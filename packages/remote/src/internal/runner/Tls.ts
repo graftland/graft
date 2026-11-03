@@ -1,5 +1,5 @@
 import { NodeSocket, NodeSocketServer } from "@effect/platform-node"
-import { Context, Effect, Option, Redacted, String } from "effect"
+import { Array, Context, Effect, Option, Redacted, String } from "effect"
 import type { Duration } from "effect"
 import type { Socket } from "effect/socket"
 import { TLSSocket } from "node:tls"
@@ -19,32 +19,71 @@ export interface ConnectOptions extends ListenOptions {
 	readonly servername: string
 	readonly openTimeout?: Duration.Input
 }
-/** Certificate fingerprints, not caller-supplied subjects, form the session namespace. */
+/** A dedicated CA attests the stable SAN URI used as the session namespace. */
 export class Peer extends Context.Service<Peer, string>()(
 	"@graftland/remote/internal/runner/Tls/Peer",
 ) {}
 
+/**
+ * Node quotes SAN values containing separators. Only top-level URI fields count;
+ * a quoted DNS value containing ", URI:..." must never impersonate an identity.
+ */
+export const identityFromSubjectAltName = (san: string | undefined) =>
+	Effect.gen(function* () {
+		let fields: ReadonlyArray<string> = []
+		let field = ""
+		let quoted = false
+		let escaped = false
+		for (const character of san ?? "") {
+			if (character === "," && !quoted) {
+				fields = Array.append(fields, String.trim(field))
+				field = ""
+				continue
+			}
+			field += character
+			if (escaped) escaped = false
+			else if (character === "\\" && quoted) escaped = true
+			else if (character === '"') quoted = !quoted
+		}
+		fields = Array.append(fields, String.trim(field))
+		const uris = Array.filter(fields, (field) =>
+			String.startsWith("URI:")(field),
+		)
+		if (
+			quoted ||
+			escaped ||
+			uris.length !== 1 ||
+			!/^URI:graft:\/\/[a-z0-9][a-z0-9._-]*$/.test(uris[0]!)
+		)
+			return yield* failure(
+				"InvalidRequest",
+				"The peer certificate must contain exactly one SAN URI of the form graft://name",
+			)
+		return String.slice(4)(uris[0]!)
+	})
+
 const authenticated = Effect.gen(function* () {
 	const socket = yield* Effect.serviceOption(NodeSocket.NetSocket)
-	if (
-		Option.isNone(socket) ||
-		!(socket.value instanceof TLSSocket) ||
-		!socket.value.authorized
-	)
+	if (Option.isNone(socket))
 		return yield* failure(
 			"InvalidRequest",
 			"An authenticated TLS client certificate is required",
 		)
-	const fingerprint = socket.value.getPeerCertificate().fingerprint256
-	if (typeof fingerprint !== "string" || fingerprint.length === 0)
+	const raw = socket.value
+	// Own the socket before validation: a rejected SAN must close even without a reader.
+	yield* Effect.addFinalizer(() =>
+		Effect.sync(() => {
+			raw.destroy()
+		}),
+	)
+	if (!(raw instanceof TLSSocket) || !raw.authorized)
 		return yield* failure(
 			"InvalidRequest",
-			"The peer certificate has no SHA-256 fingerprint",
+			"An authenticated TLS client certificate is required",
 		)
-	return {
-		identity: `sha256:${String.replaceAll(":", "")(String.toLowerCase(fingerprint))}`,
-		socket: socket.value,
-	}
+	return yield* identityFromSubjectAltName(
+		raw.getPeerCertificate().subjectaltname,
+	)
 })
 
 export const listen = Effect.fnUntraced(function* (options: ListenOptions) {
@@ -67,14 +106,8 @@ export const listen = Effect.fnUntraced(function* (options: ListenOptions) {
 				Effect.scoped(
 					Effect.gen(function* () {
 						const peer = yield* authenticated
-						// Closing a handler must not wait for an unresponsive peer to drain its socket.
-						yield* Effect.addFinalizer(() =>
-							Effect.sync(() => {
-								peer.socket.destroy()
-							}),
-						)
 						return yield* handler(socket).pipe(
-							Effect.provideService(Peer, peer.identity),
+							Effect.provideService(Peer, peer),
 						)
 					}),
 				),

@@ -37,6 +37,29 @@ const server = Effect.gen(function* () {
 })
 
 describe("runner mutual TLS", () => {
+	it.effect("rejects quoted SAN spoofing and noncanonical identities", () =>
+		Effect.gen(function* () {
+			const valid = yield* Tls.identityFromSubjectAltName(
+				'DNS:"ignored, URI:graft://spoof", URI:graft://real',
+			)
+			assert.equal(valid, "graft://real")
+			for (const san of [
+				undefined,
+				'DNS:"ignored, URI:graft://spoof"',
+				"URI:https://host",
+				"URI:graft://host/path",
+				"URI:graft://HOST",
+				"URI:graft://user@host",
+				"URI:graft://one, URI:graft://two",
+				'URI:"graft://host"',
+				'DNS:"unterminated, URI:graft://host',
+			]) {
+				const result = yield* Effect.exit(Tls.identityFromSubjectAltName(san))
+				assert.isTrue(Exit.isFailure(result), String(san))
+			}
+		}),
+	)
+
 	it.live(
 		"authenticates certificate identity and carries opaque instance and session frames",
 		() =>
@@ -69,12 +92,12 @@ describe("runner mutual TLS", () => {
 				const authenticated = yield* Deferred.await(identity)
 				assert.deepEqual(echoed, new Uint8Array([255, 0, 1]))
 				assert.equal(text(session), "session")
-				assert.match(authenticated, /^sha256:[a-f0-9]{64}$/)
+				assert.equal(authenticated, "graft://test-host")
 			}).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 		30_000,
 	)
 	it.live(
-		"rejects missing or untrusted client certificates and keeps the listener usable",
+		"rejects unauthenticated clients and missing or ambiguous SAN identities without disabling the listener",
 		() =>
 			Effect.gen(function* () {
 				const { listener, port } = yield* server
@@ -121,6 +144,23 @@ describe("runner mutual TLS", () => {
 					),
 				)
 				assert.isTrue(Exit.isFailure(untrusted))
+				for (const name of ["missing", "ambiguous"]) {
+					const rejected = yield* Effect.exit(
+						Effect.scoped(
+							Effect.gen(function* () {
+								const socket = yield* Tls.connect({
+									host: "127.0.0.1",
+									port,
+									servername: "localhost",
+									tls: yield* credentials(name),
+								})
+								const reader = yield* socket.reader
+								return yield* reader.pull
+							}),
+						),
+					)
+					assert.isTrue(Exit.isFailure(rejected))
+				}
 				const prematurelyAccepted = yield* Deferred.isDone(accepted)
 				assert.isFalse(prematurelyAccepted)
 				const socket = yield* Tls.connect({
@@ -184,7 +224,7 @@ describe("runner mutual TLS", () => {
 		30_000,
 	)
 	it.live(
-		"keeps certificates with identical subjects in different authenticated namespaces",
+		"keeps the same namespace across certificate rotation with the same SAN URI",
 		() =>
 			Effect.gen(function* () {
 				const { listener, port } = yield* server
@@ -213,7 +253,7 @@ describe("runner mutual TLS", () => {
 						}),
 					),
 				)
-				assert.notEqual(identities[0], identities[1])
+				assert.deepEqual(identities, ["graft://test-host", "graft://test-host"])
 			}).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 		30_000,
 	)

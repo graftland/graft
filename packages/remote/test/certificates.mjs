@@ -28,7 +28,7 @@ export async function certificates(base) {
 			"-config",
 			"ca.cnf",
 		)
-		for (const name of ["server", "client", "other"]) {
+		for (const name of ["server", "client", "other", "missing", "ambiguous"]) {
 			openssl(
 				"req",
 				"-newkey",
@@ -45,7 +45,12 @@ export async function certificates(base) {
 				join(root, `${name}.ext`),
 				name === "server"
 					? "basicConstraints=critical,CA:FALSE\nkeyUsage=digitalSignature,keyEncipherment\nextendedKeyUsage=serverAuth\nsubjectAltName=DNS:localhost,IP:127.0.0.1\n"
-					: "basicConstraints=critical,CA:FALSE\nkeyUsage=digitalSignature\nextendedKeyUsage=clientAuth\n",
+					: "basicConstraints=critical,CA:FALSE\nkeyUsage=digitalSignature\nextendedKeyUsage=clientAuth\n" +
+							(name === "missing"
+								? ""
+								: name === "ambiguous"
+									? "subjectAltName=URI:graft://test-host,URI:graft://another-host\n"
+									: "subjectAltName=URI:graft://test-host\n"),
 			)
 			openssl(
 				"x509",

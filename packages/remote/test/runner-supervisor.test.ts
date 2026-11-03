@@ -126,6 +126,57 @@ const orphan: Record = {
 
 describe("runner session supervisor", () => {
 	it.effect(
+		"fences competing and forgotten Open requests before disturbing the current child",
+		() =>
+			Effect.gen(function* () {
+				const { supervisor, store, spawned } = yield* setup()
+				const initialGeneration = yield* supervisor.highWater(key)
+				assert.isNull(initialGeneration)
+				const first = yield* supervisor.open({ key, requestId: "first" })
+				yield* supervisor.load(first.handle, { specifier: "fixture" })
+				const unit = yield* Queue.take(spawned)
+				const stale = yield* Effect.exit(
+					supervisor.open({ key, requestId: "wrong", expectedGeneration: 2 }),
+				)
+				reason(stale, "Stale")
+				assert.isFalse(Deferred.isDoneUnsafe(unit.interrupted))
+				const results = yield* Effect.forEach(
+					["a", "b"],
+					(requestId) =>
+						Effect.exit(
+							supervisor.open({ key, requestId, expectedGeneration: 1 }),
+						),
+					{ concurrency: "unbounded" },
+				)
+				assert.lengthOf(Array.filter(results, Exit.isSuccess), 1)
+				assert.lengthOf(Array.filter(results, Exit.isFailure), 1)
+				for (const result of results)
+					if (Exit.isFailure(result)) reason(result, "Stale")
+				for (let generation = 2; generation < 20; generation++) {
+					yield* supervisor.open({
+						key,
+						requestId: "request-" + generation,
+						expectedGeneration: generation,
+					})
+					const retainedRecords = yield* store.list
+					assert.lengthOf(retainedRecords, 1)
+				}
+				const latestGeneration = yield* supervisor.highWater(key)
+				assert.equal(latestGeneration, 20)
+				const forgotten = yield* Effect.exit(
+					supervisor.open({ key, requestId: "first" }),
+				)
+				reason(forgotten, "Stale")
+				const current = yield* supervisor.open({
+					key,
+					requestId: "request-19",
+					expectedGeneration: 19,
+				})
+				assert.equal(current.handle.generation, 20)
+			}).pipe(Effect.scoped),
+	)
+
+	it.effect(
 		"reserves generations per authenticated identity and makes Open and Dispose idempotent",
 		() =>
 			Effect.gen(function* () {
@@ -150,20 +201,22 @@ describe("runner session supervisor", () => {
 				const second = yield* supervisor.open({
 					key,
 					requestId: "second",
+					expectedGeneration: 1,
 					limits: { control: 4, data: 32, log: 1 },
 				})
 				assert.equal(second.handle.generation, 2)
 				assert.deepEqual(second.limits, { control: 4, data: 16, log: 1 })
-				const duplicate = yield* supervisor.open({ key, requestId: "first" })
-				assert.equal(duplicate.handle.generation, 1)
-				assert.equal(duplicate.phase, "Stopped")
+				const duplicate = yield* Effect.exit(
+					supervisor.open({ key, requestId: "first" }),
+				)
+				reason(duplicate, "Stale")
 				const other = yield* supervisor.open({
 					key: { ...key, identity: "certificate-b" },
 					requestId: "first",
 				})
 				assert.equal(other.handle.generation, 1)
 				const records = yield* store.list
-				assert.lengthOf(records, 3)
+				assert.lengthOf(records, 2)
 				{
 					const exit = yield* Effect.exit(supervisor.renew(first.handle))
 					reason(exit, "Stale")
@@ -245,7 +298,11 @@ describe("runner session supervisor", () => {
 				yield* supervisor.load(first.handle, { specifier: "fixture" })
 				const unit = yield* Queue.take(spawned)
 				const replacing = yield* Effect.forkScoped(
-					supervisor.open({ key, requestId: "replacement" }),
+					supervisor.open({
+						key,
+						requestId: "replacement",
+						expectedGeneration: 1,
+					}),
 				)
 				yield* Deferred.await(unit.interrupted)
 				assert.equal(replacing.pollUnsafe(), undefined)
@@ -305,7 +362,11 @@ describe("runner session supervisor", () => {
 				const supervisor = yield* Fiber.join(constructing)
 				const prior = yield* supervisor.open({ key, requestId: "old-open" })
 				assert.equal(prior.phase, "Stopped")
-				const next = yield* supervisor.open({ key, requestId: "new-open" })
+				const next = yield* supervisor.open({
+					key,
+					requestId: "new-open",
+					expectedGeneration: 7,
+				})
 				assert.equal(next.handle.generation, 8)
 				const starts = yield* Ref.get(count)
 				assert.equal(starts, 0)
@@ -411,7 +472,11 @@ describe("runner session supervisor", () => {
 							const result = yield* Fiber.await(stopping)
 							reason(result, "Unconfirmed")
 							const next = yield* Effect.exit(
-								supervisor.open({ key, requestId: "next" }),
+								supervisor.open({
+									key,
+									requestId: "next",
+									expectedGeneration: 1,
+								}),
 							)
 							reason(next, "Unconfirmed")
 							const status = yield* supervisor.status(record.handle)
@@ -460,7 +525,11 @@ describe("runner session supervisor", () => {
 					Effect.provideService(Store, store),
 					Effect.provideService(Execution, execution.driver),
 				)
-				const next = yield* supervisor.open({ key, requestId: "next" })
+				const next = yield* supervisor.open({
+					key,
+					requestId: "next",
+					expectedGeneration: 1,
+				})
 				assert.equal(next.handle.generation, 2)
 				const count = yield* Ref.get(execution.count)
 				assert.equal(count, 0)

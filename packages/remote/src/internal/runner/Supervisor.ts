@@ -14,6 +14,7 @@ import {
 	Semaphore,
 } from "effect"
 import { SecureRandom } from "effect/crypto"
+import * as Retention from "./Retention"
 import { cleanupCause } from "../cleanup"
 import {
 	CodeIdentity,
@@ -44,6 +45,8 @@ export interface Open {
 	/** Set by the authenticated transport, never taken from an RPC payload. */
 	readonly key: Key
 	readonly requestId: string
+	/** Empty only for a key that has never allocated a generation. */
+	readonly expectedGeneration?: number | null
 	readonly lease?: Duration.Input
 	readonly limits?: Limits
 }
@@ -119,14 +122,40 @@ export const make = (options: Options = {}) =>
 			if (yield* Deferred.isDone(failed)) return yield* Deferred.await(failed)
 		})
 		const persist = (record: Record) =>
-			store
-				.save(record)
-				.pipe(
-					Effect.tapCause(poison),
-					Effect.andThen(
-						Ref.update(records, HashMap.set(record.handle.token, record)),
-					),
-				)
+			store.save(record).pipe(
+				Effect.tapCause(poison),
+				Effect.andThen(
+					Effect.gen(function* () {
+						const obsolete = yield* Ref.modify(records, (all) => {
+							const next = HashMap.fromIterable(
+								Array.map(
+									Retention.retain(
+										Array.fromIterable(
+											HashMap.values(
+												HashMap.set(all, record.handle.token, record),
+											),
+										),
+									),
+									(record) => [record.handle.token, record] as const,
+								),
+							)
+							return [
+								Array.filter(
+									Array.fromIterable(HashMap.keys(all)),
+									(token) => !HashMap.has(next, token),
+								),
+								next,
+							] as const
+						})
+						// Remove only this update's retired entries; another key may have opened meanwhile.
+						yield* Ref.update(entries, (all) =>
+							Array.reduce(obsolete, all, (all, token) =>
+								HashMap.remove(all, token),
+							),
+						)
+					}),
+				),
+			)
 		const save = (entry: Entry, record: Record) =>
 			persist(record).pipe(Effect.andThen(Ref.set(entry.record, record)))
 		const lockFor = (key: string) =>
@@ -354,35 +383,9 @@ export const make = (options: Options = {}) =>
 
 		// A new process never resumes a persisted lease. All unfinished sessions are retired.
 		const stored = yield* store.list
-		for (const record of stored) {
-			if (
-				!Number.isSafeInteger(record.handle.generation) ||
-				record.handle.generation <= 0 ||
-				!Number.isFinite(record.leaseMillis) ||
-				record.leaseMillis <= 0 ||
-				(record.phase === "Stopped" && record.termination === undefined)
-			)
-				return yield* failure(
-					"Storage",
-					"Invalid generation, lease, or terminal result in runner state",
-				)
-			const all = yield* Ref.get(records)
-			if (
-				HashMap.has(all, record.handle.token) ||
-				Array.some(
-					Array.fromIterable(HashMap.values(all)),
-					(other) =>
-						keyOf(other.handle.key) === keyOf(record.handle.key) &&
-						(other.handle.generation === record.handle.generation ||
-							other.requestId === record.requestId),
-				)
-			)
-				return yield* failure(
-					"Storage",
-					"Duplicate generation, session token, or Open request in runner state",
-				)
+		yield* Retention.validate(stored)
+		for (const record of Retention.retain(stored))
 			yield* Ref.update(records, HashMap.set(record.handle.token, record))
-		}
 		for (const record of stored) {
 			if (record.phase === "Stopped") continue
 			const termination =
@@ -436,17 +439,25 @@ export const make = (options: Options = {}) =>
 		return {
 			failed,
 			status: snapshot,
+			/** Authenticated callers use this to recover the comparison value after losing local state. */
+			highWater: (key: Key) =>
+				Effect.map(latest(key), (generation) =>
+					generation === 0 ? null : generation,
+				),
 			open: (request: Open) =>
 				Effect.gen(function* () {
 					yield* healthy
 					if (
 						request.key.identity.length === 0 ||
 						request.key.instance.length === 0 ||
-						request.requestId.length === 0
+						request.requestId.length === 0 ||
+						(request.expectedGeneration != null &&
+							(!Number.isSafeInteger(request.expectedGeneration) ||
+								request.expectedGeneration <= 0))
 					)
 						return yield* failure(
 							"InvalidRequest",
-							"Identity, instance id, and Open request id must not be empty",
+							"Identity and request ids must be nonempty; expectedGeneration must be a positive safe integer or empty",
 						)
 					const leaseMillis = yield* duration(request.lease ?? leaseDefault)
 					const negotiated = yield* negotiate(
@@ -467,6 +478,12 @@ export const make = (options: Options = {}) =>
 								(record) => record.requestId === request.requestId,
 							)
 							if (Option.isSome(prior)) return prior.value
+							const generation = yield* latest(request.key)
+							if (generation !== (request.expectedGeneration ?? 0))
+								return yield* failure(
+									"Stale",
+									"Open expectedGeneration does not match the generation high-water mark",
+								)
 							const current = yield* Ref.get(entries)
 							for (const entry of HashMap.values(current)) {
 								const record = yield* Ref.get(entry.record)
@@ -476,7 +493,6 @@ export const make = (options: Options = {}) =>
 								}
 							}
 							yield* healthy
-							const generation = yield* latest(request.key)
 							if (!Number.isSafeInteger(generation + 1))
 								return yield* failure("Storage", "Generation counter exhausted")
 							const token = yield* Effect.sync(() =>
