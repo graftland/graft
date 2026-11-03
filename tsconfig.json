@@ -66,6 +66,12 @@
 		},
 		{
 			"path": "./samples/market-feed"
+		},
+		{
+			"path": "./packages/remote"
+		},
+		{
+			"path": "./packages/remote/tsconfig.test.json"
 		}
 	]
 }

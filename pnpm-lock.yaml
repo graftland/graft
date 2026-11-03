@@ -168,6 +168,25 @@ importers:
         specifier: 5.1.0
         version: 5.1.0(@types/node@26.6.6)(vite@8.3.5(@types/node@26.6.6)(yaml@2.9.1))
 
+  packages/remote:
+    dependencies:
+      "@effect/platform-node":
+        specifier: 4.1.2
+        version: 4.1.2(effect@4.1.2)(redis@6.3.1)
+      "@graftland/graft":
+        specifier: workspace:*
+        version: link:../core
+    devDependencies:
+      "@effect/vitest":
+        specifier: 4.1.2
+        version: 4.1.2(effect@4.1.2)(vitest@5.1.0(@types/node@26.6.6)(vite@8.3.5(@types/node@26.6.6)(yaml@2.9.1)))
+      effect:
+        specifier: 4.1.2
+        version: 4.1.2
+      vitest:
+        specifier: 5.1.0
+        version: 5.1.0(@types/node@26.6.6)(vite@8.3.5(@types/node@26.6.6)(yaml@2.9.1))
+
   samples/01-hello:
     dependencies:
       "@effect/platform-node":

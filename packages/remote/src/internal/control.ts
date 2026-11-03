@@ -1,0 +1,35 @@
+import { Schema } from "effect"
+import { Rpc, RpcGroup } from "effect/rpc"
+
+export const Result = Schema.Union([
+	Schema.TaggedStruct("Success", {}),
+	Schema.TaggedStruct("Failure", { cause: Schema.Json }),
+])
+export const Log = Schema.Struct({
+	level: Schema.Literals([
+		"Fatal",
+		"Error",
+		"Warn",
+		"Info",
+		"Debug",
+		"Trace",
+		"All",
+		"None",
+	]),
+	message: Schema.Defect({ includeStack: true }),
+	cause: Schema.Json,
+	annotations: Schema.Record(
+		Schema.String,
+		Schema.Defect({ includeStack: true }),
+	),
+})
+export const Event = Schema.Union([
+	Schema.TaggedStruct("Log", { entry: Log }),
+	Schema.TaggedStruct("Failed", { cause: Schema.Json }),
+	Schema.TaggedStruct("Stopped", {}),
+])
+export const Control = RpcGroup.make(
+	Rpc.make("Load", { payload: { input: Schema.Json }, success: Result }),
+	Rpc.make("Events", { success: Event, stream: true }),
+	Rpc.make("Dispose", { success: Result }),
+)
