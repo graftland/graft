@@ -1,3 +1,4 @@
+import { registrySnapshot } from "./utils.ts"
 import { assert, describe, it } from "@effect/vitest"
 import {
 	Array,
@@ -52,7 +53,7 @@ describe("regressions", () => {
 					}),
 				)
 				yield* consumer.await
-				const registry = yield* TxRef.get(runtime.registry)
+				const registry = yield* registrySnapshot(runtime)
 				const provision = Option.getOrThrow(
 					HashMap.get(registry, realmKey("", Service.key)),
 				)
@@ -131,7 +132,7 @@ describe("regressions", () => {
 				const disposing = yield* Effect.forkScoped(provider.dispose)
 				yield* Effect.tx(
 					Effect.gen(function* () {
-						const registry = yield* TxRef.get(runtime.registry)
+						const registry = yield* registrySnapshot(runtime)
 						if (HashMap.has(registry, realmKey("", Service.key)))
 							return yield* Effect.txRetry
 					}),
@@ -162,7 +163,7 @@ describe("regressions", () => {
 				yield* fork.await
 				const cleanup = yield* Effect.exit(fork.dispose)
 				assert.isTrue(Exit.isFailure(cleanup))
-				const registry = yield* TxRef.get(runtime.registry)
+				const registry = yield* registrySnapshot(runtime)
 				assert.isFalse(HashMap.has(registry, realmKey("", Service.key)))
 			}).pipe(run),
 	)

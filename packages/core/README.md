@@ -42,6 +42,18 @@ Use `Plugin.fork(effect)` for background work that a plugin owns.
 - When the parent scope closes automatically, Graft reports a cleanup error as a
   defect. The defect keeps the original Cause.
 
+`fork.state` replays the current state, emits changes, and ends with `Disposed`,
+including for subscriptions started after disposal. `fork.await` waits for this
+fork to leave `Loading`; `Pending` counts as settled and `Failed` fails with the
+plugin's cause.
+
+`fork.stable` waits until this fork and its descendants have no `Loading`
+states. It also treats `Pending` and `Failed` as settled and does not fail on a
+failed child. It reads a subtree counter without constructing or subscribing to
+the fork tree. Configuration coordinators must still check their own request
+versions and queued refreshes: this barrier describes current fork states and
+does not wait for requests that have not started yet.
+
 These rules apply to dependencies declared in `inject`:
 
 - A provision in the consumer's realm wins over the environment where

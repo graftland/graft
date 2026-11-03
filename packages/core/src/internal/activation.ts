@@ -37,18 +37,22 @@ import {
 	Schema,
 	Scope,
 	TxRef,
-	TxSubscriptionRef,
 } from "effect"
 import { Graft, ServiceConflict } from "../Graft"
 import { ForkState } from "../Fork"
 import { isOptional, type Update } from "../Plugin"
 import * as TaskGroup from "./tasks"
-import { publicationCycle } from "./dependencies"
+import * as Slots from "./slots"
+import { publicationCycle, resolutionChanged } from "./dependencies"
+import { setState } from "./forkState"
 import {
 	Realms,
 	realmKey,
 	realmOf,
 	type Activation,
+	type Slot,
+	type GraphNode,
+	type ForkStatus,
 	type Provision,
 	type Runtime,
 	type ServiceKey,
@@ -59,6 +63,8 @@ import {
 const drainWarning = Duration.seconds(10)
 
 interface Resolution {
+	readonly watch: HashMap.HashMap<ServiceKey, Slot>
+	readonly prepared: Prepared
 	readonly spec: Spec
 	readonly missing: ReadonlyArray<string>
 	readonly provisions: ReadonlyArray<Provision>
@@ -115,30 +121,29 @@ const sameAttempt = (left: Resolution, right: Resolution): boolean =>
 
 const restart = Outcome.Restart()
 
-const resolve = (
-	runtime: Runtime,
-	registry: HashMap.HashMap<ServiceKey, Provision>,
-	realms: HashMap.HashMap<string, string>,
+interface Prepared {
+	readonly plugin: Spec["plugin"]
+	readonly slots: HashMap.HashMap<ServiceKey, Slot>
+	readonly lookups: ReadonlyArray<{
+		readonly optional: boolean
+		readonly service: string
+		readonly qualified: ServiceKey
+		readonly slot: Slot
+		readonly ambient: () => Option.Option<unknown>
+	}>
+}
+
+const resolve = Effect.fnUntraced(function* (
 	spec: Spec,
-	references: Context.Context<never>,
-): Resolution => {
-	const lookups = Array.map(spec.plugin.inject, (dependency) => {
-		const key = isOptional(dependency) ? dependency.key : dependency
-		const qualified = realmKey(realmOf(realms, key.key), key.key)
-		const found = HashMap.get(registry, qualified)
-		return {
-			optional: isOptional(dependency),
-			service: key.key,
-			qualified,
+	prepared: Prepared,
+): Effect.fn.Return<Resolution> {
+	const lookups = yield* Effect.forEach(prepared.lookups, (lookup) =>
+		Effect.map(TxRef.get(lookup.slot.provision), (found) => ({
+			...lookup,
 			found,
-			ambient: Option.isSome(found)
-				? Option.none()
-				: Context.getOption(
-						Context.isReference(key) ? references : runtime.ambient,
-						key,
-					),
-		}
-	})
+			ambient: Option.isSome(found) ? Option.none() : lookup.ambient(),
+		})),
+	)
 	const unresolved = Array.filter(lookups, (lookup) =>
 		Option.isNone(lookup.found),
 	)
@@ -146,6 +151,13 @@ const resolve = (
 		Option.isNone(lookup.ambient),
 	)
 	return {
+		prepared,
+		watch: HashMap.fromIterable(
+			Array.map(
+				unresolved,
+				(lookup) => [lookup.qualified, lookup.slot] as const,
+			),
+		),
 		spec,
 		provisions: Array.getSomes(Array.map(lookups, (lookup) => lookup.found)),
 		ambient: Array.getSomes(
@@ -159,23 +171,9 @@ const resolve = (
 		),
 		unprovided: Array.map(unresolved, (lookup) => lookup.qualified),
 	}
-}
+})
 
-export const setState = (
-	runtime: Runtime,
-	id: number,
-	state: ForkState,
-	spec: Spec,
-) =>
-	TxSubscriptionRef.update(runtime.forks, (forks) =>
-		HashMap.modify(forks, id, (entry) => ({
-			...entry,
-			state,
-			accepted: spec,
-			name: spec.plugin.name,
-			input: spec.input,
-		})),
-	)
+export { setState } from "./forkState"
 
 const waitDrained = (published: ReadonlyArray<Provision>) =>
 	Effect.tx(
@@ -200,24 +198,22 @@ export const withdraw = Effect.fnUntraced(function* (
 			const current = yield* TxRef.get(activation.published)
 			const published = Option.getOrElse(current, () => [])
 			yield* TxRef.set(activation.published, Option.none())
-			yield* TxRef.update(
-				runtime.active,
-				HashMap.modify(activation.fork, (resolution) => ({
-					...resolution,
-					watch: HashSet.empty(),
-				})),
-			)
-			if (published.length > 0) {
-				yield* TxRef.update(runtime.registry, (registry) =>
-					Array.reduce(published, registry, (registry, provision) =>
-						Option.exists(
-							HashMap.get(registry, provision.key),
-							(current) => current === provision,
-						)
-							? HashMap.remove(registry, provision.key)
-							: registry,
-					),
-				)
+			yield* TxRef.update(activation.node.state, (state) => ({
+				...state,
+				resolution:
+					state.resolution === undefined
+						? undefined
+						: {
+								...state.resolution,
+								watch: HashMap.empty(),
+							},
+			}))
+			for (const provision of published) {
+				const current = yield* TxRef.get(provision.slot.provision)
+				if (Option.exists(current, (current) => current === provision)) {
+					yield* TxRef.set(provision.slot.provision, Option.none())
+				}
+				yield* Slots.release(runtime, provision.slot)
 			}
 			return published
 		}),
@@ -249,6 +245,8 @@ export const supervise = Effect.fnUntraced(function* (
 	specRef: TxRef.TxRef<Spec>,
 	/** The selected resolution or update, never a newer request still waiting in specRef. */
 	processing: TxRef.TxRef<Spec>,
+	node: GraphNode,
+	status: ForkStatus,
 	completion?: Ref.Ref<Exit.Exit<void, unknown>>,
 ) {
 	const cleanup =
@@ -258,11 +256,45 @@ export const supervise = Effect.fnUntraced(function* (
 	const inherited = yield* Effect.context<never>()
 	const references = Context.merge(runtime.ambient, inherited)
 
-	const resolveCurrent = Effect.gen(function* () {
-		const registry = yield* TxRef.get(runtime.registry)
+	// A supervisor retains its handles through Pending, running, teardown, and failed retry.
+	const held = yield* TxRef.make<Prepared | undefined>(undefined)
+	const prepare = Effect.gen(function* () {
 		const spec = yield* TxRef.get(specRef)
-		return resolve(runtime, registry, realms, spec, references)
+		const previous = yield* TxRef.get(held)
+		if (previous?.plugin === spec.plugin) return previous
+		let slots = HashMap.empty<ServiceKey, Slot>()
+		const lookups = yield* Effect.forEach(spec.plugin.inject, (dependency) =>
+			Effect.gen(function* () {
+				const key = isOptional(dependency) ? dependency.key : dependency
+				const qualified = realmKey(realmOf(realms, key.key), key.key)
+				const existing = HashMap.get(slots, qualified)
+				const slot = Option.isSome(existing)
+					? existing.value
+					: yield* Slots.retain(runtime, qualified)
+				slots = HashMap.set(slots, qualified, slot)
+				return {
+					optional: isOptional(dependency),
+					service: key.key,
+					qualified,
+					slot,
+					ambient: () =>
+						Context.getOption(
+							Context.isReference(key) ? references : runtime.ambient,
+							key,
+						),
+				}
+			}),
+		)
+		if (previous !== undefined) {
+			for (const slot of HashMap.values(previous.slots))
+				yield* Slots.release(runtime, slot)
+		}
+		const prepared: Prepared = { plugin: spec.plugin, slots, lookups }
+		yield* TxRef.set(held, prepared)
+		return prepared
 	})
+	const resolveCurrent = (prepared: Prepared) =>
+		Effect.flatMap(TxRef.get(specRef), (spec) => resolve(spec, prepared))
 
 	/** Resolves to the new spec if the spec changed, or `None` if a dependency changed. */
 	const waitChange = (resolution: Resolution) =>
@@ -275,19 +307,7 @@ export const supervise = Effect.fnUntraced(function* (
 					resolution.unprovided.length === 0
 				)
 					return yield* Effect.txRetry
-				const registry = yield* TxRef.get(runtime.registry)
-				const withdrawn = Array.some(
-					resolution.provisions,
-					(provision) =>
-						!Option.exists(
-							HashMap.get(registry, provision.key),
-							(current) => current === provision,
-						),
-				)
-				const appeared = Array.some(resolution.unprovided, (key) =>
-					HashMap.has(registry, key),
-				)
-				return withdrawn || appeared
+				return (yield* resolutionChanged(resolution))
 					? Option.none<Spec>()
 					: yield* Effect.txRetry
 			}),
@@ -296,18 +316,19 @@ export const supervise = Effect.fnUntraced(function* (
 	const acquire = Effect.gen(function* () {
 		const resolution = yield* Effect.tx(
 			Effect.gen(function* () {
-				const resolution = yield* resolveCurrent
+				const prepared = yield* prepare
+				const resolution = yield* resolveCurrent(prepared)
 				yield* TxRef.set(processing, resolution.spec)
 				if (resolution.missing.length === 0) {
 					for (const provision of resolution.provisions)
 						yield* TxRef.update(provision.consumers, HashSet.add(id))
-					yield* TxRef.update(
-						runtime.active,
-						HashMap.set(id, {
-							watch: HashSet.fromIterable(resolution.unprovided),
+					yield* TxRef.update(node.state, (state) => ({
+						...state,
+						resolution: {
+							watch: resolution.watch,
 							provisions: resolution.provisions,
-						}),
-					)
+						},
+					}))
 				}
 				return resolution
 			}),
@@ -320,6 +341,8 @@ export const supervise = Effect.fnUntraced(function* (
 		)
 		const activation: Activation = {
 			fork: id,
+			node,
+			status,
 			tasks: Option.some(tasks),
 			published,
 			fallback: references,
@@ -340,7 +363,7 @@ export const supervise = Effect.fnUntraced(function* (
 			]),
 		)
 		const spec = resolution.spec
-		yield* setState(runtime, id, ForkState.Loading(), spec)
+		yield* setState(runtime, id, status, ForkState.Loading(), spec)
 		const fiber = yield* Effect.suspend(() =>
 			// @effect-diagnostics-next-line anyUnknownInErrorContext:off -- the activation discharges plugin requirements and teardown observes its complete Exit
 			spec.plugin.decode(spec.input),
@@ -367,12 +390,14 @@ export const supervise = Effect.fnUntraced(function* (
 		yield* setState(
 			runtime,
 			id,
+			status,
 			ForkState.Pending({ missing: resolution.missing }),
 			resolution.spec,
 		)
 		yield* Effect.tx(
 			Effect.gen(function* () {
-				const next = yield* resolveCurrent
+				if ((yield* TxRef.get(specRef)) !== resolution.spec) return
+				const next = yield* resolveCurrent(resolution.prepared)
 				const unchanged =
 					next.spec === resolution.spec &&
 					Equal.equals(next.missing, resolution.missing)
@@ -410,7 +435,7 @@ export const supervise = Effect.fnUntraced(function* (
 				resolution,
 				cause: exit.cause,
 			})
-		yield* setState(runtime, id, ForkState.Active(), spec)
+		yield* setState(runtime, id, status, ForkState.Active(), spec)
 		const update = exit.value
 		while (true) {
 			const next = yield* waitChange({ ...resolution, spec })
@@ -477,7 +502,7 @@ export const supervise = Effect.fnUntraced(function* (
 			)
 			if (!handled) return restart
 			spec = candidate
-			yield* setState(runtime, id, ForkState.Active(), spec)
+			yield* setState(runtime, id, status, ForkState.Active(), spec)
 		}
 	})
 
@@ -499,7 +524,10 @@ export const supervise = Effect.fnUntraced(function* (
 					Effect.gen(function* () {
 						for (const provision of running.resolution.provisions)
 							yield* TxRef.update(provision.consumers, HashSet.remove(id))
-						yield* TxRef.update(runtime.active, HashMap.remove(id))
+						yield* TxRef.update(node.state, (state) => ({
+							...state,
+							resolution: undefined,
+						}))
 					}),
 				),
 			)
@@ -536,6 +564,7 @@ export const supervise = Effect.fnUntraced(function* (
 			setState(
 				runtime,
 				id,
+				status,
 				ForkState.Failed({ cause: outcome.cause }),
 				spec,
 			).pipe(Effect.andThen(Ref.set(cleanup, Exit.void))),
@@ -552,25 +581,38 @@ export const supervise = Effect.fnUntraced(function* (
 				: [],
 		)
 		if (blocked.length > 0) {
-			const publishable = Effect.tx(
-				Effect.gen(function* () {
-					const resolution = yield* resolveCurrent
-					if (resolution.missing.length > 0) return yield* Effect.txRetry
-					const candidate = {
-						watch: HashSet.fromIterable(resolution.unprovided),
-						provisions: resolution.provisions,
-					}
-					const registry = yield* TxRef.get(runtime.registry)
-					for (const key of blocked) {
-						if (
-							HashMap.has(registry, key) ||
-							(yield* publicationCycle(runtime, id, key, candidate))
-						)
-							return yield* Effect.txRetry
-					}
-				}),
+			yield* Effect.acquireUseRelease(
+				Effect.tx(Effect.forEach(blocked, (key) => Slots.retain(runtime, key))),
+				(slots) => {
+					const publishable = Effect.tx(
+						Effect.gen(function* () {
+							if ((yield* TxRef.get(specRef)) !== spec) return
+							const resolution = yield* resolveCurrent(
+								outcome.resolution.prepared,
+							)
+							if (resolution.missing.length > 0) return yield* Effect.txRetry
+							const candidate = {
+								watch: resolution.watch,
+								provisions: resolution.provisions,
+							}
+							for (const slot of slots) {
+								if (
+									(yield* TxRef.get(slot.provision))._tag === "Some" ||
+									(yield* publicationCycle(node, slot.key, candidate))
+								)
+									return yield* Effect.txRetry
+							}
+						}),
+					)
+					return Effect.raceFirst(changed, publishable)
+				},
+				(slots) =>
+					Effect.tx(
+						Effect.forEach(slots, (slot) => Slots.release(runtime, slot), {
+							discard: true,
+						}),
+					),
 			)
-			yield* Effect.raceFirst(changed, publishable)
 			return Option.none<Retry>()
 		}
 		if (spec.plugin.retry === undefined) {
@@ -631,6 +673,7 @@ export const supervise = Effect.fnUntraced(function* (
 						yield* setState(
 							runtime,
 							id,
+							status,
 							ForkState.Failed({
 								cause: Cause.combine(outcome.cause, result.cause),
 							}),
@@ -710,5 +753,16 @@ export const supervise = Effect.fnUntraced(function* (
 			),
 			Effect.flatMap(loop),
 		)
-	yield* loop(Option.none())
+	yield* loop(Option.none()).pipe(
+		Effect.ensuring(
+			Effect.tx(
+				Effect.gen(function* () {
+					const remaining = yield* TxRef.get(held)
+					if (remaining === undefined) return
+					for (const slot of HashMap.values(remaining.slots))
+						yield* Slots.release(runtime, slot)
+				}),
+			),
+		),
+	)
 })

@@ -30,32 +30,31 @@ describe("registration lifetime", () => {
 			}).pipe(run),
 	)
 
-	it.effect(
-		"does not leave fork entries behind at registration interruption boundaries",
-		() =>
+	// Each cancellation boundary has its own result and timeout, independent of suite load.
+	it.effect.each(Array.range(0, 100))(
+		"does not leave fork entries after %i scheduler yields",
+		(ticks) =>
 			Effect.gen(function* () {
 				const { runtime } = yield* Graft.Graft
 				const plugin = Plugin.make({
 					name: "registration",
 					apply: () => Effect.void,
 				})
-				for (const ticks of Array.range(0, 100)) {
-					const owner = yield* Scope.make()
-					const registering = yield* Graft.plugin(plugin).pipe(
-						Scope.provide(owner),
-						Effect.provideService(References.MaxOpsBeforeYield, 4),
-						Effect.forkScoped,
-					)
-					for (let tick = 0; tick < ticks; tick++) yield* Effect.yieldNow
-					yield* Fiber.interrupt(registering)
-					yield* Scope.close(owner, Exit.void)
-					const entries = yield* TxSubscriptionRef.get(runtime.forks)
-					assert.strictEqual(
-						HashMap.size(entries),
-						0,
-						`Fork entry leaked after ${ticks} yields`,
-					)
-				}
+				const owner = yield* Scope.make()
+				const registering = yield* Graft.plugin(plugin).pipe(
+					Scope.provide(owner),
+					Effect.provideService(References.MaxOpsBeforeYield, 4),
+					Effect.forkScoped,
+				)
+				for (let tick = 0; tick < ticks; tick++) yield* Effect.yieldNow
+				yield* Fiber.interrupt(registering)
+				yield* Scope.close(owner, Exit.void)
+				const entries = yield* TxSubscriptionRef.get(runtime.forks)
+				assert.strictEqual(
+					HashMap.size(entries),
+					0,
+					`Fork entry leaked after ${ticks} yields`,
+				)
 			}).pipe(run),
 	)
 
@@ -89,14 +88,15 @@ describe("registration lifetime", () => {
 			}).pipe(run),
 	)
 
-	it.effect("fully starts any fork published before load cancellation", () =>
-		Effect.gen(function* () {
-			const { runtime } = yield* Graft.Graft
-			const plugin = Plugin.make({
-				name: "cancelled load",
-				apply: () => Effect.void,
-			})
-			for (const ticks of Array.range(0, 100)) {
+	it.effect.each(Array.range(0, 100))(
+		"fully starts a published fork cancelled after %i scheduler yields",
+		(ticks) =>
+			Effect.gen(function* () {
+				const { runtime } = yield* Graft.Graft
+				const plugin = Plugin.make({
+					name: "cancelled load",
+					apply: () => Effect.void,
+				})
 				const owner = yield* Effect.acquireRelease(Scope.make(), (owner) =>
 					Scope.close(owner, Exit.void),
 				)
@@ -121,8 +121,7 @@ describe("registration lifetime", () => {
 					}),
 				)
 				yield* Scope.close(owner, Exit.void)
-			}
-		}).pipe(run),
+			}).pipe(run),
 	)
 
 	it.effect(

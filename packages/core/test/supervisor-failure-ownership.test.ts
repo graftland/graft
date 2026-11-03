@@ -16,7 +16,8 @@ import {
 } from "effect"
 import { Graft, Plugin } from "../src/index.ts"
 import { supervise } from "../src/internal/activation.ts"
-import type { Spec } from "../src/internal/runtime.ts"
+import * as ForkStatus from "../src/internal/forkState.ts"
+import type { GraphNode, Spec } from "../src/internal/runtime.ts"
 import { run } from "./utils.ts"
 
 it.effect(
@@ -45,7 +46,23 @@ it.effect(
 				})
 				const initial = yield* TxRef.get(spec)
 				const processing = yield* TxRef.make(initial)
-				const supervisor = yield* supervise(runtime, -1, spec, processing).pipe(
+				const node: GraphNode = {
+					id: -1,
+					parent: undefined,
+					state: TxRef.makeUnsafe<GraphNode["state"]["value"]>({
+						live: true,
+						resolution: undefined,
+					}),
+				}
+				const status = yield* ForkStatus.make(undefined, initial)
+				const supervisor = yield* supervise(
+					runtime,
+					-1,
+					spec,
+					processing,
+					node,
+					status,
+				).pipe(
 					Effect.provideService(References.MaxOpsBeforeYield, 16),
 					Effect.forkScoped,
 				)

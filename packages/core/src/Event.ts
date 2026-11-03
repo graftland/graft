@@ -230,10 +230,17 @@ const invoke = <Args extends ReadonlyArray<unknown>, Out, E>(
 				const started = yield* Deferred.make<void>()
 				const fiber = yield* FiberSet.run(
 					handler.fibers,
-					Deferred.succeed(started, undefined).pipe(
-						Effect.andThen(restore(Effect.suspend(() => handler.run(args)))),
+					Effect.uninterruptible(
+						Effect.withFiber((self) =>
+							// FiberSet.run registers after starting; register here before any user code.
+							// This is the invocation fiber whose result has the handler's exact bounds.
+							FiberSet.add(handler.fibers, self as Fiber.Fiber<Out, E>),
+						).pipe(
+							Effect.andThen(Deferred.succeed(started, undefined)),
+							Effect.andThen(restore(Effect.suspend(() => handler.run(args)))),
+						),
 					),
-					{ startImmediately: false },
+					{ startImmediately: true },
 				)
 				const exit = yield* Effect.onInterrupt(
 					restore(Fiber.await(fiber)),
