@@ -53,10 +53,14 @@ const setup = Effect.gen(function* () {
 		},
 		{ session: "current", local: group, remote: group, limits: { data: 2 } },
 	)
+	const started = yield* Queue.unbounded<void>()
 	const closed = yield* Ref.make(0)
 	const bindings = yield* Group.toHandlers({
 		Hold: () =>
-			Effect.never.pipe(Effect.ensuring(Ref.update(closed, (n) => n + 1))),
+			Queue.offer(started, undefined).pipe(
+				Effect.andThen(Effect.never),
+				Effect.ensuring(Ref.update(closed, (n) => n + 1)),
+			),
 		Echo: ({ value }) => Effect.succeed(value),
 		Ping: () => Effect.succeed("pong"),
 		Flood: () => Stream.iterate(0, (n) => n + 1),
@@ -74,7 +78,7 @@ const setup = Effect.gen(function* () {
 	const b = yield* RpcClient.make(Group).pipe(
 		Effect.provideService(RpcClient.Protocol, right.clientProtocol),
 	)
-	return { a, b, left, right, ab, ba, closed }
+	return { a, b, left, right, ab, ba, closed, started }
 })
 describe("duplex transport", () => {
 	it.live(
@@ -206,11 +210,13 @@ describe("duplex transport", () => {
 		"fails both RPC directions and interrupts both servers when the byte channel fails",
 		() =>
 			Effect.gen(function* () {
-				const { a, b, ab, ba, left, right, closed } = yield* setup
+				const { a, b, ab, ba, closed, started } = yield* setup
 				const first = yield* Effect.forkScoped(a.Hold())
 				const second = yield* Effect.forkScoped(b.Hold())
-				yield* until(Ref.get(left.stats), (s) => s.incoming === 1)
-				yield* until(Ref.get(right.stats), (s) => s.incoming === 1)
+				// Admission precedes dispatch: wait until both handlers have installed
+				// their finalizers before testing interruption of running requests.
+				yield* Queue.take(started).pipe(Effect.timeout("2 seconds"))
+				yield* Queue.take(started).pipe(Effect.timeout("2 seconds"))
 				const error = TransportError.make({
 					cause: Cause.die(new Error("Disconnected")),
 				})
