@@ -15,6 +15,7 @@ import {
 	Schema,
 	Semaphore,
 	String,
+	Stream,
 } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import {
@@ -199,10 +200,27 @@ export const detectAgent = Effect.fnUntraced(function* (options: Options) {
 			message: "Conflicting lockfiles; select an agent explicitly",
 		})
 	if (kinds[0] === "yarn") {
-		const lock = yield* fs.readFileString(
-			path.join(options.directory, "yarn.lock"),
-		)
-		return /^__metadata:/m.test(lock) ? "yarn-berry" : "yarn-classic"
+		const metadata = yield* fs
+			.stream(path.join(options.directory, "yarn.lock"))
+			.pipe(
+				Stream.decodeText(),
+				Stream.mapAccum(
+					// The initial newline models the start of the file.
+					() => "\n",
+					(tail, chunk) => {
+						const text = tail + chunk
+						// Preserve all ECMAScript line terminators, including across chunk boundaries.
+						// Eleven characters retain a partial marker and its preceding character.
+						return [
+							String.slice(-11)(text),
+							[/[\n\r\u2028\u2029]__metadata:/.test(text)],
+						]
+					},
+				),
+				Stream.filter((found) => found),
+				Stream.runHead,
+			)
+		return Option.isSome(metadata) ? "yarn-berry" : "yarn-classic"
 	}
 	if (kinds[0] !== undefined) return kinds[0]
 	return Option.match(decodeUserAgent(options.userAgent ?? ""), {
@@ -343,14 +361,26 @@ export const make = (
 							name,
 							"package.json",
 						)
-						if (!(yield* fs.exists(file)))
+						const source = yield* fs.readFileString(file).pipe(
+							Effect.asSome,
+							Effect.catchCauseIf(
+								(cause) =>
+									Array.every(
+										cause.reasons,
+										(reason) =>
+											Cause.isFailReason(reason) &&
+											reason.error.reason.module === "FileSystem" &&
+											reason.error.reason._tag === "NotFound",
+									),
+								() => Effect.succeedNone,
+							),
+						)
+						if (Option.isNone(source))
 							return [
 								name,
 								{ spec, version: undefined, path: undefined },
 							] as const
-						const pkg = yield* fs
-							.readFileString(file)
-							.pipe(Effect.flatMap(installed))
+						const pkg = yield* installed(source.value)
 						return [
 							name,
 							{
@@ -360,6 +390,7 @@ export const make = (
 							},
 						] as const
 					}),
+				{ concurrency: 16 },
 			)
 			return HashMap.fromIterable<string, PackageState>(entries)
 		})

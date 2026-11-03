@@ -6,8 +6,6 @@ import { NodeRuntime, NodeServices } from "@effect/platform-node"
 import { Effect, Option } from "effect"
 import { Argument, Command, Flag } from "effect/cli"
 import { version } from "../package.json" with { type: "json" }
-import * as Manage from "./Manage"
-import * as Start from "./Start"
 
 const start = Command.make(
 	"start",
@@ -29,7 +27,14 @@ const start = Command.make(
 		),
 	},
 	(options) =>
-		Start.run({ ...options, envFile: Option.getOrUndefined(options.envFile) }),
+		Effect.promise(() => import("./Start")).pipe(
+			Effect.flatMap((Start) =>
+				Start.run({
+					...options,
+					envFile: Option.getOrUndefined(options.envFile),
+				}),
+			),
+		),
 ).pipe(
 	Command.withDescription("Run the application described by a config file"),
 )
@@ -49,13 +54,19 @@ const create = Command.make(
 			Flag.withDefault(false),
 		),
 	},
-	Manage.create,
+	(options) =>
+		Effect.promise(() => import("./Manage")).pipe(
+			Effect.flatMap((Manage) => Manage.create(options)),
+		),
 ).pipe(Command.withDescription("Create a new Graft project"))
 
 const add = Command.make(
 	"add",
 	{ packages: Argument.variadic(Argument.String("package")) },
-	({ packages }) => Manage.add(packages),
+	({ packages }) =>
+		Effect.promise(() => import("./Manage")).pipe(
+			Effect.flatMap((Manage) => Manage.add(packages)),
+		),
 ).pipe(
 	Command.withDescription(
 		"Add dependencies, restoring the project if installing fails",
@@ -65,7 +76,10 @@ const add = Command.make(
 const remove = Command.make(
 	"remove",
 	{ packages: Argument.variadic(Argument.String("package")) },
-	({ packages }) => Manage.remove(packages),
+	({ packages }) =>
+		Effect.promise(() => import("./Manage")).pipe(
+			Effect.flatMap((Manage) => Manage.remove(packages)),
+		),
 ).pipe(
 	Command.withDescription(
 		"Remove dependencies, restoring the project if installing fails",
