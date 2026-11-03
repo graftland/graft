@@ -35,3 +35,13 @@ export class RemoteError extends Schema.TaggedError<
 	RemoteError,
 	{ readonly brand: unique symbol }
 >()("RemoteError", { cause: Schema.Cause(Schema.Unknown, Schema.Unknown) }) {}
+
+/** A network execution needs a stable logical identity across host restarts. */
+export class MissingInstance extends Schema.TaggedError<
+	MissingInstance,
+	{ readonly brand: unique symbol }
+>()("MissingInstance", {}) {
+	override get message() {
+		return "Remote.runner requires an instance or a loader entry id; set target.instance when loading without Loader."
+	}
+}

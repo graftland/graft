@@ -9,7 +9,7 @@ const common = {
 	platform: "node",
 	dts: false,
 	deps: {
-		alwaysBundle: ["@graftland/graft"],
+		alwaysBundle: ["@graftland/graft", "@graftland/loader"],
 		neverBundle: [/^effect(?:\/|$)/, /^@effect\//],
 	},
 	inputOptions: { resolve: { conditionNames: ["source", "import", "node"] } },
@@ -31,6 +31,7 @@ export default async function setup(project) {
 			"plugin",
 			"services-contract",
 			"services-plugin",
+			"loader-entry",
 		].map((name) => new URL(`./fixtures/${name}.ts`, import.meta.url).pathname),
 		outDir: new URL("../.cache/integration", import.meta.url).pathname,
 	})

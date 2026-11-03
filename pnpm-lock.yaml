@@ -176,6 +176,9 @@ importers:
       "@graftland/graft":
         specifier: workspace:*
         version: link:../core
+      "@graftland/loader":
+        specifier: workspace:*
+        version: link:../loader
     devDependencies:
       "@effect/vitest":
         specifier: 4.1.2

@@ -16,9 +16,8 @@ import { RpcClient, type RpcClientError } from "effect/rpc"
 import type { Schema } from "effect"
 import type { RemoteTerminationUnconfirmed } from "./model"
 import type {
-	Target,
 	Local as LocalTarget,
-	Runner as RunnerTarget,
+	Runner as RunnerOptions,
 } from "../../Targets"
 import { ProcessExited, TransportError } from "../../Errors"
 import { cleanupCause } from "../cleanup"
@@ -30,6 +29,9 @@ import * as Tls from "./Tls"
 import * as Wire from "./Wire"
 import { awaitTermination, defaults, childOf } from "./model"
 import { command } from "./command"
+
+type RunnerTarget = RunnerOptions & { readonly instance: string }
+export type Target = LocalTarget | RunnerTarget
 
 type Peer = Port.Port
 export interface Connected {

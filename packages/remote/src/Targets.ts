@@ -8,7 +8,8 @@ export interface Local {
 }
 export interface Runner {
 	readonly _tag: "Runner"
-	readonly instance: string
+	/** Defaults to the current loader entry id. Required when used outside a loader. */
+	readonly instance?: string
 	readonly host: string
 	readonly port: number
 	readonly tls: Credentials & { readonly servername: string }

@@ -1,3 +1,4 @@
+import { Entry, Include, Loader, ModuleResolver } from "@graftland/loader"
 import { assert, describe, it } from "@effect/vitest"
 import { inject } from "vitest"
 import { NodeServices } from "@effect/platform-node"
@@ -5,6 +6,7 @@ import { Graft, Plugin } from "@graftland/graft"
 import {
 	Array,
 	Cause,
+	ConfigProvider,
 	Deferred,
 	Effect,
 	Option,
@@ -263,12 +265,171 @@ const latestRecord = (state: string) =>
 		return records[0]!
 	})
 
+const loadYamlHost = (directory: string, port: number) => {
+	const certificates = inject("remoteTls")
+	const environment = Layer.mergeAll(
+		NodeServices.layer,
+		ModuleResolver.layer({
+			base: directory,
+			importer: (specifier) => import(specifier),
+		}).pipe(Layer.provide(NodeServices.layer)),
+		ConfigProvider.layer(
+			ConfigProvider.fromEnvRecord({
+				RUNNER_HOST: "127.0.0.1",
+				RUNNER_PORT: `${port}`,
+				RUNNER_SERVERNAME: "localhost",
+				RUNNER_CA: certificates + "/ca.crt",
+				RUNNER_CERT: certificates + "/client.crt",
+				RUNNER_KEY: certificates + "/client.key",
+			}),
+		),
+	)
+	return Effect.gen(function* () {
+		const provider = yield* Graft.plugin(
+			Plugin.make({
+				name: "yaml-host-provider",
+				apply: () =>
+					Graft.provide(HostApi, { double: (n) => Effect.succeed(n * 2) }),
+			}),
+		)
+		yield* provider.await
+		const include = yield* Graft.plugin(Include.Include, {
+			path: directory + "/graft.yml",
+		})
+		yield* include.await
+		const found = yield* Deferred.make<{
+			readonly loader: Loader.Loader["Service"]
+			readonly api: ChildApi["Service"]
+		}>()
+		const consumer = yield* Graft.plugin(
+			Plugin.make({
+				name: "yaml-host-consumer",
+				inject: [Loader.Loader, ChildApi],
+				apply: () =>
+					Effect.gen(function* () {
+						const loader = yield* Loader.Loader
+						const api = yield* ChildApi
+						yield* Deferred.succeed(found, { loader, api })
+					}),
+			}),
+		)
+		yield* consumer.await
+		const { loader, api } = yield* Deferred.await(found)
+		yield* loader.ready
+		const entries = yield* loader.entries
+		const entry = Option.getOrThrow(Array.head(entries))
+		const reply = yield* api.call(20)
+		assert.equal(reply.id, entry.id)
+		assert.equal(reply.value, 41)
+		return { reply, entry }
+	}).pipe(
+		Effect.scoped,
+		Effect.provide(Layer.provideMerge(Layer.fresh(Graft.layer), environment)),
+		Effect.timeout("30 seconds"),
+	)
+}
+
 describe("network runner end to end", () => {
+	it.live(
+		"uses a persisted YAML entry id across fresh host runtimes and confirms exit before its next generation",
+		() =>
+			Effect.gen(function* () {
+				const fs = yield* FileSystem.FileSystem
+				const directory = yield* fs.makeTempDirectoryScoped()
+				const daemon = yield* startRunner(directory + "/state")
+				// Build fixtures in the workspace; the temporary directory contains only the user's YAML and entry module.
+				const entryModule = new URL(
+					"../.cache/integration/loader-entry.js",
+					import.meta.url,
+				).href
+				const encodeString = Schema.encodeEffect(
+					Schema.fromJsonString(Schema.String),
+				)
+				const entryUrl = yield* encodeString(entryModule)
+				const quotedDirectory = yield* encodeString(directory)
+				yield* fs.writeFileString(
+					directory + "/entry.mjs",
+					`export { default } from ${entryUrl};\n`,
+				)
+				yield* fs.writeFileString(
+					directory + "/graft.yml",
+					`- name: ./entry.mjs\n  config:\n    directory: ${quotedDirectory}\n    fail: false\n`,
+				)
+				const first = yield* loadYamlHost(directory, daemon.port)
+				const saved = yield* fs.readFileString(directory + "/graft.yml")
+				assert.include(saved, first.entry.id)
+				const finalized = yield* fs.exists(
+					directory + "/finalized-" + first.reply.pid,
+				)
+				assert.isTrue(finalized)
+				assert.throws(() => process.kill(first.reply.pid, 0))
+				const stopped = yield* latestRecord(directory + "/state")
+				assert.equal(stopped.phase, "Stopped")
+				const second = yield* loadYamlHost(directory, daemon.port)
+				assert.equal(second.entry.id, first.entry.id)
+				assert.equal(second.reply.id, first.reply.id)
+				assert.isAbove(second.reply.generation, first.reply.generation)
+				assert.notEqual(second.reply.pid, first.reply.pid)
+				const reloaded = yield* fs.readFileString(directory + "/graft.yml")
+				assert.equal(reloaded, saved)
+				assert.throws(() => process.kill(second.reply.pid, 0))
+			}).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+		90_000,
+	)
+
+	it.live(
+		"fails with MissingInstance before connecting when no explicit or loader identity exists",
+		() =>
+			Effect.gen(function* () {
+				const empty = Remote.Contract.make({
+					name: "missing-instance",
+					config: Schema.Struct({}),
+					error: Schema.Never,
+					module: "unused",
+				})
+				const proxy = yield* Graft.plugin(
+					Remote.plugin(empty, {
+						contractModule: "unused",
+						target: Remote.runner({
+							host: "127.0.0.1",
+							port: 0,
+							tls: {
+								servername: "localhost",
+								ca: "unused",
+								cert: "unused",
+								key: Redacted.make("unused"),
+							},
+						}),
+					}),
+					{},
+				)
+				const exit = yield* Effect.exit(proxy.await)
+				assert.isTrue(Exit.isFailure(exit))
+				if (Exit.isFailure(exit)) {
+					assert.isFalse(Cause.hasDies(exit.cause))
+					assert.isTrue(
+						Array.some(
+							exit.cause.reasons,
+							(reason) =>
+								reason._tag === "Fail" &&
+								Schema.is(Remote.MissingInstance)(reason.error),
+						),
+					)
+					assert.include(Cause.pretty(exit.cause), "set target.instance")
+				}
+			}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
+	)
+
 	it.live(
 		"runs a preinstalled plugin through mTLS with bidirectional services and confirmed graceful exit",
 		() =>
 			Effect.gen(function* () {
-				const { api, proxy, fs, directory } = yield* setup()
+				const { api, proxy, fs, directory } = yield* setup().pipe(
+					Effect.provideService(
+						Entry.CurrentId,
+						Option.some("overridden-loader-id"),
+					),
+				)
 				const reply = yield* api.call(20)
 				assert.equal(reply.value, 41)
 				assert.equal(reply.id, "worker")

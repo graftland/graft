@@ -137,10 +137,10 @@ cleanup rather than the ordinary typed failure channel.
 Inside the implementation, inject `Remote.Instance` to read
 `{ id, generation }`. Each local activation gets a new UUID and generation 1;
 these local values are not persistent fencing tokens. A network execution gets
-the explicit logical instance id and a generation allocated durably by its
-runner. The runner injects these through trusted startup arguments, not business
-Load. Plugins can pass the generation to systems that enforce fencing. The
-reference's fallback outside a remote activation is
+the configured or loader-derived logical instance id and a generation allocated
+durably by its runner. The runner injects these through trusted startup
+arguments, not business Load. Plugins can pass the generation to systems that
+enforce fencing. The reference's fallback outside a remote activation is
 `{ id: "local", generation: 0 }`.
 
 ## Port transport and limits
@@ -258,14 +258,70 @@ const proxy = Remote.plugin(contract, {
 })
 ```
 
-`runner({ instance, ... })` requires an instance at the type boundary. It is
-stable across host restarts; one runner owns it. The host queries the
+`runner({ instance, ... })` uses the explicit instance when supplied. Otherwise
+it uses `Entry.CurrentId` from `@graftland/loader`; without either, activation
+fails with the typed `MissingInstance` error before connecting. The resolved id
+is stable across host restarts; one runner owns it. The host queries the
 authenticated key's generation high-water mark, then supplies it as
 `expectedGeneration` in Open. A retained request id is replayed idempotently.
 Otherwise a mismatched comparison returns `StaleSession`; a matching replacement
 waits for confirmed old-process exit before allocating and persisting its
 successor. This guarantees serial admission on this runner, not exactly-once
 side effects. External systems must check generation fencing tokens.
+
+### Loading from graft.yml
+
+Point a relative entry path at a module that exports the remote proxy. Include
+assigns an id when one is omitted and saves it in the YAML; keep that persisted
+id to retain the same logical instance after a host restart.
+
+```yaml
+- name: ./billing.ts
+  config:
+    queue: invoices
+```
+
+The entry module uses the contract's ordinary config schema. Runner settings
+come from Effect Config, not a second YAML format:
+
+```ts
+// billing.ts
+import { Config, Effect, FileSystem, Redacted } from "effect"
+import * as Remote from "@graftland/remote"
+import { contract } from "my-plugin/contract"
+
+const target = Effect.gen(function* () {
+	const fs = yield* FileSystem.FileSystem
+	const read = (name: string) =>
+		Config.String(name).pipe(Effect.flatMap((path) => fs.readFileString(path)))
+	return Remote.runner({
+		host: yield* Config.String("RUNNER_HOST"),
+		port: yield* Config.Port("RUNNER_PORT"),
+		tls: {
+			servername: yield* Config.String("RUNNER_SERVERNAME"),
+			ca: yield* read("RUNNER_CA"),
+			cert: yield* read("RUNNER_CERT"),
+			key: yield* read("RUNNER_KEY").pipe(Effect.map(Redacted.make)),
+		},
+	})
+})
+
+export default Remote.plugin(contract, {
+	target,
+	contractModule: "my-plugin/contract",
+})
+```
+
+`RUNNER_CA`, `RUNNER_CERT`, and `RUNNER_KEY` are file paths on the host. The
+configured target runs on each activation using the host's ConfigProvider and
+FileSystem; importing the entry performs no I/O. Config and file-read failures
+are retained in `RemoteError.cause`. An explicit `instance` overrides the loader
+id, including inside nested groups. Local targets keep their existing identity
+behavior.
+
+With host HMR enabled, re-evaluating this entry creates a new Plugin object and
+restarts the proxy: the old execution terminates before a new generation starts.
+The implementation module installed on the runner is outside the host HMR graph.
 
 TLS requires version 1.3, trusted client certificates, and server hostname
 verification. Identity comes from exactly one SAN URI of the form
@@ -354,9 +410,10 @@ timing and lease edge cases in `runner-supervisor.test.ts` use TestClock.
 
 `runner-framing.test.ts`, `runner-tls.test.ts`, and `runner-packages.test.ts`
 independently test byte limits, channel ordering, stable certificate identity,
-rejection paths, package resolution, and digest behavior. Loader configuration
-integration remains Phase 4; the programmatic local and network targets are
-usable.
+rejection paths, package resolution, and digest behavior. The network suite also
+loads a relative entry through Loader and Include, reloads the same persisted
+YAML in a fresh host runtime, and checks identity, confirmed exit, generation
+ordering, explicit overrides, and the missing-instance error.
 
 ## Trust and deployment assumptions
 
@@ -381,6 +438,6 @@ marks of an active deployment or reuse its fencing namespace with downstream
 systems.
 
 Plugin failures expose declared contract errors, `UndeclaredFailure`,
-`RemoteWithdrawn`, and `RemoteError`. Infrastructure details remain available in
-`RemoteError.cause`; consumers do not need to handle individual RPC, socket, or
-runner journal error types.
+`RemoteWithdrawn`, `MissingInstance`, and `RemoteError`. Infrastructure details
+remain available in `RemoteError.cause`; consumers do not need to handle
+individual RPC, socket, or runner journal error types.
