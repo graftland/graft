@@ -15,6 +15,7 @@ import {
 	Option,
 	Result,
 	Order,
+	Record,
 	PubSub,
 	References,
 	Ref,
@@ -586,10 +587,19 @@ const byId = Order.mapInput(Order.Number, (entry: ForkEntry) => entry.id)
 const buildTree = (
 	forks: HashMap.HashMap<number, ForkEntry>,
 ): ReadonlyArray<ForkTree> => {
-	const entries = Array.sort(HashMap.toValues(forks), byId)
+	// Group once: filtering every entry for each node would be quadratic, and
+	// the tree is rebuilt on every fork change.
+	const key = (parent: number | undefined) =>
+		parent === undefined ? "" : `${parent}`
+	const byParent = Array.groupBy(
+		Array.sort(HashMap.toValues(forks), byId),
+		(entry) => key(entry.parent),
+	)
 	const children = (parent: number | undefined): ReadonlyArray<ForkTree> =>
 		Array.map(
-			Array.filter(entries, (entry) => entry.parent === parent),
+			Record.get(byParent, key(parent)).pipe(
+				Option.getOrElse((): ReadonlyArray<ForkEntry> => []),
+			),
 			(entry) => ({
 				id: entry.id,
 				name: entry.name,
