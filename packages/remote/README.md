@@ -199,3 +199,56 @@ devenv shell -- pnpm exec vitest run --project remote
 devenv shell -- pnpm typecheck
 devenv shell -- pnpm build
 ```
+
+## Network runner work in progress: session control
+
+The first half of Phase 3 is implemented under `src/internal/runner`. It is not
+wired to `Remote.plugin`, a TLS listener, or the runner executable yet.
+
+- `Supervisor.make` owns session fibers, monotonic lease deadlines, generation
+  allocation, idempotent Open/Load/Dispose, and status records. Defaults are a
+  15-second lease, a five-second graceful deadline, and a five-second exit
+  confirmation deadline after requesting a kill. It never treats sending a
+  signal as proof of exit.
+- Open takes an authenticated identity and logical instance id separately from
+  its idempotency request id. Retrying an old request returns its original
+  record, even after that record has been retired. It does not allocate a new
+  generation. A new Open request waits for termination of the preceding unit.
+- Limits are negotiated to the per-priority minimum. Both endpoints and the
+  child must install the returned limits before starting business RPC. The TLS
+  handshake still needs to enforce this.
+- `Store.directory` writes schema-versioned records using file synchronization,
+  atomic rename, and directory synchronization. It retains historical Open
+  records to preserve idempotency and generation high-water marks. There is no
+  automatic retention policy or compaction.
+- The state directory requires one exclusive supervisor owner. The store is not
+  a multi-process database, and daemon-level directory locking is not
+  implemented in this half. A storage failure or an unconfirmed stop fences
+  further admission; recovery must complete before a restarted supervisor
+  exposes its API.
+- `Execution` is an injectable process adapter contract. It must register a
+  gated child and its PID/start identity before returning from spawn;
+  registration is persisted before Load replies. The real child-process adapter
+  and OS orphan reaper are still pending. Recovery tests currently verify the
+  startup barrier and recorded identity with a controlled adapter, not OS-level
+  PID reuse safety.
+- Stored leases never resume across a supervisor restart. Construction invokes
+  recovery for every unfinished recorded child and waits for confirmed exit.
+  Only then can a new generation be opened.
+- The termination-wait helper preserves a failed confirmation's cause and waits
+  a full lease plus margin before adding `RemoteTerminationUnconfirmed`. It is
+  not yet connected to the host transport.
+
+All session timing tests use TestClock. They cover renewal, expiry, grace,
+confirmation deadlines, an unfinished Load, superseding an instance, and loss of
+contact without relying on elapsed wall-clock time. State-directory tests use
+real temporary files. No network or real orphan-reaping guarantee is claimed by
+this intermediate implementation.
+
+The remaining half must implement TLS authentication and identity extraction,
+exclusive state-directory ownership, channel framing and forwarding, the real
+execution/recovery adapter, installed-package resolution and digest
+verification, host targets and renewal, and executable integration. It must
+inject the runner-assigned instance identity through the trusted child bootstrap
+instead of accepting the host's business Load payload as authority for
+generation.
