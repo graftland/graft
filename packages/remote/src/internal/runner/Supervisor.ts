@@ -1,3 +1,4 @@
+import { milliseconds as duration } from "./duration"
 import {
 	Array,
 	Cause,
@@ -287,17 +288,6 @@ const beginStop = (
 		}),
 	})
 const nanos = (millis: number) => BigInt(Math.ceil(millis * 1_000_000))
-const duration = (value: Duration.Input) => {
-	const millis = Duration.toMillis(Duration.fromInputUnsafe(value))
-	return Number.isFinite(millis) && millis > 0
-		? Effect.succeed(millis)
-		: Effect.fail(
-				InvalidSessionRequest.make({
-					detail: "Runner durations must be finite and positive",
-					cause: Cause.empty,
-				}),
-			)
-}
 const emptyTermination: Termination = {
 	kind: "Exited",
 	exit: { code: 0, signal: null },

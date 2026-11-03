@@ -1,3 +1,4 @@
+import { Command, CommandJson } from "./WatchdogProtocol"
 import {
 	Array,
 	Cause,
@@ -165,15 +166,9 @@ export const make = (root: string) =>
 						),
 						Effect.forkScoped,
 					)
-					const send = (
-						value:
-							| { readonly kind: "renew"; readonly millis: number }
-							| { readonly kind: "start" | "stop" },
-					) =>
+					const send = (value: typeof Command.Type) =>
 						Effect.raceFirst(
-							Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(
-								value,
-							).pipe(
+							Schema.encodeEffect(CommandJson)(value).pipe(
 								Effect.flatMap((line) => Queue.offer(controls, line)),
 								Effect.asVoid,
 								Effect.mapError((error) =>

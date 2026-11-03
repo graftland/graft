@@ -17,7 +17,9 @@ const common = {
 export default async function setup(project) {
 	await build({
 		...common,
-		entry: [new URL("../src/bin.ts", import.meta.url).pathname],
+		entry: ["bin", "watchdog"].map(
+			(name) => new URL(`../src/${name}.ts`, import.meta.url).pathname,
+		),
 		outDir: new URL("../dist", import.meta.url).pathname,
 		clean: false,
 	})

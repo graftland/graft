@@ -8,6 +8,7 @@ export interface Local {
 }
 export interface Runner {
 	readonly _tag: "Runner"
+	readonly instance: string
 	readonly host: string
 	readonly port: number
 	readonly tls: Credentials & { readonly servername: string }

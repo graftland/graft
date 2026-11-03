@@ -227,10 +227,11 @@ graft-remote serve --host 0.0.0.0 --port 7443 \
   --ca /run/secrets/clients-ca.crt --lease 15000 --grace 5000
 ```
 
-Lease and grace arguments are milliseconds. Defaults are a 15-second lease and a
-five-second grace period. The ready message is a JSON line with
-`event: "Listening"` and `port`. `Runner.serve` also exposes a scoped Effect
-API; supply Node platform services, `Digest`, and `SecureRandom` in the
+Lease and grace accept Duration strings such as `"15 seconds"`; bare numbers
+remain milliseconds. Values must be finite and positive. Defaults are a
+15-second lease and a five-second grace period. The ready message is a JSON line
+with `event: "Listening"` and `port`. `Runner.serve` also exposes a scoped
+Effect API; supply Node platform services, `Digest`, and `SecureRandom` in the
 application environment. The executable supplies these itself. The state
 directory requires a local filesystem and exclusive ownership. A scoped
 `node:sqlite` exclusive transaction holds the directory lock; a competing
@@ -240,8 +241,8 @@ still uses synchronized JSON files, not SQLite tables.
 ```ts
 const proxy = Remote.plugin(contract, {
 	contractModule: "my-plugin/contract",
-	instance: "billing-worker",
 	target: Remote.runner({
+		instance: "billing-worker",
 		host: "runner.internal",
 		port: 7443,
 		tls: {
@@ -257,14 +258,14 @@ const proxy = Remote.plugin(contract, {
 })
 ```
 
-`instance` is required for a network target. It is stable across host restarts;
-one runner owns it. The host queries the authenticated key's generation
-high-water mark, then supplies it as `expectedGeneration` in Open. A retained
-request id is replayed idempotently. Otherwise a mismatched comparison returns
-`StaleSession`; a matching replacement waits for confirmed old-process exit
-before allocating and persisting its successor. This guarantees serial admission
-on this runner, not exactly-once side effects. External systems must check
-generation fencing tokens.
+`runner({ instance, ... })` requires an instance at the type boundary. It is
+stable across host restarts; one runner owns it. The host queries the
+authenticated key's generation high-water mark, then supplies it as
+`expectedGeneration` in Open. A retained request id is replayed idempotently.
+Otherwise a mismatched comparison returns `StaleSession`; a matching replacement
+waits for confirmed old-process exit before allocating and persisting its
+successor. This guarantees serial admission on this runner, not exactly-once
+side effects. External systems must check generation fencing tokens.
 
 TLS requires version 1.3, trusted client certificates, and server hostname
 verification. Identity comes from exactly one SAN URI of the form

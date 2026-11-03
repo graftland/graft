@@ -27,7 +27,7 @@ import { fileURLToPath } from "node:url"
 import * as Remote from "../src/index"
 import { cleanupCause } from "../src/internal/cleanup"
 import { endpoint } from "../src/internal/control"
-import * as Transport from "../src/internal/transport"
+import * as Local from "../src/internal/runner/Local"
 import { contract, Rejected } from "./fixtures/contract"
 
 const contractModule = new URL(
@@ -254,7 +254,7 @@ describe("local remote hardening", () => {
 						),
 					)
 					.pipe(Scope.provide(processScope))
-				const transport = yield* Transport.make(child, {
+				const transport = yield* Local.connect(child, {
 					session: "local",
 					serve: {},
 					call: { [endpoint]: contract.control },
@@ -329,8 +329,7 @@ describe("local remote hardening", () => {
 				assert.isAbove(dropped, 0)
 				// Two bursts, startup/finalizer messages, and Graft's terminal failure log.
 				assert.equal(delivered + dropped, 8195)
-				yield* Ref.set(transport.stopping, true)
-				yield* transport.end
+				yield* transport.terminate(true)
 				const status = yield* Fiber.join(transport.exited)
 				assert.equal(status.exitCode, 0)
 				yield* Scope.close(processScope, Exit.void)

@@ -165,6 +165,7 @@ const setup = (lease = 15000, partitionable = false) =>
 		yield* provider.await
 		const proxySocket = partitionable ? yield* tcpProxy(daemon.port) : undefined
 		const target = Remote.runner({
+			instance: "worker",
 			host: "127.0.0.1",
 			port: proxySocket?.port ?? daemon.port,
 			tls: yield* credentials("client"),
@@ -174,7 +175,6 @@ const setup = (lease = 15000, partitionable = false) =>
 		const proxy = yield* Graft.plugin(
 			Remote.plugin(contract, {
 				contractModule: "remote-fixture",
-				instance: "worker",
 				target,
 			}),
 			{ directory, fail: false },
@@ -428,6 +428,7 @@ describe("network runner end to end", () => {
 									reason.error,
 								),
 						),
+						Cause.pretty(result.cause),
 					)
 			}),
 		120_000,
@@ -588,7 +589,7 @@ describe("network runner end to end", () => {
 		90_000,
 	)
 	it.live(
-		"rejects missing instance ids and package pins before the implementation applies",
+		"rejects empty instance ids and package pins before the implementation applies",
 		() =>
 			Effect.gen(function* () {
 				const fs = yield* FileSystem.FileSystem
@@ -609,8 +610,8 @@ describe("network runner end to end", () => {
 					const proxy = yield* Graft.plugin(
 						Remote.plugin(contract, {
 							contractModule: "remote-fixture",
-							...(expect === undefined ? {} : { instance: "pin-" + index }),
 							target: Remote.runner({
+								instance: expect === undefined ? "" : "pin-" + index,
 								host: "127.0.0.1",
 								port: daemon.port,
 								tls: yield* credentials("client"),

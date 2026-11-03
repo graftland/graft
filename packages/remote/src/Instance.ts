@@ -3,7 +3,7 @@ export const Identity = Schema.Struct({
 	id: Schema.String,
 	generation: Schema.Int,
 })
-/** Local sessions use a fresh UUID and generation 1; network runners allocate persistent generations. */
+/** Outside a remote activation the identity is local/0. Local activations use a fresh UUID/1; runners allocate persistent generations. */
 export const Instance = Context.Reference<typeof Identity.Type>(
 	"@graftland/remote/Instance/Instance",
 	{

@@ -36,10 +36,11 @@ export const make = Effect.fnUntraced(function* (channel: ByteChannel) {
 	const report = (cause: Cause.Cause<unknown>) =>
 		fail(TransportError.make({ cause }))
 	yield* Effect.addFinalizer(() => fail(failure("Runner channel scope closed")))
+	// Wire version 1 accepts all six lanes, even though current RPC traffic uses only two.
 	const lanes = yield* Effect.forEach(Array.range(0, 5), () =>
 		Effect.gen(function* () {
 			return {
-				incoming: yield* Queue.bounded<Uint8Array>(Framing.window),
+				incoming: yield* Queue.dropping<Uint8Array>(Framing.window),
 				outgoing: yield* Queue.bounded<{
 					readonly frame: Framing.Frame
 					readonly bytes: Uint8Array
@@ -126,7 +127,7 @@ export const make = Effect.fnUntraced(function* (channel: ByteChannel) {
 								})
 							}),
 						)
-						if (!Queue.offerUnsafe(lane.incoming, frame.payload))
+						if (!(yield* Queue.offer(lane.incoming, frame.payload)))
 							return yield* failure("Runner peer exceeded its receive window")
 					} else {
 						yield* Effect.tx(
@@ -236,31 +237,3 @@ export const fromSocket = Effect.fnUntraced(function* (socket: Socket.Socket) {
 		),
 	})
 })
-
-/** Relay only the instance channel; each connection keeps its own session control channel. */
-export const forwardInstance = (
-	left: Effect.Success<ReturnType<typeof make>>,
-	right: Effect.Success<ReturnType<typeof make>>,
-) =>
-	Effect.all(
-		Array.flatMap([0, 1, 2] as const, (priority) => [
-			Effect.forever(
-				Effect.flatMap(left.take(1, priority), (payload) =>
-					right.send(1, priority, payload),
-				),
-			),
-			Effect.forever(
-				Effect.flatMap(right.take(1, priority), (payload) =>
-					left.send(1, priority, payload),
-				),
-			),
-		]),
-		{ concurrency: "unbounded" },
-	).pipe(
-		Effect.tapCause((cause) =>
-			Effect.all([
-				left.fail(TransportError.make({ cause })),
-				right.fail(TransportError.make({ cause })),
-			]),
-		),
-	)

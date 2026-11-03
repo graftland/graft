@@ -1,8 +1,7 @@
 import {
 	Array,
 	Cause,
-	Deferred,
-	Duration,
+	Context,
 	Effect,
 	Exit,
 	Fiber,
@@ -12,13 +11,18 @@ import {
 } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import { RpcClient, type RpcClientError } from "effect/rpc"
-import type { Schema } from "effect"
+import type { Schema, Duration } from "effect"
 import type { RemoteTerminationUnconfirmed } from "./model"
-import type { Target } from "../../Targets"
+import type {
+	Target,
+	Local as LocalTarget,
+	Runner as RunnerTarget,
+} from "../../Targets"
 import { ProcessExited, TransportError } from "../../Errors"
 import { cleanupCause } from "../cleanup"
 import * as Port from "../port"
-import * as Transport from "../transport"
+import * as LocalProcess from "./Local"
+import { milliseconds } from "./duration"
 import * as Multiplex from "./Multiplex"
 import * as Packages from "./Packages"
 import * as Tls from "./Tls"
@@ -32,7 +36,8 @@ import {
 import { command } from "./command"
 
 type Peer = Effect.Success<ReturnType<typeof Port.make>>
-interface Connected {
+export interface Connected {
+	readonly resources: Scope.Scope
 	readonly pid: number
 	readonly diagnostics: Effect.Effect<Cause.Cause<unknown>>
 	readonly terminate: (
@@ -53,60 +58,57 @@ interface Connected {
 		readonly report: (cause: Cause.Cause<unknown>) => Effect.Effect<void>
 	}
 }
-const connected = (value: Connected): Connected => value
+export class Connection extends Context.Service<Connection, Connected>()(
+	"@graftland/remote/internal/runner/Connection",
+) {}
+const connected = Connection.of
 
-export const open = (
-	target: Target,
+export const Local = (
+	target: LocalTarget,
 	contractModule: string,
-	instance: string | undefined,
 	options: Port.Options,
 	resources: Scope.Scope,
 	processScope: Scope.Scope,
 ) =>
 	Effect.gen(function* () {
-		if (target._tag === "Local") {
-			const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
-			const argv = yield* command(target.command)
-			const child = yield* spawner
-				.spawn(
-					ChildProcess.make(
-						argv[0],
-						[...Array.drop(argv, 1), contractModule, options.session],
-						{
-							stdin: "pipe",
-							stdout: "pipe",
-							stderr: "pipe",
-							additionalFds: { fd3: { type: "output" } },
-							forceKillAfter: "1 second",
-						},
-					),
-				)
-				.pipe(Scope.provide(processScope))
-			const transport = yield* Transport.make(child, options).pipe(
-				Scope.provide(resources),
-			)
-			return connected({
-				pid: child.pid,
-				transport: { ...transport, failure: Deferred.await(transport.failed) },
-				diagnostics: Fiber.join(transport.exited).pipe(
-					Effect.andThen(Ref.get(transport.failures)),
+		const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+		const argv = yield* command(target.command)
+		const child = yield* spawner
+			.spawn(
+				ChildProcess.make(
+					argv[0],
+					[...Array.drop(argv, 1), contractModule, options.session],
+					{
+						stdin: "pipe",
+						stdout: "pipe",
+						stderr: "pipe",
+						additionalFds: { fd3: { type: "output" } },
+						forceKillAfter: "1 second",
+					},
 				),
-				terminate: (graceful) =>
-					Effect.gen(function* () {
-						yield* Ref.set(transport.stopping, true)
-						if (!graceful) return
-						yield* transport.end
-						const status = yield* Fiber.join(transport.exited)
-						if (status.exitCode !== 0 || status.statusCause.reasons.length > 0)
-							return yield* status
-					}),
-			})
-		}
-		if (instance === undefined || instance.length === 0)
+			)
+			.pipe(Scope.provide(processScope))
+		return yield* LocalProcess.connect(child, options).pipe(
+			Scope.provide(resources),
+		)
+	})
+
+export const Runner = (
+	target: RunnerTarget,
+	contractModule: string,
+	options: Port.Options,
+	resources: Scope.Scope,
+	processScope: Scope.Scope,
+) =>
+	Effect.gen(function* () {
+		const instance = target.instance
+
+		if (instance.length === 0)
 			return yield* InvalidSessionRequest.make({
 				detail: "A runner target requires an explicit instance id",
 				cause: Cause.empty,
 			})
+		const margin = yield* milliseconds(target.margin ?? "5 seconds")
 		const socket = yield* Tls.connect({
 			...target,
 			servername: target.tls.servername,
@@ -135,9 +137,7 @@ export const open = (
 			...(target.lease === undefined
 				? {}
 				: {
-						leaseMillis: Duration.toMillis(
-							Duration.fromInputUnsafe(target.lease),
-						),
+						leaseMillis: yield* milliseconds(target.lease),
 					}),
 		})
 		const stopping = yield* Ref.make(false)
@@ -151,9 +151,7 @@ export const open = (
 					record.handle,
 					session.Dispose(record.handle),
 					record.leaseMillis,
-					Duration.toMillis(
-						Duration.fromInputUnsafe(target.margin ?? "5 seconds"),
-					),
+					margin,
 				)
 				yield* Effect.logInfo("Remote execution terminated", result.exit).pipe(
 					Effect.annotateLogs({
@@ -233,6 +231,7 @@ export const open = (
 			Effect.forkIn(resources),
 		)
 		return connected({
+			resources,
 			pid: Option.getOrUndefined(childOf(loaded))?.pid ?? 0,
 			diagnostics: Ref.get(failures),
 			terminate: () =>
@@ -247,4 +246,84 @@ export const open = (
 				report,
 			},
 		})
+	})
+
+const reason = <A, E>(exit: Exit.Exit<A, E>) =>
+	Exit.isFailure(exit) ? exit.cause : Cause.empty
+const finish = (causes: ReadonlyArray<Cause.Cause<unknown>>) => {
+	const cause = Array.reduce(causes, Cause.empty, Cause.combine)
+	return cause.reasons.length === 0
+		? Effect.void
+		: Effect.failCause(cleanupCause(cause))
+}
+
+/** Close partially acquired resources too; the normal release observes exit before stopping readers. */
+const scopes = Effect.acquireRelease(
+	Effect.all({ resources: Scope.make(), process: Scope.make() }),
+	(scopes, exit) =>
+		Effect.gen(function* () {
+			const process = yield* Effect.exit(Scope.close(scopes.process, exit))
+			const resources = yield* Effect.exit(Scope.close(scopes.resources, exit))
+			yield* finish([reason(process), reason(resources)])
+		}),
+)
+
+/** Setup supplies a concrete control lifecycle; release never reads a later-installed effect. */
+export const acquire = <A, E, R, D, DR>(
+	target: Target,
+	contractModule: string,
+	options: Port.Options,
+	setup: Effect.Effect<A, E, R | Connection>,
+	dispose: (value: A) => Effect.Effect<Cause.Cause<unknown>, D, DR>,
+	timeout: Duration.Input,
+) =>
+	Effect.gen(function* () {
+		const owned = yield* scopes
+		const connection = yield* Effect.acquireRelease(
+			Effect.gen(function* () {
+				return target._tag === "Local"
+					? yield* Local(
+							target,
+							contractModule,
+							options,
+							owned.resources,
+							owned.process,
+						).pipe(Effect.map(connected))
+					: yield* Runner(
+							target,
+							contractModule,
+							options,
+							owned.resources,
+							owned.process,
+						)
+			}).pipe(Effect.interruptible),
+			(connection, exit) =>
+				Effect.gen(function* () {
+					const process = yield* Effect.exit(Scope.close(owned.process, exit))
+					yield* connection.diagnostics
+					const resources = yield* Effect.exit(
+						Scope.close(owned.resources, exit),
+					)
+					const diagnostics = yield* connection.diagnostics
+					yield* finish([reason(process), reason(resources), diagnostics])
+				}),
+		)
+		return yield* Effect.acquireRelease(
+			setup.pipe(Effect.provideService(Connection, connection)),
+			(value) =>
+				Effect.gen(function* () {
+					const graceful = yield* dispose(value).pipe(
+						Effect.interruptible,
+						Effect.timeout(timeout),
+						Effect.exit,
+					)
+					const terminated = yield* Effect.exit(
+						connection.terminate(Exit.isSuccess(graceful)),
+					)
+					yield* finish([
+						Exit.isSuccess(graceful) ? graceful.value : graceful.cause,
+						reason(terminated),
+					])
+				}),
+		)
 	})

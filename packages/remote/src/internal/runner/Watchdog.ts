@@ -1,64 +1,16 @@
-import { Cause, Deferred, Effect } from "effect"
+import { Cause, Deferred, Effect, FiberSet, Schema } from "effect"
 import { Worker } from "node:worker_threads"
 import { ExecutionError } from "./model"
-
-/**
- * fd 4 belongs exclusively to this worker. A blocked plugin main thread cannot
- * delay EOF or lease expiry. SIGKILL targets the process, not only this worker.
- */
-const source = String.raw`
-const { parentPort } = require("node:worker_threads");
-const { Socket } = require("node:net");
-let timer;
-let ended = false;
-let deadline = Infinity;
-const die = () => process.kill(process.pid, "SIGKILL");
-process.on("uncaughtException", die);
-process.on("unhandledRejection", die);
-const tick = () => {
-  const remaining = deadline - performance.now();
-  if (remaining <= 0) die();
-  else timer = setTimeout(tick, Math.min(remaining, 2147483647));
-};
-const arm = (millis) => {
-  if (performance.now() >= deadline || ended || !Number.isFinite(millis) || millis <= 0) return die();
-  deadline = performance.now() + millis;
-  clearTimeout(timer);
-  tick();
-};
-let buffer = "";
-arm(30000);
-// A pollable pipe avoids an outstanding fs.read blocking Worker.terminate().
-const input = new Socket({ fd: 4, readable: true, writable: false });
-input.on("end", die);
-input.on("error", die);
-input.on("data", (bytes) => {
-  buffer += bytes.toString("utf8");
-  if (buffer.length > 4096) return die();
-  while (buffer.includes("\n")) {
-    const end = buffer.indexOf("\n");
-    const line = buffer.slice(0, end);
-    buffer = buffer.slice(end + 1);
-    try {
-      const command = JSON.parse(line);
-      if (command.kind === "renew") arm(command.millis);
-      else if (command.kind === "start") parentPort.postMessage("start");
-      else if (command.kind === "stop") { ended = true; parentPort.postMessage("stop"); }
-      else die();
-    } catch { die(); }
-  }
-});
-parentPort.postMessage("ready");
-`
+import { Notice } from "./WatchdogProtocol"
 
 export const start = Effect.gen(function* () {
 	const ready = yield* Deferred.make<void>()
 	const begin = yield* Deferred.make<void>()
 	const stop = yield* Deferred.make<void>()
-	const failed = yield* Deferred.make<never, ExecutionError>()
 	const worker = yield* Effect.acquireRelease(
 		Effect.try({
-			try: () => new Worker(source, { eval: true }),
+			try: () =>
+				new Worker(new URL(import.meta.resolve("@graftland/remote/watchdog"))),
 			catch: (cause) =>
 				ExecutionError.make({
 					detail: "Starting the child watchdog failed",
@@ -67,36 +19,61 @@ export const start = Effect.gen(function* () {
 		}),
 		(worker) => Effect.promise(() => worker.terminate()).pipe(Effect.asVoid),
 	)
-	worker.on("message", (message: unknown) => {
-		if (message === "ready") Deferred.doneUnsafe(ready, Effect.void)
-		else if (message === "start") Deferred.doneUnsafe(begin, Effect.void)
-		else if (message === "stop") Deferred.doneUnsafe(stop, Effect.void)
-	})
-	worker.on("error", (error) =>
-		Deferred.doneUnsafe(
-			failed,
+	const listeners = yield* FiberSet.make<void, ExecutionError>()
+	const run = yield* FiberSet.runtime(listeners)<never>()
+	const message = (value: unknown) =>
+		run(
+			Schema.decodeUnknownEffect(Notice)(value).pipe(
+				Effect.mapError((error) =>
+					ExecutionError.make({
+						detail: "Invalid watchdog notice",
+						cause: Cause.fail(error),
+					}),
+				),
+				Effect.flatMap((notice) =>
+					Deferred.succeed(
+						notice === "ready" ? ready : notice === "start" ? begin : stop,
+						undefined,
+					),
+				),
+				Effect.asVoid,
+			),
+		)
+	const error = (error: Error) =>
+		run(
 			Effect.fail(
 				ExecutionError.make({
 					detail: "Child watchdog failed",
 					cause: Cause.die(error),
 				}),
 			),
-		),
-	)
-	worker.on("exit", (code) =>
-		Deferred.doneUnsafe(
-			failed,
+		)
+	const exit = (code: number) =>
+		run(
 			Effect.fail(
 				ExecutionError.make({
 					detail: "Child watchdog exited: " + code,
 					cause: Cause.empty,
 				}),
 			),
-		),
+		)
+	yield* Effect.acquireRelease(
+		Effect.sync(() => {
+			worker.on("message", message)
+			worker.on("error", error)
+			worker.on("exit", exit)
+		}),
+		() =>
+			Effect.sync(() => {
+				worker.off("message", message)
+				worker.off("error", error)
+				worker.off("exit", exit)
+			}),
 	)
-	yield* Effect.raceFirst(Deferred.await(ready), Deferred.await(failed))
+	const failure = FiberSet.join(listeners).pipe(Effect.andThen(Effect.never))
+	yield* Effect.raceFirst(Deferred.await(ready), failure)
 	return {
-		begin: Effect.raceFirst(Deferred.await(begin), Deferred.await(failed)),
-		stop: Effect.raceFirst(Deferred.await(stop), Deferred.await(failed)),
+		begin: Effect.raceFirst(Deferred.await(begin), failure),
+		stop: Effect.raceFirst(Deferred.await(stop), failure),
 	}
 })

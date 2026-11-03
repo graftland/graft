@@ -235,34 +235,4 @@ describe("runner framing", () => {
 				assert.include(Cause.pretty(failed.cause), "receive window")
 			}).pipe(Effect.scoped),
 	)
-	it.effect(
-		"forwards opaque instance frames in both directions while keeping session channels local",
-		() =>
-			Effect.gen(function* () {
-				const host = yield* setup
-				const child = yield* setup
-				const forwarding = yield* Multiplex.forwardInstance(
-					host.right,
-					child.left,
-				).pipe(Effect.forkScoped)
-				yield* host.left.send(1, 1, new Uint8Array([255, 1, 0]))
-				const request = yield* child.right.take(1, 1)
-				assert.deepEqual(request, new Uint8Array([255, 1, 0]))
-				yield* child.right.send(1, 0, bytes("response"))
-				const response = yield* host.left.take(1, 0)
-				assert.equal(text(response), "response")
-				yield* host.left.send(0, 0, bytes("renew"))
-				const control = yield* host.right.take(0, 0)
-				assert.equal(text(control), "renew")
-				yield* child.left.fail(
-					TransportError.make({
-						cause: Cause.die(new Error("Child channel failed")),
-					}),
-				)
-				const stopped = yield* Fiber.await(forwarding)
-				assert.isTrue(Exit.isFailure(stopped))
-				const failure = yield* Effect.flip(Deferred.await(host.right.failed))
-				assert.include(Cause.pretty(failure.cause), "Child channel failed")
-			}).pipe(Effect.scoped),
-	)
 })
