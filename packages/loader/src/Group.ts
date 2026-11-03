@@ -9,6 +9,7 @@ import {
 	Cause,
 	Context,
 	Effect,
+	Equal,
 	Deferred,
 	Exit,
 	Queue,
@@ -30,6 +31,13 @@ import { ModuleResolver } from "./ModuleResolver"
 import * as Intercept from "./Intercept"
 import { GroupEntries, validateGroup, type InvalidOperation } from "./Tree"
 
+import {
+	epochOf,
+	nextEpoch,
+	preserveEpoch,
+	withEpoch,
+} from "./internal/refresh"
+import { copyGroup, groups } from "./internal/validated"
 import { snapshot } from "./internal/snapshot"
 
 interface Child {
@@ -37,6 +45,8 @@ interface Child {
 	readonly fork: Fork.Fork
 	readonly identity: symbol
 	readonly generation: number
+	readonly epoch: number
+	readonly failed: Effect.Effect<boolean>
 }
 
 type Request =
@@ -113,6 +123,7 @@ const waitingFor = (
 	plugin: Plugin.Plugin,
 	group: boolean,
 	refresh: (source: Fork.Fork) => Effect.Effect<void>,
+	observe: (fork: Fork.Fork) => Effect.Effect<void>,
 ) =>
 	Plugin.make({
 		name: plugin.name,
@@ -120,7 +131,9 @@ const waitingFor = (
 		inject: Array.map(keys, (key) => Context.Service<unknown>(key)),
 		apply: (input) =>
 			Effect.flatMap(Graft.plugin(plugin, input), (fork) =>
-				updateTarget(fork, input, group, refresh),
+				observe(fork).pipe(
+					Effect.andThen(updateTarget(fork, input, group, refresh)),
+				),
 			),
 	})
 
@@ -140,6 +153,10 @@ const inputOf = (
 	entry.group === true
 		? Effect.fromResult(
 				validateGroup(entry.config === undefined ? [] : entry.config),
+			).pipe(
+				Effect.map((entries) =>
+					withEpoch(copyGroup(entries), epochOf(entry) ?? nextEpoch()),
+				),
 			)
 		: resolveEnv(entry.config).pipe(Effect.map(snapshot))
 
@@ -225,11 +242,7 @@ const disposeChild = (child: Child) =>
 		}),
 	)
 
-export const Group: Plugin.Plugin<
-	ReadonlyArray<Entry>,
-	ReadonlyArray<Entry>,
-	never
-> = Plugin.make({
+const definition = Plugin.make({
 	name: "group",
 	config: GroupEntries,
 	inject: [ModuleResolver],
@@ -292,7 +305,10 @@ export const Group: Plugin.Plugin<
 			// Register the lifecycle before any resolution can suspend. Core owns its
 			// activation generation, so interruption closes the resolver scope and
 			// a late result cannot publish a child into a removed activation.
-			const load = Effect.fnUntraced(function* (entry: Entry) {
+			const load = Effect.fnUntraced(function* (entry: Entry, epoch: number) {
+				entry = withEpoch({ ...entry }, epoch)
+				const targetFork = yield* Ref.make(Option.none<Fork.Fork>())
+				const gatedFork = yield* Ref.make(Option.none<Fork.Fork>())
 				const identity = Symbol(entry.id)
 				const refreshEntry = (source: Fork.Fork) =>
 					refresh(entry.id, identity, source)
@@ -307,6 +323,7 @@ export const Group: Plugin.Plugin<
 					config: Entry,
 					apply: (entry) =>
 						Effect.gen(function* () {
+							yield* Ref.set(gatedFork, Option.none())
 							yield* ScopedRef.set(observations, Effect.scope)
 							const observationScope = yield* ScopedRef.get(observations)
 							const plugin: Plugin.Plugin =
@@ -326,9 +343,11 @@ export const Group: Plugin.Plugin<
 										plugin,
 										entry.group === true,
 										refreshEntry,
+										(fork) => Ref.set(gatedFork, Option.some(fork)),
 									)
 								: plugin
 							const fork = yield* Graft.plugin(target, input, { intercept })
+							yield* Ref.set(targetFork, Option.some(fork))
 							const update = yield* updateTarget(
 								fork,
 								input,
@@ -368,7 +387,10 @@ export const Group: Plugin.Plugin<
 						}),
 				})
 				const fork = yield* Graft.plugin(
-					lifecycle,
+					Equal.byReference({
+						...lifecycle,
+						decode: preserveEpoch(lifecycle.decode),
+					}),
 					entry,
 					isolationOf(entry),
 				).pipe(Scope.provide(owner))
@@ -376,6 +398,20 @@ export const Group: Plugin.Plugin<
 					entry,
 					identity,
 					generation: 0,
+					epoch,
+					failed: Effect.gen(function* () {
+						const targets = [
+							yield* Ref.get(gatedFork),
+							yield* Ref.get(targetFork),
+						]
+						for (const target of targets) {
+							if (Option.isNone(target)) continue
+							const state = yield* Stream.runHead(target.value.state)
+							if (Option.exists(state, (state) => state._tag === "Failed"))
+								return true
+						}
+						return false
+					}),
 					fork: {
 						...fork,
 						dispose: disposeEntry(fork, owner),
@@ -386,6 +422,7 @@ export const Group: Plugin.Plugin<
 			const reconcile = Effect.fnUntraced(function* (
 				next: ReadonlyArray<Entry>,
 			) {
+				const epoch = epochOf(next) ?? nextEpoch()
 				const wanted = Array.filter(
 					snapshot(next),
 					(entry) => entry.disabled !== true,
@@ -394,52 +431,73 @@ export const Group: Plugin.Plugin<
 					Array.map(wanted, (entry) => [entry.id, entry] as const),
 				)
 				let current = yield* Ref.get(children)
-				for (const [id, child] of current) {
-					const entry = HashMap.get(byId, id)
-					if (
-						Option.isNone(entry) ||
-						!equalConfig(shape(entry.value), shape(child.entry))
-					) {
-						yield* FiberMap.remove(settling, id)
-						yield* disposeChild(child)
-						current = HashMap.remove(current, id)
-						yield* Ref.set(children, current)
-					}
-				}
-				for (const entry of wanted) {
-					const existing = HashMap.get(current, entry.id)
-					if (Option.isSome(existing)) {
+				const removed = Array.filter(
+					Array.fromIterable(current),
+					([id, child]) => {
+						const entry = HashMap.get(byId, id)
+						return (
+							Option.isNone(entry) ||
+							!equalConfig(shape(entry.value), shape(child.entry))
+						)
+					},
+				)
+				// Start every close: a provider may be draining a consumer later in this list.
+				yield* Effect.forEach(
+					removed,
+					([id, child]) =>
+						FiberMap.remove(settling, id).pipe(
+							Effect.andThen(disposeChild(child)),
+						),
+					{ concurrency: "unbounded", discard: true },
+				)
+				for (const [id] of removed) current = HashMap.remove(current, id)
+				// One coordinator publishes all identities and generations before workers start.
+				const jobs = yield* Effect.forEach(wanted, (description) =>
+					Effect.gen(function* () {
+						const entry = withEpoch({ ...description }, epoch)
+						const existing = HashMap.get(current, entry.id)
+						if (Option.isNone(existing)) {
+							const child = yield* load(entry, epoch)
+							current = HashMap.set(current, entry.id, child)
+							return { run: Effect.void }
+						}
+						const before = existing.value
 						const child = {
-							...existing.value,
-							generation: existing.value.generation + 1,
+							...before,
+							entry,
+							epoch: Math.max(before.epoch, epoch),
+							generation: before.generation + 1,
 						}
 						yield* FiberMap.remove(settling, entry.id)
-						current = HashMap.set(current, entry.id, { ...child, entry })
-						yield* Ref.set(children, current)
-						const state = yield* Stream.runHead(child.fork.state)
-						// An unchanged unresolved entry keeps its activation. Active wrappers
-						// forward retry to the actual plugin, including nested groups.
-						const unchanged = equalConfig(child.entry.config, entry.config)
-						if (
-							unchanged &&
-							Option.exists(state, (state) => state._tag === "Failed")
-						)
-							yield* child.fork.restart
-						else if (
-							!unchanged ||
-							Option.exists(state, (state) => state._tag === "Active")
-						)
-							yield* child.fork.update(entry)
-						else if (Option.exists(state, (state) => state._tag === "Loading"))
-							yield* refresh(entry.id, child.identity, child.fork)
-						current = HashMap.set(current, entry.id, { ...child, entry })
-					} else {
-						const child = yield* load(entry)
 						current = HashMap.set(current, entry.id, child)
-						yield* Ref.set(children, current)
-					}
-				}
+						return {
+							run: Effect.gen(function* () {
+								const state = yield* Stream.runHead(child.fork.state)
+								const unchanged = equalConfig(before.entry.config, entry.config)
+								if (
+									unchanged &&
+									Option.exists(state, (state) => state._tag === "Failed")
+								)
+									yield* child.fork.restart
+								else if (
+									!unchanged ||
+									(Option.exists(state, (state) => state._tag === "Active") &&
+										(before.epoch < epoch || (yield* child.failed)))
+								)
+									yield* child.fork.update(entry)
+								else if (
+									Option.exists(state, (state) => state._tag === "Loading")
+								)
+									yield* refresh(entry.id, child.identity, child.fork)
+							}),
+						}
+					}),
+				)
 				yield* Ref.set(children, current)
+				yield* Effect.all(
+					Array.map(jobs, (job) => job.run),
+					{ concurrency: "unbounded", discard: true },
+				)
 			})
 
 			const applyRequest = (request: Request) =>
@@ -480,7 +538,10 @@ export const Group: Plugin.Plugin<
 					const reply = yield* Deferred.make<void>()
 					yield* submit({
 						_tag: "Reconcile",
-						entries: snapshot(entries),
+						entries: withEpoch(
+							copyGroup(entries),
+							epochOf(entries) ?? nextEpoch(),
+						),
 						reply,
 					})
 					return true
@@ -488,4 +549,18 @@ export const Group: Plugin.Plugin<
 			yield* update(entries)
 			return update
 		}),
+})
+
+/** Public arrays request a full refresh; internal requests retain their explicit epoch. */
+export const Group: Plugin.Plugin<
+	ReadonlyArray<Entry>,
+	ReadonlyArray<Entry>,
+	never
+> = Equal.byReference({
+	...definition,
+	decode: preserveEpoch((input: ReadonlyArray<Entry>) =>
+		groups.has(input)
+			? Effect.succeed(input)
+			: Schema.decodeEffect(GroupEntries)(input),
+	),
 })

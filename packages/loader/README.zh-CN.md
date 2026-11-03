@@ -83,7 +83,10 @@ Worker 在同一把锁下完成保存和目标发布，并通过 `Deferred` 交�
 - 失败的插件 fork 会重启，即使它们位于注入包装器或 group 包装器之下。
 - 健康的实例和未完成的解析保持原样。
 
-对普通编辑的对账也会重试失败的条目。
+普通 API 编辑和文件变更只对变化的条目做差量对账；未变的健康兄弟和子树保留当前环境值。编辑单个叶子不再隐式刷新全树。参与对账的组仍会重试失败条目，并保留未完成的解析。需要全树重新读取环境时，显式调用
+`retry` 或 `loader.root.update(entries)`；刷新会穿过嵌套组和注入包装器。
+
+独立兄弟的更新和移除清理并发执行；同一条目的操作仍串行，替代实例须等待旧实例清理结束，组也会等待本轮必要工作全部完成。Include 合并入口和物理目标的通知，在连续 100ms 没有新通知后刷新；监听安装后的补读和符号链接目标切换仍保留。
 
 `ready` 会一直等到当前目标版本已经对账完毕，并且没有 fork 处于
 `Loading`。`Pending` 和 `Failed`
@@ -321,3 +324,9 @@ watch 模式同时监听入口目录和当前目标目录。入口链接改变�
 
 属于 [Graft](https://github.com/graftland/graft)。基于
 [Apache 2.0](https://github.com/graftland/graft/blob/main/LICENSE) 许可。
+
+`ModuleResolver.make` 的可选 `resolution`
+协议缓存解析计划，不缓存 importer 结果。`revision`
+在安装、移除或解析环境变化后必须更新；`exists` 只检查候选是否存在；`observe`
+在每次解析（包括缓存命中）中取得观察租约。未提供该协议时，每次仍按原名称优先执行 importer。详见
+[Resolution plans](./README.md#resolution-plans)。

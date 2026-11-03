@@ -12,6 +12,8 @@ import {
 	Effect,
 	FileSystem,
 	HashSet,
+	HashMap,
+	Chunk,
 	Option,
 	Path,
 	Record,
@@ -35,6 +37,7 @@ import {
 	type YAMLSeq,
 } from "yaml"
 import { isOnlyFailure } from "./internal/recovery"
+import { makeFingerprint } from "./internal/configFingerprint"
 import { equalConfig } from "./internal/equalConfig"
 import { Entry, Env } from "./Entry"
 import { newId, start, StoreError } from "./Loader"
@@ -82,13 +85,18 @@ interface Loaded extends Synced {
 	readonly target: string
 }
 
-const flatten = (entries: ReadonlyArray<Entry>): ReadonlyArray<Entry> =>
-	Array.flatMap(entries, (entry) => [
-		entry,
-		...(entry.group === true && Array.isArray(entry.config)
-			? flatten(entry.config as ReadonlyArray<Entry>)
-			: []),
-	])
+const flatten = (entries: ReadonlyArray<Entry>): ReadonlyArray<Entry> => {
+	let flattened = Chunk.empty<Entry>()
+	const visit = (entries: ReadonlyArray<Entry>): void => {
+		for (const entry of entries) {
+			flattened = Chunk.append(flattened, entry)
+			if (entry.group === true && Array.isArray(entry.config))
+				visit(entry.config as ReadonlyArray<Entry>)
+		}
+	}
+	visit(entries)
+	return Chunk.toReadonlyArray(flattened)
+}
 
 /** Normalize only entry/group boundaries; ordinary plugin config keeps its aliases. */
 const normalizeGroups = (document: Document) => {
@@ -130,87 +138,139 @@ const normalizeGroups = (document: Document) => {
  * previous version (same name and config) keeps that entry's id, so editing
  * an anonymous entry by hand does not restart it under a new identity.
  */
-const planIds = (document: Document, previous: ReadonlyArray<Entry>) =>
+const planIds = (
+	document: Document,
+	logical: unknown,
+	previous: ReadonlyArray<Entry>,
+) =>
 	Effect.gen(function* () {
-		const explicitIds = (node: unknown): ReadonlyArray<string> =>
-			!isSeq(node)
-				? []
-				: Array.flatMap(node.items, (item) => {
-						if (!isMap(item)) return []
-						const id = item.get("id")
-						return [
-							...(typeof id === "string" ? [id] : []),
-							...(item.get("group") === true
-								? explicitIds(item.get("config"))
-								: []),
-						]
-					})
-		let used = HashSet.fromIterable(explicitIds(document.contents))
-		let available = Array.filter(
+		let used = HashSet.empty<string>()
+		const collectIds = (node: unknown): void => {
+			if (!isSeq(node)) return
+			for (const item of node.items) {
+				if (!isMap(item)) continue
+				const id = item.get("id")
+				if (typeof id === "string") used = HashSet.add(used, id)
+				if (item.get("group") === true) collectIds(item.get("config"))
+			}
+		}
+		collectIds(document.contents)
+
+		const fingerprint = makeFingerprint()
+		const available = Array.filter(
 			flatten(previous),
 			(entry) => !HashSet.has(used, entry.id),
 		)
-		let assignments: ReadonlyArray<{
+		let buckets = HashMap.empty<string, Chunk.Chunk<Entry>>()
+		let fallbackNames = HashSet.empty<string>()
+		const keyOf = (name: unknown, config: unknown) =>
+			`${typeof name === "string" ? name.length : 0}:${typeof name === "string" ? name : ""}:${fingerprint(config) ?? "opaque"}`
+		for (const entry of available) {
+			if (fingerprint(entry.config) === undefined)
+				fallbackNames = HashSet.add(fallbackNames, entry.name)
+			const key = keyOf(entry.name, entry.config)
+			buckets = HashMap.set(
+				buckets,
+				key,
+				Chunk.append(
+					HashMap.get(buckets, key).pipe(
+						Option.getOrElse(() => Chunk.empty<Entry>()),
+					),
+					entry,
+				),
+			)
+		}
+		// Materialize each bucket once. A cursor skips its consumed prefix without
+		// copying slices; unmatched hash collisions remain available in order.
+		const pools = HashMap.map(buckets, Chunk.toReadonlyArray)
+		let cursors = HashMap.empty<string, number>()
+		let assignments = Chunk.empty<{
 			readonly map: YAMLMap<unknown, unknown>
 			readonly id: string
 			readonly path: EntryPath
-		}> = []
+		}>()
+
 		// Build logical entries bottom-up. No YAML nodes change during matching,
 		// so parent identity depends on restored child identities, not raw syntax.
 		const visit = (
 			node: unknown,
+			logical: unknown,
 			path: EntryPath = [],
 		): Effect.Effect<unknown, StoreError> =>
 			Effect.gen(function* () {
-				if (!isSeq(node))
-					return yield* yaml(() =>
-						isNode(node) ? node.toJS(document) : (node ?? []),
-					)
+				if (!isSeq(node)) return logical === undefined ? [] : logical
 				return yield* Effect.forEach(
 					(node as YAMLSeq<unknown>).items,
 					(item, index) =>
 						Effect.gen(function* () {
-							if (!isMap(item))
-								return yield* yaml(() =>
-									isNode(item) ? item.toJS(document) : item,
-								)
+							const raw = Array.isArray(logical) ? logical[index] : undefined
+							if (!isMap(item)) return raw
 							const map = item as YAMLMap<unknown, unknown>
-							const raw = yield* yaml(
-								() => map.toJS(document) as Record<string, unknown>,
-							)
+							const fields = raw as Record<string, unknown>
+
 							const plain =
 								map.get("group") === true
 									? {
-											...raw,
-											config: yield* visit(map.get("config"), [
-												...path,
-												index,
-												"config",
-											]),
+											...fields,
+											config: yield* visit(
+												map.get("config"),
+												fields["config"],
+												[...path, index, "config"],
+											),
 										}
-									: raw
+									: fields
 							if (map.has("id")) return plain
-							const match = Array.findFirst(
-								available,
-								(entry) =>
-									entry.name === plain["name"] &&
-									equalConfig(entry.config, plain["config"]),
+							const key = keyOf(plain["name"], plain["config"])
+							const bucket = Option.getOrElse(
+								HashMap.get(pools, key),
+								Array.empty<Entry>,
 							)
+							const name = plain["name"]
+							if (
+								typeof name === "string" &&
+								fingerprint(plain["config"]) === undefined
+							)
+								fallbackNames = HashSet.add(fallbackNames, name)
+							const fallback =
+								typeof name === "string" && HashSet.has(fallbackNames, name)
+							const pool = fallback
+								? Array.filter(available, (entry) => entry.name === name)
+								: bucket
+							let cursor = fallback
+								? 0
+								: Option.getOrElse(HashMap.get(cursors, key), () => 0)
+							while (
+								cursor < pool.length &&
+								HashSet.has(used, pool[cursor]!.id)
+							)
+								cursor++
+							if (!fallback) cursors = HashMap.set(cursors, key, cursor)
+							let match = Option.none<Entry>()
+							for (let index = cursor; index < pool.length; index++) {
+								const entry = pool[index]!
+								if (
+									!HashSet.has(used, entry.id) &&
+									equalConfig(entry.config, plain["config"])
+								) {
+									match = Option.some(entry)
+									break
+								}
+							}
 							let id = Option.isSome(match) ? match.value.id : yield* newId
 							while (HashSet.has(used, id)) id = yield* newId
 							used = HashSet.add(used, id)
-							available = Array.filter(available, (entry) => entry.id !== id)
-							assignments = Array.append(assignments, {
+							assignments = Chunk.append(assignments, {
 								map,
 								id,
 								path: [...path, index],
 							})
+
 							return { ...plain, id }
 						}),
 				)
 			})
-		const target = yield* visit(document.contents)
-		return { target, assignments }
+		const target = yield* visit(document.contents, logical)
+		return { target, assignments: Chunk.toReadonlyArray(assignments) }
 	})
 
 /** Materialize all affected references against the original graph before any mutation. */
@@ -398,7 +458,11 @@ const prepare = Effect.fnUntraced(function* (
 	const raw = yield* yaml(() => document.toJS())
 	yield* Effect.fromResult(validateStructure(raw))
 	const normalized = yield* yaml(() => normalizeGroups(document))
-	const plan = yield* planIds(document, previous)
+	const plan = yield* planIds(
+		document,
+		normalized ? yield* yaml(() => document.toJS()) : raw,
+		previous,
+	)
 	const target = yield* decodeEntries(plan.target ?? [])
 	yield* yaml(() => {
 		const affected = new WeakSet<Node>()
@@ -413,7 +477,8 @@ const prepare = Effect.fnUntraced(function* (
 			map.items.unshift(document.createPair("id", id))
 	})
 	const changed = plan.assignments.length > 0 || normalized
-	const synced = changed ? yield* yaml(() => document.toString()) : text
+	if (!changed) return { text, entries: target } satisfies Synced
+	const synced = yield* yaml(() => document.toString())
 	const verified = yield* parse(synced)
 	const value = yield* yaml(() => verified.toJS())
 	const entries = yield* decodeEntries(value ?? [])
@@ -643,7 +708,7 @@ export const Include: Plugin.Plugin<
 							),
 						).pipe(
 							// Only refresh reads configuration, under Loader's lock.
-							Stream.mapEffect(() => Effect.sleep("100 millis")),
+							Stream.debounce("100 millis"),
 						)
 					: Stream.never
 

@@ -199,3 +199,45 @@ it.effect("removes an unresolved entry after its resolver cleanup fails", () =>
 		)
 	}),
 )
+
+it.effect(
+	"retains every cleanup cause when multiple entries are removed together",
+	() =>
+		Effect.gen(function* () {
+			const first = new Error("First entry cleanup failed")
+			const second = new Error("Second entry cleanup failed")
+			const broken = (failure: Error) =>
+				Plugin.make({
+					name: "broken",
+					apply: () => Effect.addFinalizer(() => Effect.die(failure)),
+				})
+			yield* run(() => ({ first: broken(first), second: broken(second) }))(() =>
+				Effect.gen(function* () {
+					yield* Graft.plugin(Loader.plugin, [
+						{ id: "first", name: "first" },
+						{ id: "second", name: "second" },
+					])
+					const loader = yield* loaderService
+					yield* loader.ready
+					yield* loader.root.update([])
+					yield* loader.ready
+					const logs = yield* Graft.logs.pipe(
+						Stream.filter(
+							(entry) =>
+								Array.isArray(entry.message) &&
+								Array.contains(
+									entry.message,
+									"Disposing a loader entry failed",
+								),
+						),
+						Stream.take(2),
+						Stream.runCollect,
+					)
+					assert.sameMembers(
+						Array.flatMap(logs, (entry) => defects(entry.cause)),
+						[first, second],
+					)
+				}),
+			)
+		}),
+)

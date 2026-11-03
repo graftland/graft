@@ -6,6 +6,7 @@ import {
 	Array,
 	Data,
 	HashSet,
+	Chunk,
 	Option,
 	Predicate,
 	Record,
@@ -13,7 +14,8 @@ import {
 	Schema,
 } from "effect"
 import { Entry } from "./Entry"
-import { snapshot } from "./internal/snapshot"
+import { groups, trees, structures } from "./internal/validated"
+import { isSnapshot, snapshot } from "./internal/snapshot"
 
 export type Path = ReadonlyArray<string | number>
 
@@ -100,7 +102,8 @@ export const validateStructure = (
 		value: unknown,
 		ancestors: ReadonlyArray<unknown>,
 	): Result.Result<void, InvalidOperation> => {
-		if (!Array.isArray(value)) return Result.succeed(undefined)
+		if (!Array.isArray(value) || structures.has(value))
+			return Result.succeed(undefined)
 		if (Array.some(ancestors, (ancestor) => ancestor === value))
 			return Result.fail(
 				InvalidOperation.make({
@@ -108,17 +111,23 @@ export const validateStructure = (
 				}),
 			)
 		if (finished.has(value)) return Result.succeed(undefined)
+		let captured = isSnapshot(value)
 		for (const entry of value) {
+			if (typeof entry === "object" && entry !== null && !isSnapshot(entry))
+				captured = false
 			if (
 				!Predicate.hasProperty(entry, "group") ||
 				entry.group !== true ||
 				!Predicate.hasProperty(entry, "config")
 			)
 				continue
-			const result = visit(entry.config, [...ancestors, value])
+			const config = entry.config
+			const result = visit(config, [...ancestors, value])
 			if (Result.isFailure(result)) return result
+			if (Array.isArray(config) && !structures.has(config)) captured = false
 		}
 		finished.add(value)
+		if (captured) structures.add(value)
 		return Result.succeed(undefined)
 	}
 	return visit(value, [])
@@ -149,26 +158,50 @@ export const GroupEntries = Schema.Array(Entry).check(
 )
 
 const decodeGroup = (value: unknown) =>
-	Result.mapError(Schema.decodeUnknownResult(GroupEntries)(value), (cause) =>
-		InvalidOperation.make({
-			reason: "Expected an array of valid entries",
-			cause,
-		}),
+	Result.mapError(
+		Array.isArray(value) && groups.has(value)
+			? Result.succeed(value as ReadonlyArray<Entry>)
+			: Schema.decodeUnknownResult(GroupEntries)(value),
+		(cause) =>
+			InvalidOperation.make({
+				reason: "Expected an array of valid entries",
+				cause,
+			}),
 	)
 
+const ownTree = (entries: ReadonlyArray<Entry>): ReadonlyArray<Entry> => {
+	const owned = snapshot(entries)
+	const mark = (entries: ReadonlyArray<Entry>): void => {
+		if (groups.has(entries)) return
+		groups.add(entries)
+		structures.add(entries)
+		for (const entry of entries) {
+			if (entry.group === true) mark(entry.config as ReadonlyArray<Entry>)
+		}
+	}
+	mark(owned)
+	trees.add(owned)
+	return owned
+}
+
 /** Check topology, then decode only this group; descendants own their schema failures. */
-export const validateGroup = (value: unknown) =>
-	Result.flatMap(validateStructure(value), () =>
-		Result.map(decodeGroup(value), (entries) =>
-			snapshot(
+export const validateGroup = (value: unknown) => {
+	if (Array.isArray(value) && groups.has(value) && structures.has(value))
+		return Result.succeed(value as ReadonlyArray<Entry>)
+	return Result.flatMap(validateStructure(value), () =>
+		Result.map(decodeGroup(value), (entries) => {
+			const owned = snapshot(
 				Array.map(entries, (entry) =>
 					entry.group === true && entry.config === undefined
 						? { ...entry, config: [] }
 						: entry,
 				),
-			),
-		),
+			)
+			groups.add(owned)
+			return owned
+		}),
 	)
+}
 
 /**
  * Decode the whole tree after checking its topology. Unknown entry metadata is
@@ -178,6 +211,8 @@ export const validateGroup = (value: unknown) =>
 export const validate = (
 	value: unknown,
 ): Result.Result<ReadonlyArray<Entry>, InvalidOperation> => {
+	if (Array.isArray(value) && trees.has(value))
+		return Result.succeed(value as ReadonlyArray<Entry>)
 	const structure = validateStructure(value)
 	if (Result.isFailure(structure)) return Result.fail(structure.failure)
 	let seen = HashSet.empty<string>()
@@ -187,9 +222,9 @@ export const validate = (
 		Result.gen(function* () {
 			const list = yield* decodeGroup(value)
 			seen = yield* validateIds(list, seen)
-			let entries: ReadonlyArray<Entry> = []
+			let entries = Chunk.empty<Entry>()
 			for (const entry of list) {
-				entries = Array.append(
+				entries = Chunk.append(
 					entries,
 					entry.group === true
 						? {
@@ -201,9 +236,9 @@ export const validate = (
 						: entry,
 				)
 			}
-			return entries
+			return Chunk.toReadonlyArray(entries)
 		})
-	return Result.map(visit(value), snapshot)
+	return Result.map(visit(value), ownTree)
 }
 
 const entryAt = (entries: ReadonlyArray<Entry>, path: Path): Entry => {

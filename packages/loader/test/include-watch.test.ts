@@ -27,8 +27,15 @@ const setupNotifications = Effect.gen(function* () {
 	const file = path.join(directory, "graft.yml")
 	const ready = yield* Deferred.make<void>()
 	const events = yield* Queue.unbounded<FileSystem.WatchEvent>()
+	const reads = yield* Ref.make(0)
+	const readEvents = yield* Queue.unbounded<void>()
 	yield* Graft.provide(FileSystem.FileSystem, {
 		...fs,
+		readFileString: (path, encoding) =>
+			Ref.update(reads, (n) => n + 1).pipe(
+				Effect.andThen(fs.readFileString(path, encoding)),
+				Effect.tap(() => Queue.offer(readEvents, undefined)),
+			),
 		watch: (_, options) =>
 			Stream.unwrap(
 				Effect.sync(() => {
@@ -50,6 +57,8 @@ const setupNotifications = Effect.gen(function* () {
 		fs,
 		file,
 		loader,
+		reads,
+		readEvents,
 		notify: Queue.offer(events, { _tag: "Update", path: file }),
 	}
 })
@@ -301,3 +310,36 @@ describe("include watcher serialization", () => {
 			),
 	)
 })
+
+it.effect(
+	"coalesces a notification burst into one read after the quiet period",
+	() =>
+		run((journal) => ({ echo: echo(journal) }))(() =>
+			Effect.gen(function* () {
+				const { notify, reads, readEvents } = yield* setupNotifications
+				yield* TestClock.adjust("100 millis")
+				yield* Queue.take(readEvents)
+				yield* Queue.take(readEvents)
+				yield* Ref.set(reads, 0)
+				for (let index = 0; index < 20; index++) yield* notify
+				yield* TestClock.adjust("99 millis")
+				const checked1 = yield* Ref.get(reads)
+
+				assert.strictEqual(checked1, 0)
+				yield* notify
+				yield* TestClock.adjust("99 millis")
+				const checked2 = yield* Ref.get(reads)
+
+				assert.strictEqual(checked2, 0)
+				yield* TestClock.adjust("1 millis")
+				yield* Queue.take(readEvents)
+				const checked3 = yield* Ref.get(reads)
+
+				assert.strictEqual(checked3, 1)
+				yield* TestClock.adjust("1 second")
+				const checked4 = yield* Ref.get(reads)
+
+				assert.strictEqual(checked4, 1)
+			}),
+		),
+)

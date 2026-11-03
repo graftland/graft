@@ -1,6 +1,16 @@
 import { assert, it } from "@effect/vitest"
 import { Graft, Plugin } from "@graftland/graft"
-import { Context, Deferred, Effect, Layer, Path, Ref, Schema } from "effect"
+import {
+	Context,
+	Deferred,
+	Effect,
+	Layer,
+	Path,
+	Ref,
+	Schema,
+	Stream,
+	Array,
+} from "effect"
 import { Loader, ModuleResolver } from "../src/index.ts"
 import { loaderService, run } from "./utils.ts"
 
@@ -116,6 +126,23 @@ it.effect(
 				yield* loader.ready
 				yield* loader.create({ id: "slow", name: "slow" })
 				yield* Deferred.await(slowStarted)
+				// A sibling beginning its import does not imply that the failed
+				// entry's concurrent retry has settled.
+				yield* Graft.forks.pipe(
+					Stream.filterEffect((trees) =>
+						Effect.map(Ref.get(attempts), (attempts) => {
+							const failed = (nodes: typeof trees): boolean =>
+								Array.some(
+									nodes,
+									(node) =>
+										(node.name === "flaky" && node.state._tag === "Failed") ||
+										failed(node.children),
+								)
+							return attempts === 2 && failed(trees)
+						}),
+					),
+					Stream.runHead,
+				)
 				yield* Ref.set(available, true)
 				yield* loader.retry
 				yield* Deferred.await(started)

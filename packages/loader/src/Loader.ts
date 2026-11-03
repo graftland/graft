@@ -25,6 +25,8 @@ import {
 import type { PlatformError } from "effect"
 import { Entry } from "./Entry"
 import { PendingRefreshes } from "./internal/pending"
+import { nextEpoch, withEpoch } from "./internal/refresh"
+import { copyGroup } from "./internal/validated"
 import { snapshot } from "./internal/snapshot"
 import { Group } from "./Group"
 import {
@@ -68,7 +70,8 @@ export class Loader extends Context.Service<
 		readonly root: Fork.Fork
 		/**
 		 * Requests reconciliation to retry every failed entry, including resolution and
-		 * plugin activation. Healthy instances and unfinished resolution are retained.
+		 * plugin activation. Healthy instances and unfinished resolution are retained. The whole tree
+		 * rereads its environment; ordinary edits only reconcile changed entries.
 		 * Returns after publishing the target; use ready to await reconciliation.
 		 */
 		readonly retry: Effect.Effect<void>
@@ -124,21 +127,6 @@ export const newId = Effect.map(Random.nextIntBetween(0, 0xffffffff), (n) =>
 	String.padStart(8, "0")(n.toString(16)),
 )
 
-const settled = (trees: ReadonlyArray<Fork.ForkTree>, id: number): boolean => {
-	const find = (
-		nodes: ReadonlyArray<Fork.ForkTree>,
-	): Option.Option<Fork.ForkTree> =>
-		Array.findFirst(nodes, (node) =>
-			node.id === id ? Option.some(node) : find(node.children),
-		)
-	const loading = (node: Fork.ForkTree): boolean =>
-		node.state._tag === "Loading" || Array.some(node.children, loading)
-	return Option.match(find(trees), {
-		onNone: () => true,
-		onSome: (node) => !loading(node),
-	})
-}
-
 /** Runs the entries of a store under a root group and publishes the `Loader` service. */
 export const start = Effect.fnUntraced(function* (store: Store) {
 	const initial = yield* Effect.fromResult(validate(store.initial))
@@ -146,12 +134,15 @@ export const start = Effect.fnUntraced(function* (store: Store) {
 		entries: initial,
 		version: 0,
 		reconciled: 0,
+		epoch: nextEpoch(),
 	})
 	const pending = yield* SubscriptionRef.make(0)
 	// Groups load their children here, so every nested group reports to it too.
-	const root = yield* Graft.plugin(Group, initial).pipe(
-		Effect.provideService(PendingRefreshes, Option.some(pending)),
-	)
+	const initialState = yield* SubscriptionRef.get(state)
+	const root = yield* Graft.plugin(
+		Group,
+		withEpoch(copyGroup(initial), initialState.epoch),
+	).pipe(Effect.provideService(PendingRefreshes, Option.some(pending)))
 	const lock = yield* Semaphore.make(1)
 	const publish = (entries: ReadonlyArray<Entry>) =>
 		Effect.flatMap(Effect.fromResult(validate(entries)), (target) =>
@@ -169,7 +160,7 @@ export const start = Effect.fnUntraced(function* (store: Store) {
 			Effect.gen(function* () {
 				const target = yield* SubscriptionRef.get(state)
 				if (target.version === target.reconciled) return
-				yield* root.update(target.entries)
+				yield* root.update(withEpoch(copyGroup(target.entries), target.epoch))
 				yield* SubscriptionRef.update(state, (current) => ({
 					...current,
 					reconciled: target.version,
@@ -259,11 +250,10 @@ export const start = Effect.fnUntraced(function* (store: Store) {
 		),
 		Effect.forkScoped,
 	)
-	const graft = yield* Graft.Graft
+	// Wake on target and refresh changes only; the subtree counter replaces rendering the fork tree.
 	const ready = Stream.mergeAll(
 		[
 			Stream.as(SubscriptionRef.changes(state), undefined),
-			Stream.as(Graft.forks, undefined),
 			Stream.as(SubscriptionRef.changes(pending), undefined),
 		],
 		{ concurrency: "unbounded" },
@@ -272,16 +262,13 @@ export const start = Effect.fnUntraced(function* (store: Store) {
 			Effect.gen(function* () {
 				const before = yield* SubscriptionRef.get(state)
 				if (before.version !== before.reconciled) return false
-				// Read the count first. A refresh ends only after its fork's new state
-				// is published, so a tree read after a zero count already shows it.
+				if ((yield* SubscriptionRef.get(pending)) > 0) return false
+				yield* root.stable
+				// A refresh ends only after its fork's new state is published, so a zero
+				// count read after the subtree settled cannot hide a later Loading fork.
 				const refreshing = yield* SubscriptionRef.get(pending)
-				const trees = yield* Stream.runHead(Graft.forks)
 				const after = yield* SubscriptionRef.get(state)
-				return (
-					after.version === before.version &&
-					refreshing === 0 &&
-					Option.exists(trees, (trees) => settled(trees, root.id))
-				)
+				return after.version === before.version && refreshing === 0
 			}),
 		),
 		Stream.runHead,
@@ -296,7 +283,22 @@ export const start = Effect.fnUntraced(function* (store: Store) {
 			Stream.changesWith((before, after) => before.version === after.version),
 			Stream.map((current) => current.entries),
 		),
-		root,
+		root: {
+			...root,
+			// The public method always refreshes, even when given a runtime
+			// snapshot carrying an earlier internal request's epoch.
+			update: (entries) =>
+				Effect.suspend(() =>
+					root.update(
+						Array.isArray(entries)
+							? withEpoch(
+									copyGroup(entries as ReadonlyArray<Entry>),
+									nextEpoch(),
+								)
+							: entries,
+					),
+				),
+		},
 		retry: Semaphore.withPermits(
 			lock,
 			1,
@@ -304,9 +306,10 @@ export const start = Effect.fnUntraced(function* (store: Store) {
 			SubscriptionRef.update(state, (current) => ({
 				...current,
 				version: current.version + 1,
+				epoch: nextEpoch(),
 			})),
 		),
-		ready: Effect.provideService(ready, Graft.Graft, graft),
+		ready,
 		create: (entry, options) =>
 			Effect.gen(function* () {
 				const id = entry.id ?? (yield* newId)
