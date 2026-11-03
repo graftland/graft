@@ -1,8 +1,8 @@
 // @effect-diagnostics-next-line nodeBuiltinImport:off -- watcher paths use host-platform syntax without adding a Path service requirement
-import { resolve } from "node:path"
+import { dirname, resolve } from "node:path"
 import type { FileVersion } from "./modules"
 import type { WatchOptions } from "../index"
-import { Base64 } from "effect/encoding"
+import { digest } from "./digest"
 import { fileURLToPath, pathToFileURL } from "node:url"
 import {
 	Array,
@@ -11,6 +11,9 @@ import {
 	Effect,
 	FileSystem,
 	HashMap,
+	HashSet,
+	Equal,
+	Clock,
 	Ref,
 	Queue,
 	Option,
@@ -44,7 +47,13 @@ const observeSource = <A, E, R>(source: Stream.Stream<A, E, R>) =>
 		{ bufferSize: 16 },
 	)
 
-/** Reconcile loaded modules because native watchers can silently miss events. */
+/** Compare immutable observation tokens again after filesystem I/O releases the lock. */
+const sameVersion = (a: FileVersion, b: FileVersion) =>
+	a.generation === b.generation &&
+	a.content === b.content &&
+	a.resolution === b.resolution
+
+/** Reconcile owned modules because native watchers can silently miss events. */
 export const changes = (
 	withFiles: WithFiles,
 	paths: ReadonlyArray<string>,
@@ -71,129 +80,195 @@ export const changes = (
 			const accepted = (path: string) => options?.filter?.(path) ?? true
 			const watched = (url: string) =>
 				accepted(fileURLToPath(url)) &&
-				Array.some(roots, ({ urls }) =>
+				Array.some(roots, ({ urls, directory }) =>
 					Array.some(urls, (root) => {
-						const directory = String.endsWith("/")(root) ? root : `${root}/`
+						const prefix = String.endsWith("/")(root) ? root : `${root}/`
 						return (
 							fileURLToPath(url) === fileURLToPath(root) ||
-							(options?.recursive === true
-								? String.startsWith(directory)(url)
-								: new URL(".", url).href === directory)
+							(directory &&
+								(options?.recursive === true
+									? String.startsWith(prefix)(url)
+									: new URL(".", url).href === prefix))
 						)
 					}),
 				)
-
-			const snapshot = withFiles((loaded) =>
-				Effect.forEach(
-					Array.filter(Array.fromIterable(loaded), ([url]) => watched(url)),
-					([url, baseline]) =>
-						Effect.gen(function* () {
-							const resolution =
-								baseline.resolution === undefined
-									? undefined
-									: yield* fs.realPath(fileURLToPath(url)).pipe(
-											Effect.map((path) => pathToFileURL(path).href),
-											Effect.catchIf(
-												(error) => error.reason._tag === "NotFound",
-												() => Effect.undefined,
+			const files = withFiles((loaded) =>
+				Effect.succeed(HashMap.filter(loaded, (_, url) => watched(url))),
+			)
+			const missing = <
+				A,
+				E extends import("effect").PlatformError.PlatformError,
+				R,
+			>(
+				effect: Effect.Effect<A, E, R>,
+			) =>
+				effect.pipe(
+					Effect.catchIf(
+						(error) => error.reason._tag === "NotFound",
+						() => Effect.undefined,
+					),
+				)
+			// Watch only graph directories, never recursively traverse an application root.
+			// Missing descendants use their nearest existing ancestor until they appear.
+			const existingDirectory = (
+				path: string,
+			): Effect.Effect<string, import("effect").PlatformError.PlatformError> =>
+				Effect.gen(function* () {
+					const info = yield* missing(fs.stat(path))
+					return info?.type === "Directory" || dirname(path) === path
+						? path
+						: yield* existingDirectory(dirname(path))
+				})
+			const directories = Effect.gen(function* () {
+				const loaded = yield* files
+				const requested = HashSet.fromIterable([
+					...Array.map(roots, (root) =>
+						root.directory ? root.path : dirname(root.path),
+					),
+					...Array.map(Array.fromIterable(HashMap.keys(loaded)), (url) =>
+						dirname(fileURLToPath(url)),
+					),
+				])
+				const existing = yield* Effect.forEach(requested, existingDirectory, {
+					concurrency: 8,
+				})
+				return HashSet.fromIterable(existing)
+			})
+			const dirty = yield* Ref.make(HashSet.empty<string>())
+			const native = Stream.tick("1 second").pipe(
+				Stream.mapEffect(() => directories),
+				Stream.changesWith((a, b) => Equal.equals(a, b)),
+				Stream.switchMap((directories) =>
+					Stream.mergeAll(
+						Array.map(Array.fromIterable(directories), (directory) =>
+							fs.watch(directory, { ...options, recursive: false }).pipe(
+								observeSource,
+								Stream.map((event) => resolve(directory, event.path || ".")),
+							),
+						),
+						{ concurrency: "unbounded" },
+					),
+				),
+				Stream.tap((path) => Ref.update(dirty, HashSet.add(path))),
+				Stream.debounce(options?.debounce ?? "50 millis"),
+				Stream.mapEffect(() => Ref.getAndSet(dirty, HashSet.empty<string>())),
+			)
+			interface Observation {
+				readonly baseline: FileVersion
+				readonly content: string | undefined
+				readonly resolution: string | undefined
+				readonly stat: string
+				readonly checked: number
+			}
+			const observed = yield* Ref.make(HashMap.empty<string, Observation>())
+			const scan = (events: HashSet.HashSet<string> | undefined) =>
+				Effect.gen(function* () {
+					const loaded = yield* files
+					const before = yield* Ref.get(observed)
+					const now = yield* Clock.currentTimeMillis
+					const selected = Array.filter(
+						Array.fromIterable(loaded),
+						([url]) =>
+							events === undefined ||
+							Array.some(Array.fromIterable(events), (path) => {
+								const file = fileURLToPath(url)
+								return file === path || String.startsWith(`${path}/`)(file)
+							}),
+					)
+					const checked = yield* Effect.forEach(
+						selected,
+						([url, baseline]) =>
+							Effect.gen(function* () {
+								const path = fileURLToPath(url)
+								const previous = Option.getOrUndefined(HashMap.get(before, url))
+								const info = yield* missing(fs.stat(path))
+								const stat =
+									info === undefined
+										? "missing"
+										: `${info.size}:${Option.getOrUndefined(info.mtime)?.getTime()}:${Option.getOrUndefined(info.ino)}`
+								const resolution =
+									baseline.resolution === undefined
+										? undefined
+										: yield* missing(fs.realPath(path)).pipe(
+												Effect.map((path) =>
+													path === undefined
+														? undefined
+														: pathToFileURL(path).href,
+												),
+											)
+								const audit =
+									events !== undefined ||
+									previous === undefined ||
+									!sameVersion(previous.baseline, baseline) ||
+									previous.stat !== stat ||
+									now - previous.checked >= 10000
+								const content = audit
+									? yield* missing(fs.readFile(path)).pipe(
+											Effect.map((bytes) =>
+												bytes === undefined ? undefined : digest(bytes),
 											),
 										)
-							const content = yield* fs.readFile(fileURLToPath(url)).pipe(
-								Effect.map(Base64.encode),
-								// Deletion is a change; other I/O failures belong to the consumer.
-								Effect.catchIf(
-									(error) => error.reason._tag === "NotFound",
-									() => Effect.undefined,
-								),
+									: previous.content
+								const expected =
+									previous === undefined
+										? baseline
+										: {
+												content:
+													baseline.content === undefined ||
+													sameVersion(previous.baseline, baseline)
+														? previous.content
+														: baseline.content,
+												resolution: sameVersion(previous.baseline, baseline)
+													? previous.resolution
+													: baseline.resolution,
+											}
+								return {
+									url,
+									observation: {
+										baseline,
+										content,
+										resolution,
+										stat,
+										checked: audit ? now : previous.checked,
+									},
+									changed:
+										expected.content !== content ||
+										expected.resolution !== resolution,
+								}
+							}),
+						{ concurrency: 8 },
+					)
+					// The immutable snapshot keeps its bytes alive while owners can be released.
+					// A stale result cannot acknowledge a newer import, even when bytes coincide.
+					return yield* withFiles((current) =>
+						Ref.modify(observed, (seen) => {
+							let next = HashMap.filter(seen, (_, url) =>
+								HashMap.has(current, url),
 							)
-							return { url, baseline, content, resolution }
+							let changed = HashSet.empty<string>()
+							for (const { url, observation, changed: differs } of checked) {
+								if (
+									!Option.exists(HashMap.get(current, url), (version) =>
+										sameVersion(version, observation.baseline),
+									)
+								)
+									continue
+								next = HashMap.set(next, url, observation)
+								if (differs) changed = HashSet.add(changed, url)
+							}
+							return [changed, next]
 						}),
+					)
+				})
+			return Stream.merge(
+				native,
+				Stream.tick("1 second").pipe(
+					Stream.drop(1),
+					Stream.map(() => undefined),
 				),
-			)
-			// An observation acknowledges disk bytes only for the import version
-			// it reconciled. A new attempt must be checked against its own bytes.
-			const observed = yield* Ref.make(
-				HashMap.empty<
-					string,
-					{
-						readonly baseline: FileVersion
-						readonly content: string | undefined
-						readonly resolution: string | undefined
-					}
-				>(),
-			)
-			return Stream.mergeAll(
-				[
-					...Array.map(roots, (root) =>
-						fs.watch(root.path, options).pipe(
-							observeSource,
-							Stream.filter((event) =>
-								accepted(
-									root.directory ? resolve(root.path, event.path) : root.path,
-								),
-							),
-							Stream.map(() => true),
-						),
-					),
-					Stream.tick("1 second").pipe(
-						Stream.drop(1),
-						Stream.map(() => false),
-					),
-				],
-				{ concurrency: "unbounded" },
 			).pipe(
-				// One consumer serializes snapshots from events and polling. A native
-				// event also advances the baseline, avoiding a second reload on the next tick.
-				Stream.mapEffect((event) =>
-					snapshot.pipe(
-						Effect.flatMap((current) =>
-							Ref.modify(observed, (before) => [
-								event ||
-									Array.some(
-										current,
-										({ url, baseline, content, resolution }) => {
-											const expected = Option.match(HashMap.get(before, url), {
-												onNone: () => ({
-													content: baseline.content,
-													resolution: baseline.resolution,
-												}),
-												onSome: (seen) => {
-													const same =
-														seen.baseline.generation === baseline.generation &&
-														seen.baseline.content === baseline.content &&
-														seen.baseline.resolution === baseline.resolution
-													return {
-														// Failed attempts without source bytes keep the last
-														// observation acknowledged until another save.
-														content:
-															baseline.content === undefined || same
-																? seen.content
-																: baseline.content,
-														resolution: same
-															? seen.resolution
-															: baseline.resolution,
-													}
-												},
-											})
-											return (
-												expected.content !== content ||
-												expected.resolution !== resolution
-											)
-										},
-									),
-								HashMap.fromIterable(
-									Array.map(
-										current,
-										({ url, baseline, content, resolution }) =>
-											[url, { baseline, content, resolution }] as const,
-									),
-								),
-							]),
-						),
-					),
-				),
-				Stream.filter(Boolean),
-				Stream.map(() => undefined),
+				Stream.mapEffect(scan),
+				Stream.filter((changed) => HashSet.size(changed) > 0),
 			)
 		}),
 	)
