@@ -19,8 +19,8 @@ Graft 参考了 [cordis](https://github.com/cordiverse/cordis)
 | `fiber.update`                         | `apply` 返回的[更新函数](../plugins/#原地更新)。                                             |
 | `fiber.restart`                        | `fork.restart`。                                                                             |
 | `ctx.isolate`、标签                    | [`isolate`](../isolation/#领域)，对服务和事件都适用。                                        |
-| `ctx.intercept`                        | 配合 `Context.Reference` 使用的 [`intercept`](../isolation/#intercept)。                     |
-| `registry.replace`                     | [`Graft.replace`](../lifecycle/#替换插件)。                                                  |
+| `ctx.intercept`                        | 配合 `Context.Reference` 使用的 [`intercept`](../intercepts/)。                              |
+| `registry.replace`                     | [`Graft.replace`](../replace/)。                                                             |
 | `ctx.on`、`ctx.emit`、`serial`、`bail` | [事件](../events/)：`on`、`emit`、`parallel`、`bail`、`waterfall`。                          |
 | 使用 Standard Schema 的配置            | Effect `Schema`，在插件激活期间解码。                                                        |
 | 日志、定时器和文件系统插件             | Effect 的 `Logger`、`Schedule`、`Clock` 和 `FileSystem`。                                    |

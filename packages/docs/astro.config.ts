@@ -43,17 +43,27 @@ export default defineConfig({
 				{
 					label: "Start here",
 					translations: { "zh-CN": "开始", "zh-TW": "開始" },
-					items: ["index", "quickstart", "cordis"],
+					items: ["index", "quickstart", "concepts", "cordis"],
 				},
 				{
-					label: "Guides",
-					translations: { "zh-CN": "指南", "zh-TW": "指南" },
-					items: ["plugins", "services", "lifecycle", "isolation", "events"],
+					label: "Build plugins",
+					translations: { "zh-CN": "编写插件", "zh-TW": "編寫插件" },
+					items: ["plugins", "services", "events"],
+				},
+				{
+					label: "Structure",
+					translations: { "zh-CN": "组织与变更", "zh-TW": "組織與變更" },
+					items: ["lifecycle", "isolation", "intercepts", "replace"],
 				},
 				{
 					label: "Applications",
 					translations: { "zh-CN": "应用", "zh-TW": "應用" },
-					items: ["config-file", "hot-reload", "cli", "embedding"],
+					items: ["config-file", "cli", "hot-reload", "embedding"],
+				},
+				{
+					label: "Reference",
+					translations: { "zh-CN": "参考", "zh-TW": "參考" },
+					items: ["fork-handle", "loader-api", "hmr-api", "errors"],
 				},
 				{
 					label: "Project",

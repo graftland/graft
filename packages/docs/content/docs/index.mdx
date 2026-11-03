@@ -45,23 +45,36 @@ const hello = Plugin.make({
 })
 ```
 
+## Find your way
+
 <CardGrid>
 	<Card title="Get started" icon="rocket">
 		Create a project and run it with hot reload in the
-		[quickstart](quickstart/).
+		[quickstart](quickstart/). Then read the [core concepts](concepts/).
 	</Card>
 	<Card title="Write plugins" icon="puzzle">
-		[Plugins](plugins/) declare what they need, decode their config, and own
-		their resources.
+		[Plugins](plugins/), [services](services/) and [events](events/): the
+		building blocks of an application.
 	</Card>
-	<Card title="Share services" icon="random">
-		[Services](services/) are published and withdrawn at run time, in a safe
-		order.
+	<Card title="Run an application" icon="setting">
+		Describe it in a [config file](config-file/), start it with the [command
+		line](cli/), and edit it with [hot reload](hot-reload/).
 	</Card>
 	<Card title="Coming from cordis?" icon="open-book">
 		See [how cordis concepts map to Graft](cordis/).
 	</Card>
 </CardGrid>
+
+## Documentation map
+
+| Section           | Pages                                                                                                                 | Read it to…                            |
+| ----------------- | --------------------------------------------------------------------------------------------------------------------- | -------------------------------------- |
+| **Start here**    | [Quickstart](quickstart/), [Core concepts](concepts/), [Coming from cordis](cordis/)                                  | Learn the model and run something.     |
+| **Build plugins** | [Plugins](plugins/), [Services](services/), [Events](events/)                                                         | Write the code.                        |
+| **Structure**     | [Lifecycle](lifecycle/), [Realms](isolation/), [Intercepts](intercepts/), [Replace plugins](replace/)                 | Control how plugins relate and change. |
+| **Applications**  | [Config file](config-file/), [Command line](cli/), [Hot reload](hot-reload/), [Use Graft in your program](embedding/) | Run and operate an app.                |
+| **Reference**     | [Fork handle](fork-handle/), [Loader API](loader-api/), [HMR API](hmr-api/), [Errors](errors/)                        | Look up exact behavior.                |
+| **Project**       | [Releases](releases/)                                                                                                 | Check and publish Graft.               |
 
 ## Packages
 

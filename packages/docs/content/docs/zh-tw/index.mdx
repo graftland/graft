@@ -5,11 +5,11 @@ description: 基於 Effect 的外掛框架，可在行程執行期間載入、�
 
 import { Card, CardGrid } from "@astrojs/starlight/components"
 
-Graft 用外掛樹組織應用程式。每個外掛都可以發布服務，也可以使用其他外掛的服務。外掛可以在行程執行期間載入、重新設定、取代或卸載。卸載外掛時，Graft 會先停止所有依賴它的外掛，再釋放它自身的資源。
+Graft 用外掛樹組織應用程式。每個外掛都可以發布服務，也可以使用其他外掛的服務。外掛可以在行程持續執行的同時被載入、重新設定、取代或卸載。外掛消失時，所有依賴它的外掛會先停止，然後 Graft 才釋放該外掛自身的資源。
 
 Graft 基於 [Effect](https://effect.website) 建構。外掛是在 `Scope`
 中執行的 Effect。服務是 Effect 的 `Context` 鍵。失敗時會保留完整的
-`Cause`。Graft 只補充 Effect 尚未提供的能力：可在執行期間發布和撤回的服務、外掛樹、事件、設定檔和熱重載。
+`Cause`。Graft 只補充 Effect 尚未提供的能力：可在執行期間出現和消失的服務、外掛樹、事件、設定檔和熱重載。
 
 ```ts
 import { Graft, Plugin } from "@graftland/graft"
@@ -38,21 +38,33 @@ const hello = Plugin.make({
 })
 ```
 
+## 找到你的方向
+
 <CardGrid>
 	<Card title="快速上手" icon="rocket">
-		依照[快速開始](quickstart/)建立專案，並啟用熱重載執行。
+		依照[快速開始](quickstart/)建立專案，並啟用熱重載執行。接著閱讀[核心概念](concepts/)。
 	</Card>
 	<Card title="撰寫外掛" icon="puzzle">
-		[外掛](plugins/)宣告所需的服務、解碼設定，並管理自身的資源。
+		[外掛](plugins/)、[服務](services/)和[事件](events/)：應用程式的基本組成。
 	</Card>
-	<Card title="共用服務" icon="random">
-		[服務](services/)可以在執行期間發布和撤回，Graft
-		會依安全的順序完成這些操作。
+	<Card title="執行應用程式" icon="setting">
+		用[設定檔](config-file/)描述它，用[命令列](cli/)啟動它，並以[熱重載](hot-reload/)修改它。
 	</Card>
-	<Card title="從 cordis 遷移" icon="open-book">
+	<Card title="從 cordis 遷移？" icon="open-book">
 		了解 [cordis 的概念在 Graft 中如何對應](cordis/)。
 	</Card>
 </CardGrid>
+
+## 文件地圖
+
+| 區段           | 頁面                                                                                                  | 閱讀目的                   |
+| -------------- | ----------------------------------------------------------------------------------------------------- | -------------------------- |
+| **從這裡開始** | [快速開始](quickstart/)、[核心概念](concepts/)、[從 cordis 遷移](cordis/)                             | 了解模型並執行點什麼。     |
+| **建構外掛**   | [外掛](plugins/)、[服務](services/)、[事件](events/)                                                  | 撰寫程式碼。               |
+| **結構**       | [生命週期](lifecycle/)、[領域](isolation/)、[Intercept](intercepts/)、[取代外掛](replace/)            | 控制外掛之間的關係與變化。 |
+| **應用程式**   | [設定檔](config-file/)、[命令列](cli/)、[熱重載](hot-reload/)、[在自己的程式中使用 Graft](embedding/) | 執行並維運應用程式。       |
+| **參考**       | [Fork 控制代碼](fork-handle/)、[Loader API](loader-api/)、[HMR API](hmr-api/)、[錯誤](errors/)        | 查閱確切行為。             |
+| **專案**       | [發佈](releases/)                                                                                     | 檢查並發佈 Graft。         |
 
 ## 套件
 

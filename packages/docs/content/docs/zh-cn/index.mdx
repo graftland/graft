@@ -5,7 +5,7 @@ description: 基于 Effect 的插件框架，可在进程运行期间加载、�
 
 import { Card, CardGrid } from "@astrojs/starlight/components"
 
-Graft 用插件树组织应用。每个插件都可以发布服务、依赖其他插件的服务，也可以在进程运行期间加载、重新配置、替换或卸载。卸载插件时，Graft 会先停止所有依赖它的插件，再释放它自身的资源。
+Graft 用插件树组织应用。每个插件都可以发布服务，也可以使用其他插件的服务。插件可以在进程运行期间加载、重新配置、替换或卸载。插件消失时，所有依赖它的部分会先停止，然后 Graft 再释放该插件自身的资源。
 
 Graft 基于 [Effect](https://effect.website) 构建。插件是在 `Scope`
 中运行的 Effect，服务使用 Effect 的 `Context` 键，失败时保留完整的
@@ -38,21 +38,33 @@ const hello = Plugin.make({
 })
 ```
 
+## 查找方向
+
 <CardGrid>
 	<Card title="快速上手" icon="rocket">
-		按照[快速开始](quickstart/)创建项目，并启用热重载运行。
+		按照[快速开始](quickstart/)创建项目，并启用热重载运行。然后阅读[核心概念](concepts/)。
 	</Card>
 	<Card title="编写插件" icon="puzzle">
-		[插件](plugins/)声明依赖、解码配置，并管理自身的资源。
+		[插件](plugins/)、[服务](services/)和[事件](events/)：构成应用的基本部件。
 	</Card>
-	<Card title="共享服务" icon="random">
-		[服务](services/)可以在运行期间发布和撤回，Graft
-		会按安全的顺序完成这些操作。
+	<Card title="运行应用" icon="setting">
+		用[配置文件](config-file/)描述应用，用[命令行](cli/)启动，再通过[热重载](hot-reload/)修改。
 	</Card>
 	<Card title="从 cordis 迁移" icon="open-book">
 		了解 [cordis 的概念在 Graft 中如何对应](cordis/)。
 	</Card>
 </CardGrid>
+
+## 文档地图
+
+| 分区         | 页面                                                                                              | 阅读目的                   |
+| ------------ | ------------------------------------------------------------------------------------------------- | -------------------------- |
+| **入门**     | [快速开始](quickstart/)、[核心概念](concepts/)、[从 cordis 迁移](cordis/)                         | 了解模型并运行示例。       |
+| **构建插件** | [插件](plugins/)、[服务](services/)、[事件](events/)                                              | 编写代码。                 |
+| **结构**     | [生命周期](lifecycle/)、[领域](isolation/)、[Intercept](intercepts/)、[替换插件](replace/)        | 控制插件之间的关系与变化。 |
+| **应用**     | [配置文件](config-file/)、[命令行](cli/)、[热重载](hot-reload/)、[在程序中使用 Graft](embedding/) | 运行和维护应用。           |
+| **参考**     | [Fork 句柄](fork-handle/)、[Loader API](loader-api/)、[HMR API](hmr-api/)、[错误](errors/)        | 查阅确切行为。             |
+| **项目**     | [发布](releases/)                                                                                 | 检查并发布 Graft。         |
 
 ## 包
 

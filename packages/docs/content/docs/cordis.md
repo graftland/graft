@@ -22,8 +22,8 @@ only what Effect does not have.
 | `fiber.update`                         | [An update function](../plugins/#update-in-place) returned from `apply`.                        |
 | `fiber.restart`                        | `fork.restart`.                                                                                 |
 | `ctx.isolate`, labels                  | [`isolate`](../isolation/#realms), for services and events alike.                               |
-| `ctx.intercept`                        | [`intercept`](../isolation/#intercepts) with `Context.Reference`.                               |
-| `registry.replace`                     | [`Graft.replace`](../lifecycle/#replace-plugins).                                               |
+| `ctx.intercept`                        | [`intercept`](../intercepts/) with `Context.Reference`.                                         |
+| `registry.replace`                     | [`Graft.replace`](../replace/).                                                                 |
 | `ctx.on`, `ctx.emit`, `serial`, `bail` | [Events](../events/): `on`, `emit`, `parallel`, `bail`, `waterfall`.                            |
 | Config with Standard Schema            | Effect `Schema`, decoded inside the plugin's activation.                                        |
 | Logger, timer and fs plugins           | Effect's `Logger`, `Schedule`, `Clock` and `FileSystem`.                                        |
