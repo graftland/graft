@@ -69,7 +69,7 @@ const fake = (
 					yield* register({
 						identity: {
 							pid,
-							start: { born: "start-" + pid, nonce: "nonce-" + pid },
+							start: { born: "start-" + pid },
 						},
 						exited: Deferred.await(exit),
 						interrupt: Deferred.succeed(interrupted, undefined).pipe(
@@ -129,7 +129,7 @@ const orphan: SessionRecord = {
 	phase: "Loaded",
 	child: {
 		pid: 123,
-		start: { born: "original-process-start", nonce: "original-nonce" },
+		start: { born: "original-process-start" },
 	},
 	load: { specifier: "fixture" },
 	code,
@@ -258,7 +258,7 @@ layer(SecureRandom.layerWebCrypto)("runner session supervisor", (it) => {
 				assert.equal(status.phase, "Loading")
 				assert.deepEqual(Option.getOrUndefined(childOf(status)), {
 					pid: 1,
-					start: { born: "start-1", nonce: "nonce-1" },
+					start: { born: "start-1" },
 				})
 				{
 					const exit = yield* Effect.exit(

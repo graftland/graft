@@ -1,9 +1,9 @@
 import { NodeSocket, NodeSocketServer } from "@effect/platform-node"
-import { Array, Cause, Context, Effect, Option, Redacted, String } from "effect"
+import { Array, Context, Effect, Option, Redacted, String } from "effect"
 import type { Duration } from "effect"
 import type { Socket } from "effect/socket"
 import { TLSSocket } from "node:tls"
-import { InvalidSessionRequest } from "./model"
+import { PeerAuthenticationError } from "./model"
 
 export interface Credentials {
 	readonly key: Redacted.Redacted<string>
@@ -24,51 +24,27 @@ export class Peer extends Context.Service<Peer, string>()(
 	"@graftland/remote/internal/runner/Tls/Peer",
 ) {}
 
-/**
- * Node quotes SAN values containing separators. Only top-level URI fields count;
- * a quoted DNS value containing ", URI:..." must never impersonate an identity.
- */
-export const identityFromSubjectAltName = (san: string | undefined) =>
-	Effect.gen(function* () {
-		let fields: ReadonlyArray<string> = []
-		let field = ""
-		let quoted = false
-		let escaped = false
-		for (const character of san ?? "") {
-			if (character === "," && !quoted) {
-				fields = Array.append(fields, String.trim(field))
-				field = ""
-				continue
-			}
-			field += character
-			if (escaped) escaped = false
-			else if (character === "\\" && quoted) escaped = true
-			else if (character === '"') quoted = !quoted
-		}
-		fields = Array.append(fields, String.trim(field))
-		const uris = Array.filter(fields, (field) =>
-			String.startsWith("URI:")(field),
-		)
-		if (
-			quoted ||
-			escaped ||
-			uris.length !== 1 ||
-			!/^URI:graft:\/\/[a-z0-9][a-z0-9._-]*$/.test(uris[0]!)
-		)
-			return yield* InvalidSessionRequest.make({
-				detail:
-					"The peer certificate must contain exactly one SAN URI of the form graft://name",
-				cause: Cause.empty,
-			})
-		return String.slice(4)(uris[0]!)
-	})
+/** The dedicated CA supplies one graft URI and ordinary, unquoted SAN fields. */
+export const identityFromSubjectAltName = (san: string | undefined) => {
+	const uris = Array.filter(
+		String.split(san ?? "", ", "),
+		String.startsWith("URI:graft://"),
+	)
+	const [uri] = uris
+	return uris.length === 1 && uri !== undefined
+		? Effect.succeed(String.slice(4)(uri))
+		: Effect.fail(
+				PeerAuthenticationError.make({
+					detail: "The peer certificate must contain exactly one graft SAN URI",
+				}),
+			)
+}
 
 const authenticated = Effect.gen(function* () {
 	const socket = yield* Effect.serviceOption(NodeSocket.NetSocket)
 	if (Option.isNone(socket))
-		return yield* InvalidSessionRequest.make({
+		return yield* PeerAuthenticationError.make({
 			detail: "An authenticated TLS client certificate is required",
-			cause: Cause.empty,
 		})
 	const raw = socket.value
 	// Own the socket before validation: a rejected SAN must close even without a reader.
@@ -77,10 +53,10 @@ const authenticated = Effect.gen(function* () {
 			raw.destroy()
 		}),
 	)
-	if (!(raw instanceof TLSSocket) || !raw.authorized)
-		return yield* InvalidSessionRequest.make({
+	// NetSocket is typed as net.Socket; this narrows it without a cast. TLS already authenticated the peer.
+	if (!(raw instanceof TLSSocket))
+		return yield* PeerAuthenticationError.make({
 			detail: "An authenticated TLS client certificate is required",
-			cause: Cause.empty,
 		})
 	return yield* identityFromSubjectAltName(
 		raw.getPeerCertificate().subjectaltname,

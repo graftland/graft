@@ -78,9 +78,9 @@ const startRunner = (state: string, lease = 15000) =>
 					"--ca",
 					certs + "/ca.crt",
 					"--lease",
-					`${lease}`,
+					`${lease} millis`,
 					"--grace",
-					"5000",
+					"5 seconds",
 				],
 				{
 					stdin: "ignore",
@@ -539,25 +539,9 @@ describe("network runner end to end", () => {
 				assert.equal(replacement.handle.generation, 2)
 				const mismatch = yield* Processes.recover({
 					pid: process.pid,
-					start: { born: "different-start", nonce: "different-command" },
+					start: { born: "different-start" },
 				})
 				assert.equal(mismatch.kind, "Exited")
-				const own = yield* Processes.identity(process.pid, process.argv[1]!)
-				const ambiguous = yield* Effect.exit(
-					Processes.recover({
-						...own,
-						start: {
-							...own.start,
-							nonce: "missing-bootstrap-nonce",
-						},
-					}),
-				)
-				assert.isTrue(Exit.isFailure(ambiguous))
-				if (Exit.isFailure(ambiguous))
-					assert.include(
-						Cause.pretty(ambiguous.cause),
-						"bootstrap nonce is missing",
-					)
 				assert.doesNotThrow(() => process.kill(process.pid, 0))
 			}).pipe(Effect.scoped, Effect.provide(runtime)),
 		90_000,
@@ -625,7 +609,9 @@ describe("network runner end to end", () => {
 					if (Exit.isFailure(failed))
 						assert.include(
 							Cause.pretty(failed.cause),
-							expect === undefined ? "instance id" : "mismatch",
+							expect === undefined
+								? "a value with a length of at least 1"
+								: "mismatch",
 						)
 					yield* proxy.dispose
 				}

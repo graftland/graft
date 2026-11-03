@@ -54,31 +54,6 @@ describe("runner installed packages", () => {
 		30_000,
 	)
 	it.effect(
-		"rejects path specifiers and an ancestor package outside the installation",
-		() =>
-			Effect.gen(function* () {
-				const { fs, root } = yield* setup
-				const nested = root + "/nested"
-				yield* fs.makeDirectory(nested)
-				for (const specifier of [
-					"./contract.js",
-					"../remote-fixture",
-					"file:///contract.js",
-					"node:fs",
-					"remote-fixture/../contract.js",
-					"remote-fixture/%2e%2e/contract.js",
-				]) {
-					const exit = yield* Effect.exit(Packages.resolve(root, specifier))
-					assert.isTrue(Exit.isFailure(exit))
-				}
-				const outside = yield* Effect.exit(
-					Packages.resolve(nested, "remote-fixture"),
-				)
-				assert.isTrue(Exit.isFailure(outside))
-			}).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
-		30_000,
-	)
-	it.effect(
 		"hashes paths and content deterministically while excluding node_modules",
 		() =>
 			Effect.gen(function* () {
@@ -101,29 +76,22 @@ describe("runner installed packages", () => {
 				assert.notEqual(renamed, changed)
 			}).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 	)
-	it.effect(
-		"allows a package root symlink but rejects symlinked content escaping that root",
-		() =>
-			Effect.gen(function* () {
-				const { fs, root, directory } = yield* setup
-				const installed = root + "/package-store"
-				yield* fs.rename(directory, installed)
-				yield* fs.symlink(installed, directory)
-				yield* Packages.resolve(root, "remote-fixture")
-				yield* fs.writeFileString(root + "/outside.js", "outside")
-				yield* fs.symlink(root + "/outside.js", installed + "/linked.js")
-				const result = yield* Effect.exit(
-					Packages.resolve(root, "remote-fixture"),
-				)
-				assert.isTrue(Exit.isFailure(result))
-				if (Exit.isFailure(result))
-					assert.include(
-						Cause.pretty(result.cause),
-						"Unsupported package entry",
-					)
-			}).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
-		30_000,
+	it.effect("follows links in the trusted installation", () =>
+		Effect.gen(function* () {
+			const { fs, root, directory } = yield* setup
+			const installed = root + "/package-store"
+			yield* fs.rename(directory, installed)
+			yield* fs.symlink(installed, directory)
+			yield* fs.writeFileString(root + "/shared.js", "shared")
+			yield* fs.symlink(root + "/shared.js", installed + "/linked.js")
+			const resolved = yield* Packages.resolve(root, "remote-fixture")
+			const real = yield* fs.realPath(installed)
+			const digest = yield* Packages.digest(installed)
+			assert.equal(resolved.directory, real)
+			assert.equal(resolved.identity.digest, digest)
+		}).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 	)
+
 	it.effect(
 		"rejects version and digest pins without importing plugin code",
 		() =>

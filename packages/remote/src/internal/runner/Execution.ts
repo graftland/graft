@@ -34,7 +34,6 @@ import {
 	SessionStopped,
 } from "./model"
 import { Bootstrap } from "./Bootstrap"
-import { SecureRandom } from "effect/crypto"
 import { command } from "./command"
 
 export class Channels extends Context.Service<
@@ -52,7 +51,6 @@ export class Channels extends Context.Service<
 
 export const make = (root: string) =>
 	Effect.gen(function* () {
-		const random = yield* SecureRandom.SecureRandom
 		const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
 		const fs = yield* FileSystem.FileSystem
 		const path = yield* Path.Path
@@ -74,7 +72,6 @@ export const make = (root: string) =>
 			spawn: (handle, request, limits, register) =>
 				Effect.gen(function* () {
 					const resolved = yield* Packages.resolve(root, request.specifier)
-					const nonce = yield* random.uuidV4()
 					const argv = yield* command()
 					const child = yield* spawner.spawn(
 						ChildProcess.make(
@@ -90,7 +87,6 @@ export const make = (root: string) =>
 										generation: handle.generation,
 									},
 									limits,
-									nonce,
 								}),
 							],
 							{
@@ -194,7 +190,7 @@ export const make = (root: string) =>
 							),
 						),
 					})
-					const identity = yield* Processes.identity(child.pid, nonce)
+					const identity = yield* Processes.identity(child.pid)
 					yield* Ref.update(peers, HashMap.set(handle.token, peer))
 					yield* Effect.addFinalizer(() =>
 						Ref.update(peers, HashMap.remove(handle.token)),

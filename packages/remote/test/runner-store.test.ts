@@ -29,7 +29,7 @@ const record: typeof LoadedRecord.Type = {
 	leaseMillis: 15_000,
 	limits: defaults,
 	phase: "Loaded",
-	child: { pid: 42, start: { born: "process-start", nonce: "process-nonce" } },
+	child: { pid: 42, start: { born: "process-start" } },
 	load: { specifier: "fixture" },
 	code: { name: "fixture", version: "1.0.0", digest: "digest" },
 }

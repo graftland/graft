@@ -3,6 +3,7 @@ import {
 	Cause,
 	Context,
 	Effect,
+	Duration,
 	Exit,
 	Fiber,
 	Option,
@@ -11,7 +12,7 @@ import {
 } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import { RpcClient, type RpcClientError } from "effect/rpc"
-import type { Schema, Duration } from "effect"
+import type { Schema } from "effect"
 import type { RemoteTerminationUnconfirmed } from "./model"
 import type {
 	Target,
@@ -22,17 +23,11 @@ import { ProcessExited, TransportError } from "../../Errors"
 import { cleanupCause } from "../cleanup"
 import * as Port from "../port"
 import * as LocalProcess from "./Local"
-import { milliseconds } from "./duration"
 import * as Multiplex from "./Multiplex"
 import * as Packages from "./Packages"
 import * as Tls from "./Tls"
 import * as Wire from "./Wire"
-import {
-	awaitTermination,
-	defaults,
-	InvalidSessionRequest,
-	childOf,
-} from "./model"
+import { awaitTermination, defaults, childOf } from "./model"
 import { command } from "./command"
 
 type Peer = Effect.Success<ReturnType<typeof Port.make>>
@@ -103,12 +98,7 @@ export const Runner = (
 	Effect.gen(function* () {
 		const instance = target.instance
 
-		if (instance.length === 0)
-			return yield* InvalidSessionRequest.make({
-				detail: "A runner target requires an explicit instance id",
-				cause: Cause.empty,
-			})
-		const margin = yield* milliseconds(target.margin ?? "5 seconds")
+		const margin = Duration.toMillis(target.margin ?? "5 seconds")
 		const socket = yield* Tls.connect({
 			...target,
 			servername: target.tls.servername,
@@ -137,7 +127,7 @@ export const Runner = (
 			...(target.lease === undefined
 				? {}
 				: {
-						leaseMillis: yield* milliseconds(target.lease),
+						leaseMillis: Duration.toMillis(target.lease),
 					}),
 		})
 		const stopping = yield* Ref.make(false)

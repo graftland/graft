@@ -224,19 +224,19 @@ root, and run the built executable:
 graft-remote serve --host 0.0.0.0 --port 7443 \
   --root /srv/graft/install --state /var/lib/graft \
   --cert /run/secrets/server.crt --key /run/secrets/server.key \
-  --ca /run/secrets/clients-ca.crt --lease 15000 --grace 5000
+  --ca /run/secrets/clients-ca.crt --lease "15 seconds" --grace "5 seconds"
 ```
 
-Lease and grace accept Duration strings such as `"15 seconds"`; bare numbers
-remain milliseconds. Values must be finite and positive. Defaults are a
-15-second lease and a five-second grace period. The ready message is a JSON line
-with `event: "Listening"` and `port`. `Runner.serve` also exposes a scoped
-Effect API; supply Node platform services, `Digest`, and `SecureRandom` in the
-application environment. The executable supplies these itself. The state
-directory requires a local filesystem and exclusive ownership. A scoped
-`node:sqlite` exclusive transaction holds the directory lock; a competing
-process fails startup, and the OS releases the lock on SIGKILL. The record store
-still uses synchronized JSON files, not SQLite tables.
+Lease and grace accept Duration strings such as `"15 seconds"`. Values must be
+finite and positive. Defaults are a 15-second lease and a five-second grace
+period. The ready message is a JSON line with `event: "Listening"` and `port`.
+`Runner.serve` also exposes a scoped Effect API; supply Node platform services,
+`Digest`, and `SecureRandom` in the application environment. The executable
+supplies these itself. The state directory requires a local filesystem and
+exclusive ownership. A scoped `node:sqlite` exclusive transaction holds the
+directory lock; a competing process fails startup, and the OS releases the lock
+on SIGKILL. The record store still uses synchronized JSON files, not SQLite
+tables.
 
 ```ts
 const proxy = Remote.plugin(contract, {
@@ -311,15 +311,15 @@ the host proxy. A watchdog deadline or abrupt loss can prevent finalizers; only
 the graceful path promises cleanup completion. Whole-process/VM suspension also
 suspends the watchdog, so this is not a hard real-time bound.
 
-Before running plugin code, Execution records a gated child's PID, OS start
-time, and random bootstrap nonce durably. Recovery runs before the TLS listener
-opens. It compares PID, start time, and nonce in the command line; mismatches
-are not signaled. Matching survivors are killed and their exit confirmed. A
-zombie is already stopped; the parent still needs to reap it. There remains a
-small check-to-signal PID reuse window without an OS process handle. An external
-supervisor must terminate the whole cgroup or container to cover plugin-spawned
-descendants (for example, systemd `KillMode=control-group`). A failed recovery
-fences admission instead of assuming that the old process is gone.
+Before running plugin code, Execution records a gated child's PID and OS start
+time durably. Recovery runs before the TLS listener opens. It compares PID and
+start time; mismatches are not signaled. Matching survivors are killed and their
+exit confirmed. A zombie is already stopped; the parent still needs to reap it.
+There remains a small check-to-signal PID reuse window without an OS process
+handle. An external supervisor must terminate the whole cgroup or container to
+cover plugin-spawned descendants (for example, systemd
+`KillMode=control-group`). A failed recovery fences admission instead of
+assuming that the old process is gone.
 
 Stored leases never resume after restart. The store atomically synchronizes each
 record before returning a generation and compacts terminal history, keeping all
@@ -329,12 +329,11 @@ is stale. Status/Dispose of compacted records also return `StaleSession`; only
 retained results are replayable. Storage grows with logical keys and unfinished
 sessions.
 
-Only bare package specifiers under the configured root's `node_modules` are
-accepted. Package-root symlinks support pnpm; ancestor fallback, paths, exports
-outside the package, internal symlinks, and special files are rejected.
-Resolution uses import exports without importing the contract. Load reports
-package name, version, and digest. Host pins are checked before sending business
-Load; rejected pins never apply the plugin and dispose the allocated execution.
+Package specifiers resolve from the configured installation root. The runner
+trusts its installed packages and follows their filesystem links. Resolution
+uses import exports without importing the contract. Load reports package name,
+version, and digest. Host pins are checked before sending business Load;
+rejected pins never apply the plugin and dispose the allocated execution.
 
 The digest is SHA-256 over sorted package entries, excluding every
 `node_modules` subtree. Its domain prefix is `graft-package-sha256-v1\0`;

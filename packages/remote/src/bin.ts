@@ -27,13 +27,8 @@ import * as Server from "./internal/runner/Server"
 const duration = (name: string, fallback: string) =>
 	Flag.String(name).pipe(
 		Flag.withDefault(fallback),
-		// Bare numbers remain milliseconds for existing runner launchers.
-		Flag.withSchema(
-			Schema.Union([Schema.DurationFromString, Schema.FiniteFromString]),
-		),
-		Flag.map((value) =>
-			typeof value === "number" ? value : Duration.toMillis(value),
-		),
+		Flag.withSchema(Schema.DurationFromString),
+		Flag.map(Duration.toMillis),
 		Flag.filter(
 			(value) => Number.isFinite(value) && value > 0,
 			() => "Duration must be finite and positive",

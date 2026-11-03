@@ -15,12 +15,7 @@ import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import { createHash } from "node:crypto"
 import process from "node:process"
 import { fileURLToPath } from "node:url"
-import {
-	ExecutionError,
-	InvalidSessionRequest,
-	SessionConflict,
-	type CodeIdentity,
-} from "./model"
+import { PackageError, type CodeIdentity } from "./model"
 
 const Manifest = Schema.Struct({ name: Schema.String, version: Schema.String })
 export interface Expected {
@@ -30,16 +25,14 @@ export interface Expected {
 export const verify = (actual: CodeIdentity, expected: Expected = {}) =>
 	expected.version !== undefined && actual.version !== expected.version
 		? Effect.fail(
-				InvalidSessionRequest.make({
+				PackageError.make({
 					detail: `Package version mismatch: expected ${expected.version}, received ${actual.version}`,
-					cause: Cause.empty,
 				}),
 			)
 		: expected.digest !== undefined && actual.digest !== expected.digest
 			? Effect.fail(
-					InvalidSessionRequest.make({
+					PackageError.make({
 						detail: `Package digest mismatch: expected ${expected.digest}, received ${actual.digest}`,
-						cause: Cause.empty,
 					}),
 				)
 			: Effect.void
@@ -53,17 +46,13 @@ export const digest = Effect.fnUntraced(function* (directory: string) {
 	)
 	const visit = (
 		relative: string,
-	): Effect.Effect<
-		void,
-		InvalidSessionRequest | SessionConflict | PlatformError.PlatformError
-	> =>
+	): Effect.Effect<void, PackageError | PlatformError.PlatformError> =>
 		Effect.gen(function* () {
 			const filename = path.join(directory, relative)
-			const info = yield* fs.lstat(filename)
+			const info = yield* fs.stat(filename)
 			if (info.type !== "File" && info.type !== "Directory")
-				return yield* InvalidSessionRequest.make({
+				return yield* PackageError.make({
 					detail: `Unsupported package entry: ${relative}`,
-					cause: Cause.empty,
 				})
 			const name = new TextEncoder().encode(relative)
 			yield* Effect.sync(() => {
@@ -73,20 +62,13 @@ export const digest = Effect.fnUntraced(function* (directory: string) {
 				hash.update(name)
 			})
 			if (info.type === "File") {
-				let size = 0n
 				yield* fs.stream(filename).pipe(
 					Stream.runForEach((bytes) =>
 						Effect.sync(() => {
-							size += BigInt(bytes.byteLength)
 							hash.update(bytes)
 						}),
 					),
 				)
-				if (size !== info.size)
-					return yield* SessionConflict.make({
-						detail: "Package changed while its digest was being computed",
-						cause: Cause.empty,
-					})
 			} else {
 				const entries = yield* fs.readDirectory(filename)
 				for (const entry of Array.sort(entries, Order.String)) {
@@ -102,30 +84,13 @@ export const digest = Effect.fnUntraced(function* (directory: string) {
 /**
  * Resolve using Node's import conditions without importing executable package code.
  * The helper's cwd is the installation root and it inherits no NODE_OPTIONS/loaders.
- * A realpath check prevents ancestor installations or exports from escaping the selected package.
+ * The installation directory and its package exports are trusted.
  */
 export const resolve = Effect.fnUntraced(
 	function* (root: string, specifier: string, expected: Expected = {}) {
 		const segments = String.split(specifier, "/")
 		const scoped = String.startsWith("@")(specifier)
-		const name = scoped ? `${segments[0]}/${segments[1] ?? ""}` : segments[0]!
-		if (
-			!/^(?:@[a-zA-Z0-9_-][a-zA-Z0-9._-]*\/)?[a-zA-Z0-9_-][a-zA-Z0-9._-]*$/.test(
-				name,
-			) ||
-			Array.some(
-				segments,
-				(segment) =>
-					segment === "" ||
-					segment === "." ||
-					segment === ".." ||
-					/[\\:%?#\x00-\x20]/.test(segment),
-			)
-		)
-			return yield* InvalidSessionRequest.make({
-				detail: "A bare installed package specifier is required",
-				cause: Cause.empty,
-			})
+		const name = Array.join(Array.take(segments, scoped ? 2 : 1), "/")
 		const fs = yield* FileSystem.FileSystem
 		const path = yield* Path.Path
 		const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
@@ -138,11 +103,6 @@ export const resolve = Effect.fnUntraced(
 			.pipe(
 				Effect.flatMap(Schema.decodeEffect(Schema.fromJsonString(Manifest))),
 			)
-		if (manifest.name !== name)
-			return yield* InvalidSessionRequest.make({
-				detail: "The installed package name does not match its specifier",
-				cause: Cause.empty,
-			})
 		const resolved = yield* Effect.scoped(
 			Effect.gen(function* () {
 				const child = yield* spawner.spawn(
@@ -173,9 +133,8 @@ export const resolve = Effect.fnUntraced(
 					{ concurrency: "unbounded" },
 				)
 				if (code !== 0)
-					return yield* InvalidSessionRequest.make({
+					return yield* PackageError.make({
 						detail: `Package resolution failed: ${stderr}`,
-						cause: Cause.empty,
 					})
 				return stdout
 			}),
@@ -183,22 +142,12 @@ export const resolve = Effect.fnUntraced(
 		const filename = yield* Effect.try({
 			try: () => fileURLToPath(resolved),
 			catch: (error) =>
-				InvalidSessionRequest.make({
+				PackageError.make({
 					detail: "The package export is not a file URL",
 					cause: Cause.die(error),
 				}),
 		})
 		const entry = yield* fs.realPath(filename)
-		const relative = path.relative(directory, entry)
-		if (
-			relative === ".." ||
-			String.startsWith(`..${path.sep}`)(relative) ||
-			path.isAbsolute(relative)
-		)
-			return yield* InvalidSessionRequest.make({
-				detail: "The package export resolves outside its installed directory",
-				cause: Cause.empty,
-			})
 		const identity: CodeIdentity = {
 			...manifest,
 			digest: yield* digest(directory),
@@ -206,12 +155,20 @@ export const resolve = Effect.fnUntraced(
 		yield* verify(identity, expected)
 		return { directory, entry, identity }
 	},
-	Effect.catchCause((cause) =>
-		Effect.fail(
-			ExecutionError.make({
-				detail: "Resolving the installed package failed",
-				cause: cause,
-			}),
-		),
-	),
+	Effect.catchTags({
+		PlatformError: (error) =>
+			Effect.fail(
+				PackageError.make({
+					detail: "Reading the installed package failed",
+					cause: Cause.fail(error),
+				}),
+			),
+		SchemaError: (error) =>
+			Effect.fail(
+				PackageError.make({
+					detail: "Reading the package manifest failed",
+					cause: Cause.fail(error),
+				}),
+			),
+	}),
 )

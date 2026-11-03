@@ -1,19 +1,31 @@
-import {
-	Array,
-	Cause,
-	Context,
-	Data,
-	Effect,
-	Option,
-	Record,
-	Schema,
-} from "effect"
+import { Array, Cause, Context, Data, Effect, Option, Schema } from "effect"
 import type { Scope } from "effect"
 
 const diagnosticCause = Schema.Cause(
 	Schema.Defect({ includeStack: true }),
 	Schema.Defect({ includeStack: true }),
 )
+export class PackageError extends Schema.TaggedError<
+	PackageError,
+	{ readonly brand: unique symbol }
+>()("PackageError", {
+	detail: Schema.String,
+	cause: Schema.optionalKey(diagnosticCause),
+}) {
+	override get message() {
+		return this.detail
+	}
+}
+export class PeerAuthenticationError extends Schema.TaggedError<
+	PeerAuthenticationError,
+	{ readonly brand: unique symbol }
+>()("PeerAuthenticationError", {
+	detail: Schema.String,
+}) {
+	override get message() {
+		return this.detail
+	}
+}
 export class InvalidSessionRequest extends Schema.TaggedError<
 	InvalidSessionRequest,
 	{ readonly brand: unique symbol }
@@ -101,45 +113,36 @@ export class StateDirectoryLocked extends Schema.TaggedError<
 	}
 }
 export const Key = Schema.Struct({
-	identity: Schema.String,
-	instance: Schema.String,
+	identity: Schema.NonEmptyString,
+	instance: Schema.NonEmptyString,
 })
 export type Key = typeof Key.Type
 /** Structural keys keep identity namespaces separate without delimiter conventions. */
 export class SessionKey extends Data.Class<Key> {}
 export const keyOf = (key: Key) => new SessionKey(key)
+export const PositiveInt = Schema.Int.check(Schema.isGreaterThan(0))
+export const PositiveFinite = Schema.Finite.check(Schema.isGreaterThan(0))
 export const Limits = Schema.Struct({
-	control: Schema.Int,
-	data: Schema.Int,
-	log: Schema.Int,
+	control: PositiveInt,
+	data: PositiveInt,
+	log: PositiveInt,
 })
 export type Limits = typeof Limits.Type
 export const defaults: Limits = { control: 8, data: 16, log: 2 }
-export const negotiate = (local: Limits, peer: Limits) =>
-	Array.every(
-		[...Record.values(local), ...Record.values(peer)],
-		(n) => Number.isSafeInteger(n) && n > 0,
-	)
-		? Effect.succeed({
-				control: Math.min(local.control, peer.control),
-				data: Math.min(local.data, peer.data),
-				log: Math.min(local.log, peer.log),
-			})
-		: Effect.fail(
-				InvalidSessionRequest.make({
-					detail: "RPC limits must be positive safe integers",
-					cause: Cause.empty,
-				}),
-			)
+export const negotiate = (local: Limits, peer: Limits): Limits => ({
+	control: Math.min(local.control, peer.control),
+	data: Math.min(local.data, peer.data),
+	log: Math.min(local.log, peer.log),
+})
 export const Handle = Schema.Struct({
 	key: Key,
-	token: Schema.String,
-	generation: Schema.Int,
+	token: Schema.NonEmptyString,
+	generation: PositiveInt,
 })
 export type Handle = typeof Handle.Type
 export const ProcessIdentity = Schema.Struct({
 	pid: Schema.Int,
-	start: Schema.Struct({ born: Schema.String, nonce: Schema.String }),
+	start: Schema.Struct({ born: Schema.String }),
 })
 export type ProcessIdentity = typeof ProcessIdentity.Type
 export const ExitStatus = Schema.Struct({
@@ -285,7 +288,8 @@ export class Store extends Context.Service<
 		) => Effect.Effect<void, StateStorageError>
 	}
 >()("@graftland/remote/internal/runner/model/Store") {}
-export type ExecutionFailure = ExecutionError | TerminationUnconfirmed
+export type ExecutionFailure =
+	ExecutionError | PackageError | TerminationUnconfirmed
 export interface Unit {
 	readonly identity: ProcessIdentity
 	readonly exited: Effect.Effect<ExitStatus, ExecutionFailure>

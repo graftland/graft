@@ -37,22 +37,16 @@ const server = Effect.gen(function* () {
 })
 
 describe("runner mutual TLS", () => {
-	it.effect("rejects quoted SAN spoofing and noncanonical identities", () =>
+	it.effect("reads the unique graft URI from a dedicated CA certificate", () =>
 		Effect.gen(function* () {
 			const valid = yield* Tls.identityFromSubjectAltName(
-				'DNS:"ignored, URI:graft://spoof", URI:graft://real',
+				"DNS:localhost, URI:graft://real",
 			)
 			assert.equal(valid, "graft://real")
 			for (const san of [
 				undefined,
-				'DNS:"ignored, URI:graft://spoof"',
-				"URI:https://host",
-				"URI:graft://host/path",
-				"URI:graft://HOST",
-				"URI:graft://user@host",
+				"DNS:localhost",
 				"URI:graft://one, URI:graft://two",
-				'URI:"graft://host"',
-				'DNS:"unterminated, URI:graft://host',
 			]) {
 				const result = yield* Effect.exit(Tls.identityFromSubjectAltName(san))
 				assert.isTrue(Exit.isFailure(result), String(san))

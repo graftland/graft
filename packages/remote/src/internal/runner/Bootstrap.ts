@@ -5,6 +5,5 @@ import { Limits } from "./model"
 export const Bootstrap = Schema.Struct({
 	identity: Identity,
 	limits: Limits,
-	nonce: Schema.String,
 })
 export type Bootstrap = typeof Bootstrap.Type

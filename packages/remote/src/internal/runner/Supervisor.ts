@@ -1,4 +1,3 @@
-import { milliseconds as duration } from "./duration"
 import {
 	Array,
 	Cause,
@@ -28,13 +27,13 @@ import { cleanupCause } from "../cleanup"
 import {
 	Execution,
 	Store,
-	InvalidSessionRequest,
 	StaleSession,
 	LeaseExpired,
 	SessionStopped,
 	SessionConflict,
 	StateStorageError,
 	ExecutionError,
+	PackageError,
 	TerminationUnconfirmed,
 	RunnerClosing,
 	childOf,
@@ -62,13 +61,13 @@ import {
 } from "./model"
 
 export type SupervisorError =
-	| InvalidSessionRequest
 	| StaleSession
 	| LeaseExpired
 	| SessionStopped
 	| SessionConflict
 	| StateStorageError
 	| ExecutionError
+	| PackageError
 	| TerminationUnconfirmed
 	| RunnerClosing
 export interface Options {
@@ -349,15 +348,12 @@ export const make = (options: Options = {}) =>
 		const locks = yield* RcMap.make({
 			lookup: (_key: SessionKey) => Semaphore.make(1),
 		}).pipe(Scope.provide(owner))
-		const lease = yield* duration(options.lease ?? "15 seconds")
-		const grace = yield* duration(options.grace ?? "5 seconds")
-		const confirmation = yield* duration(
+		const lease = Duration.toMillis(options.lease ?? "15 seconds")
+		const grace = Duration.toMillis(options.grace ?? "5 seconds")
+		const confirmation = Duration.toMillis(
 			options.confirmationTimeout ?? "5 seconds",
 		)
-		const limits = yield* negotiate(
-			options.limits ?? defaults,
-			options.limits ?? defaults,
-		)
+		const limits = options.limits ?? defaults
 		const records = yield* Ref.make(HashMap.empty<string, SessionRecord>())
 		const entries = yield* Ref.make(HashMap.empty<string, Entry>())
 		const failed = yield* Deferred.make<never, SupervisorError>()
@@ -393,20 +389,7 @@ export const make = (options: Options = {}) =>
 				.pipe(
 					Effect.tapCause(poison),
 					Effect.andThen(
-						Ref.update(records, (all) =>
-							HashMap.fromIterable(
-								Array.map(
-									Retention.retain(
-										Array.fromIterable(
-											HashMap.values(
-												HashMap.set(all, record.handle.token, record),
-											),
-										),
-									),
-									(row) => [row.handle.token, row] as const,
-								),
-							),
-						),
+						Ref.update(records, (all) => Retention.save(all, record)),
 					),
 				)
 		const status = (handle: Handle) =>
@@ -678,24 +661,8 @@ export const make = (options: Options = {}) =>
 				Effect.scoped(
 					Effect.gen(function* () {
 						yield* healthy
-						if (
-							request.key.identity.length === 0 ||
-							request.key.instance.length === 0 ||
-							request.requestId.length === 0 ||
-							(request.expectedGeneration != null &&
-								(!Number.isSafeInteger(request.expectedGeneration) ||
-									request.expectedGeneration <= 0))
-						)
-							return yield* InvalidSessionRequest.make({
-								detail:
-									"Identity and request ids must be nonempty; expectedGeneration must be a positive safe integer or empty",
-								cause: Cause.empty,
-							})
-						const leaseMillis = yield* duration(request.lease ?? lease)
-						const negotiated = yield* negotiate(
-							limits,
-							request.limits ?? defaults,
-						)
+						const leaseMillis = Duration.toMillis(request.lease ?? lease)
+						const negotiated = negotiate(limits, request.limits ?? defaults)
 						const lock = yield* RcMap.get(locks, keyOf(request.key))
 						return yield* lock.withPermit(
 							Effect.gen(function* () {
@@ -727,11 +694,6 @@ export const make = (options: Options = {}) =>
 										)
 								}
 								yield* healthy
-								if (!Number.isSafeInteger(generation + 1))
-									return yield* StateStorageError.make({
-										detail: "Generation counter exhausted",
-										cause: Cause.empty,
-									})
 								const token = yield* random.uuidV4()
 								const record: typeof OpenRecord.Type = {
 									version: 1,

@@ -24,19 +24,7 @@ export const memory = Effect.gen(function* () {
 		list: Ref.get(records).pipe(
 			Effect.map((records) => Array.fromIterable(HashMap.values(records))),
 		),
-		save: (record) =>
-			Ref.update(records, (all) =>
-				HashMap.fromIterable(
-					Array.map(
-						Retention.retain(
-							Array.fromIterable(
-								HashMap.values(HashMap.set(all, record.handle.token, record)),
-							),
-						),
-						(record) => [record.handle.token, record] as const,
-					),
-				),
-			),
+		save: (record) => Ref.update(records, (all) => Retention.save(all, record)),
 	})
 })
 
@@ -81,7 +69,6 @@ export const directory = (root: string) =>
 						Effect.map((record) => ({ file, record })),
 					),
 			)
-			yield* Retention.validate(Array.map(rows, (row) => row.record))
 			return rows
 		})
 		const compact = Effect.scoped(

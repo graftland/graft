@@ -15,17 +15,7 @@ const inspect = (pid: number) =>
 			const child = yield* spawner.spawn(
 				ChildProcess.make(
 					"ps",
-					[
-						"-ww",
-						"-p",
-						StringFrom(pid),
-						"-o",
-						"lstart=",
-						"-o",
-						"stat=",
-						"-o",
-						"command=",
-					],
+					["-p", `${pid}`, "-o", "lstart=", "-o", "stat="],
 					{
 						env: { ...process.env, LC_ALL: "C" },
 						stdin: "ignore",
@@ -41,14 +31,15 @@ const inspect = (pid: number) =>
 				{ concurrency: "unbounded" },
 			)
 			if (code === 1 && String.trim(output) === "") return Option.none()
-			const match = /^(.{24})\s+(\S+)\s+(.*)$/m.exec(String.trim(output))
-			if (code !== 0 || match === null)
+			const [, born, status] =
+				/^(.{24})\s+(\S+)$/m.exec(String.trim(output)) ?? []
+			if (code !== 0 || born === undefined || status === undefined)
 				return yield* ExecutionError.make({
 					detail: "Cannot inspect process identity: " + stderr,
 					cause: Cause.empty,
 				})
-			if (String.startsWith("Z")(match[2]!)) return Option.none()
-			return Option.some({ born: match[1]!, command: match[3]! })
+			if (String.startsWith("Z")(status)) return Option.none()
+			return Option.some({ born })
 		}),
 	).pipe(
 		Effect.mapError((error) =>
@@ -60,34 +51,24 @@ const inspect = (pid: number) =>
 					}),
 		),
 	)
-const StringFrom = (value: number) => `${value}`
 
-export const identity = (pid: number, nonce: string) =>
+export const identity = (pid: number) =>
 	Effect.gen(function* () {
 		const current = yield* inspect(pid)
-		if (
-			Option.isNone(current) ||
-			!String.includes(nonce)(current.value.command)
-		)
+		if (Option.isNone(current))
 			return yield* ExecutionError.make({
 				detail: "The child exited before its identity could be recorded",
 				cause: Cause.empty,
 			})
-		return { pid, start: { born: current.value.born, nonce } }
+		return { pid, start: current.value }
 	})
 
+// The OS may discard argv before reporting a zombie; PID and start time remain the identity.
 export const matches = (child: ProcessIdentity) =>
 	Effect.gen(function* () {
 		const current = yield* inspect(child.pid)
 		if (Option.isNone(current) || current.value.born !== child.start.born)
 			return false
-		// process.title can erase argv without ending the recorded execution.
-		if (!String.includes(child.start.nonce)(current.value.command))
-			return yield* TerminationUnconfirmed.make({
-				detail:
-					"The process start time matches but its bootstrap nonce is missing",
-				cause: Cause.empty,
-			})
 		return true
 	})
 

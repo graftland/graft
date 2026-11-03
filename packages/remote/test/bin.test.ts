@@ -44,9 +44,10 @@ describe("remote command line", () => {
 				const cases: ReadonlyArray<readonly [string, string, string]> = [
 					["--port", "65536", "Port must be between"],
 					["--port", "fraction", "integer"],
-					["--lease", "0", "finite and positive"],
+					["--lease", "0 millis", "finite and positive"],
 					["--grace", "Infinity", "finite and positive"],
 					["--lease", "soon", "Duration"],
+					["--lease", "15000", "Duration"],
 				]
 				for (const [flag, value, detail] of cases) {
 					const result = yield* invoke([...serve, flag, value])
