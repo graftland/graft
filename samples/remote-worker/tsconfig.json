@@ -1,0 +1,16 @@
+{
+	"extends": "../../tsconfig.base.json",
+	"compilerOptions": {
+		"outDir": ".cache/types",
+		"tsBuildInfoFile": ".cache/tsbuildinfo"
+	},
+	"include": ["src", "test"],
+	"references": [
+		{
+			"path": "../../packages/core"
+		},
+		{
+			"path": "../../packages/remote"
+		}
+	]
+}

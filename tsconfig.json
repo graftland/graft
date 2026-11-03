@@ -72,6 +72,9 @@
 		},
 		{
 			"path": "./packages/remote/tsconfig.test.json"
+		},
+		{
+			"path": "./samples/remote-worker"
 		}
 	]
 }

@@ -3,6 +3,9 @@ title: Isolation and intercepts
 description: Give part of the plugin tree its own services, events or settings.
 ---
 
+Realms control service visibility within one process. To run a plugin in another
+process or on another machine, use [remote plugins](../remote/).
+
 ## Realms
 
 Every service key and event belongs to a **realm**. By default, the whole

@@ -27,6 +27,7 @@
 | [http-gateway](http-gateway)         | 一個真實的 HTTP 伺服器，它的路由來自 `graft.yml`。 | `graft start --watch`、服務期間的設定編輯與熱重載、`Pending` 路由、即時的 fork 樹。     |
 | [saas-tenants](saas-tenants)         | 同一組外掛為多個租戶提供服務。                     | 每個租戶各自的 `isolate` 與 `intercept`、帶有租戶專屬設定的共用服務、租戶的加入與退出。 |
 | [market-feed](market-feed)           | 一個建立在不穩定交易所之上的行情資料管線。         | 受監督的背景任務、重試排程、`Pending` 與 `Failed` 狀態、可選的相依。                    |
+| [remote-worker](remote-worker)       | 宿主呼叫本機子行程中的服務。                       | 共用契約、跨行程服務、關閉時確認行程退出。                                              |
 
 ## 執行範例
 

@@ -29,6 +29,8 @@ description: 用 graft.yml 描述應用程式，並在執行期間修改設定�
         url: !env TENANT_DATABASE_URL
 ```
 
+要讓設定項目在子行程或另一台機器上執行，可將它指向[遠端外掛入口](../remote/)；儲存的項目 id 也可以作為 runner 實例名稱。
+
 ## 設定項目欄位
 
 | 欄位        | 作用                                                                            |

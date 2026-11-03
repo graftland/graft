@@ -8,6 +8,10 @@ With `graft start --watch`, saving a plugin module replaces the running plugin
 with the new code. The process keeps running. So does everything that was not
 loaded from a plugin module, such as the services in its environment.
 
+For [remote plugins](../remote/), reloading the host entry replaces the child
+execution; implementation modules installed on a runner are outside the host HMR
+graph.
+
 ## What happens on a save
 
 1. Graft imports every registered plugin module again, as a new **generation**.
