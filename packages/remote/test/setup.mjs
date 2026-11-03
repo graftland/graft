@@ -1,4 +1,6 @@
 import { build } from "tsdown"
+import { rm } from "node:fs/promises"
+import { certificates } from "./certificates.mjs"
 
 const common = {
 	config: false,
@@ -12,7 +14,7 @@ const common = {
 	},
 	inputOptions: { resolve: { conditionNames: ["source", "import", "node"] } },
 }
-export default async function setup() {
+export default async function setup(project) {
 	await build({
 		...common,
 		entry: [new URL("../src/bin.ts", import.meta.url).pathname],
@@ -30,4 +32,9 @@ export default async function setup() {
 		].map((name) => new URL(`./fixtures/${name}.ts`, import.meta.url).pathname),
 		outDir: new URL("../.cache/integration", import.meta.url).pathname,
 	})
+	const directory = await certificates(
+		new URL("../.cache/certificates", import.meta.url).pathname,
+	)
+	project.provide("remoteTls", directory)
+	return () => rm(directory, { recursive: true, force: true })
 }
