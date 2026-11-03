@@ -118,13 +118,18 @@ function publish(output, name) {
 		return
 	}
 	const host = new URL(registry.url).host
-	// npm reads the token from the environment, so it is never written to disk.
+	// With NODE_AUTH_TOKEN, npm reads the token from the environment, so it is
+	// never written to disk. Without one, npm signs in as usual: with trusted
+	// publishing in CI, or with the npm login on a developer's machine.
+	const token = process.env["NODE_AUTH_TOKEN"]
 	const config = mkdtempSync(join(tmpdir(), "graft-publish-"))
 	writeFileSync(
 		join(config, "npmrc"),
 		`//${host}/:_authToken=\${NODE_AUTH_TOKEN}\n`,
 	)
-	const env = { ...process.env, NPM_CONFIG_USERCONFIG: join(config, "npmrc") }
+	const env = token
+		? { ...process.env, NPM_CONFIG_USERCONFIG: join(config, "npmrc") }
+		: process.env
 	const npm = (args) =>
 		execFileSync("npm", [...args, "--registry", registry.url], {
 			stdio: "inherit",
@@ -159,6 +164,8 @@ function publish(output, name) {
 					? release.tag
 					: "backport"
 			const integrity = view(spec, "dist.integrity")
+			// Trusted publishing creates provenance on its own, and allows only
+			// `npm publish`, so the tag is set by publishing whenever possible.
 			if (integrity === undefined)
 				npm([
 					"publish",
@@ -166,12 +173,13 @@ function publish(output, name) {
 					"--ignore-scripts",
 					"--tag",
 					tag,
-					...(name === "npm" ? ["--access", "public", "--provenance"] : []),
+					...(name === "npm" ? ["--access", "public"] : []),
 				])
 			else if (integrity !== artifact.integrity)
 				throw new Error(`Package already has other contents: ${spec}`)
-			// Set the tag on a retry too, if a prior run stopped after upload.
-			npm(["dist-tag", "add", spec, tag])
+			// A retry after an upload whose tag was not set yet.
+			else if (view(artifact.name, `dist-tags.${tag}`) !== release.version)
+				npm(["dist-tag", "add", spec, tag])
 		}
 	} finally {
 		rmSync(config, { recursive: true, force: true })

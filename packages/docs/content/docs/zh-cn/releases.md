@@ -24,11 +24,11 @@ devenv shell -- pnpm test:packages
 工作流 `.github/workflows/ci.yml` 在提交拉取请求、推送到 `main` 或推送 `v1.2.3`
 这样的标签时运行。
 
-| 任务              | 运行时机         | 工作内容                                             |
-| ----------------- | ---------------- | ---------------------------------------------------- |
-| `check`           | 每次运行         | 检查格式、构建、类型检查、测试，并打包所有公开包。   |
-| `github-packages` | 推送分支和标签时 | 将打包产物发布到 GitHub Packages。                   |
-| `npm`             | 推送标签时       | 将打包产物发布到 npm，并附带来源证明（provenance）。 |
+| 任务              | 运行时机         | 工作内容                                                 |
+| ----------------- | ---------------- | -------------------------------------------------------- |
+| `check`           | 每次运行         | 检查格式、构建、类型检查、测试，并打包所有公开包。       |
+| `github-packages` | 推送分支和标签时 | 将打包产物发布到 GitHub Packages。                       |
+| `npm`             | 推送标签时       | 通过可信发布（trusted publishing）将打包产物发布到 npm。 |
 
 发布任务仅在 `check` 通过后运行，发布的就是 `check`
 打包并测试过的文件，不会重新构建。
@@ -71,8 +71,22 @@ npm install @graftland/graft@0.0.0-commit-<full hash> --registry=https://npm.pkg
 
 3. 如果 `npm` 环境配置了审批要求，`npm` 任务会等待批准，然后发布。
 
-`npm` 任务需要一个能向 `@graftland` scope 发布包的 npm 访问令牌。在仓库设置的
-**Environments** 中，将其保存为 `npm` 环境的 `NPM_TOKEN` 密钥。
+`npm`
+任务使用 npm 的[可信发布](https://docs.npmjs.com/trusted-publishers)：npm 接受 workflow 运行的 OIDC 令牌，而不需要访问令牌，并为每个包附上来源证明（provenance）。仓库中不保存任何密钥。每个包都信任
+`graftland/graft` 的 `ci.yml` workflow 在 `npm` 环境中的运行：
+
+```sh
+npm trust github @graftland/graft --file ci.yml --repo graftland/graft --env npm --allow-publish
+npm trust list @graftland/graft
+```
+
+npm 只能信任已经存在的包。因此新包要先由维护者用 CI 打包好的文件发布一次，再建立信任：
+
+```sh
+gh run download <run id> --name packages-<commit hash> --dir .release
+npm login
+devenv shell -- pnpm packages:publish npm
+```
 
 ## 文档站
 

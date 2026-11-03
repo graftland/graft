@@ -54,7 +54,7 @@ test("latest never moves back to an older release", () => {
 })
 
 // A fake npm records its calls, so these tests never write to a registry.
-const publishWith = (registry, tag, mode, latest = "") => {
+const publishWith = (registry, tag, mode, latest = "", tagged = "") => {
 	const dir = mkdtempSync(join(tmpdir(), "graft-publish-test-"))
 	try {
 		writeFileSync(
@@ -74,8 +74,13 @@ const publishWith = (registry, tag, mode, latest = "") => {
 		writeFileSync(
 			join(dir, "npm"),
 			`#!/bin/sh
-if [ "$1" = "view" ] && [ "$3" = "dist-tags.latest" ]; then
-  if [ -n "$TEST_LATEST" ]; then printf '"%s"\\n' "$TEST_LATEST"; exit 0; fi
+if [ "$1" = "view" ] && [ "$3" = "dist-tags.latest" ] && [ -n "$TEST_LATEST" ]; then
+  printf '"%s"\\n' "$TEST_LATEST"; exit 0
+fi
+if [ "$1" = "view" ] && [ "$3" = "dist-tags.$TEST_TAGGED" ]; then
+  echo '"1.2.3"'; exit 0
+fi
+if [ "$1" = "view" ] && [ "\${3#dist-tags.}" != "$3" ]; then
   echo '{"error":{"code":"E404"}}'; exit 1
 fi
 if [ "$1" = "view" ]; then
@@ -108,6 +113,7 @@ printf '%s\\n' "$*" >> "$TEST_LOG"
 					PATH: `${dir}:${process.env.PATH}`,
 					TEST_MODE: mode,
 					TEST_LATEST: latest,
+					TEST_TAGGED: tagged,
 					TEST_LOG: log,
 				},
 			},
@@ -130,19 +136,27 @@ for (const mode of ["missing", "same", "changed", "denied"]) {
 		assert.equal(status, mode === "missing" || mode === "same" ? 0 : 1, stderr)
 		assert.deepEqual(
 			calls.map((call) => call.split(" ")[0]),
-			mode === "missing"
-				? ["publish", "dist-tag"]
-				: mode === "same"
-					? ["dist-tag"]
-					: [],
+			mode === "missing" ? ["publish"] : mode === "same" ? ["dist-tag"] : [],
 		)
 	})
 }
 
-test("npm gets releases with provenance, and no snapshots", () => {
+test("an existing version whose tag is already set needs no calls", () => {
+	const { status, stderr, calls } = publishWith(
+		"github",
+		"latest",
+		"same",
+		"",
+		"latest",
+	)
+	assert.equal(status, 0, stderr)
+	assert.deepEqual(calls, [])
+})
+
+test("npm gets public releases, and no snapshots", () => {
 	const release = publishWith("npm", "latest", "missing")
 	assert.equal(release.status, 0, release.stderr)
-	assert.match(release.calls[0], /^publish .*--provenance/)
+	assert.match(release.calls[0], /^publish .*--access public/)
 	assert.match(release.calls[0], /--registry https:\/\/registry\.npmjs\.org/)
 	const snapshot = publishWith("npm", `sha-${sha}`, "missing")
 	assert.equal(snapshot.status, 0, snapshot.stderr)
@@ -158,14 +172,14 @@ test("an older release does not take latest", () => {
 	)
 	assert.equal(status, 0, stderr)
 	assert.match(calls[0], /^publish .*--tag backport/)
-	assert.match(calls[1], /^dist-tag add @graftland\/graft@1\.2\.3 backport/)
+	assert.equal(calls.length, 1)
 })
 
 test("an existing version with no contents yet is published", () => {
 	const { status, stderr, calls } = publishWith("github", "latest", "empty")
 	assert.equal(status, 0, stderr)
 	assert.match(calls[0], /^publish /)
-	assert.doesNotMatch(calls[0], /--access|--provenance/)
+	assert.doesNotMatch(calls[0], /--access/)
 })
 
 test("an unknown registry is refused", () => {

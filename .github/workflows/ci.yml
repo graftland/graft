@@ -99,7 +99,8 @@ jobs:
       - name: Publish checked packages
         run: devenv shell -- pnpm packages:publish github
 
-  # Only version tags reach npm, with provenance from this workflow run.
+  # Only version tags reach npm. Trusted publishing signs in with this run's
+  # OIDC token, needs no secret, and adds provenance.
   npm:
     name: Publish to npm
     needs: check
@@ -111,8 +112,6 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    env:
-      NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

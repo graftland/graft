@@ -31,7 +31,7 @@ The workflow `.github/workflows/ci.yml` runs for pull requests, pushes to
 | ----------------- | --------------- | ----------------------------------------------------------------------------- |
 | `check`           | Always          | Checks formatting, builds, typechecks, tests, and packs every public package. |
 | `github-packages` | Pushes and tags | Publishes the packed files to GitHub Packages.                                |
-| `npm`             | Tags            | Publishes the packed files to npm, with provenance.                           |
+| `npm`             | Tags            | Publishes the packed files to npm with trusted publishing.                    |
 
 The publishing jobs run only after `check` passes, and publish exactly the files
 that `check` packed and tested. They never build again.
@@ -79,9 +79,25 @@ fix for an older line, is published under the `backport` tag instead.
 3. The `npm` job waits for the `npm` environment, if it requires approval, and
    then publishes.
 
-The `npm` job needs an npm access token that can publish the `@graftland` scope.
-Store it as the `NPM_TOKEN` secret of the `npm` environment, in the repository
-settings under **Environments**.
+The `npm` job uses npm's
+[trusted publishing](https://docs.npmjs.com/trusted-publishers): npm accepts the
+workflow run's OIDC token instead of an access token, and adds a provenance
+statement to every package. No secret is stored in the repository. Each package
+trusts the `ci.yml` workflow of `graftland/graft` in the `npm` environment:
+
+```sh
+npm trust github @graftland/graft --file ci.yml --repo graftland/graft --env npm --allow-publish
+npm trust list @graftland/graft
+```
+
+npm can only trust a package that exists. A new package is therefore published
+once by a maintainer from the files CI packed, and trusted afterwards:
+
+```sh
+gh run download <run id> --name packages-<commit hash> --dir .release
+npm login
+devenv shell -- pnpm packages:publish npm
+```
 
 ## Docs site
 
