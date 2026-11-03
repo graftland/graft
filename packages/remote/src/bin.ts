@@ -7,17 +7,17 @@ import {
 	Console,
 	Effect,
 	FileSystem,
-	Layer,
+	Fiber,
 	Redacted,
 	Schema,
 } from "effect"
-import { Digest } from "effect/crypto"
+import { Digest, SecureRandom } from "effect/crypto"
 import process from "node:process"
 import { pathToFileURL } from "node:url"
 import { load, run } from "./Runner"
 import { Bootstrap } from "./internal/runner/Bootstrap"
 import * as Watchdog from "./internal/runner/Watchdog"
-import { failure } from "./internal/runner/model"
+import { InvalidSessionRequest } from "./internal/runner/model"
 import * as Server from "./internal/runner/Server"
 
 const serve = (args: ReadonlyArray<string>) =>
@@ -46,7 +46,10 @@ const serve = (args: ReadonlyArray<string>) =>
 		const required = (name: string) =>
 			Effect.fromNullishOr(values[name]).pipe(
 				Effect.mapError(() =>
-					failure("InvalidRequest", "Missing serve option: " + name),
+					InvalidSessionRequest.make({
+						detail: "Missing serve option: " + name,
+						cause: Cause.empty,
+					}),
 				),
 			)
 		const fs = yield* FileSystem.FileSystem
@@ -81,10 +84,13 @@ const serve = (args: ReadonlyArray<string>) =>
 				server.address._tag === "UnixPathAddress" ? null : server.address.port,
 		})
 		yield* Console.log(message)
-		return yield* Effect.never
+		return yield* Fiber.join(server.server)
 	}).pipe(
-		// @effect-diagnostics-next-line strictEffectProvide:off -- This executable owns its platform and digest services.
-		Effect.provide(Layer.merge(NodeServices.layer, Digest.layerWebCrypto)),
+		Effect.provide([
+			NodeServices.layer,
+			Digest.layerWebCrypto,
+			SecureRandom.layerWebCrypto,
+		]),
 	)
 
 NodeRuntime.runMain(

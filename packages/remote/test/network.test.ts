@@ -7,13 +7,16 @@ import {
 	Cause,
 	Deferred,
 	Effect,
+	Option,
 	Exit,
 	Fiber,
+	FiberSet,
 	FileSystem,
 	Layer,
 	Redacted,
 	Ref,
 	Schema,
+	Schedule,
 	Stream,
 	String,
 } from "effect"
@@ -88,6 +91,7 @@ const startRunner = (state: string, lease = 15000) =>
 				},
 			),
 		)
+		const readers = yield* FiberSet.make<void, never>()
 		const ready = yield* Deferred.make<number>()
 		const stderr = yield* Ref.make("")
 		yield* child.stderr.pipe(
@@ -98,7 +102,8 @@ const startRunner = (state: string, lease = 15000) =>
 				),
 			),
 			Effect.orDie,
-			Effect.forkScoped,
+			Effect.asVoid,
+			FiberSet.run(readers),
 		)
 		yield* child.stdout.pipe(
 			Stream.decodeText(),
@@ -120,7 +125,8 @@ const startRunner = (state: string, lease = 15000) =>
 					: Effect.void,
 			),
 			Effect.orDie,
-			Effect.forkScoped,
+			Effect.asVoid,
+			FiberSet.run(readers),
 		)
 		const port = yield* Effect.raceFirst(
 			Deferred.await(ready),
@@ -137,7 +143,12 @@ const startRunner = (state: string, lease = 15000) =>
 					),
 				),
 			),
-		).pipe(Effect.timeout("30 seconds"))
+		).pipe(
+			Effect.raceFirst(
+				FiberSet.join(readers).pipe(Effect.andThen(Effect.never)),
+			),
+			Effect.timeout("30 seconds"),
+		)
 		return { child, port, stderr }
 	})
 const setup = (lease = 15000, partitionable = false) =>
@@ -216,13 +227,10 @@ const until = <A, E, R>(
 	effect: Effect.Effect<A, E, R>,
 	predicate: (value: A) => boolean,
 ) =>
-	Effect.gen(function* () {
-		while (true) {
-			const value = yield* effect
-			if (predicate(value)) return value
-			yield* Effect.sleep("50 millis")
-		}
-	}).pipe(Effect.timeout("30 seconds"))
+	effect.pipe(
+		Effect.repeat({ schedule: Schedule.spaced("50 millis"), until: predicate }),
+		Effect.timeout("30 seconds"),
+	)
 const gone = (pid: number) =>
 	until(
 		Effect.sync(() => {
@@ -247,7 +255,7 @@ const latestRecord = (state: string) =>
 					.pipe(
 						Effect.flatMap(
 							Schema.decodeEffect(
-								Schema.fromJsonString(Schema.toCodecJson(Model.Record)),
+								Schema.fromJsonString(Schema.toCodecJson(Model.SessionRecord)),
 							),
 						),
 					),
@@ -309,11 +317,16 @@ describe("network runner end to end", () => {
 				assert.throws(() => process.kill(reply.pid, 0))
 				const record = yield* latestRecord(directory + "/state")
 				assert.equal(
-					record.termination?.kind,
+					record.phase === "Stopped" ? record.termination.kind : undefined,
 					"Exited",
-					record.termination?.exit.stderr,
+					record.phase === "Stopped"
+						? record.termination.exit.stderr
+						: undefined,
 				)
-				assert.equal(record.termination?.exit.code, 0)
+				assert.equal(
+					record.phase === "Stopped" ? record.termination.exit.code : undefined,
+					0,
+				)
 			}).pipe(Effect.scoped, Effect.provide(runtime)),
 		90_000,
 	)
@@ -393,7 +406,10 @@ describe("network runner end to end", () => {
 							() => Effect.sync(() => process.kill(child.pid, "SIGCONT")),
 						).pipe(
 							Effect.andThen(
-								until(Processes.matches(record.child!), (alive) => !alive),
+								until(
+									Processes.matches(Option.getOrThrow(Model.childOf(record))),
+									(alive) => !alive,
+								),
 							),
 							Effect.scoped,
 						)
@@ -437,8 +453,8 @@ describe("network runner end to end", () => {
 					specifier: "remote-fixture",
 				})
 				const loaded = yield* first.Status(opened.handle)
-				assert.isDefined(loaded.child)
-				const pid = loaded.child!.pid
+				assert.isTrue(Option.isSome(Model.childOf(loaded)))
+				const pid = Option.getOrThrow(Model.childOf(loaded)).pid
 				yield* Effect.sync(() => process.kill(pid, "SIGSTOP"))
 				const disposed = yield* Effect.forkScoped(first.Dispose(opened.handle))
 				const second = yield* control(daemon.port)
@@ -503,7 +519,7 @@ describe("network runner end to end", () => {
 					specifier: "remote-fixture",
 				})
 				const loaded = yield* client.Status(opened.handle)
-				const identity = loaded.child!
+				const identity = Option.getOrThrow(Model.childOf(loaded))
 				yield* Effect.addFinalizer(() =>
 					Processes.recover(identity).pipe(Effect.orDie),
 				)
@@ -523,21 +539,17 @@ describe("network runner end to end", () => {
 				assert.equal(replacement.handle.generation, 2)
 				const mismatch = yield* Processes.recover({
 					pid: process.pid,
-					start: '{"born":"different-start","nonce":"different-command"}',
+					start: { born: "different-start", nonce: "different-command" },
 				})
 				assert.equal(mismatch.kind, "Exited")
 				const own = yield* Processes.identity(process.pid, process.argv[1]!)
-				const start = Schema.fromJsonString(
-					Schema.Struct({ born: Schema.String, nonce: Schema.String }),
-				)
-				const known = yield* Schema.decodeEffect(start)(own.start)
 				const ambiguous = yield* Effect.exit(
 					Processes.recover({
 						...own,
-						start: yield* Schema.encodeEffect(start)({
-							...known,
+						start: {
+							...own.start,
 							nonce: "missing-bootstrap-nonce",
-						}),
+						},
 					}),
 				)
 				assert.isTrue(Exit.isFailure(ambiguous))

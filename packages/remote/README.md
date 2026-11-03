@@ -228,12 +228,12 @@ graft-remote serve --host 0.0.0.0 --port 7443 \
 Lease and grace arguments are milliseconds. Defaults are a 15-second lease and a
 five-second grace period. The ready message is a JSON line with
 `event: "Listening"` and `port`. `Runner.serve` also exposes a scoped Effect
-API; supply Node platform services and `Digest` in the application environment.
-The executable supplies these itself. The state directory requires a local
-filesystem and exclusive ownership. A scoped `node:sqlite` exclusive transaction
-holds the directory lock; a competing process fails startup, and the OS releases
-the lock on SIGKILL. The record store still uses synchronized JSON files, not
-SQLite tables.
+API; supply Node platform services, `Digest`, and `SecureRandom` in the
+application environment. The executable supplies these itself. The state
+directory requires a local filesystem and exclusive ownership. A scoped
+`node:sqlite` exclusive transaction holds the directory lock; a competing
+process fails startup, and the OS releases the lock on SIGKILL. The record store
+still uses synchronized JSON files, not SQLite tables.
 
 ```ts
 const proxy = Remote.plugin(contract, {
@@ -259,9 +259,9 @@ const proxy = Remote.plugin(contract, {
 one runner owns it. The host queries the authenticated key's generation
 high-water mark, then supplies it as `expectedGeneration` in Open. A retained
 request id is replayed idempotently. Otherwise a mismatched comparison returns
-`Stale`; a matching replacement waits for confirmed old-process exit before
-allocating and persisting its successor. This guarantees serial admission on
-this runner, not exactly-once side effects. External systems must check
+`StaleSession`; a matching replacement waits for confirmed old-process exit
+before allocating and persisting its successor. This guarantees serial admission
+on this runner, not exactly-once side effects. External systems must check
 generation fencing tokens.
 
 TLS requires version 1.3, trusted client certificates, and server hostname
@@ -322,8 +322,9 @@ Stored leases never resume after restart. The store atomically synchronizes each
 record before returning a generation and compacts terminal history, keeping all
 unfinished records plus each key's highest generation. Compacted request ids
 cannot allocate a new generation through retry because their expected generation
-is stale. Status/Dispose of compacted records also return `Stale`; only retained
-results are replayable. Storage grows with logical keys and unfinished sessions.
+is stale. Status/Dispose of compacted records also return `StaleSession`; only
+retained results are replayable. Storage grows with logical keys and unfinished
+sessions.
 
 Only bare package specifiers under the configured root's `node_modules` are
 accepted. Package-root symlinks support pnpm; ancestor fallback, paths, exports
@@ -349,10 +350,32 @@ stalled-runner watchdog enforcement, serial generations, late renewals, restart
 recovery, PID/start mismatch safety, exclusive locking, authentication, pins,
 and the required logical instance id. Private keys are generated at setup and
 removed at teardown. Real-process deadlines have generous margins; supervisor
-timing and lease edge cases in `runner-session.test.ts` use TestClock.
+timing and lease edge cases in `runner-supervisor.test.ts` use TestClock.
 
 `runner-framing.test.ts`, `runner-tls.test.ts`, and `runner-packages.test.ts`
 independently test byte limits, credit backpressure, stable certificate
 identity, rejection paths, package resolution, and digest behavior. Loader
 configuration integration remains Phase 4; the programmatic local and network
 targets are usable.
+
+## Trust and deployment assumptions
+
+Run the supervisor on Node.js 22.22 or later on Linux or macOS; Windows is not
+supported. Node 22 may emit an ExperimentalWarning for the `node:sqlite`
+directory lock.
+
+The runner trusts its dedicated CA, installation directory, state directory, and
+operating system, including `ps` output. A certificate issued by that CA grants
+access to its SAN URI's instance namespace. CA compromise is outside this model.
+Root access on the runner machine is outside this model. Plugin escape from its
+process must be prevented by the deployment's VM or container boundary. The
+small race between checking process identity and signaling its PID remains an
+accepted limitation. Whole-machine suspension suspends lease enforcement. An
+external supervisor must stop the entire process group or container to cover
+descendants created by a plugin.
+
+Session state is persisted as a phase-tagged record. This private refactor
+changes the on-disk format; stop all instances before replacing a prototype
+runner and use a fresh state directory. Do not discard the generation high-water
+marks of an active deployment or reuse its fencing namespace with downstream
+systems.

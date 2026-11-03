@@ -1,32 +1,25 @@
 import { Cause, Effect, FileSystem, Path } from "effect"
-import { failure } from "./model"
+import { StateDirectoryLocked } from "./model"
 
-/** Local-filesystem exclusive ownership; no PID file or stale-lock deletion race. */
+/** SQLite owns the local directory lock for the enclosing scope, including failed startup. */
 export const acquire = (directory: string) =>
 	Effect.gen(function* () {
 		const fs = yield* FileSystem.FileSystem
 		const path = yield* Path.Path
 		yield* fs.makeDirectory(directory, { recursive: true })
 		const { DatabaseSync } = yield* Effect.promise(() => import("node:sqlite"))
-		yield* Effect.acquireRelease(
+		const locked = (cause: unknown) =>
+			StateDirectoryLocked.make({
+				detail:
+					"The runner state directory is already owned or cannot be locked",
+				cause: Cause.die(cause),
+			})
+		const db = yield* Effect.acquireRelease(
 			Effect.try({
-				try: () => {
-					const db = new DatabaseSync(path.join(directory, "owner.sqlite"))
-					try {
-						db.exec("BEGIN EXCLUSIVE")
-						return db
-					} catch (error) {
-						db.close()
-						throw error
-					}
-				},
-				catch: (cause) =>
-					failure(
-						"Conflict",
-						"The runner state directory is already owned or cannot be locked",
-						Cause.die(cause),
-					),
+				try: () => new DatabaseSync(path.join(directory, "owner.sqlite")),
+				catch: locked,
 			}),
 			(db) => Effect.sync(() => db.close()),
 		)
+		yield* Effect.try({ try: () => db.exec("BEGIN EXCLUSIVE"), catch: locked })
 	})

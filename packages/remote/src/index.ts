@@ -1,3 +1,4 @@
+import { SessionError } from "./internal/runner/Wire"
 import { Graft, Plugin } from "@graftland/graft"
 import {
 	Array,
@@ -25,10 +26,7 @@ import { SecureRandom } from "effect/crypto"
 import { local, runner, type Target } from "./Targets"
 export { local, runner }
 import * as Connection from "./internal/runner/Connection"
-import {
-	SessionError,
-	RemoteTerminationUnconfirmed,
-} from "./internal/runner/model"
+import { RemoteTerminationUnconfirmed } from "./internal/runner/model"
 export { SessionError, RemoteTerminationUnconfirmed }
 import * as Services from "./internal/services"
 import { Instance } from "./Instance"

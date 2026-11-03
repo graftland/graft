@@ -6,24 +6,30 @@ import {
 	Effect,
 	Exit,
 	Fiber,
+	Option,
 	Ref,
 	Scope,
 } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import { RpcClient, RpcGroup, type RpcClientError } from "effect/rpc"
+import type { Schema } from "effect"
+import type { RemoteTerminationUnconfirmed } from "./model"
 import type { Target } from "../../Targets"
 import { ProcessExited, TransportError } from "../../Errors"
 import { cleanupCause } from "../cleanup"
 import * as Services from "../services"
-import type { Schema } from "effect"
-import type { SessionError, RemoteTerminationUnconfirmed } from "./model"
 import * as Duplex from "../duplex"
 import * as Transport from "../transport"
 import * as Multiplex from "./Multiplex"
 import * as Packages from "./Packages"
 import * as Tls from "./Tls"
 import * as Wire from "./Wire"
-import { awaitTermination, defaults, failure } from "./model"
+import {
+	awaitTermination,
+	defaults,
+	InvalidSessionRequest,
+	childOf,
+} from "./model"
 import { command } from "./command"
 
 type Peer = Effect.Success<ReturnType<typeof Duplex.make>>
@@ -37,7 +43,7 @@ interface Connected {
 		| ProcessExited
 		| TransportError
 		| Schema.SchemaError
-		| SessionError
+		| Wire.SessionError
 		| RemoteTerminationUnconfirmed
 		| RpcClientError.RpcClientError
 	>
@@ -98,10 +104,10 @@ export const open = (
 			})
 		}
 		if (instance === undefined || instance.length === 0)
-			return yield* failure(
-				"InvalidRequest",
-				"A runner target requires an explicit instance id",
-			)
+			return yield* InvalidSessionRequest.make({
+				detail: "A runner target requires an explicit instance id",
+				cause: Cause.empty,
+			})
 		const socket = yield* Tls.connect({
 			...target,
 			servername: target.tls.servername,
@@ -155,7 +161,7 @@ export const open = (
 					}),
 				)
 				if (result.cause.reasons.length > 0)
-					return yield* Effect.failCause(result.cause)
+					return yield* Effect.failCause(cleanupCause(result.cause))
 			}),
 		)
 		yield* Scope.addFinalizer(
@@ -199,17 +205,14 @@ export const open = (
 					const status = yield* Effect.exit(
 						session.Status(record.handle).pipe(Effect.timeout("5 seconds")),
 					)
-					if (
-						Exit.isSuccess(status) &&
-						status.value.termination !== undefined
-					) {
+					if (Exit.isSuccess(status) && status.value.phase === "Stopped") {
 						const exit = status.value.termination.exit
 						yield* report(
 							Cause.combine(
 								cause,
 								Cause.fail(
 									ProcessExited.make({
-										pid: loaded.child?.pid ?? 0,
+										pid: Option.getOrUndefined(childOf(loaded))?.pid ?? 0,
 										exitCode: exit.code,
 										stderr: exit.stderr ?? "",
 										statusCause: exit.cause ?? Cause.empty,
@@ -228,7 +231,7 @@ export const open = (
 			Effect.forkIn(resources),
 		)
 		return connected({
-			pid: loaded.child?.pid ?? 0,
+			pid: Option.getOrUndefined(childOf(loaded))?.pid ?? 0,
 			diagnostics: Ref.get(failures),
 			terminate: () =>
 				Effect.gen(function* () {

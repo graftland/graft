@@ -1,5 +1,10 @@
 import {
+	Array,
 	Cause,
+	FileSystem,
+	Path,
+	Schema,
+	type PlatformError,
 	Exit,
 	Context,
 	Deferred,
@@ -12,25 +17,41 @@ import {
 	Sink,
 	Stream,
 	String,
+	Layer,
+	Schedule,
+	Scope,
 } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import { TransportError } from "../../Errors"
 import * as Multiplex from "./Multiplex"
 import * as Packages from "./Packages"
 import * as Processes from "./Processes"
-import { Execution, failure, type Handle, type Limits } from "./model"
+import {
+	Execution,
+	ExecutionError,
+	SessionConflict,
+	SessionStopped,
+} from "./model"
 import { Bootstrap } from "./Bootstrap"
-import { FileSystem, Path, Schema, Array } from "effect"
 import { SecureRandom } from "effect/crypto"
 import { command } from "./command"
 
-export const make = (
-	root: string,
-	settings: (
-		handle: Handle,
-	) => Effect.Effect<Limits, ReturnType<typeof failure>>,
-) =>
+export class Channels extends Context.Service<
+	Channels,
+	{
+		readonly peer: (
+			token: string,
+		) => Effect.Effect<
+			Effect.Success<ReturnType<typeof Multiplex.make>>,
+			SessionStopped | SessionConflict,
+			Scope.Scope
+		>
+	}
+>()("@graftland/remote/internal/runner/Execution/Channels") {}
+
+export const make = (root: string) =>
 	Effect.gen(function* () {
+		const random = yield* SecureRandom.SecureRandom
 		const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
 		const fs = yield* FileSystem.FileSystem
 		const path = yield* Path.Path
@@ -49,11 +70,10 @@ export const make = (
 		const driver = Execution.of({
 			recover: (child) =>
 				Processes.recover(child).pipe(Effect.provideContext(platform)),
-			spawn: (handle, request, register) =>
+			spawn: (handle, request, limits, register) =>
 				Effect.gen(function* () {
 					const resolved = yield* Packages.resolve(root, request.specifier)
-					const limits = yield* settings(handle)
-					const nonce = yield* Effect.sync(() => SecureRandom.uuidV4Unsafe())
+					const nonce = yield* random.uuidV4()
 					const argv = yield* command()
 					const child = yield* spawner.spawn(
 						ChildProcess.make(
@@ -99,7 +119,12 @@ export const make = (
 					const exited = yield* Effect.gen(function* () {
 						const result = yield* Effect.exit(child.exitCode)
 						// exitCode also fails for signals and input errors. isRunning observes Node's exit event.
-						while (yield* child.isRunning) yield* Effect.sleep("25 millis")
+						yield* child.isRunning.pipe(
+							Effect.repeat({
+								schedule: Schedule.spaced("25 millis"),
+								while: (running) => running,
+							}),
+						)
 						const err = yield* Fiber.await(stderr)
 						const out = yield* Fiber.await(stdout)
 						return {
@@ -108,34 +133,35 @@ export const make = (
 							stderr: yield* Ref.get(tail),
 							cause: Array.reduce(
 								[Exit.asVoid(result), err, out],
-								Cause.empty as Cause.Cause<unknown>,
-								(cause, exit) =>
+								Cause.empty,
+								(cause: Cause.Cause<PlatformError.PlatformError>, exit) =>
 									Exit.isFailure(exit)
 										? Cause.combine(cause, exit.cause)
 										: cause,
 							),
 						}
 					}).pipe(
-						Effect.catchCause((cause) =>
-							Effect.fail(
-								failure("Execution", "Observing child exit failed", cause),
-							),
+						Effect.mapError((error) =>
+							ExecutionError.make({
+								detail: "Observing child exit failed",
+								cause: Cause.fail(error),
+							}),
 						),
 						Effect.forkScoped,
 					)
 					const controls = yield* Queue.bounded<string>(4)
-					const writerFailed = yield* Deferred.make<
-						never,
-						ReturnType<typeof failure>
-					>()
+					const writerFailed = yield* Deferred.make<never, ExecutionError>()
 					yield* Stream.fromQueue(controls).pipe(
 						Stream.map((line) => new TextEncoder().encode(line + "\n")),
 						Stream.run(child.getInputFd(4)),
+						Effect.mapError((error) =>
+							ExecutionError.make({
+								detail: "Child supervision channel failed",
+								cause: Cause.fail(error),
+							}),
+						),
 						Effect.catchCause((cause) =>
-							Deferred.fail(
-								writerFailed,
-								failure("Execution", "Child supervision channel failed", cause),
-							),
+							Deferred.failCause(writerFailed, cause),
 						),
 						Effect.forkScoped,
 					)
@@ -150,14 +176,11 @@ export const make = (
 							).pipe(
 								Effect.flatMap((line) => Queue.offer(controls, line)),
 								Effect.asVoid,
-								Effect.catchCause((cause) =>
-									Effect.fail(
-										failure(
-											"Execution",
-											"Encoding watchdog command failed",
-											cause,
-										),
-									),
+								Effect.mapError((error) =>
+									ExecutionError.make({
+										detail: "Encoding watchdog command failed",
+										cause: Cause.fail(error),
+									}),
 								),
 							),
 							Deferred.await(writerFailed),
@@ -185,26 +208,36 @@ export const make = (
 						identity,
 						exited: Fiber.join(exited),
 						interrupt: send({ kind: "stop" }),
-						kill: child
-							.kill({ killSignal: "SIGKILL" })
-							.pipe(
-								Effect.catchCause((cause) =>
-									Effect.fail(
-										failure("Execution", "Killing the child failed", cause),
-									),
-								),
+						kill: child.kill({ killSignal: "SIGKILL" }).pipe(
+							Effect.mapError((error) =>
+								ExecutionError.make({
+									detail: "Killing the child failed",
+									cause: Cause.fail(error),
+								}),
 							),
+						),
 						renew: (millis) => send({ kind: "renew", millis }),
 					})
 					yield* send({ kind: "start" })
 					return resolved.identity
 				}).pipe(
 					Effect.provideContext(platform),
-					Effect.catchCause((cause) =>
-						Effect.fail(
-							failure("Execution", "Starting the child failed", cause),
-						),
-					),
+					Effect.catchTags({
+						PlatformError: (error) =>
+							Effect.fail(
+								ExecutionError.make({
+									detail: "Starting the child failed",
+									cause: Cause.fail(error),
+								}),
+							),
+						SchemaError: (error) =>
+							Effect.fail(
+								ExecutionError.make({
+									detail: "Encoding child bootstrap failed",
+									cause: Cause.fail(error),
+								}),
+							),
+					}),
 				),
 		})
 		return {
@@ -218,10 +251,10 @@ export const make = (
 								return peer._tag === "Some"
 									? Effect.succeed(peer.value)
 									: Effect.fail(
-											failure(
-												"Stopped",
-												"The execution channel is no longer available",
-											),
+											SessionStopped.make({
+												detail: "The execution channel is no longer available",
+												cause: Cause.empty,
+											}),
 										)
 							}),
 						)
@@ -231,13 +264,24 @@ export const make = (
 								[HashSet.has(all, token), HashSet.add(all, token)] as const,
 						)
 						if (occupied)
-							return yield* failure(
-								"Conflict",
-								"The instance channel is already attached",
-							)
+							return yield* SessionConflict.make({
+								detail: "The instance channel is already attached",
+								cause: Cause.empty,
+							})
 						return peer
 					}),
 					() => Ref.update(claimed, HashSet.remove(token)),
 				),
 		}
 	})
+
+export const layer = (root: string) =>
+	Layer.effectContext(
+		make(root).pipe(
+			Effect.map((execution) =>
+				Context.make(Execution, execution.driver).pipe(
+					Context.add(Channels, { peer: execution.peer }),
+				),
+			),
+		),
+	)

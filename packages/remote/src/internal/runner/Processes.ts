@@ -1,11 +1,13 @@
-import { Cause, Effect, Option, Schema, Stream, String } from "effect"
+import { Cause, Effect, Option, Schedule, Stream, String } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import process from "node:process"
-import { failure, type ProcessIdentity, type Termination } from "./model"
+import {
+	ExecutionError,
+	TerminationUnconfirmed,
+	type ProcessIdentity,
+	type Termination,
+} from "./model"
 
-const Start = Schema.fromJsonString(
-	Schema.Struct({ born: Schema.String, nonce: Schema.String }),
-)
 const inspect = (pid: number) =>
 	Effect.scoped(
 		Effect.gen(function* () {
@@ -41,18 +43,21 @@ const inspect = (pid: number) =>
 			if (code === 1 && String.trim(output) === "") return Option.none()
 			const match = /^(.{24})\s+(\S+)\s+(.*)$/m.exec(String.trim(output))
 			if (code !== 0 || match === null)
-				return yield* failure(
-					"Execution",
-					"Cannot inspect process identity: " + stderr,
-				)
+				return yield* ExecutionError.make({
+					detail: "Cannot inspect process identity: " + stderr,
+					cause: Cause.empty,
+				})
 			if (String.startsWith("Z")(match[2]!)) return Option.none()
 			return Option.some({ born: match[1]!, command: match[3]! })
 		}),
 	).pipe(
-		Effect.catchCause((cause) =>
-			Effect.fail(
-				failure("Execution", "Inspecting process identity failed", cause),
-			),
+		Effect.mapError((error) =>
+			error._tag === "ExecutionError"
+				? error
+				: ExecutionError.make({
+						detail: "Inspecting process identity failed",
+						cause: Cause.fail(error),
+					}),
 		),
 	)
 const StringFrom = (value: number) => `${value}`
@@ -64,50 +69,27 @@ export const identity = (pid: number, nonce: string) =>
 			Option.isNone(current) ||
 			!String.includes(nonce)(current.value.command)
 		)
-			return yield* failure(
-				"Execution",
-				"The child exited before its identity could be recorded",
-			)
-		return {
-			pid,
-			start: yield* Schema.encodeEffect(Start)({
-				born: current.value.born,
-				nonce,
-			}),
-		}
-	}).pipe(
-		Effect.catchCause((cause) =>
-			Effect.fail(
-				failure("Execution", "Recording process identity failed", cause),
-			),
-		),
-	)
+			return yield* ExecutionError.make({
+				detail: "The child exited before its identity could be recorded",
+				cause: Cause.empty,
+			})
+		return { pid, start: { born: current.value.born, nonce } }
+	})
 
 export const matches = (child: ProcessIdentity) =>
 	Effect.gen(function* () {
-		const expected = yield* Schema.decodeEffect(Start)(child.start)
 		const current = yield* inspect(child.pid)
-		if (Option.isNone(current) || current.value.born !== expected.born)
+		if (Option.isNone(current) || current.value.born !== child.start.born)
 			return false
-		// process.title can erase argv. A missing nonce with the same start time
-		// is ambiguous, not evidence that the recorded execution has stopped.
-		if (!String.includes(expected.nonce)(current.value.command))
-			return yield* failure(
-				"Unconfirmed",
-				"The process start time matches but its bootstrap nonce is missing",
-			)
+		// process.title can erase argv without ending the recorded execution.
+		if (!String.includes(child.start.nonce)(current.value.command))
+			return yield* TerminationUnconfirmed.make({
+				detail:
+					"The process start time matches but its bootstrap nonce is missing",
+				cause: Cause.empty,
+			})
 		return true
-	}).pipe(
-		Effect.catchCause((cause) =>
-			Effect.fail(
-				failure(
-					"Unconfirmed",
-					"Cannot confirm the recorded process identity",
-					cause,
-				),
-			),
-		),
-	)
+	})
 
 export const recover = (child: ProcessIdentity) =>
 	Effect.gen(function* () {
@@ -122,18 +104,24 @@ export const recover = (child: ProcessIdentity) =>
 			Effect.try({
 				try: () => process.kill(child.pid, "SIGKILL"),
 				catch: (cause) =>
-					failure("Execution", "Signaling the orphan failed", Cause.die(cause)),
+					ExecutionError.make({
+						detail: "Signaling the orphan failed",
+						cause: Cause.die(cause),
+					}),
 			}),
 		)
-		const confirmed = yield* Effect.gen(function* () {
-			while (yield* matches(child)) yield* Effect.sleep("50 millis")
-		}).pipe(Effect.timeoutOption("10 seconds"))
+		const confirmed = yield* matches(child).pipe(
+			Effect.repeat({
+				schedule: Schedule.spaced("50 millis"),
+				while: (value) => value,
+			}),
+			Effect.timeoutOption("10 seconds"),
+		)
 		if (Option.isNone(confirmed))
-			return yield* failure(
-				"Unconfirmed",
-				"The orphan did not exit after recovery",
-				sent._tag === "Failure" ? sent.cause : Cause.empty,
-			)
+			return yield* TerminationUnconfirmed.make({
+				detail: "The orphan did not exit after recovery",
+				cause: sent._tag === "Failure" ? sent.cause : Cause.empty,
+			})
 		return {
 			kind: "Killed",
 			exit: { code: null, signal: "SIGKILL" },

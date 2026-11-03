@@ -1,4 +1,4 @@
-import { Effect, Sink, Stream, Schema } from "effect"
+import { Cause, Effect, Sink, Stream, Schema } from "effect"
 import { Rpc, RpcGroup } from "effect/rpc"
 import { TransportError } from "../../Errors"
 import * as Duplex from "../duplex"
@@ -7,10 +7,34 @@ import {
 	CodeIdentity,
 	Handle,
 	Limits,
-	Record,
-	SessionError,
+	SessionRecord,
+	InvalidSessionRequest,
+	StaleSession,
+	LeaseExpired,
+	SessionStopped,
+	SessionConflict,
+	StateStorageError,
+	ExecutionError,
+	TerminationUnconfirmed,
+	RunnerClosing,
+	StateDirectoryLocked,
 	Termination,
 } from "./model"
+
+/** The RPC boundary is the only place that assembles the runner's error schema. */
+export const SessionError = Schema.Union([
+	InvalidSessionRequest,
+	StaleSession,
+	LeaseExpired,
+	SessionStopped,
+	SessionConflict,
+	StateStorageError,
+	ExecutionError,
+	TerminationUnconfirmed,
+	RunnerClosing,
+	StateDirectoryLocked,
+])
+export type SessionError = typeof SessionError.Type
 
 export const Session = RpcGroup.make(
 	Rpc.make("HighWater", {
@@ -26,7 +50,7 @@ export const Session = RpcGroup.make(
 			leaseMillis: Schema.optionalKey(Schema.Finite),
 			limits: Limits,
 		},
-		success: Record,
+		success: SessionRecord,
 		error: SessionError,
 	}),
 	Rpc.make("Load", {
@@ -44,7 +68,11 @@ export const Session = RpcGroup.make(
 		success: Termination,
 		error: SessionError,
 	}),
-	Rpc.make("Status", { payload: Handle, success: Record, error: SessionError }),
+	Rpc.make("Status", {
+		payload: Handle,
+		success: SessionRecord,
+		error: SessionError,
+	}),
 ).annotateRpcs(Duplex.Priority, "control")
 
 export type Peer = Effect.Success<ReturnType<typeof Multiplex.make>>
@@ -59,8 +87,8 @@ export const channel = (peer: Peer, id: 0 | 1): Duplex.Channel => ({
 		peer
 			.send(id, id === 0 ? 0 : 1, bytes)
 			.pipe(
-				Effect.catchCause((cause) =>
-					Effect.fail(TransportError.make({ cause })),
+				Effect.mapError((error) =>
+					TransportError.make({ cause: Cause.fail(error) }),
 				),
 			),
 	),

@@ -1,45 +1,151 @@
-import { Cause, Context, Effect, Schema, Record as EffectRecord } from "effect"
-import { Option } from "effect"
+import {
+	Array,
+	Cause,
+	Context,
+	Data,
+	Effect,
+	Option,
+	Record,
+	Schema,
+} from "effect"
 import type { Scope } from "effect"
 
-export class SessionError extends Schema.TaggedError<
-	SessionError,
+const diagnosticCause = Schema.Cause(
+	Schema.Defect({ includeStack: true }),
+	Schema.Defect({ includeStack: true }),
+)
+export class InvalidSessionRequest extends Schema.TaggedError<
+	InvalidSessionRequest,
 	{ readonly brand: unique symbol }
->()("SessionError", {
-	reason: Schema.Literals([
-		"InvalidRequest",
-		"Stale",
-		"Expired",
-		"Stopped",
-		"Conflict",
-		"Storage",
-		"Execution",
-		"Unconfirmed",
-		"Closing",
-	]),
+>()("InvalidSessionRequest", {
 	detail: Schema.String,
-	cause: Schema.Cause(
-		Schema.Defect({ includeStack: true }),
-		Schema.Defect({ includeStack: true }),
-	),
+	cause: diagnosticCause,
 }) {
 	override get message() {
 		return this.detail
 	}
 }
-export const failure = (
-	reason: SessionError["reason"],
+export class StaleSession extends Schema.TaggedError<
+	StaleSession,
+	{ readonly brand: unique symbol }
+>()("StaleSession", { detail: Schema.String, cause: diagnosticCause }) {
+	override get message() {
+		return this.detail
+	}
+}
+export class LeaseExpired extends Schema.TaggedError<
+	LeaseExpired,
+	{ readonly brand: unique symbol }
+>()("LeaseExpired", { detail: Schema.String, cause: diagnosticCause }) {
+	override get message() {
+		return this.detail
+	}
+}
+export class SessionStopped extends Schema.TaggedError<
+	SessionStopped,
+	{ readonly brand: unique symbol }
+>()("SessionStopped", { detail: Schema.String, cause: diagnosticCause }) {
+	override get message() {
+		return this.detail
+	}
+}
+export class SessionConflict extends Schema.TaggedError<
+	SessionConflict,
+	{ readonly brand: unique symbol }
+>()("SessionConflict", { detail: Schema.String, cause: diagnosticCause }) {
+	override get message() {
+		return this.detail
+	}
+}
+export class StateStorageError extends Schema.TaggedError<
+	StateStorageError,
+	{ readonly brand: unique symbol }
+>()("StateStorageError", { detail: Schema.String, cause: diagnosticCause }) {
+	override get message() {
+		return this.detail
+	}
+}
+export class ExecutionError extends Schema.TaggedError<
+	ExecutionError,
+	{ readonly brand: unique symbol }
+>()("ExecutionError", { detail: Schema.String, cause: diagnosticCause }) {
+	override get message() {
+		return this.detail
+	}
+}
+export class TerminationUnconfirmed extends Schema.TaggedError<
+	TerminationUnconfirmed,
+	{ readonly brand: unique symbol }
+>()("TerminationUnconfirmed", {
+	detail: Schema.String,
+	cause: diagnosticCause,
+}) {
+	override get message() {
+		return this.detail
+	}
+}
+export class RunnerClosing extends Schema.TaggedError<
+	RunnerClosing,
+	{ readonly brand: unique symbol }
+>()("RunnerClosing", { detail: Schema.String, cause: diagnosticCause }) {
+	override get message() {
+		return this.detail
+	}
+}
+export class StateDirectoryLocked extends Schema.TaggedError<
+	StateDirectoryLocked,
+	{ readonly brand: unique symbol }
+>()("StateDirectoryLocked", { detail: Schema.String, cause: diagnosticCause }) {
+	override get message() {
+		return this.detail
+	}
+}
+/** Compatibility for callers outside the supervisor refactor; the RPC union lives in Wire. */
+export type SessionError = import("./Wire").SessionError
+// Temporary adapters for Packages and Watchdog, which are outside this refactor.
+export function failure(
+	reason: "InvalidRequest",
+	detail: string,
+	cause?: Cause.Cause<unknown>,
+): InvalidSessionRequest
+export function failure(
+	reason: "Conflict",
+	detail: string,
+	cause?: Cause.Cause<unknown>,
+): SessionConflict
+export function failure(
+	reason: "Execution",
+	detail: string,
+	cause?: Cause.Cause<unknown>,
+): ExecutionError
+export function failure(
+	reason: "InvalidRequest" | "Conflict" | "Execution",
+	detail: string,
+	cause?: Cause.Cause<unknown>,
+): InvalidSessionRequest | SessionConflict | ExecutionError
+export function failure(
+	reason: "InvalidRequest" | "Conflict" | "Execution",
 	detail: string,
 	cause: Cause.Cause<unknown> = Cause.empty,
-) => SessionError.make({ reason, detail, cause })
+) {
+	switch (reason) {
+		case "InvalidRequest":
+			return InvalidSessionRequest.make({ detail, cause })
+		case "Conflict":
+			return SessionConflict.make({ detail, cause })
+		case "Execution":
+			return ExecutionError.make({ detail, cause })
+	}
+}
+
 export const Key = Schema.Struct({
 	identity: Schema.String,
 	instance: Schema.String,
 })
 export type Key = typeof Key.Type
-// Length-prefixing prevents namespace collisions without using input as a filesystem path.
-export const keyOf = (key: Key) =>
-	`${key.identity.length}:${key.identity}${key.instance}`
+/** Structural keys keep identity namespaces separate without delimiter conventions. */
+export class SessionKey extends Data.Class<Key> {}
+export const keyOf = (key: Key) => new SessionKey(key)
 export const Limits = Schema.Struct({
 	control: Schema.Int,
 	data: Schema.Int,
@@ -47,27 +153,22 @@ export const Limits = Schema.Struct({
 })
 export type Limits = typeof Limits.Type
 export const defaults: Limits = { control: 8, data: 16, log: 2 }
-export const negotiate = (
-	local: Limits,
-	peer: Limits,
-): Effect.Effect<Limits, SessionError> =>
-	Effect.gen(function* () {
-		for (const value of [
-			...EffectRecord.values(local),
-			...EffectRecord.values(peer),
-		])
-			if (!Number.isSafeInteger(value) || value <= 0)
-				return yield* failure(
-					"InvalidRequest",
-					"RPC limits must be positive safe integers",
-				)
-		// Both peers, including the child, install these symmetric limits before data RPC.
-		return {
-			control: Math.min(local.control, peer.control),
-			data: Math.min(local.data, peer.data),
-			log: Math.min(local.log, peer.log),
-		}
-	})
+export const negotiate = (local: Limits, peer: Limits) =>
+	Array.every(
+		[...Record.values(local), ...Record.values(peer)],
+		(n) => Number.isSafeInteger(n) && n > 0,
+	)
+		? Effect.succeed({
+				control: Math.min(local.control, peer.control),
+				data: Math.min(local.data, peer.data),
+				log: Math.min(local.log, peer.log),
+			})
+		: Effect.fail(
+				InvalidSessionRequest.make({
+					detail: "RPC limits must be positive safe integers",
+					cause: Cause.empty,
+				}),
+			)
 export const Handle = Schema.Struct({
 	key: Key,
 	token: Schema.String,
@@ -76,17 +177,12 @@ export const Handle = Schema.Struct({
 export type Handle = typeof Handle.Type
 export const ProcessIdentity = Schema.Struct({
 	pid: Schema.Int,
-	start: Schema.String,
+	start: Schema.Struct({ born: Schema.String, nonce: Schema.String }),
 })
 export type ProcessIdentity = typeof ProcessIdentity.Type
 export const ExitStatus = Schema.Struct({
 	stderr: Schema.optionalKey(Schema.String),
-	cause: Schema.optionalKey(
-		Schema.Cause(
-			Schema.Defect({ includeStack: true }),
-			Schema.Defect({ includeStack: true }),
-		),
-	),
+	cause: Schema.optionalKey(diagnosticCause),
 	code: Schema.NullOr(Schema.Int),
 	signal: Schema.NullOr(Schema.String),
 })
@@ -102,74 +198,162 @@ export type Load = typeof Load.Type
 export const Termination = Schema.Struct({
 	kind: Schema.Literals(["Exited", "Killed"]),
 	exit: ExitStatus,
-	cause: Schema.Cause(SessionError, Schema.Defect({ includeStack: true })),
+	cause: diagnosticCause,
 })
 export type Termination = typeof Termination.Type
-export const Record = Schema.Struct({
+const Fields = {
 	version: Schema.Literal(1),
 	handle: Handle,
 	requestId: Schema.String,
 	leaseMillis: Schema.Finite,
 	limits: Limits,
-	phase: Schema.Literals(["Open", "Loading", "Loaded", "Stopping", "Stopped"]),
-	reason: Schema.optionalKey(
-		Schema.Literals([
+}
+export const OpenRecord = Schema.Struct({
+	...Fields,
+	phase: Schema.Literal("Open"),
+})
+export const Launch = Schema.Union([
+	Schema.TaggedStruct("Starting", {}),
+	Schema.TaggedStruct("Registered", { child: ProcessIdentity }),
+])
+export const LoadingRecord = Schema.Struct({
+	...Fields,
+	phase: Schema.Literal("Loading"),
+	load: Load,
+	launch: Launch,
+})
+export const LoadedRecord = Schema.Struct({
+	...Fields,
+	phase: Schema.Literal("Loaded"),
+	load: Load,
+	child: ProcessIdentity,
+	code: CodeIdentity,
+})
+export const ActiveRecord = Schema.Union([
+	OpenRecord,
+	LoadingRecord,
+	LoadedRecord,
+])
+export type ActiveRecord = typeof ActiveRecord.Type
+export const StopReason = Schema.Union([
+	...Array.map(
+		[
 			"Disposed",
 			"Expired",
 			"Superseded",
 			"Recovery",
 			"Shutdown",
-			"LoadFailed",
 			"Exited",
-		]),
+		] as const,
+		(tag) => Schema.TaggedStruct(tag, {}),
 	),
-	child: Schema.optionalKey(ProcessIdentity),
-	load: Schema.optionalKey(Load),
-	code: Schema.optionalKey(CodeIdentity),
-	loadFailure: Schema.optionalKey(
-		Schema.Cause(SessionError, Schema.Defect({ includeStack: true })),
-	),
-	termination: Schema.optionalKey(Termination),
+	Schema.TaggedStruct("LoadFailed", { cause: diagnosticCause }),
+])
+export type StopReason = typeof StopReason.Type
+export const StoppingRecord = Schema.Struct({
+	...Fields,
+	phase: Schema.Literal("Stopping"),
+	previous: ActiveRecord,
+	reason: StopReason,
 })
-export type Record = typeof Record.Type
+export const StoppedRecord = Schema.Struct({
+	...Fields,
+	phase: Schema.Literal("Stopped"),
+	previous: ActiveRecord,
+	reason: StopReason,
+	termination: Termination,
+})
+export const SessionRecord = Schema.Union([
+	OpenRecord,
+	LoadingRecord,
+	LoadedRecord,
+	StoppingRecord,
+	StoppedRecord,
+])
+export type SessionRecord = typeof SessionRecord.Type
+export const childOf = (
+	record: SessionRecord,
+): Option.Option<ProcessIdentity> => {
+	switch (record.phase) {
+		case "Open":
+			return Option.none()
+		case "Loading":
+			return record.launch._tag === "Registered"
+				? Option.some(record.launch.child)
+				: Option.none()
+		case "Loaded":
+			return Option.some(record.child)
+		case "Stopping":
+		case "Stopped":
+			return childOf(record.previous)
+	}
+}
+export const stoppingRecord = (
+	previous: ActiveRecord,
+	reason: StopReason,
+): typeof StoppingRecord.Type => ({
+	version: previous.version,
+	handle: previous.handle,
+	requestId: previous.requestId,
+	leaseMillis: previous.leaseMillis,
+	limits: previous.limits,
+	phase: "Stopping",
+	previous,
+	reason,
+})
+export const stoppedRecord = (
+	previous: ActiveRecord,
+	reason: StopReason,
+	termination: Termination,
+): typeof StoppedRecord.Type => ({
+	...stoppingRecord(previous, reason),
+	phase: "Stopped",
+	termination,
+})
 
-/** One exclusive supervisor owns a store; the daemon must lock its state directory. */
 export class Store extends Context.Service<
 	Store,
 	{
-		readonly list: Effect.Effect<ReadonlyArray<Record>, SessionError>
-		readonly save: (record: Record) => Effect.Effect<void, SessionError>
+		readonly list: Effect.Effect<
+			ReadonlyArray<SessionRecord>,
+			StateStorageError
+		>
+		readonly save: (
+			record: SessionRecord,
+		) => Effect.Effect<void, StateStorageError>
 	}
 >()("@graftland/remote/internal/runner/model/Store") {}
-
+export type ExecutionFailure = ExecutionError | TerminationUnconfirmed
 export interface Unit {
-	readonly renew?: (millis: number) => Effect.Effect<void, SessionError>
 	readonly identity: ProcessIdentity
-	readonly exited: Effect.Effect<ExitStatus, SessionError>
-	/** Request graceful shutdown without requiring the peer's business RPC schemas. */
-	readonly interrupt: Effect.Effect<void, SessionError>
-	readonly kill: Effect.Effect<void, SessionError>
+	readonly exited: Effect.Effect<ExitStatus, ExecutionFailure>
+	readonly interrupt: Effect.Effect<void, ExecutionFailure>
+	readonly kill: Effect.Effect<void, ExecutionFailure>
+	readonly renew?: (millis: number) => Effect.Effect<void, ExecutionFailure>
 }
-/**
- * The adapter starts a gated child bootstrap and persists its registration before
- * releasing the gate. The child waits for business Load before applying the plugin.
- * Its scope owns the process even if registration or launch fails.
- */
 export class Execution extends Context.Service<
 	Execution,
 	{
 		readonly spawn: (
 			handle: Handle,
 			request: Load,
-			register: (unit: Unit) => Effect.Effect<void, SessionError>,
-		) => Effect.Effect<CodeIdentity, SessionError, Scope.Scope>
-		/** Match both PID and start identity; never signal a reused PID. Confirm exit before returning. */
+			limits: Limits,
+			register: (
+				unit: Unit,
+			) => Effect.Effect<
+				void,
+				ExecutionFailure | StateStorageError | LeaseExpired | SessionStopped
+			>,
+		) => Effect.Effect<
+			CodeIdentity,
+			ExecutionFailure | StateStorageError | LeaseExpired | SessionStopped,
+			Scope.Scope
+		>
 		readonly recover: (
 			child: ProcessIdentity,
-		) => Effect.Effect<Termination, SessionError>
+		) => Effect.Effect<Termination, ExecutionFailure>
 	}
 >()("@graftland/remote/internal/runner/model/Execution") {}
-
 export class RemoteTerminationUnconfirmed extends Schema.TaggedError<
 	RemoteTerminationUnconfirmed,
 	{ readonly brand: unique symbol }

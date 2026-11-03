@@ -1,4 +1,14 @@
-import { Cause, Deferred, Effect, Ref, Option, Scope, Semaphore } from "effect"
+import {
+	Context,
+	Cause,
+	Deferred,
+	Effect,
+	Ref,
+	Option,
+	Scope,
+	Semaphore,
+	Layer,
+} from "effect"
 import { RpcGroup, RpcServer } from "effect/rpc"
 import * as Services from "../services"
 import * as Duplex from "../duplex"
@@ -9,7 +19,7 @@ import * as Stores from "./Store"
 import * as Supervisor from "./Supervisor"
 import * as Tls from "./Tls"
 import * as Wire from "./Wire"
-import { Execution, Store, failure, type Handle } from "./model"
+import { InvalidSessionRequest, SessionConflict, type Handle } from "./model"
 
 export interface Options extends Tls.ListenOptions {
 	readonly root: string
@@ -20,23 +30,18 @@ export interface Options extends Tls.ListenOptions {
 export const serve = (options: Options) =>
 	Effect.gen(function* () {
 		yield* Lock.acquire(options.state)
-		const store = yield* Stores.directory(options.state)
-		const ready =
-			yield* Deferred.make<Effect.Success<ReturnType<typeof Supervisor.make>>>()
-		const execution = yield* ExecutionAdapter.make(options.root, (handle) =>
-			Deferred.await(ready).pipe(
-				Effect.flatMap((supervisor) => supervisor.status(handle)),
-				Effect.map((record) => record.limits),
-			),
+		const dependencies = Layer.merge(
+			Stores.layerDirectory(options.state),
+			ExecutionAdapter.layer(options.root),
 		)
-		const supervisor = yield* Supervisor.make({
-			...(options.lease === undefined ? {} : { lease: options.lease }),
-			...(options.grace === undefined ? {} : { grace: options.grace }),
-		}).pipe(
-			Effect.provideService(Store, store),
-			Effect.provideService(Execution, execution.driver),
+		const services = yield* Layer.build(
+			Supervisor.layer({
+				...(options.lease === undefined ? {} : { lease: options.lease }),
+				...(options.grace === undefined ? {} : { grace: options.grace }),
+			}).pipe(Layer.provideMerge(dependencies)),
 		)
-		yield* Deferred.succeed(ready, supervisor)
+		const supervisor = services.pipe(Context.get(Supervisor.Supervisor))
+		const execution = services.pipe(Context.get(ExecutionAdapter.Channels))
 		const listener = yield* Tls.listen(options)
 		const server = yield* listener
 			.run((socket) =>
@@ -55,10 +60,11 @@ export const serve = (options: Options) =>
 						handle.key.identity === identity
 							? Effect.void
 							: Effect.fail(
-									failure(
-										"InvalidRequest",
-										"The session belongs to another authenticated identity",
-									),
+									InvalidSessionRequest.make({
+										detail:
+											"The session belongs to another authenticated identity",
+										cause: Cause.empty,
+									}),
 								)
 					const handlers = yield* Wire.Session.toHandlers({
 						HighWater: ({ instance }) =>
@@ -85,10 +91,10 @@ export const serve = (options: Options) =>
 									Option.isSome(attachment) &&
 									attachment.value !== handle.token
 								)
-									return yield* failure(
-										"Conflict",
-										"A connection can attach only one execution",
-									)
+									return yield* SessionConflict.make({
+										detail: "A connection can attach only one execution",
+										cause: Cause.empty,
+									})
 								const code = yield* supervisor.load(handle, { specifier })
 								if (Option.isNone(attachment)) {
 									const child = yield* execution
@@ -130,16 +136,15 @@ export const serve = (options: Options) =>
 						Status: (handle) =>
 							authorize(handle).pipe(Effect.andThen(supervisor.status(handle))),
 					})
-					yield* RpcServer.make(Wire.Session, {
+					return yield* RpcServer.make(Wire.Session, {
 						disableFatalDefects: true,
 					}).pipe(
 						Effect.provideContext(handlers),
 						Effect.provideService(RpcServer.Protocol, peer.serverProtocol),
-						Effect.forkIn(scope),
+						Effect.raceFirst(Deferred.await(mux.failed)),
 					)
-					return yield* Deferred.await(mux.failed)
 				}),
 			)
-			.pipe(Effect.forkScoped)
+			.pipe(Effect.raceFirst(supervisor.await), Effect.forkScoped)
 		return { address: listener.address, supervisor, server }
 	})

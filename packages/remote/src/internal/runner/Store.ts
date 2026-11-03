@@ -1,5 +1,7 @@
 import {
 	Array,
+	Cause,
+	Layer,
 	Effect,
 	FileSystem,
 	HashMap,
@@ -9,14 +11,15 @@ import {
 	Schema,
 	Semaphore,
 	String,
+	type PlatformError,
 } from "effect"
 import { Digest, SecureRandom } from "effect/crypto"
-import { Key, Record, Store, failure } from "./model"
+import { Key, SessionRecord, Store, StateStorageError } from "./model"
 import * as Retention from "./Retention"
 
 /** Injectable store used by deterministic supervisor tests. */
 export const memory = Effect.gen(function* () {
-	const records = yield* Ref.make(HashMap.empty<string, Record>())
+	const records = yield* Ref.make(HashMap.empty<string, SessionRecord>())
 	return Store.of({
 		list: Ref.get(records).pipe(
 			Effect.map((records) => Array.fromIterable(HashMap.values(records))),
@@ -47,29 +50,44 @@ export const directory = (root: string) =>
 		const fs = yield* FileSystem.FileSystem
 		const path = yield* Path.Path
 		const digest = yield* Digest.Digest
-		const json = Schema.fromJsonString(Schema.toCodecJson(Record))
-		const storage = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+		const json = Schema.fromJsonString(Schema.toCodecJson(SessionRecord))
+		const random = yield* SecureRandom.SecureRandom
+		const storage = <A, R>(
+			effect: Effect.Effect<
+				A,
+				PlatformError.PlatformError | Schema.SchemaError | StateStorageError,
+				R
+			>,
+		) =>
 			effect.pipe(
-				Effect.catchCause((cause) =>
-					Effect.fail(failure("Storage", "Runner state storage failed", cause)),
+				Effect.mapError((error) =>
+					error._tag === "StateStorageError"
+						? error
+						: StateStorageError.make({
+								detail: "Runner state storage failed",
+								cause: Cause.fail(error),
+							}),
 				),
 			)
 		yield* storage(fs.makeDirectory(root, { recursive: true }))
 		const mutex = yield* Semaphore.make(1)
+		const read = Effect.gen(function* () {
+			const files = yield* fs.readDirectory(root)
+			const rows = yield* Effect.forEach(
+				Array.filter(files, String.endsWith(".json")),
+				(file) =>
+					fs.readFileString(path.join(root, file)).pipe(
+						Effect.flatMap(Schema.decodeEffect(json)),
+						Effect.map((record) => ({ file, record })),
+					),
+			)
+			yield* Retention.validate(Array.map(rows, (row) => row.record))
+			return rows
+		})
 		const compact = Effect.scoped(
 			Effect.gen(function* () {
-				const files = yield* fs.readDirectory(root)
-				const rows = yield* Effect.forEach(
-					Array.filter(files, String.endsWith(".json")),
-					(file) =>
-						fs.readFileString(path.join(root, file)).pipe(
-							Effect.flatMap(Schema.decodeEffect(json)),
-							Effect.map((record) => ({ file, record })),
-						),
-				)
-				const records = Array.map(rows, (row) => row.record)
-				yield* Retention.validate(records)
-				const retained = Retention.retain(records)
+				const rows = yield* read
+				const retained = Retention.retain(Array.map(rows, (row) => row.record))
 				const tokens = HashSet.fromIterable(
 					Array.map(retained, (record) => record.handle.token),
 				)
@@ -77,16 +95,24 @@ export const directory = (root: string) =>
 					rows,
 					(row) => !HashSet.has(tokens, row.record.handle.token),
 				)
-				for (const row of obsolete) yield* fs.remove(path.join(root, row.file))
+				yield* Effect.forEach(
+					obsolete,
+					(row) => fs.remove(path.join(root, row.file)),
+					{ discard: true },
+				)
 				if (obsolete.length > 0) {
 					const directory = yield* fs.open(root, { flag: "r" })
 					yield* directory.sync
 				}
-				return retained
 			}),
 		)
+		yield* storage(compact)
 		return Store.of({
-			list: storage(mutex.withPermit(compact)),
+			list: storage(
+				mutex.withPermit(
+					read.pipe(Effect.map((rows) => Array.map(rows, (row) => row.record))),
+				),
+			),
 			save: (record) =>
 				storage(
 					mutex.withPermit(
@@ -105,9 +131,7 @@ export const directory = (root: string) =>
 									Digest.sha256,
 									new TextEncoder().encode(address),
 								)
-								const nonce = yield* Effect.sync(() =>
-									SecureRandom.uuidV4Unsafe(),
-								)
+								const nonce = yield* random.uuidV4()
 								const temporary = path.join(root, `.${name}.${nonce}.tmp`)
 								const destination = path.join(root, name + ".json")
 								yield* Effect.acquireRelease(
@@ -137,3 +161,7 @@ export const directory = (root: string) =>
 				),
 		})
 	})
+
+export const layerMemory = Layer.effect(Store, memory)
+export const layerDirectory = (root: string) =>
+	Layer.effect(Store, directory(root))

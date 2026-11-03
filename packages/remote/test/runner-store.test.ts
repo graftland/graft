@@ -10,11 +10,15 @@ import {
 	Number,
 	Schema,
 } from "effect"
-import { Digest } from "effect/crypto"
+import { Digest, SecureRandom } from "effect/crypto"
 import * as Stores from "../src/internal/runner/Store"
-import { defaults, Record } from "../src/internal/runner/model"
+import {
+	defaults,
+	SessionRecord,
+	type LoadedRecord,
+} from "../src/internal/runner/model"
 
-const record: Record = {
+const record: typeof LoadedRecord.Type = {
 	version: 1,
 	handle: {
 		key: { identity: "certificate/../../identity", instance: "../instance" },
@@ -25,11 +29,15 @@ const record: Record = {
 	leaseMillis: 15_000,
 	limits: defaults,
 	phase: "Loaded",
-	child: { pid: 42, start: "process-start" },
+	child: { pid: 42, start: { born: "process-start", nonce: "process-nonce" } },
 	load: { specifier: "fixture" },
 	code: { name: "fixture", version: "1.0.0", digest: "digest" },
 }
-const runtime = Layer.merge(NodeServices.layer, Digest.layerWebCrypto)
+const runtime = Layer.mergeAll(
+	NodeServices.layer,
+	Digest.layerWebCrypto,
+	SecureRandom.layerWebCrypto,
+)
 describe("runner state directory", () => {
 	it.effect(
 		"compacts terminal history while retaining unfinished records and durable high-water marks",
@@ -39,7 +47,7 @@ describe("runner state directory", () => {
 				const directory = yield* fs.makeTempDirectoryScoped()
 				const store = yield* Stores.directory(directory)
 				yield* store.save(record)
-				for (let generation = 2; generation <= 30; generation++) {
+				for (const generation of Array.range(2, 30)) {
 					yield* store.save({
 						...record,
 						handle: {
@@ -49,6 +57,8 @@ describe("runner state directory", () => {
 						},
 						requestId: "request-" + generation,
 						phase: "Stopped",
+						previous: record,
+						reason: { _tag: "Disposed" },
 						termination: {
 							kind: "Exited",
 							exit: { code: 0, signal: null },
@@ -70,6 +80,8 @@ describe("runner state directory", () => {
 				yield* reopened.save({
 					...record,
 					phase: "Stopped",
+					previous: record,
+					reason: { _tag: "Disposed" },
 					termination: {
 						kind: "Killed",
 						exit: { code: null, signal: "SIGKILL" },
@@ -91,9 +103,11 @@ describe("runner state directory", () => {
 				const fs = yield* FileSystem.FileSystem
 				const directory = yield* fs.makeTempDirectoryScoped()
 				const store = yield* Stores.directory(directory)
-				const terminal: Record = {
+				const terminal: SessionRecord = {
 					...record,
 					phase: "Stopped",
+					previous: record,
+					reason: { _tag: "Disposed" },
 					termination: {
 						kind: "Exited",
 						exit: { code: 0, signal: null },
@@ -110,6 +124,11 @@ describe("runner state directory", () => {
 				})
 				// Simulate a crash after committing the high-water file but before deleting old history.
 				yield* fs.writeFileString(directory + "/" + oldFile, oldContents)
+				// Reading history must not finish compaction or delete files.
+				const history = yield* store.list
+				assert.lengthOf(history, 2)
+				const filesAfterRead = yield* fs.readDirectory(directory)
+				assert.lengthOf(filesAfterRead, 2)
 				const reopened = yield* Stores.directory(directory)
 				const recovered = yield* reopened.list
 				assert.lengthOf(recovered, 1)
@@ -149,12 +168,14 @@ describe("runner state directory", () => {
 				})
 				// A syntactically valid terminal record without its result must fail closed.
 				const malformed = yield* Schema.encodeEffect(
-					Schema.fromJsonString(Schema.toCodecJson(Record)),
+					Schema.fromJsonString(Schema.Unknown),
 				)({
 					...record,
 					handle: { ...record.handle, token: "broken", generation: 1 },
 					requestId: "broken",
 					phase: "Stopped",
+					previous: record,
+					reason: { _tag: "Disposed" },
 				})
 				yield* fs.writeFileString(directory + "/broken.json", malformed)
 				const rejected = yield* Effect.exit(store.list)
@@ -179,7 +200,9 @@ describe("runner state directory", () => {
 				yield* second.save({
 					...record,
 					phase: "Stopped",
-					reason: "Recovery",
+					previous: record,
+					reason: { _tag: "Disposed" },
+
 					termination: {
 						kind: "Killed",
 						exit: { code: null, signal: "SIGKILL" },

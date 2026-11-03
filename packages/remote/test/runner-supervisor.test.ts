@@ -1,4 +1,4 @@
-import { assert, describe, it } from "@effect/vitest"
+import { assert, layer } from "@effect/vitest"
 import {
 	Array,
 	Cause,
@@ -7,23 +7,28 @@ import {
 	Exit,
 	Fiber,
 	Queue,
+	Option,
 	Ref,
 	Schema,
 } from "effect"
+import { SecureRandom } from "effect/crypto"
 import { TestClock } from "effect/testing"
 import * as Supervisor from "../src/internal/runner/Supervisor"
 import * as Stores from "../src/internal/runner/Store"
 import {
 	Execution,
 	Store,
-	SessionError,
+	type SessionError,
+	type ExecutionFailure,
+	childOf,
 	RemoteTerminationUnconfirmed,
 	awaitTermination,
 	defaults,
-	failure,
+	ExecutionError,
+	StateStorageError,
 	type ExitStatus,
 	type ProcessIdentity,
-	type Record,
+	type SessionRecord,
 	type Termination,
 } from "../src/internal/runner/model"
 
@@ -42,7 +47,7 @@ const fake = (
 		readonly gate?: Deferred.Deferred<void>
 		readonly recover?: (
 			child: ProcessIdentity,
-		) => Effect.Effect<Termination, SessionError>
+		) => Effect.Effect<Termination, ExecutionFailure>
 	} = {},
 ) =>
 	Effect.gen(function* () {
@@ -54,7 +59,7 @@ const fake = (
 		const count = yield* Ref.make(0)
 		const closed = yield* Ref.make(0)
 		const driver = Execution.of({
-			spawn: (_handle, _request, register) =>
+			spawn: (_handle, _request, _limits, register) =>
 				Effect.gen(function* () {
 					const pid = yield* Ref.updateAndGet(count, (n) => n + 1)
 					const exit = yield* Deferred.make<ExitStatus>()
@@ -62,7 +67,10 @@ const fake = (
 					const killed = yield* Deferred.make<void>()
 					yield* Effect.addFinalizer(() => Ref.update(closed, (n) => n + 1))
 					yield* register({
-						identity: { pid, start: "start-" + pid },
+						identity: {
+							pid,
+							start: { born: "start-" + pid, nonce: "nonce-" + pid },
+						},
 						exited: Deferred.await(exit),
 						interrupt: Deferred.succeed(interrupted, undefined).pipe(
 							Effect.andThen(
@@ -101,30 +109,33 @@ const setup = (options: Parameters<typeof fake>[0] = {}) =>
 	})
 const reason = <A>(
 	exit: Exit.Exit<A, SessionError>,
-	expected: SessionError["reason"],
+	expected: SessionError["_tag"],
 ) => {
 	assert.isTrue(Exit.isFailure(exit))
 	if (Exit.isFailure(exit))
 		assert.isTrue(
 			Array.some(
 				exit.cause.reasons,
-				(reason) => reason._tag === "Fail" && reason.error.reason === expected,
+				(reason) => reason._tag === "Fail" && reason.error._tag === expected,
 			),
 		)
 }
-const orphan: Record = {
+const orphan: SessionRecord = {
 	version: 1,
 	handle: { key, token: "old-token", generation: 7 },
 	requestId: "old-open",
 	leaseMillis: 15_000,
 	limits: defaults,
 	phase: "Loaded",
-	child: { pid: 123, start: "original-process-start" },
+	child: {
+		pid: 123,
+		start: { born: "original-process-start", nonce: "original-nonce" },
+	},
 	load: { specifier: "fixture" },
 	code,
 }
 
-describe("runner session supervisor", () => {
+layer(SecureRandom.layerWebCrypto)("runner session supervisor", (it) => {
 	it.effect(
 		"fences competing and forgotten Open requests before disturbing the current child",
 		() =>
@@ -138,7 +149,7 @@ describe("runner session supervisor", () => {
 				const stale = yield* Effect.exit(
 					supervisor.open({ key, requestId: "wrong", expectedGeneration: 2 }),
 				)
-				reason(stale, "Stale")
+				reason(stale, "StaleSession")
 				assert.isFalse(Deferred.isDoneUnsafe(unit.interrupted))
 				const results = yield* Effect.forEach(
 					["a", "b"],
@@ -151,8 +162,8 @@ describe("runner session supervisor", () => {
 				assert.lengthOf(Array.filter(results, Exit.isSuccess), 1)
 				assert.lengthOf(Array.filter(results, Exit.isFailure), 1)
 				for (const result of results)
-					if (Exit.isFailure(result)) reason(result, "Stale")
-				for (let generation = 2; generation < 20; generation++) {
+					if (Exit.isFailure(result)) reason(result, "StaleSession")
+				for (const generation of Array.range(2, 19)) {
 					yield* supervisor.open({
 						key,
 						requestId: "request-" + generation,
@@ -166,7 +177,7 @@ describe("runner session supervisor", () => {
 				const forgotten = yield* Effect.exit(
 					supervisor.open({ key, requestId: "first" }),
 				)
-				reason(forgotten, "Stale")
+				reason(forgotten, "StaleSession")
 				const current = yield* supervisor.open({
 					key,
 					requestId: "request-19",
@@ -209,7 +220,7 @@ describe("runner session supervisor", () => {
 				const duplicate = yield* Effect.exit(
 					supervisor.open({ key, requestId: "first" }),
 				)
-				reason(duplicate, "Stale")
+				reason(duplicate, "StaleSession")
 				const other = yield* supervisor.open({
 					key: { ...key, identity: "certificate-b" },
 					requestId: "first",
@@ -219,13 +230,13 @@ describe("runner session supervisor", () => {
 				assert.lengthOf(records, 2)
 				{
 					const exit = yield* Effect.exit(supervisor.renew(first.handle))
-					reason(exit, "Stale")
+					reason(exit, "StaleSession")
 				}
 				{
 					const exit = yield* Effect.exit(
 						supervisor.load(first.handle, { specifier: "fixture" }),
 					)
-					reason(exit, "Stale")
+					reason(exit, "StaleSession")
 				}
 			}).pipe(Effect.scoped),
 	)
@@ -245,12 +256,15 @@ describe("runner session supervisor", () => {
 				)
 				const status = yield* supervisor.status(record.handle)
 				assert.equal(status.phase, "Loading")
-				assert.deepEqual(status.child, { pid: 1, start: "start-1" })
+				assert.deepEqual(Option.getOrUndefined(childOf(status)), {
+					pid: 1,
+					start: { born: "start-1", nonce: "nonce-1" },
+				})
 				{
 					const exit = yield* Effect.exit(
 						supervisor.load(record.handle, { specifier: "different" }),
 					)
-					reason(exit, "Conflict")
+					reason(exit, "SessionConflict")
 				}
 				yield* Deferred.succeed(gate, undefined)
 				const results = yield* Effect.all([
@@ -280,7 +294,7 @@ describe("runner session supervisor", () => {
 				yield* Deferred.await(unit.interrupted)
 				{
 					const exit = yield* Effect.exit(supervisor.renew(record.handle))
-					reason(exit, "Expired")
+					reason(exit, "LeaseExpired")
 				}
 				assert.isFalse(Deferred.isDoneUnsafe(unit.killed))
 				yield* TestClock.adjust("5 seconds")
@@ -377,14 +391,20 @@ describe("runner session supervisor", () => {
 			const store = yield* Stores.memory
 			yield* store.save(orphan)
 			const { driver } = yield* fake({
-				recover: () => Effect.fail(failure("Execution", "Recovery sentinel")),
+				recover: () =>
+					Effect.fail(
+						ExecutionError.make({
+							detail: "Recovery sentinel",
+							cause: Cause.empty,
+						}),
+					),
 			})
 			const exit = yield* Supervisor.make().pipe(
 				Effect.provideService(Store, store),
 				Effect.provideService(Execution, driver),
 				Effect.exit,
 			)
-			reason(exit, "Unconfirmed")
+			reason(exit, "TerminationUnconfirmed")
 			const records = yield* store.list
 			assert.equal(records[0]!.phase, "Loaded")
 		}).pipe(Effect.scoped),
@@ -393,7 +413,10 @@ describe("runner session supervisor", () => {
 		"reports unconfirmed termination after T plus margin and retains the transport cause",
 		() =>
 			Effect.gen(function* () {
-				const transport = failure("Execution", "Connection lost")
+				const transport = ExecutionError.make({
+					detail: "Connection lost",
+					cause: Cause.empty,
+				})
 				const waiting = yield* awaitTermination(
 					orphan.handle,
 					Effect.fail(transport),
@@ -442,7 +465,11 @@ describe("runner session supervisor", () => {
 			const closed = yield* Ref.get(execution.closed)
 			assert.equal(closed, 1)
 			const records = yield* store.list
-			assert.equal(records[0]!.termination?.kind, "Exited")
+			assert.equal(records[0]!.phase, "Stopped")
+			assert.equal(
+				"termination" in records[0]! ? records[0].termination.kind : undefined,
+				"Exited",
+			)
 		}).pipe(Effect.scoped),
 	)
 	it.effect(
@@ -470,7 +497,7 @@ describe("runner session supervisor", () => {
 							assert.equal(stopping.pollUnsafe(), undefined)
 							yield* TestClock.adjust("5 seconds")
 							const result = yield* Fiber.await(stopping)
-							reason(result, "Unconfirmed")
+							reason(result, "TerminationUnconfirmed")
 							const next = yield* Effect.exit(
 								supervisor.open({
 									key,
@@ -478,10 +505,10 @@ describe("runner session supervisor", () => {
 									expectedGeneration: 1,
 								}),
 							)
-							reason(next, "Unconfirmed")
+							reason(next, "TerminationUnconfirmed")
 							const status = yield* supervisor.status(record.handle)
 							assert.equal(status.phase, "Stopping")
-							assert.isUndefined(status.termination)
+							assert.notProperty(status, "termination")
 						}),
 					),
 				)
@@ -499,15 +526,16 @@ describe("runner session supervisor", () => {
 				const failedStore = Store.of({
 					list: store.list,
 					save: (record) =>
-						store
-							.save(record)
-							.pipe(
-								Effect.andThen(
-									Effect.fail(
-										failure("Storage", "Commit acknowledgement lost"),
-									),
+						store.save(record).pipe(
+							Effect.andThen(
+								Effect.fail(
+									StateStorageError.make({
+										detail: "Commit acknowledgement lost",
+										cause: Cause.empty,
+									}),
 								),
 							),
+						),
 				})
 				const first = yield* Effect.exit(
 					Effect.scoped(
@@ -561,20 +589,29 @@ describe("runner session supervisor", () => {
 				const failing = Store.of({
 					list: store.list,
 					save: (record) =>
-						record.loadFailure !== undefined
-							? Effect.fail(failure("Storage", "Failure journal sentinel"))
+						(record.phase === "Stopping" || record.phase === "Stopped") &&
+						record.reason._tag === "LoadFailed"
+							? Effect.fail(
+									StateStorageError.make({
+										detail: "Failure journal sentinel",
+										cause: Cause.empty,
+									}),
+								)
 							: store.save(record),
 				})
 				const driver = Execution.of({
 					...execution.driver,
-					spawn: (handle, request, register) =>
-						execution.driver
-							.spawn(handle, request, register)
-							.pipe(
-								Effect.andThen(
-									Effect.fail(failure("Execution", "Launch sentinel")),
+					spawn: (handle, request, limits, register) =>
+						execution.driver.spawn(handle, request, limits, register).pipe(
+							Effect.andThen(
+								Effect.fail(
+									ExecutionError.make({
+										detail: "Launch sentinel",
+										cause: Cause.empty,
+									}),
 								),
 							),
+						),
 				})
 				const scopeExit = yield* Effect.exit(
 					Effect.scoped(
@@ -609,11 +646,14 @@ describe("runner session supervisor", () => {
 			Effect.gen(function* () {
 				const store = yield* Stores.memory
 				const execution = yield* fake({ graceful: false })
-				const sentinel = failure("Execution", "Shutdown sentinel")
+				const sentinel = ExecutionError.make({
+					detail: "Shutdown sentinel",
+					cause: Cause.empty,
+				})
 				const driver = Execution.of({
 					...execution.driver,
-					spawn: (handle, request, register) =>
-						execution.driver.spawn(handle, request, (unit) =>
+					spawn: (handle, request, limits, register) =>
+						execution.driver.spawn(handle, request, limits, (unit) =>
 							register({
 								...unit,
 								interrupt: unit.interrupt.pipe(
