@@ -5,9 +5,11 @@
 import {
 	Array,
 	Config,
+	Context,
 	Data,
 	Effect,
 	MutableList,
+	Option,
 	Record,
 	Result,
 	Schema,
@@ -17,6 +19,15 @@ import { isContainer } from "./internal/snapshot"
 
 /** A value read from an environment variable when the entry is loaded (`!env NAME` in YAML). */
 export class Env extends Data.TaggedClass("Env")<{ readonly name: string }> {}
+
+/**
+ * The id of the entry a plugin was loaded from. Ids persist in the config
+ * file, so a plugin can use this as a name that survives restarts.
+ */
+export const CurrentId = Context.Reference<Option.Option<string>>(
+	"@graftland/loader/Entry/CurrentId",
+	{ defaultValue: () => Option.none() },
+)
 
 /** The descriptions also document the config file's JSON Schema. */
 const Fields = Schema.Struct({

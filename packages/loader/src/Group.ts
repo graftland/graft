@@ -25,7 +25,7 @@ import {
 } from "effect"
 import { equalConfig } from "./internal/equalConfig"
 import { PendingRefreshes, track } from "./internal/pending"
-import { Entry, resolveEnv, type CyclicConfig } from "./Entry"
+import { CurrentId, Entry, resolveEnv, type CyclicConfig } from "./Entry"
 import { ModuleResolver } from "./ModuleResolver"
 import * as Intercept from "./Intercept"
 import { GroupEntries, validateGroup, type InvalidOperation } from "./Tree"
@@ -328,7 +328,12 @@ export const Group: Plugin.Plugin<
 										refreshEntry,
 									)
 								: plugin
-							const fork = yield* Graft.plugin(target, input, { intercept })
+							const fork = yield* Graft.plugin(target, input, {
+								intercept: [
+									...intercept,
+									Graft.intercept(CurrentId, () => Option.some(entry.id)),
+								],
+							})
 							const update = yield* updateTarget(
 								fork,
 								input,
