@@ -82,7 +82,7 @@ export interface Runtime {
 
 /** Maps a service key to the realm it resolves in. Absent keys use the root realm. */
 export const Realms = Context.Reference<HashMap.HashMap<string, string>>(
-	"@nmnmcc/graft/Realms",
+	"@graftland/graft/Realms",
 	{
 		defaultValue: () => HashMap.empty(),
 	},

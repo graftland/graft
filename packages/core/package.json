@@ -1,12 +1,12 @@
 {
-	"name": "@nmnmcc/graft",
+	"name": "@graftland/graft",
 	"version": "0.0.0",
 	"type": "module",
-	"description": "A plugin framework built on Effect",
+	"description": "A plugin framework built on Effect: plugins, forks, services, isolation, events and logs",
 	"license": "Apache-2.0",
 	"repository": {
 		"type": "git",
-		"url": "git+https://github.com/nmnmcc/graft.git",
+		"url": "git+https://github.com/graftland/graft.git",
 		"directory": "packages/core"
 	},
 	"sideEffects": false,

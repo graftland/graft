@@ -19,7 +19,7 @@ import {
 import { Graft } from "./Graft"
 import { Realms, realmOf, type Handler } from "./internal/runtime"
 
-const TypeId = "~@nmnmcc/graft/Event"
+const TypeId = "~@graftland/graft/Event"
 
 export interface Event<
 	in out Args extends ReadonlyArray<unknown>,
@@ -69,7 +69,7 @@ export interface HandlerOptions {
  * handler was registered in, so it can read any service or reference there.
  */
 const Filter = Context.Reference<(owner: Context.Context<never>) => boolean>(
-	"@nmnmcc/graft/Event/Filter",
+	"@graftland/graft/Event/Filter",
 	{
 		defaultValue: () => () => true,
 	},

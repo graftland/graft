@@ -1,0 +1,78 @@
+---
+title: Graft
+description:
+  A plugin framework built on Effect. Load, replace and unload plugins in a
+  running process.
+---
+
+import { Card, CardGrid } from "@astrojs/starlight/components"
+
+Graft runs an application as a tree of plugins. Each plugin can publish
+services, depend on services from other plugins, and be loaded, reconfigured,
+replaced or unloaded while the process keeps running. When a plugin goes away,
+everything that depends on it stops first, and then its own resources are
+released.
+
+Graft is built on [Effect](https://effect.website). A plugin is an Effect that
+runs in a `Scope`, a service is an Effect `Context` key, and a failure keeps its
+full `Cause`. Graft adds only what Effect does not have: services that come and
+go at run time, the plugin tree, events, config files and hot reload.
+
+```ts
+import { Graft, Plugin } from "@graftland/graft"
+import { Context, Effect, Schema } from "effect"
+
+class Greeter extends Context.Service<
+	Greeter,
+	{ readonly greet: (name: string) => Effect.Effect<void> }
+>()("app/Greeter") {}
+
+// Publishes a Greeter while it is loaded.
+const greeter = Plugin.make({
+	name: "greeter",
+	config: Schema.Struct({ greeting: Schema.String }),
+	apply: ({ greeting }) =>
+		Graft.provide(Greeter, {
+			greet: (name) => Effect.log(`${greeting}, ${name}!`),
+		}),
+})
+
+// Starts once a Greeter exists, and stops before it goes away.
+const hello = Plugin.make({
+	name: "hello",
+	inject: [Greeter],
+	apply: () => Effect.flatMap(Greeter, (greeter) => greeter.greet("world")),
+})
+```
+
+<CardGrid>
+	<Card title="Get started" icon="rocket">
+		Create a project and run it with hot reload in the
+		[quickstart](quickstart/).
+	</Card>
+	<Card title="Write plugins" icon="puzzle">
+		[Plugins](plugins/) declare what they need, decode their config, and own
+		their resources.
+	</Card>
+	<Card title="Share services" icon="random">
+		[Services](services/) are published and withdrawn at run time, in a safe
+		order.
+	</Card>
+	<Card title="Coming from cordis?" icon="open-book">
+		See [how cordis concepts map to Graft](cordis/).
+	</Card>
+</CardGrid>
+
+## Packages
+
+| Package                      | What it does                                                                              |
+| ---------------------------- | ----------------------------------------------------------------------------------------- |
+| `@graftland/graft`           | A plugin framework built on Effect: plugins, forks, services, isolation, events and logs. |
+| `@graftland/loader`          | Loads plugins from a list of entries or a YAML config file.                               |
+| `@graftland/hmr`             | Reloads plugin modules on Node.js without restarting the process.                         |
+| `@graftland/cli`             | The `graft` command: `start`, `create`, `add` and `remove`.                               |
+| `@graftland/create`          | Generates a new Graft project. `graft create` uses it.                                    |
+| `@graftland/package-manager` | Installs dependencies with npm, pnpm or Yarn, and rolls back on failure.                  |
+
+All packages are released together with the same version, and need `effect`
+4.1.2.

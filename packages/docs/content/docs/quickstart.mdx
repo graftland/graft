@@ -1,0 +1,88 @@
+---
+title: Quickstart
+description: Create a Graft project, run it, and change it while it runs.
+---
+
+import { Steps } from "@astrojs/starlight/components"
+
+You need Node.js 22.15 or later. Hot reload uses Node's `module.registerHooks`,
+which older versions do not have.
+
+<Steps>
+
+1. Create a project and install its dependencies:
+
+   ```sh
+   npx @graftland/cli create my-app --install
+   cd my-app
+   ```
+
+   The project has three files besides `package.json`:
+
+   | File         | What it is                                       |
+   | ------------ | ------------------------------------------------ |
+   | `graft.yml`  | The config file: which plugins to load, and how. |
+   | `hello.mjs`  | An example plugin.                               |
+   | `.gitignore` | Ignores `node_modules` and `.env`.               |
+
+2. Start the application and watch for changes:
+
+   ```sh
+   npx graft start --watch
+   ```
+
+   The `hello` plugin logs `Hello from Graft!`. The process keeps running until
+   you press <kbd>Ctrl</kbd>+<kbd>C</kbd>, which unloads every plugin.
+
+3. Change the config while it runs. Open `graft.yml` and change the message:
+
+   ```yaml
+   - id: hello
+     name: ./hello.mjs
+     config:
+       message: Hello again!
+   ```
+
+   When you save, Graft unloads `hello` and loads it again with the new message.
+   You see `Hello plugin stopped`, then `Hello again!`.
+
+4. Change the code while it runs. Edit `hello.mjs`, for example to log the
+   message twice, and save. Graft imports the new version of the module and
+   replaces the running plugin with it. If the new code fails to import, the old
+   version keeps running and the error is logged.
+
+</Steps>
+
+## The example plugin
+
+```js title="hello.mjs"
+import { Plugin } from "@graftland/graft"
+import { Effect, Schema } from "effect"
+
+// Module evaluation only defines the plugin; its activation owns all resources.
+export default Plugin.make({
+	name: "hello",
+	config: Schema.Struct({ message: Schema.String }),
+	apply: ({ message }) =>
+		Effect.acquireRelease(Effect.logInfo(message), () =>
+			Effect.logInfo("Hello plugin stopped"),
+		),
+})
+```
+
+A plugin module exports its plugin as the default export, or as an export named
+`plugin`. Importing the module must not start anything: open connections, timers
+and servers inside `apply`, so that Graft can release them. See
+[Plugins](../plugins/).
+
+## Add a plugin from npm
+
+```sh
+npx graft add graft-plugin-review
+```
+
+`graft add` installs packages with the project's package manager. If installing
+fails, it puts `package.json` and the lockfile back as they were. Then add an
+entry for the plugin to `graft.yml`. Its `name` can be the short name `review`,
+which is looked up as `review`, `@graftland/plugin-review` and
+`graft-plugin-review`, in that order. See [Config file](../config-file/).

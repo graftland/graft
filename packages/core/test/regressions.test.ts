@@ -19,10 +19,10 @@ import { Graft, Plugin } from "../src/index.ts"
 import { reach, run } from "./utils.ts"
 
 class Service extends Context.Service<Service, string>()(
-	"@nmnmcc/graft/test/regressions.test/Service",
+	"@graftland/graft/test/regressions.test/Service",
 ) {}
 class Other extends Context.Service<Other, string>()(
-	"@nmnmcc/graft/test/regressions.test/Other",
+	"@graftland/graft/test/regressions.test/Other",
 ) {}
 const settle = Effect.forEach(Arr.range(1, 50), () => Effect.yieldNow, {
 	discard: true,

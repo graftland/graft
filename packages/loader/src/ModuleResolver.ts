@@ -1,7 +1,7 @@
 /**
  * Turns the `name` of an entry into a plugin.
  */
-import { Plugin } from "@nmnmcc/graft"
+import { Plugin } from "@graftland/graft"
 import {
 	Array as Arr,
 	Context,
@@ -44,7 +44,7 @@ export class ModuleResolver extends Context.Service<
 			name: string,
 		) => Effect.Effect<Plugin.Plugin, ModuleNotFound | ModuleInvalid>
 	}
->()("@nmnmcc/graft-loader/ModuleResolver") {}
+>()("@graftland/loader/ModuleResolver") {}
 
 const isPath = (name: string) =>
 	Str.startsWith(".")(name) || Str.startsWith("/")(name)
@@ -53,7 +53,7 @@ const isPath = (name: string) =>
 export const candidates = (name: string): ReadonlyArray<string> =>
 	isPath(name) || Str.includes(":")(name) || Str.startsWith("@")(name)
 		? [name]
-		: [name, `@nmnmcc/graft-plugin-${name}`, `graft-plugin-${name}`]
+		: [name, `@graftland/plugin-${name}`, `graft-plugin-${name}`]
 
 /** An error followed by its causes, outermost first. */
 const causes = (error: unknown, depth = 0): ReadonlyArray<unknown> =>

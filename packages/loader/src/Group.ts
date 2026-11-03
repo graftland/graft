@@ -3,7 +3,7 @@
  * changes: untouched entries keep running, configuration changes are applied
  * through `Fork.update`, and anything else is unloaded and loaded again.
  */
-import { Graft, Plugin, type Fork } from "@nmnmcc/graft"
+import { Graft, Plugin, type Fork } from "@graftland/graft"
 import {
 	Array as Arr,
 	Context,

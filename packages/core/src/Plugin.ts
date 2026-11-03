@@ -7,7 +7,7 @@ import type { Context, Schedule, Scope } from "effect"
 import { Array as Arr, Effect, Layer, Option, Predicate, Schema } from "effect"
 import { provide, type Graft, type ServiceConflict } from "./Graft"
 
-const TypeId = "~@nmnmcc/graft/Plugin"
+const TypeId = "~@graftland/graft/Plugin"
 
 /**
  * Marks a dependency as optional: the plugin starts without it and restarts

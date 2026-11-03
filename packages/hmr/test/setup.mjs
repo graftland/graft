@@ -8,7 +8,7 @@ export default function setup() {
 		format: "esm",
 		platform: "node",
 		dts: false,
-		deps: { alwaysBundle: ["@nmnmcc/graft"], neverBundle: ["effect"] },
+		deps: { alwaysBundle: ["@graftland/graft"], neverBundle: ["effect"] },
 		inputOptions: { resolve: { conditionNames: ["source", "import", "node"] } },
 	}).then(() => undefined)
 }

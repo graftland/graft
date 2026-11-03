@@ -3,7 +3,7 @@
  * formatting and comments preserved, and edits made to the file by hand are
  * picked up while the loader runs.
  */
-import { Graft, Plugin } from "@nmnmcc/graft"
+import { Graft, Plugin } from "@graftland/graft"
 import type { PlatformError } from "effect"
 import {
 	Array as Arr,

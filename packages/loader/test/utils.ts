@@ -1,6 +1,6 @@
 import { assert } from "@effect/vitest"
 import { NodeServices } from "@effect/platform-node"
-import { Graft, Plugin } from "@nmnmcc/graft"
+import { Graft, Plugin } from "@graftland/graft"
 import {
 	Array as Arr,
 	ConfigProvider,

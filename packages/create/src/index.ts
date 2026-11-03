@@ -15,7 +15,11 @@ export interface Options {
 	readonly name?: string
 	/** An exact packageManager declaration, such as pnpm@9.15.9. */
 	readonly packageManager?: string
-	/** Override these for unpublished releases or local development. */
+	/**
+	 * Graft and its CLI default to this package's own version, since every
+	 * Graft package is released with the same one. Override these for local
+	 * development.
+	 */
 	readonly versions?: {
 		readonly graft?: string
 		readonly cli?: string
@@ -39,7 +43,24 @@ const encodeJson = Schema.encodeEffect(
 		space: 2,
 	}),
 )
-const plugin = `import { Plugin } from "@nmnmcc/graft"
+const Manifest = Schema.fromJsonString(
+	Schema.Struct({ version: Schema.String }),
+)
+
+/** The version in this package's own manifest, read when a project is created. */
+const ownVersion = Effect.gen(function* () {
+	const fs = yield* FileSystem.FileSystem
+	const path = yield* Path.Path
+	// A module loaded from disk always has a file URL.
+	const file = yield* path
+		.fromFileUrl(new URL("../package.json", import.meta.url))
+		.pipe(Effect.orDie)
+	const text = yield* fs.readFileString(file)
+	const manifest = yield* Schema.decodeEffect(Manifest)(text)
+	return manifest.version
+})
+
+const plugin = `import { Plugin } from "@graftland/graft"
 import { Effect, Schema } from "effect"
 
 // Module evaluation only defines the plugin; its activation owns all resources.
@@ -91,6 +112,7 @@ export const create = (
 						message: "The target must be an empty directory or a new path",
 					})
 			}
+			const version = yield* ownVersion
 			const manifest = yield* encodeJson({
 				name,
 				version: "0.0.0",
@@ -101,8 +123,8 @@ export const create = (
 					: { packageManager: options.packageManager }),
 				scripts: { start: "graft start" },
 				dependencies: {
-					"@nmnmcc/graft": options.versions?.graft ?? "0.0.0",
-					"@nmnmcc/graft-cli": options.versions?.cli ?? "0.0.0",
+					"@graftland/graft": options.versions?.graft ?? version,
+					"@graftland/cli": options.versions?.cli ?? version,
 					effect: options.versions?.effect ?? "4.1.2",
 				},
 			})

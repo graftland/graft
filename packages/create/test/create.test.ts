@@ -1,6 +1,6 @@
 import { NodeServices } from "@effect/platform-node"
 import { assert, describe, it } from "@effect/vitest"
-import { Entry } from "@nmnmcc/graft-loader"
+import { Entry } from "@graftland/loader"
 import { Effect, Exit, FileSystem, Path, Schema } from "effect"
 import type { Scope } from "effect"
 import { parse } from "yaml"
@@ -47,8 +47,8 @@ describe("create", () => {
 				packageManager: "pnpm@9.15.9",
 				scripts: { start: "graft start" },
 				dependencies: {
-					"@nmnmcc/graft": "0.0.0",
-					"@nmnmcc/graft-cli": "0.0.0",
+					"@graftland/graft": "0.0.0",
+					"@graftland/cli": "0.0.0",
 					effect: "4.1.2",
 				},
 			})
@@ -80,7 +80,10 @@ describe("create", () => {
 					),
 				)
 			assert.strictEqual(manifest.name, "@example/app")
-			assert.strictEqual(manifest.dependencies["@nmnmcc/graft"], "file:../core")
+			assert.strictEqual(
+				manifest.dependencies["@graftland/graft"],
+				"file:../core",
+			)
 		}).pipe(run),
 	)
 	it.effect("refuses nonempty targets without touching their contents", () =>

@@ -8,16 +8,16 @@ import {
 	Deferred,
 	Effect,
 	Exit,
-	Fiber,
 	FileSystem,
 	Option,
 	Path,
 	Predicate,
+	Ref,
 	Schema,
 	Stream,
 	String as Str,
 } from "effect"
-import type { Graft as GraftType, Plugin as PluginType } from "@nmnmcc/graft"
+import type { Graft as GraftType, Plugin as PluginType } from "@graftland/graft"
 
 const runtimeUrl = new URL("../.cache/integration/runtime.mjs", import.meta.url)
 const { Hmr, Graft } = createRequire(import.meta.url)(
@@ -265,18 +265,24 @@ module.exports = Plugin.make({ name: 'commonjs', apply: () => Effect.void });
 			const plugin = yield* load("./a.mjs")
 			yield* Graft.plugin(plugin)
 			const ready = yield* Deferred.make<void>()
-			const watcher = yield* hmr
+			const results = yield* Ref.make<ReadonlyArray<string>>([])
+			// Events for the files written above may still arrive after the watcher is
+			// ready, so wait for the new code to run rather than for the first reload.
+			yield* hmr
 				.watch([directory], {
 					onReady: () => Deferred.doneUnsafe(ready, Exit.void),
 				})
-				.pipe(Stream.take(1), Stream.runCollect, Effect.forkScoped)
+				.pipe(
+					Stream.runForEach((result) =>
+						Ref.update(results, Arr.append(result._tag)),
+					),
+					Effect.forkScoped,
+				)
 			yield* Deferred.await(ready)
 			yield* write("dependency.mjs", "export const value = 2")
-			const results = yield* Fiber.join(watcher).pipe(
-				Effect.timeout("5 seconds"),
-			)
-			assert.strictEqual(results[0]?._tag, "Reloaded")
 			yield* reach(["a-2"])
+			const tags = yield* Ref.get(results)
+			assert.include(tags, "Reloaded")
 		}).pipe(run),
 	)
 

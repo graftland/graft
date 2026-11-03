@@ -1,12 +1,12 @@
 {
-	"name": "@nmnmcc/graft-create",
+	"name": "@graftland/create",
 	"version": "0.0.0",
 	"type": "module",
-	"description": "Scaffolds new Graft projects",
+	"description": "Generates a new Graft project. graft create uses it",
 	"license": "Apache-2.0",
 	"repository": {
 		"type": "git",
-		"url": "git+https://github.com/nmnmcc/graft.git",
+		"url": "git+https://github.com/graftland/graft.git",
 		"directory": "packages/create"
 	},
 	"sideEffects": false,
@@ -33,8 +33,8 @@
 		"effect": "4.1.2",
 		"vitest": "5.1.0",
 		"@effect/platform-node": "4.1.2",
-		"@nmnmcc/graft-loader": "workspace:*",
-		"@nmnmcc/graft": "workspace:*",
+		"@graftland/loader": "workspace:*",
+		"@graftland/graft": "workspace:*",
 		"yaml": "2.9.1"
 	},
 	"dependencies": {},

@@ -1,0 +1,17 @@
+# @graftland/create
+
+Generates a new Graft project. `graft create` uses it.
+
+```sh
+npm install @graftland/create effect
+```
+
+`create` writes a `package.json`, a `graft.yml`, an example plugin and a
+`.gitignore` into an empty or new directory.
+
+## Documentation
+
+- [Command line](https://graftland.github.io/graft/cli/)
+
+Part of [Graft](https://github.com/graftland/graft). Licensed under
+[Apache 2.0](https://github.com/graftland/graft/blob/main/LICENSE).

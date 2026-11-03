@@ -1,10 +1,11 @@
 /**
  * Creating projects and changing their dependencies.
  */
-import * as Create from "@nmnmcc/graft-create"
-import * as PackageManager from "@nmnmcc/graft-package-manager"
+import * as Create from "@graftland/create"
+import * as PackageManager from "@graftland/package-manager"
 import {
 	Array as Arr,
+	Config,
 	Effect,
 	Option,
 	Record,
@@ -34,7 +35,11 @@ const install = (
 ) =>
 	Effect.gen(function* () {
 		const decoded = yield* Schema.decodeEffect(PackageManager.Changes)(changes)
-		const manager = yield* PackageManager.make({ directory })
+		// Set by npm, pnpm and Yarn when they run graft, such as through `pnpm dlx`.
+		const userAgent = yield* Config.String("npm_config_user_agent").pipe(
+			Config.withDefault(""),
+		)
+		const manager = yield* PackageManager.make({ directory, userAgent })
 		const result = yield* manager.install(decoded)
 		yield* report(result)
 	})

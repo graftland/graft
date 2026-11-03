@@ -3,7 +3,7 @@
  * through a store, which may persist them, and the running tree is
  * reconciled to match.
  */
-import { Graft, Plugin, type Fork } from "@nmnmcc/graft"
+import { Graft, Plugin, type Fork } from "@graftland/graft"
 import {
 	Array as Arr,
 	Context,
@@ -51,7 +51,7 @@ export class Loader extends Context.Service<
 			id: string,
 		) => Effect.Effect<void, EntryNotFound | PlatformError.PlatformError>
 	}
->()("@nmnmcc/graft-loader/Loader") {}
+>()("@graftland/loader/Loader") {}
 
 /** Where the entries live. */
 export interface Store {

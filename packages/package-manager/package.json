@@ -1,12 +1,12 @@
 {
-	"name": "@nmnmcc/graft-package-manager",
+	"name": "@graftland/package-manager",
 	"version": "0.0.0",
 	"type": "module",
-	"description": "Package installation with backup and rollback for Graft projects",
+	"description": "Installs dependencies with npm, pnpm or Yarn, and rolls back on failure",
 	"license": "Apache-2.0",
 	"repository": {
 		"type": "git",
-		"url": "git+https://github.com/nmnmcc/graft.git",
+		"url": "git+https://github.com/graftland/graft.git",
 		"directory": "packages/package-manager"
 	},
 	"sideEffects": false,

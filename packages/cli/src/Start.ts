@@ -2,9 +2,9 @@
  * Runs a Graft application from its config file.
  */
 import { NodeServices } from "@effect/platform-node"
-import { Graft, Plugin } from "@nmnmcc/graft"
-import * as Hmr from "@nmnmcc/graft-hmr"
-import { Include, Loader, ModuleResolver } from "@nmnmcc/graft-loader"
+import { Graft, Plugin } from "@graftland/graft"
+import * as Hmr from "@graftland/hmr"
+import { Include, Loader, ModuleResolver } from "@graftland/loader"
 import type { PlatformError } from "effect"
 import {
 	Array as Arr,

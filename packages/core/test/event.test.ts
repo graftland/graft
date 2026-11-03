@@ -19,12 +19,12 @@ const Command = Event.make<[name: string], Option.Option<string>>("command")
 const Render = Event.middleware<string, string>("render")
 
 const Channel = Context.Reference<string>(
-	"@nmnmcc/graft/test/event.test/Channel",
+	"@graftland/graft/test/event.test/Channel",
 	{ defaultValue: () => "general" },
 )
 
 class Prefix extends Context.Service<Prefix, string>()(
-	"@nmnmcc/graft/test/event.test/Prefix",
+	"@graftland/graft/test/event.test/Prefix",
 ) {}
 
 describe("events", () => {

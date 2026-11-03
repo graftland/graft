@@ -16,10 +16,10 @@ import { Graft, Fork, Plugin } from "../src/index.ts"
 import { makeJournal, reach, run, type Journal } from "./utils.ts"
 
 class Database extends Context.Service<Database, { readonly name: string }>()(
-	"@nmnmcc/graft/test/lifecycle.test/Database",
+	"@graftland/graft/test/lifecycle.test/Database",
 ) {}
 class Cache extends Context.Service<Cache, { readonly name: string }>()(
-	"@nmnmcc/graft/test/lifecycle.test/Cache",
+	"@graftland/graft/test/lifecycle.test/Cache",
 ) {}
 
 describe("lifecycle", () => {
@@ -246,7 +246,7 @@ describe("services", () => {
 			assert.deepStrictEqual(
 				state._tag === "Some" && state.value,
 				Fork.ForkState.Pending({
-					missing: ["@nmnmcc/graft/test/lifecycle.test/Database"],
+					missing: ["@graftland/graft/test/lifecycle.test/Database"],
 				}),
 			)
 			yield* Graft.plugin(provider(journal))

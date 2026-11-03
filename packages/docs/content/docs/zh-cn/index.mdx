@@ -1,0 +1,68 @@
+---
+title: Graft
+description: 基于 Effect 的插件框架，可在进程运行期间加载、替换和卸载插件。
+---
+
+import { Card, CardGrid } from "@astrojs/starlight/components"
+
+Graft 用插件树组织应用。每个插件都可以发布服务、依赖其他插件的服务，也可以在进程运行期间加载、重新配置、替换或卸载。卸载插件时，Graft 会先停止所有依赖它的插件，再释放它自身的资源。
+
+Graft 基于 [Effect](https://effect.website) 构建。插件是在 `Scope`
+中运行的 Effect，服务使用 Effect 的 `Context` 键，失败时保留完整的
+`Cause`。Graft 只补充 Effect 尚未提供的能力：可在运行期间发布和撤回的服务、插件树、事件、配置文件和热重载。
+
+```ts
+import { Graft, Plugin } from "@graftland/graft"
+import { Context, Effect, Schema } from "effect"
+
+class Greeter extends Context.Service<
+	Greeter,
+	{ readonly greet: (name: string) => Effect.Effect<void> }
+>()("app/Greeter") {}
+
+// Publishes a Greeter while it is loaded.
+const greeter = Plugin.make({
+	name: "greeter",
+	config: Schema.Struct({ greeting: Schema.String }),
+	apply: ({ greeting }) =>
+		Graft.provide(Greeter, {
+			greet: (name) => Effect.log(`${greeting}, ${name}!`),
+		}),
+})
+
+// Starts once a Greeter exists, and stops before it goes away.
+const hello = Plugin.make({
+	name: "hello",
+	inject: [Greeter],
+	apply: () => Effect.flatMap(Greeter, (greeter) => greeter.greet("world")),
+})
+```
+
+<CardGrid>
+	<Card title="快速上手" icon="rocket">
+		按照[快速开始](quickstart/)创建项目，并启用热重载运行。
+	</Card>
+	<Card title="编写插件" icon="puzzle">
+		[插件](plugins/)声明依赖、解码配置，并管理自身的资源。
+	</Card>
+	<Card title="共享服务" icon="random">
+		[服务](services/)可以在运行期间发布和撤回，Graft
+		会按安全的顺序完成这些操作。
+	</Card>
+	<Card title="从 cordis 迁移" icon="open-book">
+		了解 [cordis 的概念在 Graft 中如何对应](cordis/)。
+	</Card>
+</CardGrid>
+
+## 包
+
+| 包                           | 功能                                                         |
+| ---------------------------- | ------------------------------------------------------------ |
+| `@graftland/graft`           | 基于 Effect 的插件框架：插件、fork、服务、隔离、事件和日志。 |
+| `@graftland/loader`          | 从配置项列表或 YAML 配置文件加载插件。                       |
+| `@graftland/hmr`             | 在 Node.js 中重载插件模块，无需重启进程。                    |
+| `@graftland/cli`             | 提供 `graft` 命令：`start`、`create`、`add` 和 `remove`。    |
+| `@graftland/create`          | 生成新的 Graft 项目，由 `graft create` 调用。                |
+| `@graftland/package-manager` | 使用 npm、pnpm 或 Yarn 安装依赖，失败时回滚。                |
+
+所有包使用相同的版本号一同发布，并依赖 `effect` 4.1.2。

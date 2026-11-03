@@ -6,10 +6,10 @@ import { makeJournal, reach, run } from "./utils.ts"
 class Greeter extends Context.Service<
 	Greeter,
 	{ readonly greet: Effect.Effect<string> }
->()("@nmnmcc/graft/test/runtime.test/Greeter") {}
+>()("@graftland/graft/test/runtime.test/Greeter") {}
 
 const Punctuation = Context.Reference<string>(
-	"@nmnmcc/graft/test/runtime.test/Punctuation",
+	"@graftland/graft/test/runtime.test/Punctuation",
 	{
 		defaultValue: () => ".",
 	},
@@ -153,10 +153,10 @@ describe("runtime", () => {
 		() =>
 			Effect.gen(function* () {
 				class Left extends Context.Service<Left, {}>()(
-					"@nmnmcc/graft/test/runtime.test/Left",
+					"@graftland/graft/test/runtime.test/Left",
 				) {}
 				class Right extends Context.Service<Right, {}>()(
-					"@nmnmcc/graft/test/runtime.test/Right",
+					"@graftland/graft/test/runtime.test/Right",
 				) {}
 				const left = Plugin.make({
 					name: "left",

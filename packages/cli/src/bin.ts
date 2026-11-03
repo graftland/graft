@@ -3,7 +3,7 @@
  * The `graft` executable. Running this module starts the program.
  */
 import { NodeRuntime, NodeServices } from "@effect/platform-node"
-import { Effect } from "effect"
+import { Effect, FileSystem, Path, Schema } from "effect"
 import { Argument, Command, Flag } from "effect/cli"
 import * as Manage from "./Manage"
 import * as Start from "./Start"
@@ -69,7 +69,17 @@ const graft = Command.make("graft").pipe(
 	Command.withSubcommands([start, create, add, remove]),
 )
 
-Command.run(graft, { version: "0.0.0" }).pipe(
-	Effect.provide(NodeServices.layer),
-	NodeRuntime.runMain,
+const Manifest = Schema.fromJsonString(
+	Schema.Struct({ version: Schema.String }),
 )
+
+Effect.gen(function* () {
+	const fs = yield* FileSystem.FileSystem
+	const path = yield* Path.Path
+	const file = yield* path.fromFileUrl(
+		new URL("../package.json", import.meta.url),
+	)
+	const text = yield* fs.readFileString(file)
+	const { version } = yield* Schema.decodeEffect(Manifest)(text)
+	return yield* Command.run(graft, { version })
+}).pipe(Effect.provide(NodeServices.layer), NodeRuntime.runMain)

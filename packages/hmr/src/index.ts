@@ -1,7 +1,7 @@
 /**
  * Hot module replacement for Graft plugins on Node.js.
  */
-import { Graft, Plugin } from "@nmnmcc/graft"
+import { Graft, Plugin } from "@graftland/graft"
 import {
 	Array as Arr,
 	Cause,

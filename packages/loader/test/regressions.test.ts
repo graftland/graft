@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest"
-import { Graft, Plugin } from "@nmnmcc/graft"
+import { Graft, Plugin } from "@graftland/graft"
 import { Effect, Exit, FileSystem, Layer, Path, Ref } from "effect"
 import { Entry, Include, Loader, ModuleResolver } from "../src/index.ts"
 import { echo, loaderService, makeJournal, run } from "./utils.ts"

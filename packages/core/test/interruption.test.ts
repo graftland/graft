@@ -18,7 +18,7 @@ import type { Spec } from "../src/internal/runtime.ts"
 import { run } from "./utils.ts"
 
 class Service extends Context.Service<Service, string>()(
-	"@nmnmcc/graft/test/interruption.test/Service",
+	"@graftland/graft/test/interruption.test/Service",
 ) {}
 
 it.effect(

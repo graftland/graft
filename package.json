@@ -1,9 +1,9 @@
 {
-	"name": "@nmnmcc/graft-workspace",
+	"name": "@graftland/workspace",
 	"license": "Apache-2.0",
 	"repository": {
 		"type": "git",
-		"url": "git+https://github.com/nmnmcc/graft.git"
+		"url": "git+https://github.com/graftland/graft.git"
 	},
 	"private": true,
 	"packageManager": "pnpm@9.15.9",
@@ -22,6 +22,9 @@
 		"build": "pnpm -r build",
 		"typecheck": "tsc -b",
 		"test": "vitest run",
-		"format": "treefmt"
+		"format": "treefmt",
+		"test:packages": "node --test scripts/packages.test.mjs",
+		"packages:pack": "node scripts/packages.mjs pack",
+		"packages:publish": "node scripts/packages.mjs publish"
 	}
 }

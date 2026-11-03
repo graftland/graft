@@ -44,7 +44,7 @@ import type { Plugin } from "./Plugin"
 export class Graft extends Context.Service<
 	Graft,
 	{ readonly runtime: Runtime; readonly activation: Activation }
->()("@nmnmcc/graft/Graft") {}
+>()("@graftland/graft/Graft") {}
 
 export class ServiceConflict extends Schema.TaggedError<
 	ServiceConflict,
@@ -165,7 +165,8 @@ export interface Intercept {
 
 export const intercept = <A>(
 	reference: Context.Reference<A>,
-	f: (outer: A) => A,
+	// The value type comes from the reference alone; a callback returning anything else is an error there.
+	f: (outer: A) => NoInfer<A>,
 ): Intercept => ({
 	apply: (effect) => Effect.updateService(effect, reference, f),
 })

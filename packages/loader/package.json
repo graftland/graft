@@ -1,12 +1,12 @@
 {
-	"name": "@nmnmcc/graft-loader",
+	"name": "@graftland/loader",
 	"version": "0.0.0",
 	"type": "module",
-	"description": "Config-file driven plugin loading for Graft",
+	"description": "Loads plugins from a list of entries or a YAML config file",
 	"license": "Apache-2.0",
 	"repository": {
 		"type": "git",
-		"url": "git+https://github.com/nmnmcc/graft.git",
+		"url": "git+https://github.com/graftland/graft.git",
 		"directory": "packages/loader"
 	},
 	"sideEffects": false,
@@ -35,7 +35,7 @@
 		"@effect/platform-node": "4.1.2"
 	},
 	"dependencies": {
-		"@nmnmcc/graft": "workspace:*",
+		"@graftland/graft": "workspace:*",
 		"yaml": "2.9.1"
 	},
 	"publishConfig": {
