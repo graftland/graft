@@ -8,6 +8,7 @@ import {
 	Fiber,
 	Layer,
 	Logger,
+	MutableRef,
 	Option,
 	Queue,
 	Ref,
@@ -20,37 +21,56 @@ import {
 import { RpcSerialization, RpcServer } from "effect/rpc"
 // @effect-diagnostics-next-line nodeBuiltinImport:off -- Node's extra inherited descriptor is the dedicated protocol output, separate from console output.
 import { createWriteStream } from "node:fs"
-import { UndeclaredFailure, type RunnerContract } from "./Contract"
-import { Control, type Event } from "./internal/control"
+import { UndeclaredFailure, fromModule, type RunnerContract } from "./Contract"
+import { Control, type Event, type Log } from "./internal/control"
 
-/** Run from an executable bootstrap; importing this module performs no I/O. */
+/** Import a contract in the runner installation; importing this module performs no I/O. */
+export const load = (specifier: string) =>
+	Effect.gen(function* () {
+		const module = yield* Effect.tryPromise({
+			try: () => import(specifier),
+			catch: (cause) => UndeclaredFailure.make({ original: cause }),
+		})
+		const contract = fromModule(module)
+		if (Option.isNone(contract))
+			return yield* Effect.die(
+				new Error(`No remote contract exported by ${specifier}`),
+			)
+		return contract.value
+	})
+
+/** One local execution unit, owned by the executable's scope. */
 export const run = (contract: RunnerContract) =>
 	Effect.scoped(
 		Effect.gen(function* () {
 			const eof = yield* Deferred.make<void>()
 			const events =
-				yield* Queue.unbounded<Effect.Effect<typeof Event.Type, never>>()
+				yield* Queue.bounded<Effect.Effect<typeof Event.Type, never>>(2)
+			const logs = yield* Queue.dropping<
+				Effect.Effect<typeof Log.Type>,
+				Cause.Done
+			>(128)
+			// Logger callbacks are synchronous, so the loss counter uses MutableRef.
+			const dropped = MutableRef.make(0)
 			const instance = yield* Ref.make(
 				Option.none<Effect.Effect<void, unknown>>(),
 			)
-			const instanceScope = yield* Scope.make()
-			yield* Effect.addFinalizer((exit) => Scope.close(instanceScope, exit))
+			const scope = yield* Effect.scope
+			const instanceScope = yield* Scope.fork(scope)
 			const encode = (cause: Cause.Cause<unknown>) =>
 				contract.encodeCause(cause).pipe(Effect.orDie)
 			const logger = Logger.make((entry) => {
 				const annotations = entry.fiber.getRef(References.CurrentLogAnnotations)
-				Queue.offerUnsafe(
-					events,
+				const accepted = Queue.offerUnsafe(
+					logs,
 					Effect.map(encode(entry.cause), (cause) => ({
-						_tag: "Log",
-						entry: {
-							level: entry.logLevel,
-							message: entry.message,
-							cause,
-							annotations,
-						},
+						level: entry.logLevel,
+						message: entry.message,
+						cause,
+						annotations,
 					})),
 				)
+				if (!accepted) MutableRef.increment(dropped)
 			})
 			return yield* Effect.gen(function* () {
 				const handlers = Control.toLayer({
@@ -124,6 +144,22 @@ export const run = (contract: RunnerContract) =>
 						}),
 					Events: () =>
 						Stream.fromQueue(events).pipe(Stream.mapEffect((event) => event)),
+					Logs: () =>
+						Stream.fromQueue(logs).pipe(
+							Stream.mapEffect((entry) =>
+								Effect.map(entry, (entry) => ({
+									_tag: "Log" as const,
+									entry,
+									dropped: MutableRef.get(dropped),
+								})),
+							),
+							Stream.concat(
+								Stream.sync(() => ({
+									_tag: "LogsEnded" as const,
+									dropped: MutableRef.get(dropped),
+								})),
+							),
+						),
 					Dispose: () =>
 						Effect.gen(function* () {
 							const current = yield* Ref.get(instance)
@@ -132,6 +168,7 @@ export const run = (contract: RunnerContract) =>
 								Option.isSome(current) ? current.value : Effect.void,
 							)
 							yield* Queue.offer(events, Effect.succeed({ _tag: "Stopped" }))
+							yield* Queue.end(logs)
 							return Exit.isFailure(exit)
 								? ({
 										_tag: "Failure",
@@ -163,8 +200,8 @@ export const run = (contract: RunnerContract) =>
 						}),
 					stderr: stdio.stderr,
 				})
-				// Stdio's writer finalizer interrupts its construction fiber. Give that fiber
-				// its own scope so normal protocol shutdown cannot interrupt the runner root.
+				// Stdio's writer finalizer interrupts its construction fiber. Construct it
+				// in a separate scoped fiber so shutdown cannot interrupt the runner root.
 				const ready = yield* Deferred.make<RpcServer.Protocol["Service"]>()
 				const owner = yield* Effect.gen(function* () {
 					const protocol = yield* RpcServer.makeProtocolStdio.pipe(

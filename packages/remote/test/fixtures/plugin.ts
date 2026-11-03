@@ -32,11 +32,19 @@ export default Plugin.make({
 					yield* fs
 						.writeFileString(`${directory}/finalized-${pid}`, "complete")
 						.pipe(Effect.orDie)
+					if (mode === "flood") {
+						for (let index = 0; index < 4096; index++)
+							yield* Effect.logInfo("Finalizer flood", index)
+					}
 					yield* Effect.logInfo("Remote fixture finalized")
 					if (mode === "cleanup-fail")
 						return yield* Effect.die(new Error("Remote finalizer failed"))
 				}),
 			)
+			if (mode === "flood") {
+				for (let index = 0; index < 4096; index++)
+					yield* Effect.logInfo("Startup flood", index)
+			}
 			if (mode === "wait")
 				yield* fs.exists(`${directory}/activate`).pipe(
 					Effect.repeat({
@@ -62,7 +70,7 @@ export default Plugin.make({
 						Cause.die(new Error("Remote apply defect")),
 					),
 				)
-			if (mode === "background-fail")
+			if (mode === "background-fail" || (mode === "flood" && value === 2))
 				yield* Plugin.fork(
 					fs.exists(`${directory}/fail`).pipe(
 						Effect.repeat({

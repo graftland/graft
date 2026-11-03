@@ -1,4 +1,6 @@
-import { Cause, Effect, Schema } from "effect"
+import { Array, Cause, Effect, Predicate, Schema } from "effect"
+
+const TypeId = "~@graftland/remote/Contract"
 
 /** An undeclared failure still crosses the boundary, with its diagnostic value. */
 export class UndeclaredFailure extends Schema.TaggedError<
@@ -30,6 +32,7 @@ export const make = <
 	const declared = Schema.is(options.error)
 	return {
 		...options,
+		[TypeId]: TypeId,
 		encodeCause: (cause: Cause.Cause<unknown>) =>
 			Schema.encodeEffect(codec)(
 				Cause.map(cause, (error) =>
@@ -42,9 +45,23 @@ export const make = <
 
 /** The runner only needs encoding; the host retains the concrete error type. */
 export interface RunnerContract {
+	readonly [TypeId]: string
 	readonly name: string
 	readonly module: string
 	readonly encodeCause: (
 		cause: Cause.Cause<unknown>,
 	) => Effect.Effect<Schema.Json, Schema.SchemaError>
 }
+
+export const isContract = (value: unknown): value is RunnerContract =>
+	Predicate.hasProperty(value, TypeId) && value[TypeId] === TypeId
+
+/** A contract module exports either default or a named contract. */
+export const fromModule = (module: unknown) =>
+	Array.findFirst(
+		[
+			Predicate.hasProperty(module, "default") ? module.default : undefined,
+			Predicate.hasProperty(module, "contract") ? module.contract : undefined,
+		],
+		isContract,
+	)

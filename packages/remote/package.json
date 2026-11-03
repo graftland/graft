@@ -10,6 +10,10 @@
 			"source": "./src/index.ts",
 			"default": "./dist/index.js"
 		},
+		"./bin": {
+			"source": "./src/bin.ts",
+			"default": "./dist/bin.js"
+		},
 		"./Runner": {
 			"source": "./src/Runner.ts",
 			"default": "./dist/Runner.js"
@@ -35,8 +39,12 @@
 	"publishConfig": {
 		"exports": {
 			".": "./dist/index.js",
+			"./bin": "./dist/bin.js",
 			"./Runner": "./dist/Runner.js",
 			"./package.json": "./package.json"
 		}
+	},
+	"bin": {
+		"graft-remote": "./dist/bin.js"
 	}
 }

@@ -15,6 +15,7 @@ export const config = Schema.Struct({
 		"cleanup-fail",
 		"retry",
 		"background-fail",
+		"flood",
 	]),
 	value: Schema.Int,
 })

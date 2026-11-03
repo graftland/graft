@@ -43,6 +43,7 @@ const Response = Schema.Union([
 export const make = Effect.fnUntraced(function* (
 	child: ChildProcessSpawner.ChildProcessHandle,
 ) {
+	const scope = yield* Effect.scope
 	const failed = yield* Deferred.make<never, ProcessExited | TransportError>()
 	const stopping = yield* Ref.make(false)
 	const failures = yield* Ref.make<Cause.Cause<ProcessExited | TransportError>>(
@@ -50,6 +51,7 @@ export const make = Effect.fnUntraced(function* (
 	)
 	const outgoing = yield* Queue.bounded<Uint8Array, Cause.Done>(32)
 	const stderr = yield* Ref.make("")
+	const logRequest = yield* Ref.make<string | number | undefined>(undefined)
 	const record = (error: ProcessExited | TransportError) =>
 		Effect.gen(function* () {
 			yield* Ref.update(failures, (cause) =>
@@ -107,26 +109,43 @@ export const make = Effect.fnUntraced(function* (
 		supportsAck: true,
 		supportsTransferables: false,
 		run: (_id, receive) =>
-			child.getOutputFd(3).pipe(
-				Stream.runForEach((bytes) =>
-					Effect.gen(function* () {
-						const messages = yield* Effect.try({
-							try: () => parser.decode(bytes),
-							catch: (error) =>
-								TransportError.make({ cause: Cause.die(error) }),
-						}).pipe(Effect.orDie)
-						for (const message of messages) {
-							const decoded =
-								yield* Schema.decodeUnknownEffect(Response)(message)
-							yield* receive(decoded)
-						}
-					}),
-				),
-				Effect.catchCause((cause) => Effect.asVoid(report(cause))),
-				Effect.andThen(Effect.never),
-			),
+			Effect.gen(function* () {
+				// RpcClient.receive can wait for a stream consumer. Isolate the single
+				// Logs request so its ACK backpressure cannot block control responses.
+				const logs = yield* Queue.bounded<typeof Response.Type>(1)
+				yield* Stream.fromQueue(logs).pipe(
+					Stream.runForEach(receive),
+					Effect.tapCause(report),
+					Effect.forkIn(scope),
+				)
+				return yield* child.getOutputFd(3).pipe(
+					Stream.runForEach((bytes) =>
+						Effect.gen(function* () {
+							const messages = yield* Effect.try({
+								try: () => parser.decode(bytes),
+								catch: (error) =>
+									TransportError.make({ cause: Cause.die(error) }),
+							}).pipe(Effect.orDie)
+							for (const message of messages) {
+								const decoded =
+									yield* Schema.decodeUnknownEffect(Response)(message)
+								if (
+									(decoded._tag === "Chunk" || decoded._tag === "Exit") &&
+									decoded.requestId === (yield* Ref.get(logRequest))
+								)
+									yield* Queue.offer(logs, decoded)
+								else yield* receive(decoded)
+							}
+						}),
+					),
+					Effect.catchCause((cause) => Effect.asVoid(report(cause))),
+					Effect.andThen(Effect.never),
+				)
+			}),
 		send: (_id, message) =>
 			Effect.gen(function* () {
+				if (message._tag === "Request" && message.tag === "Logs")
+					yield* Ref.set(logRequest, message.id)
 				const encoded = yield* Effect.try({
 					try: () => parser.encode(message),
 					catch: (cause) =>

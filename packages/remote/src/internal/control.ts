@@ -24,12 +24,16 @@ export const Log = Schema.Struct({
 	),
 })
 export const Event = Schema.Union([
-	Schema.TaggedStruct("Log", { entry: Log }),
 	Schema.TaggedStruct("Failed", { cause: Schema.Json }),
 	Schema.TaggedStruct("Stopped", {}),
+])
+export const LogEvent = Schema.Union([
+	Schema.TaggedStruct("Log", { entry: Log, dropped: Schema.Int }),
+	Schema.TaggedStruct("LogsEnded", { dropped: Schema.Int }),
 ])
 export const Control = RpcGroup.make(
 	Rpc.make("Load", { payload: { input: Schema.Json }, success: Result }),
 	Rpc.make("Events", { success: Event, stream: true }),
+	Rpc.make("Logs", { success: LogEvent, stream: true }),
 	Rpc.make("Dispose", { success: Result }),
 )

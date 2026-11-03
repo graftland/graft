@@ -1,10 +1,7 @@
 import { Plugin } from "@graftland/graft"
-import { NodeServices } from "@effect/platform-node"
 import {
 	Array,
 	Cause,
-	Layer,
-	Context,
 	Deferred,
 	Effect,
 	Exit,
@@ -18,6 +15,8 @@ import type { Duration, Schedule, PlatformError } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import { RpcClient, type RpcClientError } from "effect/rpc"
 import process from "node:process"
+import { fileURLToPath } from "node:url"
+import { cleanupCause } from "./internal/cleanup"
 import type { ProcessExited, TransportError } from "./Errors"
 import * as Contract from "./Contract"
 import { Control } from "./internal/control"
@@ -26,8 +25,8 @@ export { Contract }
 export { ProcessExited, TransportError } from "./Errors"
 
 export interface Options {
-	/** Executable bootstrap importing its contract and running Runner.run(contract). */
-	readonly runner: string
+	/** Contract module exported as default or named `contract`, resolved in the runner installation. */
+	readonly contractModule: string
 	readonly retry?: Schedule.Schedule<unknown, unknown> | undefined
 	readonly shutdownTimeout?: Duration.Input | undefined
 }
@@ -59,14 +58,17 @@ export const plugin = <
 > =>
 	Plugin.make({
 		name: contract.name,
+		inject: [ChildProcessSpawner.ChildProcessSpawner],
 		config: Schema.toEncoded(contract.config),
 		retry: options.retry,
 		apply: (input) =>
 			Effect.gen(function* () {
 				const json = yield* Schema.decodeEffect(Schema.Json)(input)
+				yield* Schema.decodeEffect(contract.config)(input)
 				// Keep transport fibers alive until the process has exited, including forced cleanup.
-				const resources = yield* Scope.make()
-				const processScope = yield* Scope.make()
+				const activationScope = yield* Effect.scope
+				const resources = yield* Scope.fork(activationScope)
+				const processScope = yield* Scope.fork(activationScope)
 				const diagnostics = yield* Ref.make<
 					Effect.Effect<Cause.Cause<unknown>>
 				>(Effect.succeed(Cause.empty))
@@ -103,26 +105,28 @@ export const plugin = <
 								Exit.isFailure(closed) ? closed.cause : Cause.empty,
 							),
 						)
-						// Scope finalizers have no typed error channel; retain every reason as a nested cause.
-						if (cause.reasons.length > 0) return yield* Effect.die(cause)
+						// Finalizers cannot expose typed errors; preserve each reason at the top level.
+						if (cause.reasons.length > 0)
+							return yield* Effect.failCause(cleanupCause(cause))
 					}),
 				)
-				const node = yield* Layer.build(NodeServices.layer).pipe(
-					Scope.provide(resources),
-				)
-				const spawner = Context.get(
-					node,
-					ChildProcessSpawner.ChildProcessSpawner,
-				)
+				const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
 				const child = yield* spawner
 					.spawn(
-						ChildProcess.make(process.execPath, [options.runner], {
-							stdin: "pipe",
-							stdout: "pipe",
-							stderr: "pipe",
-							additionalFds: { fd3: { type: "output" } },
-							forceKillAfter: "1 second",
-						}),
+						ChildProcess.make(
+							process.execPath,
+							[
+								fileURLToPath(new URL("../dist/bin.js", import.meta.url)),
+								options.contractModule,
+							],
+							{
+								stdin: "pipe",
+								stdout: "pipe",
+								stderr: "pipe",
+								additionalFds: { fd3: { type: "output" } },
+								forceKillAfter: "1 second",
+							},
+						),
 					)
 					.pipe(Scope.provide(processScope))
 				const transport = yield* Transport.make(child).pipe(
@@ -157,6 +161,33 @@ export const plugin = <
 								yield* Deferred.failCause(remoteFailure, cause)
 								return
 							}
+						}),
+					),
+					race,
+					Effect.tapCause(transport.report),
+					Effect.forkIn(resources),
+				)
+				const logsEnded = yield* Deferred.make<void>()
+				const reportedDrops = yield* Ref.make(0)
+				yield* client.Logs().pipe(
+					Stream.runForEach((event) =>
+						Effect.gen(function* () {
+							const previous = yield* Ref.getAndSet(
+								reportedDrops,
+								event.dropped,
+							)
+							if (event.dropped > previous)
+								yield* Effect.logWarning("Remote logs were dropped").pipe(
+									Effect.annotateLogs({
+										"remote.pid": child.pid,
+										"remote.logs.dropped": event.dropped - previous,
+										"remote.logs.droppedTotal": event.dropped,
+									}),
+								)
+							if (event._tag === "LogsEnded") {
+								yield* Deferred.succeed(logsEnded, undefined)
+								return
+							}
 							const entry = event.entry
 							const cause = yield* contract.decodeCause(entry.cause)
 							yield* Effect.logWithLevel(
@@ -189,8 +220,9 @@ export const plugin = <
 								? yield* contract.decodeCause(disposed.cause)
 								: Cause.empty
 						yield* Ref.set(remoteCleanupCause, remoteCause)
-						// The event barrier follows the last finalizer log in the runner queue.
+						// Control completion never waits behind logs; separately drain the bounded log tail.
 						yield* race(Deferred.await(stopped))
+						yield* race(Deferred.await(logsEnded))
 						yield* Ref.set(transport.stopping, true)
 						yield* transport.end
 						const status = yield* Fiber.join(transport.exited)
