@@ -1,0 +1,41 @@
+{
+	"files": [],
+	"references": [
+		{
+			"path": "./packages/core"
+		},
+		{
+			"path": "./packages/core/tsconfig.test.json"
+		},
+		{
+			"path": "./packages/loader"
+		},
+		{
+			"path": "./packages/loader/tsconfig.test.json"
+		},
+		{
+			"path": "./packages/hmr"
+		},
+		{
+			"path": "./packages/hmr/tsconfig.test.json"
+		},
+		{
+			"path": "./packages/package-manager"
+		},
+		{
+			"path": "./packages/package-manager/tsconfig.test.json"
+		},
+		{
+			"path": "./packages/create"
+		},
+		{
+			"path": "./packages/create/tsconfig.test.json"
+		},
+		{
+			"path": "./packages/cli"
+		},
+		{
+			"path": "./packages/cli/tsconfig.test.json"
+		}
+	]
+}

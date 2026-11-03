@@ -1,0 +1,46 @@
+{
+	"name": "@nmnmcc/graft-hmr",
+	"version": "0.0.0",
+	"type": "module",
+	"description": "Hot module replacement for Graft plugins on Node.js",
+	"license": "Apache-2.0",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/nmnmcc/graft.git",
+		"directory": "packages/hmr"
+	},
+	"sideEffects": false,
+	"files": [
+		"dist",
+		"src"
+	],
+	"exports": {
+		".": {
+			"source": "./src/index.ts",
+			"default": "./dist/index.js"
+		},
+		"./package.json": "./package.json"
+	},
+	"scripts": {
+		"build": "tsdown",
+		"test": "vitest run"
+	},
+	"peerDependencies": {
+		"effect": "4.1.2"
+	},
+	"devDependencies": {
+		"@effect/platform-node": "4.1.2",
+		"@effect/vitest": "4.1.2",
+		"effect": "4.1.2",
+		"vitest": "5.1.0"
+	},
+	"dependencies": {
+		"@nmnmcc/graft": "workspace:*"
+	},
+	"publishConfig": {
+		"exports": {
+			".": "./dist/index.js",
+			"./package.json": "./package.json"
+		}
+	}
+}

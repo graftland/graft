@@ -1,0 +1,17 @@
+{
+	"extends": "../../tsconfig.base.json",
+	"compilerOptions": {
+		"outDir": ".cache/test-types",
+		"tsBuildInfoFile": ".cache/test.tsbuildinfo",
+		"allowImportingTsExtensions": true
+	},
+	"include": ["src", "test"],
+	"references": [
+		{
+			"path": "../core"
+		},
+		{
+			"path": "../loader"
+		}
+	]
+}

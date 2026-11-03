@@ -1,0 +1,27 @@
+{
+	"name": "@nmnmcc/graft-workspace",
+	"license": "Apache-2.0",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/nmnmcc/graft.git"
+	},
+	"private": true,
+	"packageManager": "pnpm@9.15.9",
+	"type": "module",
+	"devDependencies": {
+		"@effect/tsgo": "0.64.1",
+		"@effect/vitest": "4.1.2",
+		"@types/node": "26.6.6",
+		"effect": "4.1.2",
+		"tsdown": "0.23.4",
+		"typescript": "7",
+		"vitest": "5.1.0"
+	},
+	"scripts": {
+		"prepare": "effect-tsgo patch --typescript --no-oxlint",
+		"build": "pnpm -r build",
+		"typecheck": "tsc -b",
+		"test": "vitest run",
+		"format": "treefmt"
+	}
+}

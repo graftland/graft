@@ -1,0 +1,58 @@
+{
+	"name": "@nmnmcc/graft-cli",
+	"version": "0.0.0",
+	"type": "module",
+	"description": "The graft command line",
+	"license": "Apache-2.0",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/nmnmcc/graft.git",
+		"directory": "packages/cli"
+	},
+	"sideEffects": false,
+	"files": [
+		"dist",
+		"src"
+	],
+	"exports": {
+		".": {
+			"source": "./src/index.ts",
+			"default": "./dist/index.js"
+		},
+		"./bin": {
+			"source": "./src/bin.ts",
+			"default": "./dist/bin.js"
+		},
+		"./package.json": "./package.json"
+	},
+	"scripts": {
+		"build": "tsdown",
+		"test": "vitest run"
+	},
+	"peerDependencies": {
+		"effect": "4.1.2"
+	},
+	"devDependencies": {
+		"@effect/vitest": "4.1.2",
+		"effect": "4.1.2",
+		"vitest": "5.1.0"
+	},
+	"dependencies": {
+		"@nmnmcc/graft": "workspace:*",
+		"@nmnmcc/graft-loader": "workspace:*",
+		"@nmnmcc/graft-hmr": "workspace:*",
+		"@nmnmcc/graft-create": "workspace:*",
+		"@nmnmcc/graft-package-manager": "workspace:*",
+		"@effect/platform-node": "4.1.2"
+	},
+	"bin": {
+		"graft": "./dist/bin.js"
+	},
+	"publishConfig": {
+		"exports": {
+			".": "./dist/index.js",
+			"./bin": "./dist/bin.js",
+			"./package.json": "./package.json"
+		}
+	}
+}
