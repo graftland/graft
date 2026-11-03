@@ -11,10 +11,10 @@ import {
 	HashMap,
 	HashSet,
 	Layer,
-	Chunk,
 	Logger,
 	Option,
 	Order,
+	Record,
 	PubSub,
 	References,
 	Ref,
@@ -576,24 +576,18 @@ const byId = Order.mapInput(Order.Number, (entry: ForkEntry) => entry.id)
 const buildTree = (
 	forks: HashMap.HashMap<number, ForkEntry>,
 ): ReadonlyArray<ForkTree> => {
-	const entries = Array.sort(HashMap.toValues(forks), byId)
-	const grouped = Array.reduce(
-		entries,
-		HashMap.empty<number | undefined, Chunk.Chunk<ForkEntry>>(),
-		(groups, entry) =>
-			HashMap.set(
-				groups,
-				entry.parent,
-				Chunk.append(
-					Option.getOrElse(HashMap.get(groups, entry.parent), Chunk.empty),
-					entry,
-				),
-			),
+	// Group once: filtering every entry for each node would be quadratic, and
+	// the tree is rebuilt on every fork change.
+	const key = (parent: number | undefined) =>
+		parent === undefined ? "" : `${parent}`
+	const byParent = Array.groupBy(
+		Array.sort(HashMap.toValues(forks), byId),
+		(entry) => key(entry.parent),
 	)
 	const children = (parent: number | undefined): ReadonlyArray<ForkTree> =>
 		Array.map(
-			Array.fromIterable(
-				Option.getOrElse(HashMap.get(grouped, parent), Chunk.empty),
+			Record.get(byParent, key(parent)).pipe(
+				Option.getOrElse((): ReadonlyArray<ForkEntry> => []),
 			),
 			(entry) => ({
 				id: entry.id,
