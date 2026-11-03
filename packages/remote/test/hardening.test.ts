@@ -1,3 +1,6 @@
+import { AlreadyLoaded } from "../src/internal/childErrors"
+import { underlying } from "./errors"
+import { ProcessExited } from "../src/Errors"
 import { assert, describe, it } from "@effect/vitest"
 import { NodeServices } from "@effect/platform-node"
 import { Graft } from "@graftland/graft"
@@ -80,7 +83,7 @@ describe("local remote hardening", () => {
 			if (Exit.isFailure(exit))
 				assert.isTrue(
 					Array.some(
-						exit.cause.reasons,
+						underlying(exit.cause).reasons,
 						(reason) => reason._tag === "Fail" && reason.error === error,
 					),
 				)
@@ -109,7 +112,7 @@ describe("local remote hardening", () => {
 				if (Exit.isFailure(exit))
 					assert.isTrue(
 						Array.some(
-							exit.cause.reasons,
+							underlying(exit.cause).reasons,
 							(reason) =>
 								reason._tag === "Fail" && Schema.isSchemaError(reason.error),
 						),
@@ -187,10 +190,10 @@ describe("local remote hardening", () => {
 				if (Exit.isFailure(exit))
 					assert.isTrue(
 						Array.some(
-							exit.cause.reasons,
+							underlying(exit.cause).reasons,
 							(reason) =>
 								reason._tag === "Fail" &&
-								Schema.is(Remote.ProcessExited)(reason.error) &&
+								Schema.is(ProcessExited)(reason.error) &&
 								reason.error.exitCode !== 0 &&
 								String.includes("No remote contract exported")(
 									reason.error.stderr,
@@ -285,7 +288,11 @@ describe("local remote hardening", () => {
 				const stopped = yield* Deferred.make<void>()
 				const failed =
 					yield* Deferred.make<
-						Cause.Cause<Rejected | Remote.Contract.UndeclaredFailure>
+						Cause.Cause<
+							| Rejected
+							| Remote.Contract.UndeclaredFailure
+							| Remote.Contract.ChildFailure
+						>
 					>()
 				yield* client.Events().pipe(
 					Stream.runForEach((event) =>
@@ -304,6 +311,18 @@ describe("local remote hardening", () => {
 					input: { directory, mode: "flood", value: 2 },
 				})
 				assert.isUndefined(loaded)
+				const duplicate = yield* Effect.flip(
+					client.Load({ input: { directory, mode: "flood", value: 2 } }),
+				)
+				assert.isTrue(
+					Cause.isCause(duplicate) &&
+						Array.some(
+							duplicate.reasons,
+							(reason) =>
+								reason._tag === "Fail" &&
+								Schema.is(AlreadyLoaded)(reason.error),
+						),
+				)
 				yield* Deferred.await(receivedLog)
 				yield* fs.writeFileString(`${directory}/fail`, "fail")
 				const failure = yield* Deferred.await(failed).pipe(

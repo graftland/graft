@@ -1,4 +1,4 @@
-import { Effect, Schema } from "effect"
+import { Array, Effect, MutableRef, Option, Result, Schema } from "effect"
 
 export class FrameError extends Schema.TaggedError<
 	FrameError,
@@ -8,96 +8,98 @@ export class FrameError extends Schema.TaggedError<
 		return this.detail
 	}
 }
-
 export type Channel = 0 | 1
-export type Priority = 0 | 1 | 2
 export interface Frame {
 	readonly channel: Channel
-	readonly priority: Priority
-	readonly kind: "Data" | "Credit"
 	readonly payload: Uint8Array
 }
 export const headerSize = 8
 export const maxPayload = 1024 * 1024
-/** Fixed by wire version 1, independently of the negotiated RPC admission limits. */
-export const window = 4
-
 const invalid = (detail: string) => FrameError.make({ detail })
 
-/** Length is checked before allocating payload storage or decoding any RPC value. */
+/** Version 2 carries only channel and length; request admission belongs to port. */
 export const encode = (frame: Frame) =>
 	Effect.gen(function* () {
 		if (frame.payload.byteLength > maxPayload)
 			return yield* invalid("Runner frame exceeds the payload limit")
-		if (frame.kind === "Credit" && frame.payload.byteLength !== 0)
-			return yield* invalid("Credit frames cannot carry a payload")
 		const bytes = new Uint8Array(headerSize + frame.payload.byteLength)
-		bytes.set([1, frame.channel, frame.priority, frame.kind === "Data" ? 0 : 1])
+		bytes.set([2, frame.channel, 0, 0])
 		new DataView(bytes.buffer).setUint32(4, frame.payload.byteLength)
 		bytes.set(frame.payload, headerSize)
 		return bytes
 	})
 
-/** Mutable byte buffers belong to this one incremental decoder, never shared between readers. */
+/** The decoder owns its byte buffer. Results expose malformed frames without throwing through a generator. */
 export const decoder = () => {
-	const header = new Uint8Array(headerSize)
-	let headerUsed = 0
-	let payload: Uint8Array | undefined
-	let payloadUsed = 0
-	let poisoned: FrameError | undefined
-	const decode = function* (bytes: Uint8Array): Generator<Frame> {
-		if (poisoned !== undefined) throw poisoned
-		let offset = 0
-		while (offset < bytes.byteLength) {
-			if (payload === undefined) {
-				const length = Math.min(
-					headerSize - headerUsed,
-					bytes.byteLength - offset,
-				)
-				header.set(bytes.subarray(offset, offset + length), headerUsed)
-				headerUsed += length
-				offset += length
-				if (headerUsed !== headerSize) continue
-				const size = new DataView(header.buffer).getUint32(4)
-				if (
-					header[0] !== 1 ||
-					header[1]! > 1 ||
-					header[2]! > 2 ||
-					header[3]! > 1 ||
-					size > maxPayload ||
-					(header[3] === 1 && size !== 0)
-				) {
-					poisoned = invalid("Invalid runner frame header or payload length")
-					throw poisoned
-				}
-				payload = new Uint8Array(size)
-			}
-			const length = Math.min(
-				payload.byteLength - payloadUsed,
-				bytes.byteLength - offset,
+	const pending = MutableRef.make<Result.Result<Uint8Array, FrameError>>(
+		Result.succeed(new Uint8Array(0)),
+	)
+	const decode = (
+		chunk: Uint8Array,
+	): Result.Result<ReadonlyArray<Frame>, FrameError> =>
+		Result.flatMap(MutableRef.get(pending), (previous) => {
+			const bytes = new Uint8Array(previous.length + chunk.length)
+			bytes.set(previous)
+			bytes.set(chunk, previous.length)
+			const frames = Array.unfold(
+				0,
+				(
+					offset,
+				): Option.Option<
+					readonly [Result.Result<Frame, FrameError>, number]
+				> => {
+					if (bytes.length - offset < headerSize) return Option.none()
+					const header = new DataView(bytes.buffer, offset, headerSize)
+					const channel = header.getUint8(1)
+					const length = header.getUint32(4)
+					if (
+						header.getUint8(0) !== 2 ||
+						(channel !== 0 && channel !== 1) ||
+						header.getUint16(2) !== 0 ||
+						length > maxPayload
+					)
+						return Option.some([
+							Result.fail(
+								invalid("Invalid runner frame header or payload length"),
+							),
+							bytes.length,
+						])
+					const end = offset + headerSize + length
+					if (end > bytes.length) return Option.none()
+					return Option.some([
+						Result.succeed({
+							channel,
+							payload: bytes.subarray(offset + headerSize, end),
+						}),
+						end,
+					])
+				},
 			)
-			payload.set(bytes.subarray(offset, offset + length), payloadUsed)
-			payloadUsed += length
-			offset += length
-			if (payloadUsed !== payload.byteLength) continue
-			const frame: Frame = {
-				channel: header[1] === 0 ? 0 : 1,
-				priority: header[2] === 0 ? 0 : header[2] === 1 ? 1 : 2,
-				kind: header[3] === 0 ? "Data" : "Credit",
-				payload,
-			}
-			payload = undefined
-			payloadUsed = 0
-			headerUsed = 0
-			yield frame
-		}
-	}
+			const result = Result.all(frames)
+			MutableRef.set(
+				pending,
+				Result.map(result, (frames) =>
+					bytes.subarray(
+						Array.reduce(
+							frames,
+							0,
+							(used, frame) => used + headerSize + frame.payload.length,
+						),
+					),
+				),
+			)
+			return result
+		})
 	return {
 		decode,
 		finish: Effect.suspend(() =>
-			headerUsed === 0 && payload === undefined
-				? Effect.void
-				: Effect.fail(invalid("Runner connection ended inside a frame")),
+			Effect.fromResult(
+				Result.flatMap(MutableRef.get(pending), (bytes) =>
+					bytes.length === 0
+						? Result.succeed(undefined)
+						: Result.fail(invalid("Runner connection ended inside a frame")),
+				),
+			),
 		),
 	}
 }

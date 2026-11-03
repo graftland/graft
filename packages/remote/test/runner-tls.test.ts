@@ -66,9 +66,9 @@ describe("runner mutual TLS", () => {
 							const authenticated = yield* Tls.Peer
 							yield* Deferred.succeed(identity, authenticated)
 							const peer = yield* Multiplex.fromSocket(socket)
-							const input = yield* peer.take(1, 1)
-							yield* peer.send(1, 1, input)
-							yield* peer.send(0, 0, bytes("session"))
+							const input = yield* peer.take(1)
+							yield* peer.send(1, input)
+							yield* peer.send(0, bytes("session"))
 							return yield* Effect.never
 						}),
 					)
@@ -80,9 +80,9 @@ describe("runner mutual TLS", () => {
 					tls: yield* credentials("client"),
 				})
 				const peer = yield* Multiplex.fromSocket(socket)
-				yield* peer.send(1, 1, new Uint8Array([255, 0, 1]))
-				const echoed = yield* peer.take(1, 1)
-				const session = yield* peer.take(0, 0)
+				yield* peer.send(1, new Uint8Array([255, 0, 1]))
+				const echoed = yield* peer.take(1)
+				const session = yield* peer.take(0)
 				const authenticated = yield* Deferred.await(identity)
 				assert.deepEqual(echoed, new Uint8Array([255, 0, 1]))
 				assert.equal(text(session), "session")
@@ -101,7 +101,7 @@ describe("runner mutual TLS", () => {
 						Effect.gen(function* () {
 							yield* Deferred.succeed(accepted, undefined)
 							const peer = yield* Multiplex.fromSocket(socket)
-							yield* peer.send(0, 0, bytes("accepted"))
+							yield* peer.send(0, bytes("accepted"))
 							return yield* Effect.never
 						}),
 					)
@@ -164,7 +164,7 @@ describe("runner mutual TLS", () => {
 					tls,
 				})
 				const peer = yield* Multiplex.fromSocket(socket)
-				const response = yield* peer.take(0, 0)
+				const response = yield* peer.take(0)
 				assert.equal(text(response), "accepted")
 			}).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 		30_000,
@@ -196,7 +196,7 @@ describe("runner mutual TLS", () => {
 					.run((socket) =>
 						Effect.gen(function* () {
 							const peer = yield* Multiplex.fromSocket(socket)
-							const failure = yield* Effect.flip(Deferred.await(peer.failed))
+							const failure = yield* Effect.flip(peer.await)
 							yield* Deferred.succeed(rejected, Cause.pretty(failure.cause))
 						}),
 					)
@@ -209,7 +209,7 @@ describe("runner mutual TLS", () => {
 				})
 				yield* socket.reader
 				const writer = yield* socket.writer
-				const header = new Uint8Array([1, 1, 2, 0, 0, 0, 0, 0])
+				const header = new Uint8Array([2, 1, 0, 0, 0, 0, 0, 0])
 				new DataView(header.buffer).setUint32(4, Framing.maxPayload + 1)
 				yield* writer.write(header)
 				const reason = yield* Deferred.await(rejected)
@@ -227,7 +227,7 @@ describe("runner mutual TLS", () => {
 						Effect.gen(function* () {
 							const identity = yield* Tls.Peer
 							const peer = yield* Multiplex.fromSocket(socket)
-							yield* peer.send(0, 0, bytes(identity))
+							yield* peer.send(0, bytes(identity))
 							return yield* Effect.never
 						}),
 					)
@@ -242,7 +242,7 @@ describe("runner mutual TLS", () => {
 								tls: yield* credentials(name),
 							})
 							const peer = yield* Multiplex.fromSocket(socket)
-							const identity = yield* peer.take(0, 0)
+							const identity = yield* peer.take(0)
 							return text(identity)
 						}),
 					),

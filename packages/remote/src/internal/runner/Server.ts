@@ -1,7 +1,7 @@
+import { TransportError } from "../../Errors"
 import {
 	Context,
 	Cause,
-	Deferred,
 	Effect,
 	Ref,
 	Option,
@@ -18,7 +18,7 @@ import * as Stores from "./Store"
 import * as Supervisor from "./Supervisor"
 import * as Tls from "./Tls"
 import * as Wire from "./Wire"
-import { InvalidSessionRequest, SessionConflict, type Handle } from "./model"
+import { SessionAccessDenied, SessionConflict, type Handle } from "./model"
 
 export interface Options extends Tls.ListenOptions {
 	readonly root: string
@@ -59,10 +59,9 @@ export const serve = (options: Options) =>
 						handle.key.identity === identity
 							? Effect.void
 							: Effect.fail(
-									InvalidSessionRequest.make({
+									SessionAccessDenied.make({
 										detail:
 											"The session belongs to another authenticated identity",
-										cause: Cause.empty,
 									}),
 								)
 					const handlers = yield* Wire.Session.toHandlers({
@@ -92,7 +91,6 @@ export const serve = (options: Options) =>
 								)
 									return yield* SessionConflict.make({
 										detail: "A connection can attach only one execution",
-										cause: Cause.empty,
 									})
 								const code = yield* supervisor.load(handle, { specifier })
 								if (Option.isNone(attachment)) {
@@ -104,13 +102,13 @@ export const serve = (options: Options) =>
 									yield* Effect.all(
 										[
 											Effect.forever(
-												Effect.flatMap(mux.take(1, 1), (bytes) =>
-													child.send(1, 1, bytes),
+												Effect.flatMap(mux.take(1), (bytes) =>
+													child.send(1, bytes),
 												),
 											),
 											Effect.forever(
-												Effect.flatMap(child.take(1, 1), (bytes) =>
-													mux.send(1, 1, bytes),
+												Effect.flatMap(child.take(1), (bytes) =>
+													mux.send(1, bytes),
 												),
 											),
 										],
@@ -119,7 +117,7 @@ export const serve = (options: Options) =>
 										Effect.catchCause((cause) =>
 											Cause.hasInterruptsOnly(cause)
 												? Effect.void
-												: Effect.logDebug("Instance relay ended", cause),
+												: child.fail(TransportError.make({ cause })),
 										),
 										Effect.forkIn(scope),
 									)
@@ -143,7 +141,7 @@ export const serve = (options: Options) =>
 							RpcServer.Protocol,
 							peer.serverProtocol("session"),
 						),
-						Effect.raceFirst(Deferred.await(mux.failed)),
+						Effect.raceFirst(mux.await),
 					)
 				}),
 			)

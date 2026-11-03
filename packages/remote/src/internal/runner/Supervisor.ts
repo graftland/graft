@@ -1,3 +1,4 @@
+import * as FailureGroup from "../FailureGroup"
 import {
 	Array,
 	Cause,
@@ -177,18 +178,15 @@ const live = (
 			state.record.reason._tag === "Expired"
 				? LeaseExpired.make({
 						detail: "The session lease has expired",
-						cause: Cause.empty,
 					})
 				: SessionStopped.make({
 						detail: "The session is stopping or stopped",
-						cause: Cause.empty,
 					}),
 		)
 	return now >= state.deadline
 		? Result.fail(
 				LeaseExpired.make({
 					detail: "The session lease has expired",
-					cause: Cause.empty,
 				}),
 			)
 		: Result.succeed(state)
@@ -226,14 +224,12 @@ const registerUnit = (
 		return Result.fail(
 			SessionStopped.make({
 				detail: "The session is stopping or stopped",
-				cause: Cause.empty,
 			}),
 		)
 	if (state.launch._tag === "Registered")
 		return Result.fail(
 			ExecutionError.make({
 				detail: "An execution adapter registered more than one child",
-				cause: Cause.empty,
 			}),
 		)
 	return Result.succeed(
@@ -248,14 +244,12 @@ const loaded = (
 		return Result.fail(
 			SessionStopped.make({
 				detail: "The session is stopping or stopped",
-				cause: Cause.empty,
 			}),
 		)
 	if (state.launch._tag !== "Registered")
 		return Result.fail(
 			ExecutionError.make({
 				detail: "Execution adapter returned without registering its child",
-				cause: Cause.empty,
 			}),
 		)
 	return Result.succeed(
@@ -335,13 +329,14 @@ const terminate = (
 	})
 }
 
-export const make = (options: Options = {}) =>
+const initialize = (options: Options = {}) =>
 	Effect.gen(function* () {
 		const store = yield* Store
 		const execution = yield* Execution
 		const random = yield* SecureRandom.SecureRandom
 		const parent = yield* Effect.scope
 		const owner = yield* Scope.fork(parent)
+		// Cleanup must continue after a health failure so every registered process is reaped.
 		const workers = yield* FiberSet.make<void, never>().pipe(
 			Scope.provide(owner),
 		)
@@ -356,241 +351,271 @@ export const make = (options: Options = {}) =>
 		const limits = options.limits ?? defaults
 		const records = yield* Ref.make(HashMap.empty<string, SessionRecord>())
 		const entries = yield* Ref.make(HashMap.empty<string, Entry>())
-		const failed = yield* Deferred.make<never, SupervisorError>()
-		const health = yield* Ref.make<{
-			readonly closing: boolean
-			readonly cause: Cause.Cause<SupervisorError>
-		}>({ closing: false, cause: Cause.empty })
-		const poison = (cause: Cause.Cause<SupervisorError>) =>
-			Cause.hasInterruptsOnly(cause)
-				? Effect.void
-				: Effect.gen(function* () {
-						yield* Ref.update(health, (current) => ({
-							...current,
-							cause: Cause.combine(current.cause, cause),
-						}))
-						yield* Deferred.failCause(failed, cause)
-					})
-		const observe = <A>(effect: Effect.Effect<A, SupervisorError>) =>
-			effect.pipe(Effect.asVoid, Effect.catchCause(poison))
-		const healthy = Effect.gen(function* () {
-			const current = yield* Ref.get(health)
-			if (current.cause.reasons.length > 0)
-				return yield* Effect.failCause(current.cause)
-			if (current.closing)
-				return yield* RunnerClosing.make({
-					detail: "The runner is closing",
-					cause: Cause.empty,
-				})
-		})
-		const persist = (record: SessionRecord) =>
-			store
-				.save(record)
-				.pipe(
-					Effect.tapCause(poison),
-					Effect.andThen(
-						Ref.update(records, (all) => Retention.save(all, record)),
-					),
-				)
-		const status = (handle: Handle) =>
-			Ref.get(records).pipe(
-				Effect.flatMap((all) => {
-					const found = HashMap.get(all, handle.token)
-					return Option.isSome(found) &&
-						Equal.equals(keyOf(found.value.handle.key), keyOf(handle.key)) &&
-						found.value.handle.generation === handle.generation
-						? Effect.succeed(found.value)
-						: Effect.fail(
-								StaleSession.make({
-									detail: "Unknown session or generation",
-									cause: Cause.empty,
-								}),
-							)
-				}),
-			)
-		const latest = (key: Key) =>
-			Ref.get(records).pipe(
-				Effect.map((all) =>
-					Array.reduce(
-						Array.fromIterable(HashMap.values(all)),
-						0,
-						(value, record) =>
-							Equal.equals(keyOf(record.handle.key), keyOf(key))
-								? Math.max(value, record.handle.generation)
-								: value,
-					),
+		const health = yield* FailureGroup.make<SupervisorError>().pipe(
+			Scope.provide(owner),
+		)
+		const closing = yield* Ref.make(false)
+		return {
+			store,
+			execution,
+			random,
+			owner,
+			workers,
+			locks,
+			lease,
+			grace,
+			confirmation,
+			limits,
+			records,
+			entries,
+			health,
+			closing,
+		}
+	})
+type Runtime = Effect.Success<ReturnType<typeof initialize>>
+const operations = (runtime: Runtime) => {
+	const {
+		store,
+		execution,
+		workers,
+		grace,
+		confirmation,
+		records,
+		entries,
+		health,
+		closing,
+	} = runtime
+
+	const poison = health.failCause
+	const observe = <A>(effect: Effect.Effect<A, SupervisorError>) =>
+		effect.pipe(Effect.asVoid, Effect.catchCause(poison))
+	const healthy = health.check.pipe(
+		Effect.andThen(
+			Effect.gen(function* () {
+				if (yield* Ref.get(closing))
+					return yield* RunnerClosing.make({ detail: "The runner is closing" })
+			}),
+		),
+	)
+	const persist = (record: SessionRecord) =>
+		store
+			.save(record)
+			.pipe(
+				Effect.tapCause(poison),
+				Effect.andThen(
+					Ref.update(records, (all) => Retention.save(all, record)),
 				),
 			)
-		const entryFor = (handle: Handle) =>
-			Effect.gen(function* () {
-				yield* status(handle)
-				const all = yield* Ref.get(entries)
+	const status = (handle: Handle) =>
+		Ref.get(records).pipe(
+			Effect.flatMap((all) => {
 				const found = HashMap.get(all, handle.token)
-				if (Option.isNone(found))
-					return yield* SessionStopped.make({
-						detail: "The session was retired during recovery",
-						cause: Cause.empty,
-					})
-				return found.value
-			})
-		const commit = (
-			entry: Entry,
-			transition: (
-				state: Session,
-			) => Result.Result<Session, ExecutionError | SessionStopped>,
-		) =>
-			SynchronizedRef.updateEffect(entry.state, (state) =>
-				Effect.gen(function* () {
-					const next = yield* Effect.fromResult(transition(state))
-					yield* persist(snapshot(next))
-					return next
-				}),
-			)
-		const finishStop = (
-			entry: Entry,
-			state: Stopping,
-			saved: Exit.Exit<void, StateStorageError>,
-		) =>
-			Effect.gen(function* () {
-				yield* FiberHandle.clear(entry.loading)
-				const result = yield* terminate(state.execution, grace, confirmation)
-				const closed = yield* Effect.exit(
-					Scope.close(entry.unitScope, Exit.void),
-				)
-				const termination: Termination = {
-					...result,
-					cause: Cause.combine(result.cause, exitCause(closed)),
-				}
-				const record = stoppedRecord(
-					state.record.previous,
-					state.record.reason,
-					termination,
-				)
-				yield* SynchronizedRef.updateEffect(entry.state, () =>
-					persist(record).pipe(
-						Effect.as(Session.Stopped({ record, reply: state.reply })),
-					),
-				)
-				if (Exit.isFailure(saved)) return yield* Effect.failCause(saved.cause)
-				return termination
-			})
-		/** Called with the session ref locked; the worker starts after its transition is published. */
-		const stopLocked = (
-			entry: Entry,
-			state: Session,
-			reason: StopReason,
-			exit: Option.Option<ExitStatus>,
-		): Effect.Effect<readonly [StopReply, Session]> =>
-			Effect.gen(function* () {
-				if (state._tag === "Stopping" || state._tag === "Stopped")
-					return [state.reply, state]
-				const reply = yield* Deferred.make<Termination, SupervisorError>()
-				const next = beginStop(state, reason, reply, exit)
-				// Fence in memory even when the journal cannot acknowledge the transition.
-				const saved = yield* Effect.exit(persist(next.record))
-				yield* FiberSet.run(
-					workers,
-					finishStop(entry, next, saved).pipe(
-						Effect.onExit((result) => Deferred.done(reply, result)),
-						observe,
-					),
-					{ startImmediately: false },
-				)
-				return [reply, next]
-			})
-		const stop = (
-			entry: Entry,
-			reason: StopReason,
-			exit: Option.Option<ExitStatus> = Option.none(),
-		) =>
-			SynchronizedRef.modifyEffect(entry.state, (state) =>
-				stopLocked(entry, state, reason, exit),
-			).pipe(Effect.uninterruptible)
-		const scheduleLease = (entry: Entry, deadline: bigint) =>
-			FiberHandle.run(
-				entry.timer,
-				observe(
-					Effect.gen(function* () {
-						const now = yield* Clock.monotonicTimeNanos
-						yield* Effect.sleep(
-							Duration.nanos(deadline > now ? deadline - now : 0n),
+				return Option.isSome(found) &&
+					Equal.equals(keyOf(found.value.handle.key), keyOf(handle.key)) &&
+					found.value.handle.generation === handle.generation
+					? Effect.succeed(found.value)
+					: Effect.fail(
+							StaleSession.make({
+								detail: "Unknown session or generation",
+							}),
 						)
-						yield* SynchronizedRef.updateEffect(entry.state, (state) => {
-							if (
-								state._tag === "Stopping" ||
-								state._tag === "Stopped" ||
-								state.deadline !== deadline
-							)
-								return Effect.succeed(state)
-							return stopLocked(
-								entry,
-								state,
-								{ _tag: "Expired" },
-								Option.none(),
-							).pipe(Effect.map(([, next]) => next))
-						})
-					}),
+			}),
+		)
+	const latest = (key: Key) =>
+		Ref.get(records).pipe(
+			Effect.map((all) =>
+				Array.reduce(
+					Array.fromIterable(HashMap.values(all)),
+					0,
+					(value, record) =>
+						Equal.equals(keyOf(record.handle.key), keyOf(key))
+							? Math.max(value, record.handle.generation)
+							: value,
+				),
+			),
+		)
+	const entryFor = (handle: Handle) =>
+		Effect.gen(function* () {
+			yield* status(handle)
+			const all = yield* Ref.get(entries)
+			const found = HashMap.get(all, handle.token)
+			if (Option.isNone(found))
+				return yield* SessionStopped.make({
+					detail: "The session was retired during recovery",
+				})
+			return found.value
+		})
+	const commit = (
+		entry: Entry,
+		transition: (
+			state: Session,
+		) => Result.Result<Session, ExecutionError | SessionStopped>,
+	) =>
+		SynchronizedRef.updateEffect(entry.state, (state) =>
+			Effect.gen(function* () {
+				const next = yield* Effect.fromResult(transition(state))
+				yield* persist(snapshot(next))
+				return next
+			}),
+		)
+	const finishStop = (
+		entry: Entry,
+		state: Stopping,
+		saved: Exit.Exit<void, StateStorageError>,
+	) =>
+		Effect.gen(function* () {
+			yield* FiberHandle.clear(entry.loading)
+			const result = yield* terminate(state.execution, grace, confirmation)
+			const closed = yield* Effect.exit(Scope.close(entry.unitScope, Exit.void))
+			const termination: Termination = {
+				...result,
+				cause: Cause.combine(result.cause, exitCause(closed)),
+			}
+			const record = stoppedRecord(
+				state.record.previous,
+				state.record.reason,
+				termination,
+			)
+			yield* SynchronizedRef.updateEffect(entry.state, () =>
+				persist(record).pipe(
+					Effect.as(Session.Stopped({ record, reply: state.reply })),
+				),
+			)
+			if (Exit.isFailure(saved)) return yield* Effect.failCause(saved.cause)
+			return termination
+		})
+	/** Called with the session ref locked; the worker starts after its transition is published. */
+	const stopLocked = (
+		entry: Entry,
+		state: Session,
+		reason: StopReason,
+		exit: Option.Option<ExitStatus>,
+	): Effect.Effect<readonly [StopReply, Session]> =>
+		Effect.gen(function* () {
+			if (state._tag === "Stopping" || state._tag === "Stopped")
+				return [state.reply, state]
+			const reply = yield* Deferred.make<Termination, SupervisorError>()
+			const next = beginStop(state, reason, reply, exit)
+			// Fence in memory even when the journal cannot acknowledge the transition.
+			const saved = yield* Effect.exit(persist(next.record))
+			yield* FiberSet.run(
+				workers,
+				finishStop(entry, next, saved).pipe(
+					Effect.onExit((result) => Deferred.done(reply, result)),
+					observe,
 				),
 				{ startImmediately: false },
 			)
-		const register = (entry: Entry, unit: Unit) =>
-			SynchronizedRef.updateEffect(entry.state, (state) =>
+			return [reply, next]
+		})
+	const stop = (
+		entry: Entry,
+		reason: StopReason,
+		exit: Option.Option<ExitStatus> = Option.none(),
+	) =>
+		SynchronizedRef.modifyEffect(entry.state, (state) =>
+			stopLocked(entry, state, reason, exit),
+		).pipe(Effect.uninterruptible)
+	const scheduleLease = (entry: Entry, deadline: bigint) =>
+		FiberHandle.run(
+			entry.timer,
+			observe(
 				Effect.gen(function* () {
 					const now = yield* Clock.monotonicTimeNanos
-					const current = yield* Effect.fromResult(live(state, now))
-					const next = yield* Effect.fromResult(registerUnit(current, unit))
-					if (unit.renew !== undefined)
-						yield* unit.renew(
-							Number(current.deadline - (yield* Clock.monotonicTimeNanos)) /
-								1_000_000,
+					yield* Effect.sleep(
+						Duration.nanos(deadline > now ? deadline - now : 0n),
+					)
+					yield* SynchronizedRef.updateEffect(entry.state, (state) => {
+						if (
+							state._tag === "Stopping" ||
+							state._tag === "Stopped" ||
+							state.deadline !== deadline
 						)
-					yield* persist(snapshot(next))
-					yield* FiberSet.run(
-						workers,
-						observe(
-							unit.exited.pipe(
-								Effect.flatMap((exit) =>
-									stop(entry, { _tag: "Exited" }, Option.some(exit)),
-								),
+							return Effect.succeed(state)
+						return stopLocked(
+							entry,
+							state,
+							{ _tag: "Expired" },
+							Option.none(),
+						).pipe(Effect.map(([, next]) => next))
+					})
+				}),
+			),
+			{ startImmediately: false },
+		)
+	const register = (entry: Entry, unit: Unit) =>
+		SynchronizedRef.updateEffect(entry.state, (state) =>
+			Effect.gen(function* () {
+				const now = yield* Clock.monotonicTimeNanos
+				const current = yield* Effect.fromResult(live(state, now))
+				const next = yield* Effect.fromResult(registerUnit(current, unit))
+				yield* unit.renew(
+					Number(current.deadline - (yield* Clock.monotonicTimeNanos)) /
+						1_000_000,
+				)
+				yield* persist(snapshot(next))
+				yield* FiberSet.run(
+					workers,
+					observe(
+						unit.exited.pipe(
+							Effect.flatMap((exit) =>
+								stop(entry, { _tag: "Exited" }, Option.some(exit)),
 							),
 						),
-					)
-					return next
-				}),
-			).pipe(Effect.uninterruptible)
-		const runLoad = (entry: Entry, state: Loading) =>
-			execution
-				.spawn(
-					state.record.handle,
-					state.request,
-					state.record.limits,
-					(unit) => register(entry, unit),
-				)
-				.pipe(
-					Scope.provide(entry.unitScope),
-					Effect.tap((code) =>
-						commit(entry, (current) => loaded(current, code)),
 					),
-					Effect.onExit((result) =>
-						Effect.gen(function* () {
-							if (Exit.isSuccess(result)) {
-								yield* Deferred.done(state.reply, result)
-								return
-							}
-							const current = yield* SynchronizedRef.get(entry.state)
-							if (current._tag === "Loading")
-								yield* stop(entry, { _tag: "LoadFailed", cause: result.cause })
-							const healthNow = yield* Ref.get(health)
-							yield* Deferred.failCause(
-								state.reply,
-								Cause.combine(result.cause, healthNow.cause),
-							)
-						}),
-					),
-					// Load's caller observes its complete exit through the reply, including cancellation.
-					Effect.exit,
-					Effect.asVoid,
 				)
+				return next
+			}),
+		).pipe(Effect.uninterruptible)
+	const runLoad = (entry: Entry, state: Loading) =>
+		execution
+			.spawn(state.record.handle, state.request, state.record.limits)
+			.pipe(
+				Scope.provide(entry.unitScope),
+				Effect.flatMap((unit) =>
+					register(entry, unit).pipe(
+						Effect.andThen(unit.start),
+						Effect.as(unit.code),
+					),
+				),
+				Effect.tap((code) => commit(entry, (current) => loaded(current, code))),
+				Effect.onExit((result) =>
+					Effect.gen(function* () {
+						if (Exit.isSuccess(result)) {
+							yield* Deferred.done(state.reply, result)
+							return
+						}
+						const current = yield* SynchronizedRef.get(entry.state)
+						if (current._tag === "Loading")
+							yield* stop(entry, { _tag: "LoadFailed", cause: result.cause })
+						const healthCause = yield* health.cause
+						yield* Deferred.failCause(
+							state.reply,
+							Cause.combine(result.cause, healthCause),
+						)
+					}),
+				),
+				// Load's caller observes its complete exit through the reply, including cancellation.
+				Effect.exit,
+				Effect.asVoid,
+			)
+
+	return {
+		persist,
+		status,
+		latest,
+		entryFor,
+		stop,
+		scheduleLease,
+		runLoad,
+		healthy,
+	}
+}
+type Operations = ReturnType<typeof operations>
+const recover = (runtime: Runtime, actions: Operations) =>
+	Effect.gen(function* () {
+		const { store, execution, confirmation, records } = runtime
+		const { persist } = actions
 		// Recover before the service is published. Construction does not resume old leases.
 		const stored = yield* store.list
 		yield* Ref.set(
@@ -631,9 +656,14 @@ export const make = (options: Options = {}) =>
 				),
 			)
 		}
+	})
+const ownShutdown = (runtime: Runtime, actions: Operations) =>
+	Effect.gen(function* () {
+		const { entries, health, closing } = runtime
+		const { stop } = actions
 		yield* Effect.addFinalizer(() =>
 			Effect.gen(function* () {
-				yield* Ref.update(health, (current) => ({ ...current, closing: true }))
+				yield* Ref.set(closing, true)
 				const all = yield* Ref.get(entries)
 				const exits = yield* Effect.forEach(HashMap.values(all), (entry) =>
 					stop(entry, { _tag: "Shutdown" }).pipe(
@@ -641,7 +671,7 @@ export const make = (options: Options = {}) =>
 						Effect.exit,
 					),
 				)
-				const initial: Cause.Cause<unknown> = (yield* Ref.get(health)).cause
+				const initial: Cause.Cause<unknown> = yield* health.cause
 				const cause = Array.reduce(exits, initial, (cause, exit) =>
 					Cause.combine(
 						cause,
@@ -652,8 +682,23 @@ export const make = (options: Options = {}) =>
 					return yield* Effect.failCause(cleanupCause(cause))
 			}),
 		)
+	})
+const protocol = (runtime: Runtime, actions: Operations) =>
+	Effect.gen(function* () {
+		const { random, owner, locks, lease, limits, records, entries, health } =
+			runtime
+		const {
+			persist,
+			status,
+			latest,
+			entryFor,
+			stop,
+			scheduleLease,
+			runLoad,
+			healthy,
+		} = actions
 		return Supervisor.of({
-			await: Deferred.await(failed),
+			await: health.await,
 			status,
 			highWater: (key) =>
 				latest(key).pipe(Effect.map((value) => (value === 0 ? null : value))),
@@ -683,7 +728,6 @@ export const make = (options: Options = {}) =>
 									return yield* StaleSession.make({
 										detail:
 											"Open expectedGeneration does not match the generation high-water mark",
-										cause: Cause.empty,
 									})
 								for (const record of same) {
 									const allEntries = yield* Ref.get(entries)
@@ -764,10 +808,7 @@ export const make = (options: Options = {}) =>
 							const now = yield* Clock.monotonicTimeNanos
 							const current = yield* Effect.fromResult(live(state, now))
 							const running = executionOf(current)
-							if (
-								running._tag === "Running" &&
-								running.unit.renew !== undefined
-							)
+							if (running._tag === "Running")
 								yield* running.unit.renew(current.record.leaseMillis)
 							const deadline = now + nanos(current.record.leaseMillis)
 							yield* scheduleLease(entry, deadline)
@@ -797,7 +838,6 @@ export const make = (options: Options = {}) =>
 										return yield* SessionConflict.make({
 											detail:
 												"Load was already requested with a different specifier",
-											cause: Cause.empty,
 										})
 									return [
 										current._tag === "Loading"
@@ -831,6 +871,14 @@ export const make = (options: Options = {}) =>
 					)
 				}),
 		})
+	})
+export const make = (options: Options = {}) =>
+	Effect.gen(function* () {
+		const runtime = yield* initialize(options)
+		const actions = operations(runtime)
+		yield* recover(runtime, actions)
+		yield* ownShutdown(runtime, actions)
+		return yield* protocol(runtime, actions)
 	})
 export const layer = (options: Options = {}) =>
 	Layer.effect(Supervisor, make(options))

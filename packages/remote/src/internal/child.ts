@@ -1,3 +1,8 @@
+import {
+	AlreadyLoaded,
+	ModuleImportFailed,
+	ActivationFailed,
+} from "./childErrors"
 import { Graft, Plugin, type Fork } from "@graftland/graft"
 import {
 	Array,
@@ -15,14 +20,15 @@ import {
 	References,
 	Scope,
 	Stream,
+	SynchronizedRef,
 } from "effect"
 import type { Schema } from "effect"
-import { UndeclaredFailure, type RunnerContract } from "../Contract"
+import { type RunnerContract } from "../Contract"
 import { Instance, type Identity } from "../Instance"
 import type * as Port from "./port"
 import type { Event, Log, LogEvent } from "./control"
 
-type Peer = Effect.Success<ReturnType<typeof Port.make>>
+type Peer = Port.Port
 type ChildEvent = Data.TaggedEnum<{
 	Failed: { readonly cause: Cause.Cause<unknown> }
 	Withdrawing: {}
@@ -96,6 +102,21 @@ interface Running {
 	readonly observation: Fiber.Fiber<void>
 	readonly observedFailure: Ref.Ref<Cause.Cause<unknown>>
 }
+type Lifecycle = Data.TaggedEnum<{
+	Idle: {}
+	Loading: {}
+	Running: { readonly running: Running }
+	Withdrawing: { readonly running: Option.Option<Running> }
+	Disposing: { readonly running: Option.Option<Running> }
+}>
+const Lifecycle = Data.taggedEnum<Lifecycle>()
+const runningOf = (state: Lifecycle): Option.Option<Running> =>
+	state._tag === "Running"
+		? Option.some(state.running)
+		: state._tag === "Withdrawing" || state._tag === "Disposing"
+			? state.running
+			: Option.none()
+
 const cleanup = (running: Running, retired: boolean) =>
 	Effect.gen(function* () {
 		const pluginExit = yield* Effect.exit(running.fork.dispose)
@@ -131,13 +152,11 @@ export const lifecycle = (
 		const scope = yield* Effect.scope
 		const instanceScope = yield* Scope.fork(scope)
 		const releaseExports = yield* Deferred.make<void>()
-		const exportsReady = yield* Deferred.make<void>()
-		const hostDisposing = yield* Ref.make(false)
-		const withdrawing = yield* Ref.make(false)
-		const instance = yield* Ref.make(Option.none<Running>())
-		const release = Ref.set(hostDisposing, true).pipe(
-			Effect.andThen(Deferred.succeed(releaseExports, undefined)),
-		)
+		const state = yield* SynchronizedRef.make<Lifecycle>(Lifecycle.Idle())
+		// This gate represents host consumers draining, not a second lifecycle state.
+		const release = SynchronizedRef.update(state, (current) =>
+			Lifecycle.Disposing({ running: runningOf(current) }),
+		).pipe(Effect.andThen(Deferred.succeed(releaseExports, undefined)))
 
 		const exportBridge = Graft.plugin(
 			Plugin.make({
@@ -147,13 +166,22 @@ export const lifecycle = (
 					Effect.gen(function* () {
 						for (const service of contract.provides)
 							yield* service.serve(peer).pipe(Effect.forkScoped)
-						yield* Deferred.succeed(exportsReady, undefined)
 						yield* Effect.addFinalizer(() =>
 							Effect.gen(function* () {
-								if (!(yield* Ref.get(hostDisposing))) {
-									yield* Ref.set(withdrawing, true)
+								const withdrawing = yield* SynchronizedRef.modify(
+									state,
+									(current) =>
+										current._tag === "Disposing"
+											? [false, current]
+											: [
+													true,
+													Lifecycle.Withdrawing({
+														running: runningOf(current),
+													}),
+												],
+								)
+								if (withdrawing)
 									yield* Queue.offer(telemetry.events, ChildEvent.Withdrawing())
-								}
 								yield* Deferred.await(releaseExports)
 							}),
 						)
@@ -165,16 +193,25 @@ export const lifecycle = (
 			Effect.gen(function* () {
 				// Imported clients outlive Load and remain available during plugin cleanup.
 				for (const service of contract.inject)
-					yield* service.publish(peer).pipe(Scope.provide(scope), Effect.orDie)
+					yield* service.publish(peer).pipe(
+						Scope.provide(scope),
+						Effect.mapError((error) =>
+							ActivationFailed.make({
+								detail: "Publishing imported services failed",
+								cause: Cause.fail(error),
+							}),
+						),
+					)
 				const module = yield* Effect.tryPromise({
 					try: () => import(contract.module),
-					catch: (cause) => UndeclaredFailure.make({ original: cause }),
-				}).pipe(Effect.orDie)
+					catch: (cause) =>
+						ModuleImportFailed.make({ module: contract.module, cause }),
+				})
 				const plugin = Plugin.fromModule(module)
 				if (Option.isNone(plugin))
-					return yield* Effect.die(
-						new Error("The implementation module exports no plugin"),
-					)
+					return yield* ActivationFailed.make({
+						detail: "The implementation module exports no plugin",
+					})
 				const fork = yield* Graft.plugin(
 					{ ...plugin.value, retry: undefined },
 					input,
@@ -203,17 +240,16 @@ export const lifecycle = (
 					Stream.runHead,
 				)
 				if (Option.isNone(first))
-					return yield* Effect.die(
-						new Error("The remote fork disappeared during startup"),
-					)
+					return yield* ActivationFailed.make({
+						detail: "The remote fork disappeared during startup",
+					})
 				if (first.value._tag === "Failed")
 					return yield* Effect.fail(contract.normalizeCause(first.value.cause))
 				if (first.value._tag !== "Active")
-					return yield* Effect.die(
-						new Error(
+					return yield* ActivationFailed.make({
+						detail:
 							"The remote plugin did not become active; check its declared dependencies",
-						),
-					)
+					})
 				yield* running.fork.state.pipe(
 					Stream.runForEach((state) =>
 						state._tag === "Failed"
@@ -235,30 +271,43 @@ export const lifecycle = (
 					Stream.runHead,
 				)
 				if (Option.isSome(exported) && exported.value._tag === "Failed")
-					return yield* Effect.failCause(exported.value.cause).pipe(
-						Effect.orDie,
-					)
+					return yield* ActivationFailed.make({
+						detail: "The remote export bridge failed during startup",
+						cause: exported.value.cause,
+					})
 				if (Option.isNone(exported) || exported.value._tag !== "Active")
-					return yield* Effect.die(
-						new Error("The remote export bridge stopped during startup"),
-					)
-				yield* Deferred.await(exportsReady)
+					return yield* ActivationFailed.make({
+						detail: "The remote export bridge stopped during startup",
+					})
 			})
 		const load = (input: Schema.Json) =>
 			Effect.gen(function* () {
-				const current = yield* Ref.get(instance)
-				if (Option.isSome(current))
-					return yield* Effect.die(
-						new Error("This runner already owns an instance"),
-					)
+				yield* SynchronizedRef.updateEffect(state, (current) =>
+					current._tag === "Idle"
+						? Effect.succeed(Lifecycle.Loading())
+						: Effect.fail(AlreadyLoaded.make({})),
+				)
 				const running = yield* start(input)
-				yield* Ref.set(instance, Option.some(running))
+				yield* SynchronizedRef.update(state, (current) =>
+					current._tag === "Withdrawing"
+						? Lifecycle.Withdrawing({ running: Option.some(running) })
+						: current._tag === "Disposing"
+							? Lifecycle.Disposing({ running: Option.some(running) })
+							: Lifecycle.Running({ running }),
+				)
 				yield* awaitActive(running)
-			})
+			}).pipe(
+				Effect.mapError((error) =>
+					Cause.isCause(error)
+						? error
+						: contract.normalizeCause(Cause.fail(error)),
+				),
+			)
 		const dispose = Effect.gen(function* () {
+			const previous = yield* SynchronizedRef.get(state)
 			yield* release
-			const current = yield* Ref.get(instance)
-			const retired = yield* Ref.get(withdrawing)
+			const current = runningOf(previous)
+			const retired = previous._tag === "Withdrawing"
 			const cause = Option.isSome(current)
 				? yield* cleanup(current.value, retired)
 				: Cause.empty

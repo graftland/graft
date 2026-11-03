@@ -8,6 +8,7 @@ import {
 	Fiber,
 	Queue,
 	Ref,
+	Result,
 	Sink,
 	Stream,
 } from "effect"
@@ -32,146 +33,80 @@ const setup = Effect.gen(function* () {
 })
 
 describe("runner framing", () => {
-	it.effect(
-		"decodes split headers, split payloads, and empty frames without parsing payload values",
-		() =>
-			Effect.gen(function* () {
-				const frames: ReadonlyArray<Framing.Frame> = [
-					{ channel: 0, priority: 0, kind: "Data", payload: bytes("control") },
-					{
-						channel: 1,
-						priority: 2,
-						kind: "Data",
-						payload: new Uint8Array([255, 0, 254]),
-					},
-					{
-						channel: 1,
-						priority: 2,
-						kind: "Credit",
-						payload: new Uint8Array(0),
-					},
-				]
-				const encoded = yield* Effect.forEach(frames, Framing.encode)
-				const parser = Framing.decoder()
-				const decoded = Array.flatMap(encoded, (buffer) =>
-					Array.flatMap(Array.fromIterable(buffer), (byte) =>
-						Array.fromIterable(parser.decode(new Uint8Array([byte]))),
-					),
-				)
-				assert.deepEqual(decoded, frames)
-				yield* parser.finish
-			}),
-	)
-	it.effect("rejects an oversized length with only the header present", () =>
+	it.effect("decodes split headers, split payloads and empty frames", () =>
 		Effect.gen(function* () {
-			const header = new Uint8Array([1, 1, 2, 0, 0, 0, 0, 0])
-			new DataView(header.buffer).setUint32(4, Framing.maxPayload + 1)
+			const frames: ReadonlyArray<Framing.Frame> = [
+				{ channel: 0, payload: bytes("control") },
+				{ channel: 1, payload: new Uint8Array([255, 0, 254]) },
+				{ channel: 1, payload: new Uint8Array(0) },
+			]
+			const encoded = yield* Effect.forEach(frames, Framing.encode)
 			const parser = Framing.decoder()
-			assert.throws(() => Array.fromIterable(parser.decode(header)))
-			assert.throws(() =>
-				Array.fromIterable(parser.decode(new Uint8Array([0]))),
+			const decoded = yield* Effect.forEach(
+				Array.flatMap(encoded, Array.fromIterable),
+				(byte) => Effect.fromResult(parser.decode(new Uint8Array([byte]))),
 			)
-			const short = Framing.decoder()
-			Array.fromIterable(short.decode(header.subarray(0, 7)))
-			const partial = yield* Effect.exit(short.finish)
-			assert.isTrue(Exit.isFailure(partial))
+			assert.deepEqual(Array.flatten(decoded), frames)
+			yield* parser.finish
 		}),
 	)
 	it.effect(
-		"backpressures a full log window while control and reverse traffic still progress",
+		"rejects an oversized length before reading its payload and retains the error",
+		() =>
+			Effect.gen(function* () {
+				const header = new Uint8Array([2, 1, 0, 0, 0, 0, 0, 0])
+				new DataView(header.buffer).setUint32(4, Framing.maxPayload + 1)
+				const parser = Framing.decoder()
+				assert.isTrue(Result.isFailure(parser.decode(header)))
+				assert.isTrue(Result.isFailure(parser.decode(new Uint8Array([0]))))
+				const short = Framing.decoder()
+				assert.isTrue(Result.isSuccess(short.decode(header.subarray(0, 7))))
+				const partial = yield* Effect.exit(short.finish)
+				assert.isTrue(Exit.isFailure(partial))
+			}),
+	)
+	it.effect(
+		"keeps session and reverse traffic moving while instance bytes wait for their consumer",
 		() =>
 			Effect.gen(function* () {
 				const { left, right } = yield* setup
-				for (const n of Array.range(0, Framing.window - 1))
-					yield* left.send(1, 2, bytes(String(n)))
-				const fifth = yield* Effect.forkScoped(left.send(1, 2, bytes("last")))
-				yield* left.send(0, 0, bytes("dispose"))
-				const dispose = yield* right.take(0, 0)
+				for (const n of Array.range(0, 19))
+					yield* left.send(1, bytes(String(n)))
+				yield* left.send(0, bytes("dispose"))
+				const dispose = yield* right.take(0)
 				assert.equal(text(dispose), "dispose")
-				yield* right.send(1, 0, bytes("interrupt"))
-				const interrupt = yield* left.take(1, 0)
-				assert.equal(text(interrupt), "interrupt")
-				assert.equal(fifth.pollUnsafe(), undefined)
-				for (const n of Array.range(0, Framing.window - 1)) {
-					const value = yield* right.take(1, 2)
+				yield* right.send(1, bytes("reverse"))
+				const reverse = yield* left.take(1)
+				assert.equal(text(reverse), "reverse")
+				for (const n of Array.range(0, 19)) {
+					const value = yield* right.take(1)
 					assert.equal(text(value), String(n))
 				}
-				yield* Fiber.join(fifth)
-				const last = yield* right.take(1, 2)
-				assert.equal(text(last), "last")
 			}).pipe(Effect.scoped),
 	)
 	it.effect(
-		"interrupts credit waiters and fails all lanes when the byte channel breaks",
+		"fails both channels and directions when the byte stream breaks",
 		() =>
 			Effect.gen(function* () {
 				const { left, right, ab, ba } = yield* setup
-				for (const _ of Array.range(1, Framing.window))
-					yield* left.send(1, 1, bytes("pending"))
-				const canceled = yield* Effect.forkScoped(
-					left.send(1, 1, bytes("canceled")),
-				)
-				yield* Fiber.interrupt(canceled)
-				const send = yield* Effect.forkScoped(left.send(1, 1, bytes("blocked")))
-				const receive = yield* Effect.forkScoped(
-					left.take(0, 0).pipe(Effect.asVoid),
-				)
-				const reverse = yield* Effect.forkScoped(
-					right.take(0, 0).pipe(Effect.asVoid),
+				const waiting = yield* Effect.forEach(
+					[left.take(0), left.take(1), right.take(0), right.take(1)],
+					(effect) => Effect.forkScoped(effect),
 				)
 				const error = TransportError.make({
 					cause: Cause.die(new Error("Partition")),
 				})
 				yield* Queue.fail(ab, error)
 				yield* Queue.fail(ba, error)
-				for (const fiber of [send, receive, reverse]) {
+				for (const fiber of waiting) {
 					const exit = yield* Fiber.await(fiber)
 					assert.isTrue(Exit.isFailure(exit))
 				}
-				assert.include(
-					Cause.pretty((yield* Effect.flip(Deferred.await(left.failed))).cause),
-					"Partition",
-				)
+				const failed = yield* Effect.flip(left.await)
+				assert.include(Cause.pretty(failed.cause), "Partition")
 			}).pipe(Effect.scoped),
 	)
-	it.effect("disconnects a peer that invents credits", () =>
-		Effect.gen(function* () {
-			const { ab, right } = yield* setup
-			const credit = yield* Framing.encode({
-				channel: 1,
-				priority: 1,
-				kind: "Credit",
-				payload: new Uint8Array(0),
-			})
-			yield* Queue.offer(ab, credit)
-			assert.include(
-				Cause.pretty((yield* Effect.flip(Deferred.await(right.failed))).cause),
-				"unsolicited credit",
-			)
-		}).pipe(Effect.scoped),
-	)
-	it.effect(
-		"disconnects on inbound overflow instead of blocking control dispatch",
-		() =>
-			Effect.gen(function* () {
-				const { ab, right } = yield* setup
-				const frame = yield* Framing.encode({
-					channel: 1,
-					priority: 2,
-					kind: "Data",
-					payload: bytes("overflow"),
-				})
-				for (const _ of Array.range(0, Framing.window))
-					yield* Queue.offer(ab, frame)
-				assert.include(
-					Cause.pretty(
-						(yield* Effect.flip(Deferred.await(right.failed))).cause,
-					),
-					"receive window",
-				)
-			}).pipe(Effect.scoped),
-	)
-	it.effect("writes queued control frames before data and logs", () =>
+	it.effect("writes queued session frames before instance frames", () =>
 		Effect.gen(function* () {
 			const gate = yield* Deferred.make<void>()
 			const entered = yield* Deferred.make<void>()
@@ -183,56 +118,24 @@ describe("runner framing", () => {
 					Effect.gen(function* () {
 						yield* Deferred.succeed(entered, undefined)
 						yield* Deferred.await(gate)
-						const priorities = yield* Ref.updateAndGet(
+						const channels = yield* Ref.updateAndGet(
 							written,
-							Array.append(data[2]!),
+							Array.append(
+								new DataView(data.buffer, data.byteOffset).getUint8(1),
+							),
 						)
-						if (priorities.length === 6)
-							yield* Deferred.succeed(complete, priorities)
+						if (channels.length === 3)
+							yield* Deferred.succeed(complete, channels)
 					}),
 				),
 			})
-			yield* peer.send(1, 2, bytes("first"))
+			yield* peer.send(1, bytes("first"))
 			yield* Deferred.await(entered)
-			yield* peer.send(1, 2, bytes("log"))
-			yield* peer.send(1, 2, bytes("log"))
-			yield* peer.send(1, 1, bytes("data"))
-			yield* peer.send(1, 0, bytes("interrupt"))
-			yield* peer.send(0, 0, bytes("renew"))
+			yield* peer.send(1, bytes("instance"))
+			yield* peer.send(0, bytes("session"))
 			yield* Deferred.succeed(gate, undefined)
-			const priorities = yield* Deferred.await(complete)
-			assert.deepEqual(priorities, [2, 0, 0, 1, 2, 2])
+			const channels = yield* Deferred.await(complete)
+			assert.deepEqual(channels, [1, 0, 1])
 		}).pipe(Effect.scoped),
-	)
-	it.effect(
-		"does not replenish the receive window until credits reach the writer",
-		() =>
-			Effect.gen(function* () {
-				const incoming = yield* Queue.bounded<Uint8Array, TransportError>(2)
-				const entered = yield* Deferred.make<void>()
-				const peer = yield* Multiplex.make({
-					input: Stream.fromQueue(incoming),
-					output: Sink.forEach(() =>
-						Deferred.succeed(entered, undefined).pipe(
-							Effect.andThen(Effect.never),
-						),
-					),
-				})
-				yield* peer.send(0, 0, bytes("block the writer"))
-				yield* Deferred.await(entered)
-				const frame = yield* Framing.encode({
-					channel: 1,
-					priority: 2,
-					kind: "Data",
-					payload: bytes("data"),
-				})
-				for (const _ of Array.range(1, Framing.window)) {
-					yield* Queue.offer(incoming, frame)
-					yield* peer.take(1, 2)
-				}
-				yield* Queue.offer(incoming, frame)
-				const failed = yield* Effect.flip(Deferred.await(peer.failed))
-				assert.include(Cause.pretty(failed.cause), "receive window")
-			}).pipe(Effect.scoped),
 	)
 })

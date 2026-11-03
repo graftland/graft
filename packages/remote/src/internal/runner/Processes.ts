@@ -36,7 +36,6 @@ const inspect = (pid: number) =>
 			if (code !== 0 || born === undefined || status === undefined)
 				return yield* ExecutionError.make({
 					detail: "Cannot inspect process identity: " + stderr,
-					cause: Cause.empty,
 				})
 			if (String.startsWith("Z")(status)) return Option.none()
 			return Option.some({ born })
@@ -58,7 +57,6 @@ export const identity = (pid: number) =>
 		if (Option.isNone(current))
 			return yield* ExecutionError.make({
 				detail: "The child exited before its identity could be recorded",
-				cause: Cause.empty,
 			})
 		return { pid, start: current.value }
 	})

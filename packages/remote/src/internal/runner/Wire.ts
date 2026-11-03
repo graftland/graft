@@ -10,7 +10,7 @@ import {
 	PositiveInt,
 	PositiveFinite,
 	SessionRecord,
-	InvalidSessionRequest,
+	SessionAccessDenied,
 	StaleSession,
 	LeaseExpired,
 	SessionStopped,
@@ -26,7 +26,7 @@ import {
 
 /** The RPC boundary is the only place that assembles the runner's error schema. */
 export const SessionError = Schema.Union([
-	InvalidSessionRequest,
+	SessionAccessDenied,
 	StaleSession,
 	LeaseExpired,
 	SessionStopped,
@@ -79,17 +79,13 @@ export const Session = RpcGroup.make(
 	}),
 ).annotateRpcs(Port.Priority, "control")
 
-export type Peer = Effect.Success<ReturnType<typeof Multiplex.make>>
-/**
- * Preserve the port writer's order, including Request before Interrupt.
- * The session channel has independent credits and takes priority over instance bytes.
- * The bounded outer window adds at most four already-admitted instance frames.
- */
+export type Peer = Multiplex.Peer
+/** Preserve the port writer order within each byte channel. */
 export const channel = (peer: Peer, id: 0 | 1): Port.Channel => ({
-	input: Stream.fromEffectRepeat(peer.take(id, id === 0 ? 0 : 1)),
+	input: Stream.fromEffectRepeat(peer.take(id)),
 	output: Sink.forEach((bytes: Uint8Array) =>
 		peer
-			.send(id, id === 0 ? 0 : 1, bytes)
+			.send(id, bytes)
 			.pipe(
 				Effect.mapError((error) =>
 					TransportError.make({ cause: Cause.fail(error) }),

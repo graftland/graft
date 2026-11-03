@@ -1,3 +1,5 @@
+import { ChildFailure } from "./internal/childErrors"
+export { ChildFailure }
 import { Array, Cause, Effect, Predicate, Schema } from "effect"
 
 import type { Service } from "./internal/services"
@@ -43,11 +45,11 @@ export const make = <
 		throw new Error(
 			"Service keys must be unique within a remote contract and must not use the control endpoint",
 		)
-	const failure = Schema.Union([options.error, UndeclaredFailure])
+	const failure = Schema.Union([options.error, UndeclaredFailure, ChildFailure])
 	const codec = Schema.toCodecJson(
 		Schema.Cause(failure, Schema.Defect({ includeStack: true })),
 	)
-	const declared = Schema.is(options.error)
+	const declared = Schema.is(failure)
 	const normalizeCause = (cause: Cause.Cause<unknown>) =>
 		Cause.map(cause, (error) =>
 			declared(error) ? error : UndeclaredFailure.make({ original: error }),

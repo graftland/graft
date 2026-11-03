@@ -59,14 +59,24 @@ const fake = (
 		const count = yield* Ref.make(0)
 		const closed = yield* Ref.make(0)
 		const driver = Execution.of({
-			spawn: (_handle, _request, _limits, register) =>
+			spawn: () =>
 				Effect.gen(function* () {
 					const pid = yield* Ref.updateAndGet(count, (n) => n + 1)
 					const exit = yield* Deferred.make<ExitStatus>()
 					const interrupted = yield* Deferred.make<void>()
 					const killed = yield* Deferred.make<void>()
 					yield* Effect.addFinalizer(() => Ref.update(closed, (n) => n + 1))
-					yield* register({
+					return {
+						code,
+						renew: () => Effect.void,
+						start: Queue.offer(spawned, { exit, interrupted, killed }).pipe(
+							Effect.andThen(
+								options.gate === undefined
+									? Effect.void
+									: Deferred.await(options.gate),
+							),
+							Effect.asVoid,
+						),
 						identity: {
 							pid,
 							start: { born: "start-" + pid },
@@ -88,10 +98,7 @@ const fake = (
 							),
 							Effect.asVoid,
 						),
-					}).pipe(Effect.uninterruptible)
-					yield* Queue.offer(spawned, { exit, interrupted, killed })
-					if (options.gate !== undefined) yield* Deferred.await(options.gate)
-					return code
+					}
 				}),
 			recover: options.recover ?? (() => Effect.succeed(termination)),
 		})
@@ -395,7 +402,6 @@ layer(SecureRandom.layerWebCrypto)("runner session supervisor", (it) => {
 					Effect.fail(
 						ExecutionError.make({
 							detail: "Recovery sentinel",
-							cause: Cause.empty,
 						}),
 					),
 			})
@@ -415,7 +421,6 @@ layer(SecureRandom.layerWebCrypto)("runner session supervisor", (it) => {
 			Effect.gen(function* () {
 				const transport = ExecutionError.make({
 					detail: "Connection lost",
-					cause: Cause.empty,
 				})
 				const waiting = yield* awaitTermination(
 					orphan.handle,
@@ -531,7 +536,6 @@ layer(SecureRandom.layerWebCrypto)("runner session supervisor", (it) => {
 								Effect.fail(
 									StateStorageError.make({
 										detail: "Commit acknowledgement lost",
-										cause: Cause.empty,
 									}),
 								),
 							),
@@ -594,23 +598,24 @@ layer(SecureRandom.layerWebCrypto)("runner session supervisor", (it) => {
 							? Effect.fail(
 									StateStorageError.make({
 										detail: "Failure journal sentinel",
-										cause: Cause.empty,
 									}),
 								)
 							: store.save(record),
 				})
 				const driver = Execution.of({
 					...execution.driver,
-					spawn: (handle, request, limits, register) =>
-						execution.driver.spawn(handle, request, limits, register).pipe(
-							Effect.andThen(
-								Effect.fail(
-									ExecutionError.make({
-										detail: "Launch sentinel",
-										cause: Cause.empty,
-									}),
+					spawn: (handle, request, limits) =>
+						execution.driver.spawn(handle, request, limits).pipe(
+							Effect.map((unit) => ({
+								...unit,
+								start: unit.start.pipe(
+									Effect.andThen(
+										Effect.fail(
+											ExecutionError.make({ detail: "Launch sentinel" }),
+										),
+									),
 								),
-							),
+							})),
 						),
 				})
 				const scopeExit = yield* Effect.exit(
@@ -648,18 +653,17 @@ layer(SecureRandom.layerWebCrypto)("runner session supervisor", (it) => {
 				const execution = yield* fake({ graceful: false })
 				const sentinel = ExecutionError.make({
 					detail: "Shutdown sentinel",
-					cause: Cause.empty,
 				})
 				const driver = Execution.of({
 					...execution.driver,
-					spawn: (handle, request, limits, register) =>
-						execution.driver.spawn(handle, request, limits, (unit) =>
-							register({
+					spawn: (handle, request, limits) =>
+						execution.driver.spawn(handle, request, limits).pipe(
+							Effect.map((unit) => ({
 								...unit,
 								interrupt: unit.interrupt.pipe(
 									Effect.andThen(Effect.fail(sentinel)),
 								),
-							}),
+							})),
 						),
 				})
 				const scopeExit = yield* Effect.exit(

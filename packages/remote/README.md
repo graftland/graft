@@ -272,23 +272,21 @@ verification. Identity comes from exactly one SAN URI of the form
 `graft://name`, where name matches `[a-z0-9][a-z0-9._-]*`. There is no CN
 fallback. Renewing a certificate with the same URI preserves its namespace. Use
 a dedicated CA: issuing the same URI grants access to the same logical
-instances. SAN parsing respects quoted fields and rejects ambiguous, malformed,
-or missing identities. Session methods authorize every handle against the
+instances. The dedicated CA supplies a single graft URI; missing or ambiguous
+identities are rejected. Session methods authorize every handle against the
 authenticated connection.
 
 The runner terminates only session RPC. Instance traffic is relayed as opaque
 frames to the child, so services still use one end-to-end RPC relationship. An
-eight-byte outer header identifies channel, priority, kind, and payload length;
-payloads over 1 MiB are rejected before allocation or JSON decoding. Each outer
-lane has four credits and bounded queues. Session traffic has independent
-control credits. The complete instance byte stream uses one ordered outer lane:
-applying a second priority scheduler to already-ordered inner Request/Interrupt
-frames could invert them. The inner port still prioritizes control over
-data/logs; up to four already-admitted outer instance frames can precede it. No
-transport can preempt bytes already written to the socket. Open negotiates RPC
-admission limits to their per-priority minimum and installs them in both host
-and child. An execution channel has only one attached reader; competing
-attachments fail.
+eight-byte outer header identifies the protocol version, channel, and payload
+length; payloads over 1 MiB are rejected before JSON decoding. Multiplex only
+frames and routes bytes, preserving FIFO order within each channel and selecting
+session traffic before instance traffic. Port owns request admission and RPC ACK
+backpressure, with control, data, and log priorities. There is no second credit
+window. No transport can preempt bytes already written to the socket. Open
+negotiates RPC admission limits to their per-priority minimum and installs them
+in both host and child. An execution channel has only one attached reader;
+competing attachments fail.
 
 The host renews at approximately T/3. The supervisor and child both enforce the
 lease. fd 4 is reserved for supervision commands; a worker-thread watchdog owns
@@ -355,10 +353,10 @@ removed at teardown. Real-process deadlines have generous margins; supervisor
 timing and lease edge cases in `runner-supervisor.test.ts` use TestClock.
 
 `runner-framing.test.ts`, `runner-tls.test.ts`, and `runner-packages.test.ts`
-independently test byte limits, credit backpressure, stable certificate
-identity, rejection paths, package resolution, and digest behavior. Loader
-configuration integration remains Phase 4; the programmatic local and network
-targets are usable.
+independently test byte limits, channel ordering, stable certificate identity,
+rejection paths, package resolution, and digest behavior. Loader configuration
+integration remains Phase 4; the programmatic local and network targets are
+usable.
 
 ## Trust and deployment assumptions
 
@@ -381,3 +379,8 @@ changes the on-disk format; stop all instances before replacing a prototype
 runner and use a fresh state directory. Do not discard the generation high-water
 marks of an active deployment or reuse its fencing namespace with downstream
 systems.
+
+Plugin failures expose declared contract errors, `UndeclaredFailure`,
+`RemoteWithdrawn`, and `RemoteError`. Infrastructure details remain available in
+`RemoteError.cause`; consumers do not need to handle individual RPC, socket, or
+runner journal error types.

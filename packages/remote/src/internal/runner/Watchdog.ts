@@ -1,4 +1,5 @@
-import { Cause, Deferred, Effect, FiberSet, Schema } from "effect"
+import { Cause, Deferred, Effect, Schema } from "effect"
+import * as FailureGroup from "../FailureGroup"
 import { Worker } from "node:worker_threads"
 import { ExecutionError } from "./model"
 import { Notice } from "./WatchdogProtocol"
@@ -19,8 +20,8 @@ export const start = Effect.gen(function* () {
 		}),
 		(worker) => Effect.promise(() => worker.terminate()).pipe(Effect.asVoid),
 	)
-	const listeners = yield* FiberSet.make<void, ExecutionError>()
-	const run = yield* FiberSet.runtime(listeners)<never>()
+	const listeners = yield* FailureGroup.make<ExecutionError>()
+	const run = yield* listeners.runtime<never>()
 	const message = (value: unknown) =>
 		run(
 			Schema.decodeUnknownEffect(Notice)(value).pipe(
@@ -53,7 +54,6 @@ export const start = Effect.gen(function* () {
 			Effect.fail(
 				ExecutionError.make({
 					detail: "Child watchdog exited: " + code,
-					cause: Cause.empty,
 				}),
 			),
 		)
@@ -70,7 +70,7 @@ export const start = Effect.gen(function* () {
 				worker.off("exit", exit)
 			}),
 	)
-	const failure = FiberSet.join(listeners).pipe(Effect.andThen(Effect.never))
+	const failure = listeners.await
 	yield* Effect.raceFirst(Deferred.await(ready), failure)
 	return {
 		begin: Effect.raceFirst(Deferred.await(begin), failure),

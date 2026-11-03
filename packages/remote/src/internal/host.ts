@@ -1,3 +1,4 @@
+import * as FailureGroup from "./FailureGroup"
 import * as ContractModule from "../Contract"
 import {
 	Cause,
@@ -29,7 +30,9 @@ interface Contract<E extends ErrorSchema> {
 	readonly decodeCause: (
 		input: unknown,
 	) => Effect.Effect<
-		Cause.Cause<E["Type"] | ContractModule.UndeclaredFailure>,
+		Cause.Cause<
+			E["Type"] | ContractModule.UndeclaredFailure | ContractModule.ChildFailure
+		>,
 		Schema.SchemaError
 	>
 }
@@ -49,9 +52,11 @@ const forwardEvents = <E extends ErrorSchema>(
 ) =>
 	Effect.gen(function* () {
 		const stopped = yield* Deferred.make<void>()
-		const remoteFailure = yield* Deferred.make<
-			never,
-			E["Type"] | ContractModule.UndeclaredFailure | RemoteWithdrawn
+		const remoteFailure = yield* FailureGroup.make<
+			| E["Type"]
+			| ContractModule.UndeclaredFailure
+			| ContractModule.ChildFailure
+			| RemoteWithdrawn
 		>()
 		const events = yield* race(
 			connection,
@@ -61,15 +66,11 @@ const forwardEvents = <E extends ErrorSchema>(
 						case "Stopped":
 							return Deferred.succeed(stopped, undefined)
 						case "Withdrawing":
-							return Deferred.fail(remoteFailure, RemoteWithdrawn.make({}))
+							return remoteFailure.fail(RemoteWithdrawn.make({}))
 						case "Failed":
 							return contract
 								.decodeCause(event.cause)
-								.pipe(
-									Effect.flatMap((cause) =>
-										Deferred.failCause(remoteFailure, cause),
-									),
-								)
+								.pipe(Effect.flatMap((cause) => remoteFailure.failCause(cause)))
 					}
 				}),
 			),
@@ -169,12 +170,14 @@ export const load = <E extends ErrorSchema>(
 						(
 							cause,
 						): cause is Cause.Cause<
-							E["Type"] | ContractModule.UndeclaredFailure
+							| E["Type"]
+							| ContractModule.UndeclaredFailure
+							| ContractModule.ChildFailure
 						> => Cause.isCause(cause),
 						Effect.failCause,
 					),
 				),
-			Deferred.await(active.remoteFailure),
+			active.remoteFailure.await,
 		),
 	)
 export const dispose = <E extends ErrorSchema>(active: Active<E>) =>

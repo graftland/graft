@@ -5,7 +5,7 @@ import type { Scope } from "effect"
 import type { Rpc, RpcClientError, RpcGroup } from "effect/rpc"
 import type * as Port from "./port"
 
-type Peer = Effect.Success<ReturnType<typeof Port.make>>
+type Peer = Port.Port
 
 /** RPC types stay inside the descriptor; Graft supplies its dynamic activation context. */
 export interface Service<R = never, ClientR = never> {

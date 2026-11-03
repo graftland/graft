@@ -29,3 +29,9 @@ export class RemoteWithdrawn extends Schema.TaggedError<
 		return "Remote services were withdrawn"
 	}
 }
+
+/** Infrastructure failure at the plugin boundary; the complete underlying cause remains inspectable. */
+export class RemoteError extends Schema.TaggedError<
+	RemoteError,
+	{ readonly brand: unique symbol }
+>()("RemoteError", { cause: Schema.Cause(Schema.Unknown, Schema.Unknown) }) {}

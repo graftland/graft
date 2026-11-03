@@ -1,3 +1,5 @@
+import { underlying } from "./errors"
+import { ProcessExited } from "../src/Errors"
 import { assert, describe, it } from "@effect/vitest"
 import { NodeServices } from "@effect/platform-node"
 import { Graft } from "@graftland/graft"
@@ -105,7 +107,7 @@ describe("local remote lifecycle", () => {
 			if (Exit.isFailure(exit)) {
 				assert.isTrue(
 					Array.some(
-						exit.cause.reasons,
+						underlying(exit.cause).reasons,
 						(reason) =>
 							reason._tag === "Fail" &&
 							Schema.is(Rejected)(reason.error) &&
@@ -165,10 +167,10 @@ describe("local remote lifecycle", () => {
 			if (Exit.isFailure(exit))
 				assert.isTrue(
 					Array.some(
-						exit.cause.reasons,
+						underlying(exit.cause).reasons,
 						(reason) =>
 							reason._tag === "Fail" &&
-							Schema.is(Remote.ProcessExited)(reason.error) &&
+							Schema.is(ProcessExited)(reason.error) &&
 							reason.error.exitCode === 23 &&
 							String.includes("Crash diagnostic tail")(reason.error.stderr),
 					),
@@ -354,10 +356,10 @@ describe("local remote lifecycle", () => {
 				if (state._tag === "Failed")
 					assert.isTrue(
 						Array.some(
-							state.cause.reasons,
+							underlying(state.cause).reasons,
 							(reason) =>
 								reason._tag === "Fail" &&
-								Schema.is(Remote.ProcessExited)(reason.error) &&
+								Schema.is(ProcessExited)(reason.error) &&
 								reason.error.exitCode === null &&
 								reason.error.statusCause.reasons.length > 0 &&
 								String.includes("Fixture stderr diagnostic")(
@@ -390,7 +392,7 @@ describe("local remote lifecycle", () => {
 				if (state._tag === "Failed")
 					assert.isTrue(
 						Array.some(
-							state.cause.reasons,
+							underlying(state.cause).reasons,
 							(reason) =>
 								reason._tag === "Fail" &&
 								Schema.is(Rejected)(reason.error) &&

@@ -1,3 +1,4 @@
+import * as FailureGroup from "../FailureGroup"
 import {
 	Array,
 	Cause,
@@ -30,7 +31,7 @@ import * as Wire from "./Wire"
 import { awaitTermination, defaults, childOf } from "./model"
 import { command } from "./command"
 
-type Peer = Effect.Success<ReturnType<typeof Port.make>>
+type Peer = Port.Port
 export interface Connected {
 	readonly resources: Scope.Scope
 	readonly pid: number
@@ -130,13 +131,14 @@ export const Runner = (
 						leaseMillis: Duration.toMillis(target.lease),
 					}),
 		})
-		const stopping = yield* Ref.make(false)
-		const failures = yield* Ref.make<Cause.Cause<TransportError>>(Cause.empty)
+		const failures = yield* FailureGroup.make<TransportError>().pipe(
+			Scope.provide(resources),
+		)
 		const finishStarted = yield* Ref.make(false)
 		const terminate = yield* Effect.cached(
 			Effect.gen(function* () {
 				yield* Ref.set(finishStarted, true)
-				yield* Ref.set(stopping, true)
+				yield* failures.close
 				const result = yield* awaitTermination(
 					record.handle,
 					session.Dispose(record.handle),
@@ -180,50 +182,57 @@ export const Runner = (
 			limits: record.limits,
 		}).pipe(Scope.provide(resources))
 		const report = (cause: Cause.Cause<unknown>) =>
-			Effect.gen(function* () {
-				if (Cause.hasInterruptsOnly(cause) || (yield* Ref.get(stopping))) return
-				const error = TransportError.make({ cause })
-				yield* Ref.update(failures, (current) =>
-					Cause.combine(current, Cause.fail(error)),
-				)
-				yield* peer.fail(error)
-			})
-		yield* Fiber.join(renewed).pipe(
+			failures.failCause(
+				Cause.map(cause, (error) =>
+					TransportError.make({ cause: Cause.fail(error) }),
+				),
+			)
+		yield* failures.await.pipe(
 			Effect.catchCause((cause) =>
-				Effect.gen(function* () {
-					if (yield* Ref.get(stopping)) return
-					const status = yield* Effect.exit(
-						session.Status(record.handle).pipe(Effect.timeout("5 seconds")),
-					)
-					if (Exit.isSuccess(status) && status.value.phase === "Stopped") {
-						const exit = status.value.termination.exit
-						yield* report(
-							Cause.combine(
-								cause,
-								Cause.fail(
-									ProcessExited.make({
-										pid: Option.getOrUndefined(childOf(loaded))?.pid ?? 0,
-										exitCode: exit.code,
-										stderr: exit.stderr ?? "",
-										statusCause: exit.cause ?? Cause.empty,
-									}),
-								),
-							),
-						)
-					} else
-						yield* report(
-							Exit.isFailure(status)
-								? Cause.combine(cause, status.cause)
-								: cause,
-						)
-				}),
+				Cause.hasInterruptsOnly(cause)
+					? Effect.void
+					: peer.fail(TransportError.make({ cause })),
 			),
 			Effect.forkIn(resources),
+		)
+
+		yield* failures.run(
+			Fiber.join(renewed).pipe(
+				Effect.catchCause((cause) =>
+					Effect.gen(function* () {
+						if (Cause.hasInterruptsOnly(cause)) return
+						const status = yield* Effect.exit(
+							session.Status(record.handle).pipe(Effect.timeout("5 seconds")),
+						)
+						if (Exit.isSuccess(status) && status.value.phase === "Stopped") {
+							const exit = status.value.termination.exit
+							yield* report(
+								Cause.combine(
+									cause,
+									Cause.fail(
+										ProcessExited.make({
+											pid: Option.getOrUndefined(childOf(loaded))?.pid ?? 0,
+											exitCode: exit.code,
+											stderr: exit.stderr ?? "",
+											statusCause: exit.cause ?? Cause.empty,
+										}),
+									),
+								),
+							)
+						} else
+							yield* report(
+								Exit.isFailure(status)
+									? Cause.combine(cause, status.cause)
+									: cause,
+							)
+					}),
+				),
+			),
 		)
 		return connected({
 			resources,
 			pid: Option.getOrUndefined(childOf(loaded))?.pid ?? 0,
-			diagnostics: Ref.get(failures),
+			diagnostics: failures.cause,
 			terminate: () =>
 				Effect.gen(function* () {
 					// No renewal may extend a disconnected session while termination waits out its lease.

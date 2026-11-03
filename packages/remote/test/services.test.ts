@@ -1,3 +1,4 @@
+import { underlying } from "./errors"
 import { assert, describe, it } from "@effect/vitest"
 import { NodeServices } from "@effect/platform-node"
 import { Graft, Plugin } from "@graftland/graft"
@@ -222,7 +223,7 @@ describe("cross-process services", () => {
 			if (Exit.isFailure(exit))
 				assert.isTrue(
 					Array.some(
-						exit.cause.reasons,
+						underlying(exit.cause).reasons,
 						(reason) =>
 							reason._tag === "Fail" &&
 							Schema.is(Graft.ServiceConflict)(reason.error) &&
@@ -299,7 +300,7 @@ describe("cross-process services", () => {
 				if (Exit.isFailure(exit))
 					assert.isTrue(
 						Array.some(
-							exit.cause.reasons,
+							underlying(exit.cause).reasons,
 							(reason) =>
 								(reason._tag === "Fail" &&
 									reason.error === "Remote apply failed") ||

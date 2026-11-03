@@ -1,10 +1,11 @@
+import { ModuleImportFailed, ContractNotFound } from "./internal/childErrors"
 import type { Graft } from "@graftland/graft"
 import { NodeSink } from "@effect/platform-node"
 import { Cause, Effect, Logger, Option, Stdio, Stream } from "effect"
 import { RpcServer } from "effect/rpc"
 // @effect-diagnostics-next-line nodeBuiltinImport:off -- Node's extra inherited descriptor is the dedicated protocol output, separate from console output.
 import { createWriteStream } from "node:fs"
-import { UndeclaredFailure, fromModule, type RunnerContract } from "./Contract"
+import { fromModule, type RunnerContract } from "./Contract"
 import { TransportError } from "./Errors"
 import * as Port from "./internal/port"
 import * as Services from "./internal/services"
@@ -20,13 +21,11 @@ export const load = (specifier: string) =>
 	Effect.gen(function* () {
 		const module = yield* Effect.tryPromise({
 			try: () => import(specifier),
-			catch: (cause) => UndeclaredFailure.make({ original: cause }),
+			catch: (cause) => ModuleImportFailed.make({ module: specifier, cause }),
 		})
 		const contract = fromModule(module)
 		if (Option.isNone(contract))
-			return yield* Effect.die(
-				new Error(`No remote contract exported by ${specifier}`),
-			)
+			return yield* ContractNotFound.make({ module: specifier })
 		return contract.value
 	})
 
@@ -106,14 +105,7 @@ export const run = (
 					),
 					Effect.forkScoped,
 				)
-				yield* Effect.raceFirst(
-					Effect.flip(peer.await),
-					stop.pipe(
-						Effect.tap(() =>
-							peer.fail(TransportError.make({ cause: Cause.empty })),
-						),
-					),
-				).pipe(
+				yield* Effect.raceFirst(Effect.flip(peer.await), stop).pipe(
 					// Release exports before closing the instance scope, including on interruption.
 					Effect.ensuring(instance.release),
 				)

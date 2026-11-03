@@ -1,3 +1,5 @@
+import { Limits, PositiveInt } from "../Limits"
+export { Limits, PositiveInt, PositiveFinite, defaults } from "../Limits"
 import { Array, Cause, Context, Data, Effect, Option, Schema } from "effect"
 import type { Scope } from "effect"
 
@@ -26,12 +28,12 @@ export class PeerAuthenticationError extends Schema.TaggedError<
 		return this.detail
 	}
 }
-export class InvalidSessionRequest extends Schema.TaggedError<
-	InvalidSessionRequest,
+export class SessionAccessDenied extends Schema.TaggedError<
+	SessionAccessDenied,
 	{ readonly brand: unique symbol }
->()("InvalidSessionRequest", {
+>()("SessionAccessDenied", {
 	detail: Schema.String,
-	cause: diagnosticCause,
+	cause: Schema.optionalKey(diagnosticCause),
 }) {
 	override get message() {
 		return this.detail
@@ -40,7 +42,10 @@ export class InvalidSessionRequest extends Schema.TaggedError<
 export class StaleSession extends Schema.TaggedError<
 	StaleSession,
 	{ readonly brand: unique symbol }
->()("StaleSession", { detail: Schema.String, cause: diagnosticCause }) {
+>()("StaleSession", {
+	detail: Schema.String,
+	cause: Schema.optionalKey(diagnosticCause),
+}) {
 	override get message() {
 		return this.detail
 	}
@@ -48,7 +53,10 @@ export class StaleSession extends Schema.TaggedError<
 export class LeaseExpired extends Schema.TaggedError<
 	LeaseExpired,
 	{ readonly brand: unique symbol }
->()("LeaseExpired", { detail: Schema.String, cause: diagnosticCause }) {
+>()("LeaseExpired", {
+	detail: Schema.String,
+	cause: Schema.optionalKey(diagnosticCause),
+}) {
 	override get message() {
 		return this.detail
 	}
@@ -56,7 +64,10 @@ export class LeaseExpired extends Schema.TaggedError<
 export class SessionStopped extends Schema.TaggedError<
 	SessionStopped,
 	{ readonly brand: unique symbol }
->()("SessionStopped", { detail: Schema.String, cause: diagnosticCause }) {
+>()("SessionStopped", {
+	detail: Schema.String,
+	cause: Schema.optionalKey(diagnosticCause),
+}) {
 	override get message() {
 		return this.detail
 	}
@@ -64,7 +75,10 @@ export class SessionStopped extends Schema.TaggedError<
 export class SessionConflict extends Schema.TaggedError<
 	SessionConflict,
 	{ readonly brand: unique symbol }
->()("SessionConflict", { detail: Schema.String, cause: diagnosticCause }) {
+>()("SessionConflict", {
+	detail: Schema.String,
+	cause: Schema.optionalKey(diagnosticCause),
+}) {
 	override get message() {
 		return this.detail
 	}
@@ -72,7 +86,10 @@ export class SessionConflict extends Schema.TaggedError<
 export class StateStorageError extends Schema.TaggedError<
 	StateStorageError,
 	{ readonly brand: unique symbol }
->()("StateStorageError", { detail: Schema.String, cause: diagnosticCause }) {
+>()("StateStorageError", {
+	detail: Schema.String,
+	cause: Schema.optionalKey(diagnosticCause),
+}) {
 	override get message() {
 		return this.detail
 	}
@@ -80,7 +97,10 @@ export class StateStorageError extends Schema.TaggedError<
 export class ExecutionError extends Schema.TaggedError<
 	ExecutionError,
 	{ readonly brand: unique symbol }
->()("ExecutionError", { detail: Schema.String, cause: diagnosticCause }) {
+>()("ExecutionError", {
+	detail: Schema.String,
+	cause: Schema.optionalKey(diagnosticCause),
+}) {
 	override get message() {
 		return this.detail
 	}
@@ -90,7 +110,7 @@ export class TerminationUnconfirmed extends Schema.TaggedError<
 	{ readonly brand: unique symbol }
 >()("TerminationUnconfirmed", {
 	detail: Schema.String,
-	cause: diagnosticCause,
+	cause: Schema.optionalKey(diagnosticCause),
 }) {
 	override get message() {
 		return this.detail
@@ -99,7 +119,10 @@ export class TerminationUnconfirmed extends Schema.TaggedError<
 export class RunnerClosing extends Schema.TaggedError<
 	RunnerClosing,
 	{ readonly brand: unique symbol }
->()("RunnerClosing", { detail: Schema.String, cause: diagnosticCause }) {
+>()("RunnerClosing", {
+	detail: Schema.String,
+	cause: Schema.optionalKey(diagnosticCause),
+}) {
 	override get message() {
 		return this.detail
 	}
@@ -107,7 +130,10 @@ export class RunnerClosing extends Schema.TaggedError<
 export class StateDirectoryLocked extends Schema.TaggedError<
 	StateDirectoryLocked,
 	{ readonly brand: unique symbol }
->()("StateDirectoryLocked", { detail: Schema.String, cause: diagnosticCause }) {
+>()("StateDirectoryLocked", {
+	detail: Schema.String,
+	cause: Schema.optionalKey(diagnosticCause),
+}) {
 	override get message() {
 		return this.detail
 	}
@@ -120,15 +146,6 @@ export type Key = typeof Key.Type
 /** Structural keys keep identity namespaces separate without delimiter conventions. */
 export class SessionKey extends Data.Class<Key> {}
 export const keyOf = (key: Key) => new SessionKey(key)
-export const PositiveInt = Schema.Int.check(Schema.isGreaterThan(0))
-export const PositiveFinite = Schema.Finite.check(Schema.isGreaterThan(0))
-export const Limits = Schema.Struct({
-	control: PositiveInt,
-	data: PositiveInt,
-	log: PositiveInt,
-})
-export type Limits = typeof Limits.Type
-export const defaults: Limits = { control: 8, data: 16, log: 2 }
 export const negotiate = (local: Limits, peer: Limits): Limits => ({
 	control: Math.min(local.control, peer.control),
 	data: Math.min(local.data, peer.data),
@@ -291,11 +308,14 @@ export class Store extends Context.Service<
 export type ExecutionFailure =
 	ExecutionError | PackageError | TerminationUnconfirmed
 export interface Unit {
+	readonly code: CodeIdentity
+	/** The supervisor persists identity and renews the lease before releasing the child startup gate. */
+	readonly start: Effect.Effect<void, ExecutionFailure>
 	readonly identity: ProcessIdentity
 	readonly exited: Effect.Effect<ExitStatus, ExecutionFailure>
 	readonly interrupt: Effect.Effect<void, ExecutionFailure>
 	readonly kill: Effect.Effect<void, ExecutionFailure>
-	readonly renew?: (millis: number) => Effect.Effect<void, ExecutionFailure>
+	readonly renew: (millis: number) => Effect.Effect<void, ExecutionFailure>
 }
 export class Execution extends Context.Service<
 	Execution,
@@ -304,17 +324,7 @@ export class Execution extends Context.Service<
 			handle: Handle,
 			request: Load,
 			limits: Limits,
-			register: (
-				unit: Unit,
-			) => Effect.Effect<
-				void,
-				ExecutionFailure | StateStorageError | LeaseExpired | SessionStopped
-			>,
-		) => Effect.Effect<
-			CodeIdentity,
-			ExecutionFailure | StateStorageError | LeaseExpired | SessionStopped,
-			Scope.Scope
-		>
+		) => Effect.Effect<Unit, ExecutionFailure, Scope.Scope>
 		readonly recover: (
 			child: ProcessIdentity,
 		) => Effect.Effect<Termination, ExecutionFailure>

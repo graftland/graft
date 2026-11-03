@@ -1,3 +1,5 @@
+import * as ProcessObservation from "./ProcessObservation"
+import * as FailureGroup from "../FailureGroup"
 import { Command, CommandJson } from "./WatchdogProtocol"
 import {
 	Array,
@@ -5,21 +7,15 @@ import {
 	FileSystem,
 	Path,
 	Schema,
-	type PlatformError,
-	Exit,
 	Context,
-	Deferred,
 	Effect,
-	Fiber,
 	HashMap,
 	HashSet,
 	Queue,
 	Ref,
 	Sink,
 	Stream,
-	String,
 	Layer,
-	Schedule,
 	Scope,
 } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
@@ -42,7 +38,7 @@ export class Channels extends Context.Service<
 		readonly peer: (
 			token: string,
 		) => Effect.Effect<
-			Effect.Success<ReturnType<typeof Multiplex.make>>,
+			Multiplex.Peer,
 			SessionStopped | SessionConflict,
 			Scope.Scope
 		>
@@ -59,17 +55,12 @@ export const make = (root: string) =>
 			spawner,
 		).pipe(Context.add(FileSystem.FileSystem, fs), Context.add(Path.Path, path))
 
-		const peers = yield* Ref.make(
-			HashMap.empty<
-				string,
-				Effect.Success<ReturnType<typeof Multiplex.make>>
-			>(),
-		)
+		const peers = yield* Ref.make(HashMap.empty<string, Multiplex.Peer>())
 		const claimed = yield* Ref.make(HashSet.empty<string>())
 		const driver = Execution.of({
 			recover: (child) =>
 				Processes.recover(child).pipe(Effect.provideContext(platform)),
-			spawn: (handle, request, limits, register) =>
+			spawn: (handle, request, limits) =>
 				Effect.gen(function* () {
 					const resolved = yield* Packages.resolve(root, request.specifier)
 					const argv = yield* command()
@@ -101,66 +92,39 @@ export const make = (root: string) =>
 							},
 						),
 					)
-					const tail = yield* Ref.make("")
-					const stdout = yield* child.stdout.pipe(
-						Stream.runDrain,
-						Effect.forkScoped,
-					)
-					const stderr = yield* child.stderr.pipe(
-						Stream.decodeText(),
-						Stream.runForEach((text) =>
-							Ref.update(tail, (old) => String.takeRight(old + text, 8192)),
-						),
-						Effect.forkScoped,
-					)
-					const exited = yield* Effect.gen(function* () {
-						const result = yield* Effect.exit(child.exitCode)
-						// exitCode also fails for signals and input errors. isRunning observes Node's exit event.
-						yield* child.isRunning.pipe(
-							Effect.repeat({
-								schedule: Schedule.spaced("25 millis"),
-								while: (running) => running,
-							}),
-						)
-						const err = yield* Fiber.await(stderr)
-						const out = yield* Fiber.await(stdout)
-						return {
-							code: result._tag === "Success" ? result.value : null,
-							signal: null,
-							stderr: yield* Ref.get(tail),
-							cause: Array.reduce(
-								[Exit.asVoid(result), err, out],
-								Cause.empty,
-								(cause: Cause.Cause<PlatformError.PlatformError>, exit) =>
-									Exit.isFailure(exit)
-										? Cause.combine(cause, exit.cause)
-										: cause,
-							),
-						}
-					}).pipe(
+					const observation = yield* ProcessObservation.observe(child)
+					const exited = observation.exited.pipe(
 						Effect.mapError((error) =>
 							ExecutionError.make({
 								detail: "Observing child exit failed",
 								cause: Cause.fail(error),
 							}),
 						),
-						Effect.forkScoped,
+					)
+					const failures = yield* FailureGroup.make<ExecutionError>()
+					yield* failures.run(
+						observation.failure.pipe(
+							Effect.mapError((error) =>
+								ExecutionError.make({
+									detail: "Reading child output failed",
+									cause: Cause.fail(error),
+								}),
+							),
+						),
 					)
 					const controls = yield* Queue.bounded<string>(4)
-					const writerFailed = yield* Deferred.make<never, ExecutionError>()
-					yield* Stream.fromQueue(controls).pipe(
-						Stream.map((line) => new TextEncoder().encode(line + "\n")),
-						Stream.run(child.getInputFd(4)),
-						Effect.mapError((error) =>
-							ExecutionError.make({
-								detail: "Child supervision channel failed",
-								cause: Cause.fail(error),
-							}),
+
+					yield* failures.run(
+						Stream.fromQueue(controls).pipe(
+							Stream.map((line) => new TextEncoder().encode(line + "\n")),
+							Stream.run(child.getInputFd(4)),
+							Effect.mapError((error) =>
+								ExecutionError.make({
+									detail: "Child supervision channel failed",
+									cause: Cause.fail(error),
+								}),
+							),
 						),
-						Effect.catchCause((cause) =>
-							Deferred.failCause(writerFailed, cause),
-						),
-						Effect.forkScoped,
 					)
 					const send = (value: typeof Command.Type) =>
 						Effect.raceFirst(
@@ -174,7 +138,7 @@ export const make = (root: string) =>
 									}),
 								),
 							),
-							Deferred.await(writerFailed),
+							failures.await,
 						)
 					const peer = yield* Multiplex.make({
 						input: child
@@ -195,9 +159,11 @@ export const make = (root: string) =>
 					yield* Effect.addFinalizer(() =>
 						Ref.update(peers, HashMap.remove(handle.token)),
 					)
-					yield* register({
+					return {
+						code: resolved.identity,
+						start: send({ kind: "start" }),
 						identity,
-						exited: Fiber.join(exited),
+						exited,
 						interrupt: send({ kind: "stop" }),
 						kill: child.kill({ killSignal: "SIGKILL" }).pipe(
 							Effect.mapError((error) =>
@@ -207,10 +173,8 @@ export const make = (root: string) =>
 								}),
 							),
 						),
-						renew: (millis) => send({ kind: "renew", millis }),
-					})
-					yield* send({ kind: "start" })
-					return resolved.identity
+						renew: (millis: number) => send({ kind: "renew", millis }),
+					}
 				}).pipe(
 					Effect.provideContext(platform),
 					Effect.catchTags({
@@ -244,7 +208,6 @@ export const make = (root: string) =>
 									: Effect.fail(
 											SessionStopped.make({
 												detail: "The execution channel is no longer available",
-												cause: Cause.empty,
 											}),
 										)
 							}),
@@ -257,7 +220,6 @@ export const make = (root: string) =>
 						if (occupied)
 							return yield* SessionConflict.make({
 								detail: "The instance channel is already attached",
-								cause: Cause.empty,
 							})
 						return peer
 					}),
