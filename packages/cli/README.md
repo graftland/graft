@@ -1,13 +1,18 @@
 # @graftland/cli
 
+English |
+[简体中文](https://github.com/graftland/graft/blob/main/packages/cli/README.zh-CN.md)
+|
+[繁體中文](https://github.com/graftland/graft/blob/main/packages/cli/README.zh-TW.md)
+
 The `graft` command: `start`, `create`, `add` and `remove`.
 
 ```sh
 npm install @graftland/cli effect
 ```
 
-Create a project with `npx @graftland/cli create my-app --install`, then run it
-with `npx graft start --watch`. Needs Node.js 22.15 or later.
+Create a project with `npx @graftland/cli create my-app --install`. Then run it
+with `npx graft start --watch`. You need Node.js 22.19 or later.
 
 ## Documentation
 

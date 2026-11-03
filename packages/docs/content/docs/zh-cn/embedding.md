@@ -52,7 +52,7 @@ const resolver = ModuleResolver.fromRecord({ greeter, hello })
 `ModuleResolver.fromRecord`
 从固定的映射表解析名称，适合打包后的应用和测试。`ModuleResolver.layer({ base, importer })`
 则通过导入模块来解析：相对名称从 `base` 解析，包名通过 `importer`
-解析。`importer` 通常是在应用中定义的
+解析。`importer` 通常是在应用中编写的
 `(specifier) => import(specifier)`，以便找到应用的依赖。
 
 将解析器和 Node.js 服务一起提供到环境中：
@@ -74,7 +74,7 @@ program.pipe(
 
 `Include.Include` 是 `graft start`
 使用的插件。它读取 YAML 文件并将编辑结果写回；设置 `watch: true`
-后，还会监听手动修改：
+后，还会获取你手动做的修改：
 
 ```ts
 import { Include } from "@graftland/loader"

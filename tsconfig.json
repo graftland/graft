@@ -36,6 +36,36 @@
 		},
 		{
 			"path": "./packages/cli/tsconfig.test.json"
+		},
+		{
+			"path": "./samples/01-hello"
+		},
+		{
+			"path": "./samples/02-services"
+		},
+		{
+			"path": "./samples/03-events"
+		},
+		{
+			"path": "./samples/04-failures"
+		},
+		{
+			"path": "./samples/05-config-file"
+		},
+		{
+			"path": "./samples/chat-bot"
+		},
+		{
+			"path": "./samples/checkout-upgrade"
+		},
+		{
+			"path": "./samples/http-gateway"
+		},
+		{
+			"path": "./samples/saas-tenants"
+		},
+		{
+			"path": "./samples/market-feed"
 		}
 	]
 }

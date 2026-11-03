@@ -7,14 +7,14 @@ description:
 
 import { Card, CardGrid } from "@astrojs/starlight/components"
 
-Graft runs an application as a tree of plugins. Each plugin can publish
-services, depend on services from other plugins, and be loaded, reconfigured,
+Graft runs an application as a tree of plugins. Each plugin can publish services
+and use services from other plugins. A plugin can be loaded, reconfigured,
 replaced or unloaded while the process keeps running. When a plugin goes away,
-everything that depends on it stops first, and then its own resources are
-released.
+everything that depends on it stops first. Then Graft releases the plugin's own
+resources.
 
 Graft is built on [Effect](https://effect.website). A plugin is an Effect that
-runs in a `Scope`, a service is an Effect `Context` key, and a failure keeps its
+runs in a `Scope`. A service is an Effect `Context` key. A failure keeps its
 full `Cause`. Graft adds only what Effect does not have: services that come and
 go at run time, the plugin tree, events, config files and hot reload.
 
@@ -65,14 +65,14 @@ const hello = Plugin.make({
 
 ## Packages
 
-| Package                      | What it does                                                                              |
-| ---------------------------- | ----------------------------------------------------------------------------------------- |
-| `@graftland/graft`           | A plugin framework built on Effect: plugins, forks, services, isolation, events and logs. |
-| `@graftland/loader`          | Loads plugins from a list of entries or a YAML config file.                               |
-| `@graftland/hmr`             | Reloads plugin modules on Node.js without restarting the process.                         |
-| `@graftland/cli`             | The `graft` command: `start`, `create`, `add` and `remove`.                               |
-| `@graftland/create`          | Generates a new Graft project. `graft create` uses it.                                    |
-| `@graftland/package-manager` | Installs dependencies with npm, pnpm or Yarn, and rolls back on failure.                  |
+| Package                      | What it does                                                                                                            |
+| ---------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `@graftland/graft`           | A plugin framework built on Effect: plugins, forks, services, isolation, events and logs.                               |
+| `@graftland/loader`          | Loads plugins from a list of entries or a YAML config file.                                                             |
+| `@graftland/hmr`             | Reloads plugin modules on Node.js without restarting the process.                                                       |
+| `@graftland/cli`             | The `graft` command: `start`, `create`, `add` and `remove`.                                                             |
+| `@graftland/create`          | Makes a new Graft project. `graft create` uses it.                                                                      |
+| `@graftland/package-manager` | Installs dependencies with npm, pnpm or Yarn. A failed install is undone by [snapshot rollback](cli/#package-managers). |
 
-All packages are released together with the same version, and need `effect`
-4.1.2.
+All packages share one version number and are released together. They need
+`effect` 4.1.x.

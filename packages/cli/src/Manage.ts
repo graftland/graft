@@ -4,13 +4,13 @@
 import * as Create from "@graftland/create"
 import * as PackageManager from "@graftland/package-manager"
 import {
-	Array as Arr,
+	Array,
 	Config,
 	Effect,
 	Option,
+	Predicate,
 	Record,
 	Schema,
-	String as Str,
 } from "effect"
 
 const report = (result: PackageManager.InstallResult) =>
@@ -18,16 +18,19 @@ const report = (result: PackageManager.InstallResult) =>
 		`${result.agent}: ${result.added.length} added, ${result.updated.length} updated, ${result.removed.length} removed`,
 	)
 
-/** Splits `name@range` (the scope's `@` excluded); a bare name means the latest version. */
-const parseSpec = (spec: string): readonly [string, string] =>
-	Option.match(
-		Option.filter(Str.lastIndexOf("@")(spec), (at) => at > 0),
-		{
-			onNone: () => [spec, "latest"] as const,
-			onSome: (at) =>
-				[Str.slice(0, at)(spec), Str.slice(at + 1)(spec)] as const,
-		},
-	)
+/**
+ * `name@range`, split at the last `@` so a scope's `@` stays in the name. A
+ * bare name means the latest version.
+ */
+const Spec = Schema.Union([
+	Schema.TemplateLiteralParser([
+		PackageManager.PackageName,
+		"@",
+		Schema.String,
+	]),
+	PackageManager.PackageName,
+])
+const decodeSpecs = Schema.decodeEffect(Schema.Array(Spec))
 
 const install = (
 	directory: string,
@@ -62,10 +65,21 @@ export const create = (options: {
 	})
 
 export const add = (specs: ReadonlyArray<string>) =>
-	install(".", Record.fromEntries(Arr.map(specs, parseSpec)))
+	Effect.flatMap(decodeSpecs(specs), (specs) =>
+		install(
+			".",
+			Record.fromEntries(
+				Array.map(specs, (spec) =>
+					Predicate.isString(spec)
+						? ([spec, "latest"] as const)
+						: ([spec[0], spec[2]] as const),
+				),
+			),
+		),
+	)
 
 export const remove = (names: ReadonlyArray<string>) =>
 	install(
 		".",
-		Record.fromEntries(Arr.map(names, (name) => [name, null] as const)),
+		Record.fromEntries(Array.map(names, (name) => [name, null] as const)),
 	)

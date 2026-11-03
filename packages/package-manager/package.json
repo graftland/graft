@@ -1,5 +1,8 @@
 {
 	"name": "@graftland/package-manager",
+	"engines": {
+		"node": ">=22.19.0"
+	},
 	"version": "0.0.0",
 	"type": "module",
 	"description": "Installs dependencies with npm, pnpm or Yarn, and rolls back on failure",
@@ -12,12 +15,18 @@
 	"sideEffects": false,
 	"files": [
 		"dist",
-		"src"
+		"src",
+		"README.zh-CN.md",
+		"README.zh-TW.md"
 	],
 	"exports": {
 		".": {
 			"source": "./src/index.ts",
 			"default": "./dist/index.js"
+		},
+		"./PackageManagerDeclaration": {
+			"source": "./src/PackageManagerDeclaration.ts",
+			"default": "./dist/PackageManagerDeclaration.js"
 		},
 		"./package.json": "./package.json"
 	},
@@ -26,7 +35,7 @@
 		"test": "vitest run"
 	},
 	"peerDependencies": {
-		"effect": "4.1.2"
+		"effect": "4.1.*"
 	},
 	"devDependencies": {
 		"@effect/vitest": "4.1.2",
@@ -38,6 +47,7 @@
 	"publishConfig": {
 		"exports": {
 			".": "./dist/index.js",
+			"./PackageManagerDeclaration": "./dist/PackageManagerDeclaration.js",
 			"./package.json": "./package.json"
 		}
 	}

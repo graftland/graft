@@ -4,40 +4,24 @@
 import { NodeServices } from "@effect/platform-node"
 import { Graft, Plugin } from "@graftland/graft"
 import * as Hmr from "@graftland/hmr"
-import { Include, Loader, ModuleResolver } from "@graftland/loader"
-import type { PlatformError } from "effect"
-import {
-	Array as Arr,
-	Effect,
-	FileSystem,
-	Layer,
-	Logger,
-	Path,
-	Queue,
-	Stream,
-	String as Str,
-} from "effect"
+import { Include, Loader, ModuleResolver, type Tree } from "@graftland/loader"
+import type { PlatformError, Schema } from "effect"
+import { Effect, FileSystem, Layer, Logger, Path } from "effect"
+import { EnvFile, layer as env, watchEnvFile } from "./internal/env"
+import { layer as intercepts } from "./internal/intercepts"
+import { watchModules } from "./internal/watch"
 
 export interface Options {
 	/** Path of the config file. */
 	readonly config: string
 	/** Reload plugin modules and the config file when they change. */
 	readonly watch: boolean
+	/**
+	 * A `.env` file that `!env` reads when the process environment does not set
+	 * a variable. With `watch`, changes to it are read again.
+	 */
+	readonly envFile?: string | undefined
 }
-
-const moduleExtensions = [".js", ".mjs", ".cjs", ".ts", ".mts", ".cts"]
-
-/** Whether a change to this file should reload plugin modules. */
-const isModule = (path: string) =>
-	!Str.includes("node_modules")(path) &&
-	Arr.some(moduleExtensions, (extension) => Str.endsWith(extension)(path))
-
-const describe = (result: Hmr.ReloadResult) =>
-	result._tag === "Reloaded"
-		? Effect.logInfo(`Reloaded ${result.entries.length} plugin module(s)`)
-		: Effect.logWarning(
-				`Restart required to pick up ${Arr.join(result.modules, ", ")}`,
-			)
 
 /**
  * Loads the entries of the config file and runs until interrupted. Plugin
@@ -46,9 +30,16 @@ const describe = (result: Hmr.ReloadResult) =>
  */
 export const run = (
 	options: Options,
-): Effect.Effect<never, Graft.ServiceConflict | PlatformError.BadArgument> =>
+): Effect.Effect<
+	never,
+	| Graft.ServiceConflict
+	| PlatformError.BadArgument
+	| PlatformError.PlatformError
+	| Schema.SchemaError
+	| Loader.StoreError
+	| Tree.InvalidOperation
+> =>
 	Effect.gen(function* () {
-		const fs = yield* FileSystem.FileSystem
 		const path = yield* Path.Path
 		const file = path.resolve(options.config)
 		const directory = path.dirname(file)
@@ -56,38 +47,30 @@ export const run = (
 		const hmr = yield* Hmr.make({ base: base.href })
 		const resolver = yield* ModuleResolver.make({
 			base: directory,
-			importer: hmr.importer,
+			importer: hmr.importerScoped,
 		})
 		yield* Graft.provide(ModuleResolver.ModuleResolver, resolver)
-		yield* Graft.plugin(Include.Include, { path: file, watch: options.watch })
+		const included = yield* Graft.plugin(Include.Include, {
+			path: file,
+			watch: options.watch,
+		})
+		yield* included.await
 		if (options.watch) {
-			// A save raises several events; a one-slot sliding queue folds them into one pending reload.
-			const changed = yield* Queue.sliding<void>(1)
-			// Only module changes reload code; the config file is watched by the loader itself.
-			yield* fs.watch(directory, { recursive: true }).pipe(
-				Stream.filter((event) => isModule(event.path)),
-				Stream.runForEach(() => Queue.offer(changed, undefined)),
-				Effect.forkScoped,
-			)
+			const { reload } = yield* EnvFile
+			const envFile = options.envFile
 			const reloader = Plugin.make({
 				name: "reloader",
-				inject: [Loader.Loader],
+				inject: [Loader.Loader, FileSystem.FileSystem, Path.Path],
 				apply: () =>
 					Effect.gen(function* () {
 						const loader = yield* Loader.Loader
-						yield* Queue.take(changed).pipe(
-							Effect.andThen(Effect.sleep("50 millis")),
-							Effect.andThen(Queue.clear(changed)),
-							Effect.andThen(hmr.reload),
-							Effect.flatMap(describe),
-							// Entries whose module failed to load get another chance with the new code.
-							Effect.andThen(loader.retry),
-							Effect.catchCause((cause) =>
-								Effect.logError("Reloading plugin modules failed", cause),
-							),
-							Effect.forever,
+						yield* watchModules(hmr, directory, loader.retry).pipe(
 							Effect.forkScoped,
 						)
+						if (envFile !== undefined)
+							yield* watchEnvFile(envFile, reload, loader.retry).pipe(
+								Effect.forkScoped,
+							)
 					}),
 			})
 			yield* Graft.plugin(reloader)
@@ -105,6 +88,8 @@ export const run = (
 				Graft.layer,
 				Layer.mergeAll(
 					NodeServices.layer,
+					intercepts,
+					env(options.envFile).pipe(Layer.provide(NodeServices.layer)),
 					Logger.layer([Logger.consolePretty()]),
 				),
 			),

@@ -1,0 +1,19 @@
+{
+	"name": "@graftland/sample-events",
+	"private": true,
+	"type": "module",
+	"description": "Event handlers that belong to the plugin that registered them",
+	"scripts": {
+		"start": "node src/main.ts",
+		"test": "vitest run"
+	},
+	"dependencies": {
+		"@effect/platform-node": "4.1.2",
+		"@graftland/graft": "workspace:*",
+		"effect": "4.1.2"
+	},
+	"devDependencies": {
+		"@effect/vitest": "4.1.2",
+		"vitest": "5.1.0"
+	}
+}

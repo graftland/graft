@@ -56,13 +56,13 @@ const hello = Plugin.make({
 
 ## 包
 
-| 包                           | 功能                                                         |
-| ---------------------------- | ------------------------------------------------------------ |
-| `@graftland/graft`           | 基于 Effect 的插件框架：插件、fork、服务、隔离、事件和日志。 |
-| `@graftland/loader`          | 从配置项列表或 YAML 配置文件加载插件。                       |
-| `@graftland/hmr`             | 在 Node.js 中重载插件模块，无需重启进程。                    |
-| `@graftland/cli`             | 提供 `graft` 命令：`start`、`create`、`add` 和 `remove`。    |
-| `@graftland/create`          | 生成新的 Graft 项目，由 `graft create` 调用。                |
-| `@graftland/package-manager` | 使用 npm、pnpm 或 Yarn 安装依赖，失败时回滚。                |
+| 包                           | 功能                                                                             |
+| ---------------------------- | -------------------------------------------------------------------------------- |
+| `@graftland/graft`           | 基于 Effect 的插件框架：插件、fork、服务、隔离、事件和日志。                     |
+| `@graftland/loader`          | 从配置项列表或 YAML 配置文件加载插件。                                           |
+| `@graftland/hmr`             | 在 Node.js 中重载插件模块，无需重启进程。                                        |
+| `@graftland/cli`             | 提供 `graft` 命令：`start`、`create`、`add` 和 `remove`。                        |
+| `@graftland/create`          | 创建新的 Graft 项目，由 `graft create` 调用。                                    |
+| `@graftland/package-manager` | 使用 npm、pnpm 或 Yarn 安装依赖。安装失败时，通过[快照回滚](cli/#包管理器)撤销。 |
 
-所有包使用相同的版本号一同发布，并依赖 `effect` 4.1.2。
+所有包共用同一个版本号，一同发布，并需要 `effect` 4.1.x。

@@ -3,8 +3,9 @@
  * The `graft` executable. Running this module starts the program.
  */
 import { NodeRuntime, NodeServices } from "@effect/platform-node"
-import { Effect, FileSystem, Path, Schema } from "effect"
+import { Effect, Option } from "effect"
 import { Argument, Command, Flag } from "effect/cli"
+import { version } from "../package.json" with { type: "json" }
 import * as Manage from "./Manage"
 import * as Start from "./Start"
 
@@ -20,8 +21,15 @@ const start = Command.make(
 			Flag.withDescription("Reload plugins and config when files change"),
 			Flag.withDefault(false),
 		),
+		envFile: Flag.String("env-file").pipe(
+			Flag.withDescription(
+				"Read variables for !env from a .env file; the process environment takes precedence",
+			),
+			Flag.optional,
+		),
 	},
-	Start.run,
+	(options) =>
+		Start.run({ ...options, envFile: Option.getOrUndefined(options.envFile) }),
 ).pipe(
 	Command.withDescription("Run the application described by a config file"),
 )
@@ -69,17 +77,7 @@ const graft = Command.make("graft").pipe(
 	Command.withSubcommands([start, create, add, remove]),
 )
 
-const Manifest = Schema.fromJsonString(
-	Schema.Struct({ version: Schema.String }),
+Command.run(graft, { version }).pipe(
+	Effect.provide(NodeServices.layer),
+	NodeRuntime.runMain,
 )
-
-Effect.gen(function* () {
-	const fs = yield* FileSystem.FileSystem
-	const path = yield* Path.Path
-	const file = yield* path.fromFileUrl(
-		new URL("../package.json", import.meta.url),
-	)
-	const text = yield* fs.readFileString(file)
-	const { version } = yield* Schema.decodeEffect(Manifest)(text)
-	return yield* Command.run(graft, { version })
-}).pipe(Effect.provide(NodeServices.layer), NodeRuntime.runMain)

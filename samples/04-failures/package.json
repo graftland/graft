@@ -1,0 +1,19 @@
+{
+	"name": "@graftland/sample-failures",
+	"private": true,
+	"type": "module",
+	"description": "A failing plugin is retried on a schedule and the rest keep running",
+	"scripts": {
+		"start": "node src/main.ts",
+		"test": "vitest run"
+	},
+	"dependencies": {
+		"@effect/platform-node": "4.1.2",
+		"@graftland/graft": "workspace:*",
+		"effect": "4.1.2"
+	},
+	"devDependencies": {
+		"@effect/vitest": "4.1.2",
+		"vitest": "5.1.0"
+	}
+}

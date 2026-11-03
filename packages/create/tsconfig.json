@@ -5,5 +5,10 @@
 		"outDir": ".cache/types",
 		"tsBuildInfoFile": ".cache/src.tsbuildinfo"
 	},
-	"include": ["src"]
+	"include": ["src"],
+	"references": [
+		{
+			"path": "../package-manager"
+		}
+	]
 }

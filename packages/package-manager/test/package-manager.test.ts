@@ -1,7 +1,7 @@
 import { NodeServices } from "@effect/platform-node"
 import { assert, describe, it } from "@effect/vitest"
 import {
-	Array as Arr,
+	Array,
 	Cause,
 	Deferred,
 	Effect,
@@ -13,9 +13,11 @@ import {
 	Path,
 	Ref,
 	Schema,
+	String,
 } from "effect"
 import type { PlatformError, Scope } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
+import { handle } from "./fixtures.ts"
 import { detectAgent, make } from "../src/index.ts"
 
 const encode = Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))
@@ -38,10 +40,12 @@ const setup = Effect.gen(function* () {
 		>,
 	) =>
 		make({ directory }).pipe(
-			Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, {
-				...real,
-				exitCode: run,
-			}),
+			Effect.provideService(
+				ChildProcessSpawner.ChildProcessSpawner,
+				ChildProcessSpawner.make((command) =>
+					Effect.succeed(handle(run(command))),
+				),
+			),
 		)
 	return { fs, path, directory, write, read, manifest, manager, real }
 })
@@ -67,7 +71,7 @@ describe("agent detection", () => {
 					["npm@11.0.0", "npm"],
 					["pnpm@9.15.9", "pnpm"],
 					["yarn@1.22.22", "yarn-classic"],
-					["yarn@4.9.0+sha512.test", "yarn-berry"],
+					[`yarn@4.9.0+sha512.${String.repeat(128)("a")}`, "yarn-berry"],
 				] as const) {
 					yield* manifest({ packageManager: spec })
 					const observed1 = yield* detectAgent({
@@ -169,8 +173,11 @@ describe("installation", () => {
 			)
 			const exit = yield* Effect.exit(pm.install({ example: "1" }))
 			assert(Exit.isFailure(exit))
-			const errors = Arr.filter(exit.cause.reasons, Cause.isFailReason)
-			assert.strictEqual(errors.length, 2)
+			const errors = Array.filter(exit.cause.reasons, Cause.isFailReason)
+			assert.deepStrictEqual(
+				Array.map(errors, (reason) => reason.error._tag),
+				["PackageManagerError", "PackageManagerError", "RecoveryRequiredError"],
+			)
 			const observed14 = yield* read("package.json")
 			assert.strictEqual(observed14, original)
 		}).pipe(run),
@@ -228,11 +235,11 @@ describe("installation", () => {
 				)
 				const result = yield* pm.install({ tool: "^2", old: null, added: "3" })
 				assert.deepStrictEqual(
-					Arr.map(result.added, (c) => c.name),
+					Array.map(result.added, (c) => c.name),
 					["added"],
 				)
 				assert.deepStrictEqual(
-					Arr.map(result.removed, (c) => c.name),
+					Array.map(result.removed, (c) => c.name),
 					["old"],
 				)
 				assert.strictEqual(result.updated[0]?.after?.version, "2.0.0")

@@ -73,6 +73,10 @@ importers:
         version: 5.1.0(@types/node@26.6.6)(vite@8.3.5(@types/node@26.6.6)(yaml@2.9.1))
 
   packages/create:
+    dependencies:
+      "@graftland/package-manager":
+        specifier: workspace:*
+        version: link:../package-manager
     devDependencies:
       "@effect/platform-node":
         specifier: 4.1.2
@@ -160,6 +164,205 @@ importers:
       effect:
         specifier: 4.1.2
         version: 4.1.2
+      vitest:
+        specifier: 5.1.0
+        version: 5.1.0(@types/node@26.6.6)(vite@8.3.5(@types/node@26.6.6)(yaml@2.9.1))
+
+  samples/01-hello:
+    dependencies:
+      "@effect/platform-node":
+        specifier: 4.1.2
+        version: 4.1.2(effect@4.1.2)(redis@6.3.1)
+      "@graftland/graft":
+        specifier: workspace:*
+        version: link:../../packages/core
+      effect:
+        specifier: 4.1.2
+        version: 4.1.2
+    devDependencies:
+      "@effect/vitest":
+        specifier: 4.1.2
+        version: 4.1.2(effect@4.1.2)(vitest@5.1.0(@types/node@26.6.6)(vite@8.3.5(@types/node@26.6.6)(yaml@2.9.1)))
+      vitest:
+        specifier: 5.1.0
+        version: 5.1.0(@types/node@26.6.6)(vite@8.3.5(@types/node@26.6.6)(yaml@2.9.1))
+
+  samples/02-services:
+    dependencies:
+      "@effect/platform-node":
+        specifier: 4.1.2
+        version: 4.1.2(effect@4.1.2)(redis@6.3.1)
+      "@graftland/graft":
+        specifier: workspace:*
+        version: link:../../packages/core
+      effect:
+        specifier: 4.1.2
+        version: 4.1.2
+    devDependencies:
+      "@effect/vitest":
+        specifier: 4.1.2
+        version: 4.1.2(effect@4.1.2)(vitest@5.1.0(@types/node@26.6.6)(vite@8.3.5(@types/node@26.6.6)(yaml@2.9.1)))
+      vitest:
+        specifier: 5.1.0
+        version: 5.1.0(@types/node@26.6.6)(vite@8.3.5(@types/node@26.6.6)(yaml@2.9.1))
+
+  samples/03-events:
+    dependencies:
+      "@effect/platform-node":
+        specifier: 4.1.2
+        version: 4.1.2(effect@4.1.2)(redis@6.3.1)
+      "@graftland/graft":
+        specifier: workspace:*
+        version: link:../../packages/core
+      effect:
+        specifier: 4.1.2
+        version: 4.1.2
+    devDependencies:
+      "@effect/vitest":
+        specifier: 4.1.2
+        version: 4.1.2(effect@4.1.2)(vitest@5.1.0(@types/node@26.6.6)(vite@8.3.5(@types/node@26.6.6)(yaml@2.9.1)))
+      vitest:
+        specifier: 5.1.0
+        version: 5.1.0(@types/node@26.6.6)(vite@8.3.5(@types/node@26.6.6)(yaml@2.9.1))
+
+  samples/04-failures:
+    dependencies:
+      "@effect/platform-node":
+        specifier: 4.1.2
+        version: 4.1.2(effect@4.1.2)(redis@6.3.1)
+      "@graftland/graft":
+        specifier: workspace:*
+        version: link:../../packages/core
+      effect:
+        specifier: 4.1.2
+        version: 4.1.2
+    devDependencies:
+      "@effect/vitest":
+        specifier: 4.1.2
+        version: 4.1.2(effect@4.1.2)(vitest@5.1.0(@types/node@26.6.6)(vite@8.3.5(@types/node@26.6.6)(yaml@2.9.1)))
+      vitest:
+        specifier: 5.1.0
+        version: 5.1.0(@types/node@26.6.6)(vite@8.3.5(@types/node@26.6.6)(yaml@2.9.1))
+
+  samples/05-config-file:
+    dependencies:
+      "@effect/platform-node":
+        specifier: 4.1.2
+        version: 4.1.2(effect@4.1.2)(redis@6.3.1)
+      "@graftland/cli":
+        specifier: workspace:*
+        version: link:../../packages/cli
+      "@graftland/graft":
+        specifier: workspace:*
+        version: link:../../packages/core
+      effect:
+        specifier: 4.1.2
+        version: 4.1.2
+    devDependencies:
+      "@effect/vitest":
+        specifier: 4.1.2
+        version: 4.1.2(effect@4.1.2)(vitest@5.1.0(@types/node@26.6.6)(vite@8.3.5(@types/node@26.6.6)(yaml@2.9.1)))
+      vitest:
+        specifier: 5.1.0
+        version: 5.1.0(@types/node@26.6.6)(vite@8.3.5(@types/node@26.6.6)(yaml@2.9.1))
+
+  samples/chat-bot:
+    dependencies:
+      "@effect/platform-node":
+        specifier: 4.1.2
+        version: 4.1.2(effect@4.1.2)(redis@6.3.1)
+      "@graftland/graft":
+        specifier: workspace:*
+        version: link:../../packages/core
+      effect:
+        specifier: 4.1.2
+        version: 4.1.2
+    devDependencies:
+      "@effect/vitest":
+        specifier: 4.1.2
+        version: 4.1.2(effect@4.1.2)(vitest@5.1.0(@types/node@26.6.6)(vite@8.3.5(@types/node@26.6.6)(yaml@2.9.1)))
+      vitest:
+        specifier: 5.1.0
+        version: 5.1.0(@types/node@26.6.6)(vite@8.3.5(@types/node@26.6.6)(yaml@2.9.1))
+
+  samples/checkout-upgrade:
+    dependencies:
+      "@effect/platform-node":
+        specifier: 4.1.2
+        version: 4.1.2(effect@4.1.2)(redis@6.3.1)
+      "@graftland/graft":
+        specifier: workspace:*
+        version: link:../../packages/core
+      effect:
+        specifier: 4.1.2
+        version: 4.1.2
+    devDependencies:
+      "@effect/vitest":
+        specifier: 4.1.2
+        version: 4.1.2(effect@4.1.2)(vitest@5.1.0(@types/node@26.6.6)(vite@8.3.5(@types/node@26.6.6)(yaml@2.9.1)))
+      vitest:
+        specifier: 5.1.0
+        version: 5.1.0(@types/node@26.6.6)(vite@8.3.5(@types/node@26.6.6)(yaml@2.9.1))
+
+  samples/http-gateway:
+    dependencies:
+      "@effect/platform-node":
+        specifier: 4.1.2
+        version: 4.1.2(effect@4.1.2)(redis@6.3.1)
+      "@graftland/cli":
+        specifier: workspace:*
+        version: link:../../packages/cli
+      "@graftland/graft":
+        specifier: workspace:*
+        version: link:../../packages/core
+      "@graftland/loader":
+        specifier: workspace:*
+        version: link:../../packages/loader
+      effect:
+        specifier: 4.1.2
+        version: 4.1.2
+    devDependencies:
+      "@effect/vitest":
+        specifier: 4.1.2
+        version: 4.1.2(effect@4.1.2)(vitest@5.1.0(@types/node@26.6.6)(vite@8.3.5(@types/node@26.6.6)(yaml@2.9.1)))
+      vitest:
+        specifier: 5.1.0
+        version: 5.1.0(@types/node@26.6.6)(vite@8.3.5(@types/node@26.6.6)(yaml@2.9.1))
+
+  samples/market-feed:
+    dependencies:
+      "@effect/platform-node":
+        specifier: 4.1.2
+        version: 4.1.2(effect@4.1.2)(redis@6.3.1)
+      "@graftland/graft":
+        specifier: workspace:*
+        version: link:../../packages/core
+      effect:
+        specifier: 4.1.2
+        version: 4.1.2
+    devDependencies:
+      "@effect/vitest":
+        specifier: 4.1.2
+        version: 4.1.2(effect@4.1.2)(vitest@5.1.0(@types/node@26.6.6)(vite@8.3.5(@types/node@26.6.6)(yaml@2.9.1)))
+      vitest:
+        specifier: 5.1.0
+        version: 5.1.0(@types/node@26.6.6)(vite@8.3.5(@types/node@26.6.6)(yaml@2.9.1))
+
+  samples/saas-tenants:
+    dependencies:
+      "@effect/platform-node":
+        specifier: 4.1.2
+        version: 4.1.2(effect@4.1.2)(redis@6.3.1)
+      "@graftland/graft":
+        specifier: workspace:*
+        version: link:../../packages/core
+      effect:
+        specifier: 4.1.2
+        version: 4.1.2
+    devDependencies:
+      "@effect/vitest":
+        specifier: 4.1.2
+        version: 4.1.2(effect@4.1.2)(vitest@5.1.0(@types/node@26.6.6)(vite@8.3.5(@types/node@26.6.6)(yaml@2.9.1)))
       vitest:
         specifier: 5.1.0
         version: 5.1.0(@types/node@26.6.6)(vite@8.3.5(@types/node@26.6.6)(yaml@2.9.1))

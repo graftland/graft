@@ -1,5 +1,5 @@
 import { assert } from "@effect/vitest"
-import { Array as Arr, Effect, Layer, Option, Ref, Stream } from "effect"
+import { Array, Effect, Layer, Option, Ref, Stream } from "effect"
 import type { Scope } from "effect"
 import { Graft, type Fork } from "../src/index.ts"
 
@@ -18,7 +18,7 @@ export interface Journal {
 export const makeJournal: Effect.Effect<Journal> = Effect.gen(function* () {
 	const ref = yield* Ref.make<ReadonlyArray<string>>([])
 	return {
-		record: (event: string) => Ref.update(ref, Arr.append(event)),
+		record: (event: string) => Ref.update(ref, Array.append(event)),
 		entries: Ref.get(ref),
 		expect: (expected) =>
 			Effect.map(Ref.get(ref), (entries) =>

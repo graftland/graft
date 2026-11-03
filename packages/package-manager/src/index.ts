@@ -1,19 +1,40 @@
 /** Non-interactive package installation. Provide platform services at the application boundary. */
 import {
-	Array as Arr,
+	Array,
+	Cause,
+	Data,
+	Ref,
 	Effect,
 	Exit,
 	FileSystem,
 	HashMap,
 	Option,
 	Path,
+	PlatformError,
 	Record,
 	Schema,
 	Semaphore,
-	String as Str,
+	String,
 } from "effect"
-import type { PlatformError } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
+import {
+	PackageManagerDeclaration,
+	PackageManagerName,
+} from "./PackageManagerDeclaration"
+export { PackageManagerDeclaration } from "./PackageManagerDeclaration"
+import { terminateProcess } from "./process"
+import {
+	writeSnapshot,
+	withSnapshot,
+	type SnapshotCleanupFailure,
+	inspectManagedFiles,
+	UnsupportedFileTypeError,
+	type Contents,
+} from "./snapshot"
+export {
+	UnsupportedFileTypeError,
+	type SnapshotCleanupFailure,
+} from "./snapshot"
 import {
 	applyChanges,
 	Changes,
@@ -39,8 +60,48 @@ export class PackageManagerError extends Schema.TaggedError<
 	message: Schema.String,
 	exitCode: Schema.optionalKey(Schema.Int),
 }) {}
+export class RecoveryRequiredError extends Schema.TaggedError<
+	RecoveryRequiredError,
+	{ readonly brand: unique symbol }
+>()("RecoveryRequiredError", {
+	directory: Schema.String,
+	snapshotDirectory: Schema.String,
+	operation: Schema.Literals(["install", "recover", "rollback"]),
+	processId: Schema.optionalKey(Schema.Int),
+	message: Schema.String,
+	terminationCause: Schema.optionalKey(
+		Schema.Cause(Schema.Unknown, Schema.Unknown),
+	),
+	recoveryCause: Schema.Cause(Schema.Unknown, Schema.Unknown),
+}) {}
+
+type WriterState = Data.TaggedEnum<{
+	ManagedWritersIdle: {}
+	Running: {}
+	FileWrite: {}
+	Unconfirmed: {
+		readonly operation: "install" | "recover"
+		readonly processId: number
+		readonly cause: Cause.Cause<PlatformError.PlatformError>
+	}
+}>
+
+const WriterState = Data.taggedEnum<WriterState>()
+
+type ManagerState = Data.TaggedEnum<{
+	Ready: {}
+	Active: { readonly writer: WriterState }
+	RecoveryRequired: { readonly error: RecoveryRequiredError }
+}>
+
+const ManagerState = Data.taggedEnum<ManagerState>()
+
 export type Error =
-	PackageManagerError | PlatformError.PlatformError | Schema.SchemaError
+	| PackageManagerError
+	| UnsupportedFileTypeError
+	| RecoveryRequiredError
+	| PlatformError.PlatformError
+	| Schema.SchemaError
 export interface Options {
 	/** Project directory, containing package.json. Use the workspace root for workspace installs. */
 	readonly directory: string
@@ -67,7 +128,37 @@ const backupFiles = [
 	".pnp.loader.mjs",
 ]
 const executable = (agent: Agent) =>
-	Str.startsWith("yarn")(agent) ? "yarn" : agent
+	String.startsWith("yarn")(agent) ? "yarn" : agent
+
+const readSource = Effect.fnUntraced(function* (
+	fs: FileSystem.FileSystem,
+	file: string,
+) {
+	const bytes = yield* fs.readFile(file)
+	return yield* Effect.try({
+		try: () =>
+			new TextDecoder("utf-8", { ignoreBOM: true, fatal: true }).decode(bytes),
+		catch: (cause) =>
+			PlatformError.badArgument({
+				module: "FileSystem",
+				method: "readManifest",
+				description: "The manifest must contain valid UTF-8",
+				cause,
+			}),
+	})
+})
+
+const Executable = PackageManagerName
+const Digits = Schema.String.check(Schema.isPattern(/^\d+$/))
+const decodePackageManager = Schema.decodeUnknownOption(
+	PackageManagerDeclaration,
+)
+/** `name/version ...`, as package managers set `npm_config_user_agent`. */
+const decodeUserAgent = Schema.decodeUnknownOption(
+	Schema.TemplateLiteralParser([Executable, "/", Digits, Schema.String]),
+)
+const agentOf = (name: typeof Executable.Type, major: string): Agent =>
+	name === "yarn" ? (major === "1" ? "yarn-classic" : "yarn-berry") : name
 
 /** packageManager, then lockfile, then caller user-agent, then npm. Conflicting lockfiles fail. */
 export const detectAgent = Effect.fnUntraced(function* (options: Options) {
@@ -75,29 +166,26 @@ export const detectAgent = Effect.fnUntraced(function* (options: Options) {
 		return yield* Schema.decodeEffect(Agent)(options.agent)
 	const fs = yield* FileSystem.FileSystem
 	const path = yield* Path.Path
-	const manifest = yield* fs
-		.readFileString(path.join(options.directory, "package.json"))
-		.pipe(Effect.flatMap(decodeManifest))
+	const manifest = yield* readSource(
+		fs,
+		path.join(options.directory, "package.json"),
+	).pipe(Effect.flatMap(decodeManifest))
 	if (manifest.packageManager !== undefined) {
-		const match = /^(npm|pnpm|yarn)@(\d+)\.\d+\.\d+(?:[-+].*)?$/.exec(
-			manifest.packageManager,
-		)
-		if (match === null)
-			return yield* PackageManagerError.make({
-				operation: "detect",
-				message: `Unsupported packageManager: ${manifest.packageManager}`,
-			})
-		return match[1] === "yarn"
-			? match[2] === "1"
-				? "yarn-classic"
-				: "yarn-berry"
-			: (match[1] as "npm" | "pnpm")
+		return yield* Option.match(decodePackageManager(manifest.packageManager), {
+			onNone: () =>
+				PackageManagerError.make({
+					operation: "detect",
+					message: `Unsupported packageManager: ${manifest.packageManager}`,
+				}),
+			onSome: ([name, , version]) =>
+				Effect.succeed(agentOf(name, `${version.major}`)),
+		})
 	}
 	const found = yield* Effect.filter(lockfiles, (file) =>
 		fs.exists(path.join(options.directory, file)),
 	)
-	const kinds = Arr.dedupe(
-		Arr.map(found, (file) =>
+	const kinds = Array.dedupe(
+		Array.map(found, (file) =>
 			file === "pnpm-lock.yaml"
 				? "pnpm"
 				: file === "yarn.lock"
@@ -117,14 +205,10 @@ export const detectAgent = Effect.fnUntraced(function* (options: Options) {
 		return /^__metadata:/m.test(lock) ? "yarn-berry" : "yarn-classic"
 	}
 	if (kinds[0] !== undefined) return kinds[0]
-	const caller = /^(npm|pnpm|yarn)\/(\d+)/.exec(options.userAgent ?? "")
-	return caller?.[1] === "yarn"
-		? caller[2] === "1"
-			? "yarn-classic"
-			: "yarn-berry"
-		: caller?.[1] === "pnpm"
-			? "pnpm"
-			: "npm"
+	return Option.match(decodeUserAgent(options.userAgent ?? ""), {
+		onNone: () => "npm" as const,
+		onSome: ([name, , major]) => agentOf(name, major),
+	})
 })
 
 export interface PackageState {
@@ -146,10 +230,10 @@ export interface StateDiff {
 	readonly updated: ReadonlyArray<PackageChange>
 }
 export const diffState = (before: State, after: State): StateDiff => {
-	const changes = Arr.map(
-		Arr.sort(
-			Arr.dedupe([...HashMap.keys(before), ...HashMap.keys(after)]),
-			Str.Order,
+	const changes = Array.map(
+		Array.sort(
+			Array.dedupe([...HashMap.keys(before), ...HashMap.keys(after)]),
+			String.Order,
 		),
 		(name) => ({
 			name,
@@ -158,9 +242,9 @@ export const diffState = (before: State, after: State): StateDiff => {
 		}),
 	)
 	return {
-		added: Arr.filter(changes, (change) => change.before === undefined),
-		removed: Arr.filter(changes, (change) => change.after === undefined),
-		updated: Arr.filter(
+		added: Array.filter(changes, (change) => change.before === undefined),
+		removed: Array.filter(changes, (change) => change.after === undefined),
+		updated: Array.filter(
 			changes,
 			({ before, after }) =>
 				before !== undefined &&
@@ -173,19 +257,44 @@ export const diffState = (before: State, after: State): StateDiff => {
 }
 export interface InstallResult extends StateDiff {
 	readonly agent: Agent
+	/** The install committed; retry only snapshot deletion, not installation. */
+	readonly snapshotCleanupFailure: Option.Option<SnapshotCleanupFailure>
 }
 export interface PackageManager {
 	readonly directory: string
 	readonly agent: Agent
 	readonly readState: Effect.Effect<State, Error>
+	/** Present when manual recovery is required; the manager cannot be reused. */
+	readonly recoveryRequired: Effect.Effect<Option.Option<RecoveryRequiredError>>
 	/** Serialized per manager. Empty changes installs the current manifest, including first installs. */
 	readonly install: (changes: Changes) => Effect.Effect<InstallResult, Error>
 }
 
 /**
- * Own one manager per project. Failed or interrupted installs restore the exact
- * manifest/lockfiles, then attempt to repair node_modules when a lockfile existed.
- * Recovery failures are combined with the original cause. No crash recovery is promised.
+ * Own one manager per project. The caller must give this manager and its child
+ * processes exclusive write access to the project for each install, including
+ * recovery. Do not edit project files or run another installer concurrently.
+ * Calls are serialized only within this manager; no cross-process lock is taken.
+ * Managed paths must be regular files or absent. make and install reject symbolic
+ * links and other file types with UnsupportedFileTypeError before any write.
+ *
+ * Accepted file writes finish before cancellation can start rollback or release
+ * the lock. File writes and the original process group participate in the transaction.
+ * Scripts must not create escaped writers in independent groups or daemons.
+ * Failed or interrupted installs before commit restore backed-up package files byte-for-byte
+ * with recorded permissions and ownership, and remove tracked files that did not
+ * exist before installation. Writes made
+ * during installation are overwritten by rollback, never merged. When a lockfile
+ * existed, recovery also attempts to repair node_modules. Recovery failures are
+ * combined with the original cause. If process termination cannot be confirmed,
+ * no further restoration or recovery runs. Any failed rollback step also requires
+ * manual recovery, even if all writers stopped. Only successful installation or
+ * complete rollback permits snapshot deletion and reuse. RecoveryRequiredError
+ * and recoveryRequired expose the retained snapshot directory and complete cause;
+ * this manager rejects
+ * all later installs. Complete manual recovery before making a new manager.
+ * Committed installs report snapshot deletion failures in snapshotCleanupFailure
+ * rather than failing or rolling back. No crash recovery is promised.
  */
 export const make = (
 	options: Options,
@@ -199,12 +308,14 @@ export const make = (
 		const path = yield* Path.Path
 		const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
 		const directory = path.resolve(options.directory)
+		yield* inspectManagedFiles(fs, path, directory, backupFiles)
 		const agent = yield* detectAgent({ ...options, directory })
 		const lock = yield* Semaphore.make(1)
+		const transaction = yield* Ref.make<ManagerState>(ManagerState.Ready())
 		const manifestFile = path.join(directory, "package.json")
-		const readManifest = fs
-			.readFileString(manifestFile)
-			.pipe(Effect.flatMap(decodeManifest))
+		const readManifest = readSource(fs, manifestFile).pipe(
+			Effect.flatMap(decodeManifest),
+		)
 		const installed = Schema.decodeUnknownEffect(
 			Schema.fromJsonString(
 				Schema.Struct({ version: Schema.optionalKey(Schema.String) }),
@@ -217,7 +328,7 @@ export const make = (
 					message:
 						"Plug'n'Play is not supported; configure Yarn with nodeLinker: node-modules",
 				})
-			const deps = Arr.reduce(
+			const deps = Array.reduce(
 				fields,
 				{} as Readonly<Record<string, string>>,
 				(all, field) => ({ ...all, ...manifest[field] }),
@@ -253,6 +364,9 @@ export const make = (
 			return HashMap.fromIterable<string, PackageState>(entries)
 		})
 		const readState = Effect.flatMap(readManifest, stateOf)
+		const termination: ChildProcess.KillOptions = {
+			forceKillAfter: "5 seconds",
+		}
 		const run = Effect.fnUntraced(function* (operation: "install" | "recover") {
 			const recovery = operation === "recover"
 			const args =
@@ -278,113 +392,250 @@ export const make = (
 										: []),
 								]
 							: ["install", ...(recovery ? ["--immutable"] : [])]
-			const code = yield* spawner
-				.exitCode(
-					ChildProcess.make(executable(agent), args, {
-						cwd: directory,
-						extendEnv: true,
-						stdin: "ignore",
-						stdout: "inherit",
-						stderr: "inherit",
-						env: {
-							CI: "true",
-							...(agent === "yarn-berry"
-								? {
-										YARN_ENABLE_IMMUTABLE_INSTALLS: recovery ? "true" : "false",
-										YARN_NODE_LINKER: "node-modules",
-									}
-								: {}),
-						},
-					}),
-				)
-				.pipe(
-					Effect.timeoutOrElse({
-						duration: "10 minutes",
-						orElse: () =>
-							PackageManagerError.make({
-								operation,
-								message: `${executable(agent)} ${operation} timed out`,
+			// Acquire and install the release handler atomically, then wait interruptibly.
+			return yield* Effect.acquireUseRelease(
+				spawner
+					.spawn(
+						ChildProcess.make(executable(agent), args, {
+							cwd: directory,
+							extendEnv: true,
+							stdin: "ignore",
+							stdout: "inherit",
+							stderr: "inherit",
+							detached: true,
+							...termination,
+							env: {
+								CI: "true",
+								...(agent === "yarn-berry"
+									? {
+											YARN_ENABLE_IMMUTABLE_INSTALLS: recovery
+												? "true"
+												: "false",
+											YARN_NODE_LINKER: "node-modules",
+										}
+									: {}),
+							},
+						}),
+					)
+					.pipe(
+						Effect.tap(() =>
+							Ref.set(
+								transaction,
+								ManagerState.Active({ writer: WriterState.Running() }),
+							),
+						),
+					),
+				(process) =>
+					Effect.gen(function* () {
+						const code = yield* process.exitCode.pipe(
+							Effect.timeoutOrElse({
+								duration: "10 minutes",
+								orElse: () =>
+									PackageManagerError.make({
+										operation,
+										message: `${executable(agent)} ${operation} timed out`,
+									}),
 							}),
+						)
+						if (code !== 0)
+							return yield* PackageManagerError.make({
+								operation,
+								exitCode: code,
+								message: `${executable(agent)} ${operation} exited with code ${code}`,
+							})
 					}),
-				)
-			if (code !== 0)
-				return yield* PackageManagerError.make({
-					operation,
-					exitCode: code,
-					message: `${executable(agent)} ${operation} exited with code ${code}`,
-				})
-		})
+				// The command owns its group; a stopped leader may leave live descendants.
+				// Observe kill failures here rather than relying on best-effort scope cleanup.
+				(process) =>
+					Effect.gen(function* () {
+						const result = yield* terminateProcess(process, termination)
+						yield* Ref.set(
+							transaction,
+							ManagerState.Active({
+								writer:
+									result._tag === "OriginalGroupStopped"
+										? WriterState.ManagedWritersIdle()
+										: WriterState.Unconfirmed({
+												operation,
+												processId: process.pid,
+												cause: result.cause,
+											}),
+							}),
+						)
+						if (result._tag === "Unconfirmed")
+							return yield* Effect.failCause(result.cause)
+					}),
+			)
+		}, Effect.scoped)
+		// AbortSignal does not join accepted OS writes. Keep the writer owned until completion.
+		const withFileWriter = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+			Effect.acquireUseRelease(
+				Ref.set(
+					transaction,
+					ManagerState.Active({ writer: WriterState.FileWrite() }),
+				),
+				() => effect,
+				() =>
+					Ref.set(
+						transaction,
+						ManagerState.Active({ writer: WriterState.ManagedWritersIdle() }),
+					),
+			).pipe(Effect.uninterruptible)
+
 		const install = (changes: Changes) =>
 			lock.withPermits(1)(
 				Effect.gen(function* () {
+					const state = yield* Ref.get(transaction)
+					if (state._tag === "RecoveryRequired") return yield* state.error
 					const validated = yield* Schema.decodeEffect(Changes)(changes)
-					const original = yield* fs.readFileString(manifestFile)
+					const inspected = yield* inspectManagedFiles(
+						fs,
+						path,
+						directory,
+						backupFiles,
+					)
+					const backups = yield* Effect.forEach(
+						inspected,
+						({ name, file, metadata }) =>
+							Effect.gen(function* () {
+								const contents = yield* Option.match(metadata, {
+									onNone: () => Effect.succeedNone,
+									onSome: (info) =>
+										fs
+											.readFile(file)
+											.pipe(
+												Effect.map((bytes) =>
+													Option.some<Contents>({ ...info, bytes }),
+												),
+											),
+								})
+								return { name, file, contents }
+							}),
+					)
+					const original = yield* readSource(fs, manifestFile)
 					const manifest = yield* decodeManifest(original)
 					const before = yield* stateOf(manifest)
 					const text = yield* encodeManifest(
 						applyChanges(manifest, validated),
 						original,
 					)
-					const backups = yield* Effect.forEach(backupFiles, (name) =>
-						Effect.gen(function* () {
-							const file = path.join(directory, name)
-							return {
-								name,
-								file,
-								bytes: (yield* fs.exists(file))
-									? yield* fs.readFile(file).pipe(Effect.asSome)
-									: Option.none<Uint8Array>(),
-							}
-						}),
-					)
-					// Every file gets a restoration attempt; onExit combines failures.
-					const restore = Arr.reduce<
-						(typeof backups)[number],
-						Effect.Effect<void, PlatformError.PlatformError>
-					>(backups, Effect.void, (previous, { file, bytes }) =>
-						previous.pipe(
-							Effect.onExit(() =>
-								Option.match(bytes, {
-									onNone: () => fs.remove(file, { force: true }),
-									onSome: (bytes) => fs.writeFile(file, bytes),
-								}),
-							),
-						),
-					)
+
 					const agentLocks =
 						agent === "npm"
 							? ["package-lock.json", "npm-shrinkwrap.json"]
 							: agent === "pnpm"
 								? ["pnpm-lock.yaml"]
 								: ["yarn.lock"]
-					const hasLock = Arr.some(
+					const hasLock = Array.some(
 						backups,
-						({ name, bytes }) =>
-							Arr.contains(agentLocks, name) && Option.isSome(bytes),
+						({ name, contents }) =>
+							Array.contains(agentLocks, name) && Option.isSome(contents),
 					)
-					return yield* Effect.acquireUseRelease(
-						Effect.void,
-						() =>
+					const completed = yield* withSnapshot(
+						fs,
+						Ref.get(transaction).pipe(
+							Effect.map((state) => state._tag === "Ready"),
+						),
+						(snapshotDirectory) =>
 							Effect.gen(function* () {
-								yield* fs.writeFileString(manifestFile, text)
-								yield* run("install")
-								const after = yield* readState
-								return { agent, ...diffState(before, after) }
-							}),
-						(_, exit) =>
-							Exit.isSuccess(exit)
-								? Effect.void
-								: restore.pipe(
-										Effect.andThen(hasLock ? run("recover") : Effect.void),
-										// Recovery itself may rewrite the manifest or lockfile, including on failure.
-										Effect.onExit(() => restore),
+								const snapshot = yield* writeSnapshot(
+									fs,
+									path,
+									snapshotDirectory,
+									directory,
+									agent,
+									backups,
+								)
+								const restore = Effect.flatMap(Ref.get(transaction), (state) =>
+									state._tag === "Active" &&
+									state.writer._tag === "ManagedWritersIdle"
+										? withFileWriter(snapshot.restore(state.writer))
+										: Effect.void,
+								)
+								return yield* Effect.acquireUseRelease(
+									Ref.set(
+										transaction,
+										ManagerState.Active({
+											writer: WriterState.ManagedWritersIdle(),
+										}),
 									),
+									() =>
+										Effect.gen(function* () {
+											yield* withFileWriter(
+												fs.writeFileString(manifestFile, text),
+											)
+											yield* run("install")
+											const after = yield* readState
+											return { agent, ...diffState(before, after) }
+										}),
+									(_, exit) =>
+										Effect.gen(function* () {
+											if (Exit.isFailure(exit)) {
+												const state = yield* Ref.get(transaction)
+												if (
+													state._tag !== "Active" ||
+													state.writer._tag !== "ManagedWritersIdle"
+												)
+													return
+												yield* withFileWriter(snapshot.restore(state.writer))
+												if (hasLock)
+													yield* run("recover").pipe(
+														// Even a failed recovery must restore files, once its writer has stopped.
+														Effect.onExit(() => restore),
+													)
+											}
+											// Idle managed writers alone do not prove that the transaction completed.
+											yield* Ref.set(transaction, ManagerState.Ready())
+										}),
+								).pipe(
+									Effect.onExit((exit) =>
+										Effect.gen(function* () {
+											const state = yield* Ref.get(transaction)
+											if (Exit.isSuccess(exit) || state._tag !== "Active")
+												return
+											const writer = state.writer
+											const error = RecoveryRequiredError.make({
+												directory,
+												snapshotDirectory,
+												operation:
+													writer._tag === "Unconfirmed"
+														? writer.operation
+														: "rollback",
+												...(writer._tag === "Unconfirmed"
+													? {
+															processId: writer.processId,
+															terminationCause: writer.cause,
+														}
+													: {}),
+												message: `Manual recovery is required. Stop all writers before restoring the snapshot at ${snapshotDirectory}`,
+												recoveryCause: exit.cause,
+											})
+											yield* Ref.set(
+												transaction,
+												ManagerState.RecoveryRequired({ error }),
+											)
+											return yield* error
+										}),
+									),
+								)
+							}),
 					)
+					return {
+						...completed.value,
+						snapshotCleanupFailure: completed.snapshotCleanupFailure,
+					}
 				}),
 			)
 		return {
 			directory,
 			agent,
+			recoveryRequired: Ref.get(transaction).pipe(
+				Effect.map((state) =>
+					state._tag === "RecoveryRequired"
+						? Option.some(state.error)
+						: Option.none(),
+				),
+			),
 			readState: lock.withPermits(1)(readState),
 			install,
 		}

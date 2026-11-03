@@ -1,0 +1,12 @@
+# yaml-language-server: $schema=../../packages/cli/schema.json
+# Each entry loads one plugin. Edit this file while `pnpm start` is running:
+# Graft applies the change to the running application.
+- id: greeter
+  name: ./src/greeter.ts
+  config:
+    name: Alice
+
+- id: ticker
+  name: ./src/ticker.ts
+  config:
+    seconds: 2

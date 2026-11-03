@@ -1,0 +1,23 @@
+# yaml-language-server: $schema=../../packages/cli/schema.json
+# The gateway's plugins. With `pnpm start`, edits to this file and to the
+# plugin modules apply while the server keeps running.
+- id: server
+  name: ./src/plugins/server.ts
+  config:
+    port: 3000
+
+- id: health
+  name: ./src/plugins/health.ts
+
+- id: inspector
+  name: ./src/plugins/inspector.ts
+
+- id: todo-store
+  name: ./src/plugins/todo-store.ts
+  config:
+    seed:
+      - Try the gateway
+      - Disable this store in graft.yml
+
+- id: todos
+  name: ./src/plugins/todos.ts

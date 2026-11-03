@@ -2,7 +2,7 @@ import { assert } from "@effect/vitest"
 import { NodeServices } from "@effect/platform-node"
 import { Graft, Plugin } from "@graftland/graft"
 import {
-	Array as Arr,
+	Array,
 	ConfigProvider,
 	Deferred,
 	Effect,
@@ -36,7 +36,7 @@ export const echo = (journal: Journal) =>
 export const makeJournal = Effect.gen(function* () {
 	const ref = yield* Ref.make<ReadonlyArray<string>>([])
 	const journal: Journal = {
-		record: (event) => Ref.update(ref, Arr.append(event)),
+		record: (event) => Ref.update(ref, Array.append(event)),
 		expect: (expected) =>
 			Effect.map(Ref.get(ref), (entries) =>
 				assert.deepStrictEqual(entries, expected),

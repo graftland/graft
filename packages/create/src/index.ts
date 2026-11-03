@@ -1,4 +1,5 @@
 /** A local, non-interactive template. Installation is a separate package-manager operation. */
+import { PackageManagerDeclaration } from "@graftland/package-manager/PackageManagerDeclaration"
 import { Effect, FileSystem, Path, Schema } from "effect"
 import type { PlatformError } from "effect"
 
@@ -13,7 +14,7 @@ export interface Options {
 	readonly directory: string
 	/** Defaults to the target directory's basename. */
 	readonly name?: string
-	/** An exact packageManager declaration, such as pnpm@9.15.9. */
+	/** Exact SemVer, optionally with a prerelease and a supported Corepack SHA hash. */
 	readonly packageManager?: string
 	/**
 	 * Graft and its CLI default to this package's own version, since every
@@ -32,11 +33,11 @@ export interface Project {
 	readonly files: ReadonlyArray<string>
 }
 const Name = Schema.String.check(
-	Schema.isPattern(/^(?:@[a-z0-9-~][a-z0-9-._~]*\/)?[a-z0-9-~][a-z0-9-._~]*$/),
+	Schema.isPattern(
+		/^(?!(?:node_modules|favicon\.ico)$)(?:@[a-z0-9-][a-z0-9-._]*\/)?[a-z0-9-][a-z0-9-._]*$/,
+	),
+	Schema.isTrimmed(),
 	Schema.isMaxLength(214),
-)
-const PackageManager = Schema.String.check(
-	Schema.isPattern(/^(npm|pnpm|yarn)@\d+\.\d+\.\d+(?:[-+].*)?$/),
 )
 const encodeJson = Schema.encodeEffect(
 	Schema.fromJsonString(Schema.Record(Schema.String, Schema.Unknown), {
@@ -73,7 +74,17 @@ export default Plugin.make({
   ),
 })
 `
-const config = `- id: hello
+/**
+ * The JSON Schema of graft.yml as released with a version of Graft. Every
+ * package shares that version, and npm keeps each release's files unchanged.
+ */
+export const schemaUrl = (version: string): string =>
+	`https://cdn.jsdelivr.net/npm/@graftland/cli@${version}/schema.json`
+
+const config = (
+	version: string,
+) => `# yaml-language-server: $schema=${schemaUrl(version)}
+- id: hello
   name: ./hello.mjs
   config:
     message: Hello from Graft!
@@ -100,7 +111,9 @@ export const create = (
 				options.name ?? path.basename(directory),
 			)
 			if (options.packageManager !== undefined)
-				yield* Schema.decodeEffect(PackageManager)(options.packageManager)
+				yield* Schema.decodeUnknownEffect(PackageManagerDeclaration)(
+					options.packageManager,
+				)
 			if (yield* fs.exists(directory)) {
 				const stat = yield* fs.stat(directory)
 				if (
@@ -135,14 +148,17 @@ export const create = (
 			})
 			const files = [
 				["package.json", manifest + "\n"],
-				["graft.yml", config],
+				["graft.yml", config(version)],
 				["hello.mjs", plugin],
 				[".gitignore", "node_modules/\n.env\n"],
 			] as const
 			yield* Effect.forEach(
 				files,
 				([name, content]) =>
-					fs.writeFileString(path.join(staging, name), content),
+					// Join accepted native writes before cancellation can remove staging.
+					fs
+						.writeFileString(path.join(staging, name), content)
+						.pipe(Effect.uninterruptible),
 				{ discard: true },
 			)
 			yield* fs.rename(staging, directory).pipe(Effect.uninterruptible)

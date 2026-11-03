@@ -3,5 +3,5 @@ import { defineConfig } from "tsdown"
 
 export default defineConfig({
 	...config,
-	entry: ["src/index.ts", "src/bin.ts"],
+	entry: ["src/index.ts", "src/bin.ts", "src/internal/configSchema.ts"],
 })

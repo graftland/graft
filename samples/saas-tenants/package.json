@@ -1,0 +1,19 @@
+{
+	"name": "@graftland/sample-saas-tenants",
+	"private": true,
+	"type": "module",
+	"description": "One set of plugins serving many tenants, each with its own storage and logs",
+	"scripts": {
+		"start": "node src/main.ts",
+		"test": "vitest run"
+	},
+	"dependencies": {
+		"@effect/platform-node": "4.1.2",
+		"@graftland/graft": "workspace:*",
+		"effect": "4.1.2"
+	},
+	"devDependencies": {
+		"@effect/vitest": "4.1.2",
+		"vitest": "5.1.0"
+	}
+}

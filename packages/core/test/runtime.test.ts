@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest"
-import { Array as Arr, Context, Effect, Layer, Option, Stream } from "effect"
+import { Array, Context, Effect, Layer, Option, Stream } from "effect"
 import { Graft, Plugin } from "../src/index.ts"
 import { makeJournal, reach, run } from "./utils.ts"
 
@@ -85,10 +85,10 @@ describe("runtime", () => {
 			const tree = yield* Stream.runHead(Graft.forks)
 			const shape = Option.map(
 				tree,
-				Arr.map((node) => [
+				Array.map((node) => [
 					node.name,
 					node.state._tag,
-					Arr.map(node.children, (child) => child.name),
+					Array.map(node.children, (child) => child.name),
 				]),
 			)
 			assert.deepStrictEqual(
@@ -193,11 +193,11 @@ describe("runtime", () => {
 					inject: [Greeter],
 					apply: () => Effect.asVoid(Greeter),
 				})
-				const consumers = yield* Effect.forEach(Arr.range(1, 20), () =>
+				const consumers = yield* Effect.forEach(Array.range(1, 20), () =>
 					Graft.plugin(consumer),
 				)
 				yield* Effect.forEach(
-					Arr.range(1, 30),
+					Array.range(1, 30),
 					() =>
 						Effect.flatMap(Graft.plugin(provider), (fork) =>
 							Effect.andThen(fork.await, fork.dispose),

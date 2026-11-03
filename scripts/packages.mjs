@@ -20,29 +20,84 @@ export const registries = {
 	npm: { url: "https://registry.npmjs.org", snapshots: false },
 }
 
-/** A commit gets an exact snapshot version; a tag like v1.2.3 is a release. */
+/**
+ * A commit gets an exact snapshot version; a tag like v1.2.3 is a release,
+ * and a tag like v1.2.3-beta.0 a prerelease under its channel's npm tag.
+ */
 export function releaseVersion(ref, sha) {
 	if (!/^[a-f0-9]{40}$/.test(sha))
 		throw new Error("A full commit hash is required")
-	if (!ref) return { version: `0.0.0-commit-${sha}`, tag: `sha-${sha}` }
+	if (!ref)
+		return {
+			version: `0.0.0-commit-${sha}`,
+			tag: `sha-${sha}`,
+			snapshot: true,
+		}
 	const match =
-		/^v((?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*))$/.exec(ref)
-	if (!match) throw new Error("Use a version tag such as v0.1.0")
-	return { version: match[1], tag: "latest" }
+		/^v((?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-(alpha|beta|rc)\.(?:0|[1-9][0-9]*))?)$/.exec(
+			ref,
+		)
+	if (!match)
+		throw new Error("Use a version tag such as v0.1.0 or v0.2.0-beta.0")
+	return { version: match[1], tag: match[2] ?? "latest", snapshot: false }
 }
 
-/**
- * Whether a release may take the `latest` tag. It never moves back to an
- * older version, such as when a fix for an older line is released, or an old
- * release job runs again.
- */
-export function becomesLatest(version, latest) {
-	if (!latest) return true
-	const parts = (value) => value.split(/[.-]/).slice(0, 3).map(Number)
-	const [next, current] = [parts(version), parts(latest)]
-	for (let i = 0; i < 3; i++)
-		if (next[i] !== current[i]) return next[i] > current[i]
-	return true
+// Publishing jobs run without workspace dependencies. Keep SemVer precedence
+// self-contained, including registry versions with arbitrary prerelease identifiers.
+function parseVersion(version) {
+	const match =
+		/^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/.exec(
+			version,
+		)
+	if (!match || match[0] !== version)
+		throw new Error(`Invalid SemVer version: ${version}`)
+	const prerelease = match[4]?.split(".") ?? []
+	if (prerelease.some((part) => /^0[0-9]+$/.test(part)))
+		throw new Error(`Invalid SemVer version: ${version}`)
+	return { core: match.slice(1, 4).map(BigInt), prerelease }
+}
+
+const compare = (left, right) => (left === right ? 0 : left < right ? -1 : 1)
+const numeric = (identifier) => /^[0-9]+$/.test(identifier)
+
+function compareVersions(left, right) {
+	const next = parseVersion(left)
+	const current = parseVersion(right)
+	for (const [index, value] of next.core.entries()) {
+		const order = compare(value, current.core[index])
+		if (order !== 0) return order
+	}
+	if (next.prerelease.length === 0)
+		return current.prerelease.length === 0 ? 0 : 1
+	if (current.prerelease.length === 0) return -1
+	for (const [index, value] of next.prerelease.entries()) {
+		const previous = current.prerelease[index]
+		if (previous === undefined) return 1
+		const order =
+			numeric(value) && numeric(previous)
+				? compare(BigInt(value), BigInt(previous))
+				: numeric(value) !== numeric(previous)
+					? numeric(value)
+						? -1
+						: 1
+					: compare(value, previous)
+		if (order !== 0) return order
+	}
+	return compare(next.prerelease.length, current.prerelease.length)
+}
+
+/** One channel decision for first uploads and tag repair, under the registry lock. */
+export function publicationPlan({ version, tag, snapshot }, current) {
+	const mayAdvance =
+		snapshot || current === undefined || compareVersions(version, current) >= 0
+	return {
+		publishTag: mayAdvance
+			? tag
+			: tag === "latest"
+				? "backport"
+				: `${tag}-backport`,
+		repairTag: mayAdvance && current !== version ? tag : undefined,
+	}
 }
 
 /** Gives the package the release version, and pins its workspace dependencies to it. */
@@ -109,11 +164,46 @@ function pack(root, output, ref, sha) {
 	}
 }
 
+/** Reads a field of a published package, or `undefined` if it does not exist. */
+function viewRegistry(spec, field, registry, env) {
+	const result = spawnSync(
+		"npm",
+		["view", spec, field, "--json", "--registry", registry],
+		{ encoding: "utf8", env },
+	)
+	if (result.error) throw result.error
+	if (result.status === 0)
+		return result.stdout.trim() === "" ? undefined : JSON.parse(result.stdout)
+	let error
+	try {
+		error = JSON.parse(result.stdout).error
+	} catch {
+		throw new Error(result.stderr)
+	}
+	if (error?.code !== "E404") throw new Error(result.stderr || error?.summary)
+	return field === "dist-tags" ? {} : undefined
+}
+
+/** Read packument tags without npm's implicit latest-version selection. */
+export function readDistTags(name, channel, registry, env) {
+	const tags = viewRegistry(`${name}@${channel}`, "dist-tags", registry, env)
+	if (tags === undefined)
+		throw new Error(`No dist-tags object returned for ${name}`)
+	if (
+		tags === null ||
+		typeof tags !== "object" ||
+		Array.isArray(tags) ||
+		Object.values(tags).some((version) => typeof version !== "string")
+	)
+		throw new Error(`Invalid dist-tags object returned for ${name}`)
+	return tags
+}
+
 function publish(output, name) {
 	const registry = registries[name]
 	if (!registry) throw new Error("Use github or npm as the registry")
 	const release = JSON.parse(readFileSync(join(output, "release.json"), "utf8"))
-	if (release.tag !== "latest" && !registry.snapshots) {
+	if (release.snapshot && !registry.snapshots) {
 		console.log(`Snapshots are not published to ${name}`)
 		return
 	}
@@ -135,51 +225,35 @@ function publish(output, name) {
 			stdio: "inherit",
 			env,
 		})
-	/** Reads a field of a published package, or `undefined` if it does not exist. */
-	const view = (spec, field) => {
-		const result = spawnSync(
-			"npm",
-			["view", spec, field, "--json", "--registry", registry.url],
-			{ encoding: "utf8", env },
-		)
-		if (result.error) throw result.error
-		if (result.status === 0)
-			return result.stdout.trim() === "" ? undefined : JSON.parse(result.stdout)
-		let error
-		try {
-			error = JSON.parse(result.stdout).error
-		} catch {
-			throw new Error(result.stderr)
-		}
-		if (error?.code !== "E404") throw new Error(result.stderr || error?.summary)
-		return undefined
-	}
+
 	try {
 		for (const artifact of release.artifacts) {
 			const spec = `${artifact.name}@${release.version}`
-			// An older release goes under `backport`, so `latest` stays on the newest one.
-			const tag =
-				release.tag !== "latest" ||
-				becomesLatest(release.version, view(artifact.name, "dist-tags.latest"))
-					? release.tag
-					: "backport"
-			const integrity = view(spec, "dist.integrity")
-			// Trusted publishing creates provenance on its own, and allows only
-			// `npm publish`, so the tag is set by publishing whenever possible.
+			// The caller must serialize this entire operation per registry (CI uses
+			// a fixed job concurrency group). A check alone cannot prevent a race.
+			const { publishTag, repairTag } = publicationPlan(
+				release,
+				readDistTags(artifact.name, release.tag, registry.url, env)[
+					release.tag
+				],
+			)
+			const integrity = viewRegistry(spec, "dist.integrity", registry.url, env)
+			// Our npm trusted publisher grants publish access without dist-tag access.
+			// Set the tag as part of the first upload; retries leave npm tags alone.
 			if (integrity === undefined)
 				npm([
 					"publish",
 					join(output, artifact.file),
 					"--ignore-scripts",
 					"--tag",
-					tag,
+					publishTag,
 					...(name === "npm" ? ["--access", "public"] : []),
 				])
 			else if (integrity !== artifact.integrity)
 				throw new Error(`Package already has other contents: ${spec}`)
-			// A retry after an upload whose tag was not set yet.
-			else if (view(artifact.name, `dist-tags.${tag}`) !== release.version)
-				npm(["dist-tag", "add", spec, tag])
+			// GitHub Packages also permits repairing a tag after a partial upload.
+			else if (name !== "npm" && repairTag !== undefined)
+				npm(["dist-tag", "add", spec, repairTag])
 		}
 	} finally {
 		rmSync(config, { recursive: true, force: true })

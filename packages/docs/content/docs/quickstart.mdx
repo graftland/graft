@@ -5,8 +5,8 @@ description: Create a Graft project, run it, and change it while it runs.
 
 import { Steps } from "@astrojs/starlight/components"
 
-You need Node.js 22.15 or later. Hot reload uses Node's `module.registerHooks`,
-which older versions do not have.
+You need Node.js 22.19 or later. This is the version that the CLI's Effect Node
+adapter needs. It also has `module.registerHooks`, which hot reload uses.
 
 <Steps>
 
@@ -32,9 +32,10 @@ which older versions do not have.
    ```
 
    The `hello` plugin logs `Hello from Graft!`. The process keeps running until
-   you press <kbd>Ctrl</kbd>+<kbd>C</kbd>, which unloads every plugin.
+   you press <kbd>Ctrl</kbd>+<kbd>C</kbd>. Then Graft unloads every plugin.
 
-3. Change the config while it runs. Open `graft.yml` and change the message:
+3. Change the config while the app runs. Open `graft.yml` and change the
+   message:
 
    ```yaml
    - id: hello
@@ -46,10 +47,10 @@ which older versions do not have.
    When you save, Graft unloads `hello` and loads it again with the new message.
    You see `Hello plugin stopped`, then `Hello again!`.
 
-4. Change the code while it runs. Edit `hello.mjs`, for example to log the
-   message twice, and save. Graft imports the new version of the module and
+4. Change the code while the app runs. Edit `hello.mjs` (for example, log the
+   message twice) and save. Graft imports the new version of the module and
    replaces the running plugin with it. If the new code fails to import, the old
-   version keeps running and the error is logged.
+   version keeps running, and Graft logs the error.
 
 </Steps>
 
@@ -71,7 +72,7 @@ export default Plugin.make({
 ```
 
 A plugin module exports its plugin as the default export, or as an export named
-`plugin`. Importing the module must not start anything: open connections, timers
+`plugin`. Importing the module must not start anything. Open connections, timers
 and servers inside `apply`, so that Graft can release them. See
 [Plugins](../plugins/).
 
@@ -81,8 +82,11 @@ and servers inside `apply`, so that Graft can release them. See
 npx graft add graft-plugin-review
 ```
 
-`graft add` installs packages with the project's package manager. If installing
-fails, it puts `package.json` and the lockfile back as they were. Then add an
-entry for the plugin to `graft.yml`. Its `name` can be the short name `review`,
-which is looked up as `review`, `@graftland/plugin-review` and
-`graft-plugin-review`, in that order. See [Config file](../config-file/).
+`graft add` installs packages with the project's package manager. If the install
+fails, it puts `package.json` and the lockfile back as they were. While it
+installs or recovers, do not edit project files or run another installer. A
+rollback overwrites changes. It does not merge them. See
+[installation ownership and recovery](../cli/#package-managers). Then add an
+entry for the plugin to `graft.yml`. Its `name` can be the short name `review`.
+Graft looks for `review`, `@graftland/plugin-review` and `graft-plugin-review`,
+in that order. See [Config file](../config-file/).

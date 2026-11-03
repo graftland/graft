@@ -1,0 +1,120 @@
+# @graftland/hmr
+
+[English](https://github.com/graftland/graft/blob/main/packages/hmr/README.md)
+| 简体中文 |
+[繁體中文](https://github.com/graftland/graft/blob/main/packages/hmr/README.zh-TW.md)
+
+在 Node.js 上热重载插件模块，无需重启进程。
+
+```sh
+npm install @graftland/hmr effect
+```
+
+`Hmr.make` 为加载器提供一个 importer，同时提供 `reload` 和
+`watch`，用新代码替换插件。需要 Node.js 22.19 或更高版本。
+
+## 监视文件
+
+`watch`
+使用原生文件系统事件，所以重载很快。它还会每秒检查一次监视路径内已加载的、带版本的模块的内容，以捕获原生后端漏掉的变更。例如：
+
+- macOS 目录监视器的启动窗口期
+- import 与监视器安装之间发生的保存
+
+检查的工作方式：
+
+- 新加载的模块会与它的模块钩子读取的字节进行比较。所以通过配置添加插件，不会被算作文件变更。
+- 每次磁盘观察都与一次 import 尝试以及该尝试实际读取的字节相关联。
+- 更新的已提交或已失败的尝试会使更早的观察失效。所以在快照与 import 之间发生的保存，不会让正在运行的插件停留在错误的版本上。
+- 未发生变化的失败尝试会保持已确认状态，直到下一次变更。轮询不会反复重试它。
+- 检查遵循 `recursive`，并在消费者关闭流时停止。
+- 它的开销取决于这些模块的内容，而不是目录树的大小。
+
+首次导入失败后，观察租约仍由配置项持有，与立即关闭的候选资源 scope 分离。修正模块后，即使原生通知丢失，也能通过轮询恢复。重试替换观察代次，移除或禁用配置项则关闭观察 scope。
+
+`watch(paths, options)` 除了 `recursive`、`onReady` 和 `debounce` 之外，还接受
+`filter(absolutePath)`。这个谓词同时过滤原生事件和定期的内容检查。默认接受所有路径。例如：
+
+```ts
+hmr.watch([directory], {
+	recursive: true,
+	filter: (path) => path.endsWith(".mjs"),
+})
+```
+
+CLI 对 `node_modules`
+之外的 JavaScript 和 TypeScript 模块文件使用这个过滤器。YAML 配置的变更属于加载器处理，永远不会触发对所有条目的 HMR 重载。
+
+## 失败
+
+防抖不会让文件写入变成原子操作。如果重载遇到不完整的代码，它会发出
+`Failed`，并带上原始的
+`Cause`。之后的内容变更可以触发恢复，即使没有新的原生事件。
+
+监视器 I/O 失败和对账 I/O 失败都会使流失败。所以消费者应该处理这两个失败通道。
+
+`onReady` 表示监视器已安装。它不是操作系统层面的事件投递屏障。
+
+## 何时需要重启
+
+CommonJS 和原生依赖需要重启进程。HMR 按会话的 generation 跟踪依赖信息，其中包括入口 import 完成之后、插件激活期间的动态 import。一旦 HMR 记录了这样的依赖，该 generation 之后的重载都会返回
+`Skipped`，原因是 `restart-required`。
+
+通过 `require` 加载的模块不受 ESM URL 版本的隔离，包括
+`require(esm)`。HMR 在这里很谨慎：带版本的模块只要 import 了 `node:module`（或
+`module`），HMR 就认为它获得了一种无法跟踪的原生加载能力。该依赖图会返回
+`Skipped / restart-required`，即使这个模块只用了 `node:module`
+里的其他工具。HMR 在使用之前就记录这种能力，这样可以覆盖 CommonJS 缓存命中的情况，并且在另一个入口获得同样的能力时仍然有效。需要热重载的依赖请使用静态或动态的 ESM
+import。
+
+即使没有文件通知，监听也会报告已知的原生加载重启要求，包括启动后才获取该能力的插件。周期性状态检查不会重复报告相同状态；这条警告不表示已经执行重载。
+
+本地文件入口及其可达依赖边会按代次保留请求路径、导入方和物理目标。入口和依赖共用检查逻辑及轮询数据；失败待重试的依赖图继续保留，最后一个租约释放后不再参与检查。重载在 import 之前检查这个关系，在发布任何替换之前再检查一次。如果符号链接的目标变了，重载会返回
+`Skipped / restart-required`，并附上受影响的请求 URL，所有正在运行的插件保持不变。轮询也会检查这个关系，包括内容相同的目标和漏掉的原生事件。重新指定入口或 helper 的目标之后，请重启进程。HMR 不会使 Node 的解析缓存失效。这些检查覆盖跟踪依赖图中的本地文件请求，不覆盖包的 export
+map 或裸包解析的变化。
+
+## 入口租约
+
+`importerScoped(specifier)` 是一个需要 `Scope`
+的 Effect。每次调用都持有该入口的一个租约。最后一个租约释放后，该入口不再参与之后的重载。
+
+`importerScoped(specifier, { observationScope })`
+将观察租约与候选导入的临时资源分开。`ModuleResolver`
+通过 importer 的第二个参数传递这个 scope。失败条目等待重试时应保留它，替换观察尝试或移除条目时关闭它；候选资源仍在失败时立即清理。省略该选项时使用调用方的 scope。
+
+原生 watcher 在源资源清理完成后、进入后台合并边界之前观察完整 Exit。包含失败的中断会在这里记录完整 Cause，纯中断保持安静；普通后端失败继续交给消费方处理，不重复记录。
+
+CLI 把这个 importer 传给
+`ModuleResolver`。它的入口 scope 在配置更新、激活失败或激活等待期间保持存活，并在入口被移除时关闭。
+
+轮询和重启如何与租约配合：
+
+- 轮询根据每个存活的租约确定文件集合，使用正在运行的 generation 和最近一次未提交的 import 尝试。
+- 它会保留失败的 import 和缺失的本地依赖，以便重试。
+- 当最后一个所有者关闭时，它不再读取该入口以及仅被该入口使用的依赖。
+- 成功的替换会让旧的依赖图退役。
+- 只有从被租用的入口可以到达的依赖，才可能要求重启。
+- 基于 Promise 的 `importer` 会保留它的注册，直到 HMR 会话关闭。
+
+## 替换冲突
+
+有时多个入口原本共享同一个 Plugin 对象，现在却导出了不同的对象。此时重载返回
+`Skipped`，原因是 `ambiguous-exports`，并附上受影响的模块 URL。
+
+另外两种情况会返回 `Skipped`，原因是 `identity-conflict`，并附上冲突的模块 URL：
+
+- 替换的标识有重叠，例如 `P → Q, Q → R`。
+- 映射与现有的运行时别名不一致。
+
+在所有这些情况下，都不会替换任何东西。请重启应用，或恢复一个可以表示的映射。校验与别名发布共用核心的替换事务。
+
+## 取消
+
+模块在取消期间失败时，HMR 会连同完整的 Cause 一起记录原始失败。它在待处理的中断掩盖已完成的 Exit 之前完成这一步。
+
+## 文档
+
+- [热重载](https://graftland.github.io/graft/zh-cn/hot-reload/)
+
+属于 [Graft](https://github.com/graftland/graft)。基于
+[Apache 2.0](https://github.com/graftland/graft/blob/main/LICENSE) 许可。

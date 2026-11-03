@@ -1,21 +1,24 @@
 import { assert, describe, it } from "@effect/vitest"
 import {
-	Array as Arr,
+	Array,
 	Cause,
 	Context,
 	Deferred,
 	Effect,
+	Exit,
 	Fiber,
 	HashMap,
+	HashSet,
 	Option,
 	PubSub,
 	Ref,
 	Schema,
 	Stream,
-	String as Str,
+	String,
 	TxRef,
 } from "effect"
 import { Graft, Plugin } from "../src/index.ts"
+import { realmKey } from "../src/internal/runtime.ts"
 import { reach, run } from "./utils.ts"
 
 class Service extends Context.Service<Service, string>()(
@@ -24,7 +27,7 @@ class Service extends Context.Service<Service, string>()(
 class Other extends Context.Service<Other, string>()(
 	"@graftland/graft/test/regressions.test/Other",
 ) {}
-const settle = Effect.forEach(Arr.range(1, 50), () => Effect.yieldNow, {
+const settle = Effect.forEach(Array.range(1, 50), () => Effect.yieldNow, {
 	discard: true,
 })
 
@@ -51,14 +54,15 @@ describe("regressions", () => {
 				yield* consumer.await
 				const registry = yield* TxRef.get(runtime.registry)
 				const provision = Option.getOrThrow(
-					HashMap.get(registry, `\u0000${Service.key}`),
+					HashMap.get(registry, realmKey("", Service.key)),
 				)
-				yield* consumer.dispose
-				const remaining = yield* TxRef.get(provision.leases)
-				// Repair the counter after observing it, so the regression cannot hang test cleanup.
-				yield* TxRef.set(provision.leases, 0)
+				const cleanup = yield* Effect.exit(consumer.dispose)
+				assert.isTrue(Exit.isFailure(cleanup))
+				const remaining = yield* TxRef.get(provision.consumers)
+				// Clear the consumers after observing it, so the regression cannot hang test cleanup.
+				yield* TxRef.set(provision.consumers, HashSet.empty())
 				yield* provider.dispose
-				assert.strictEqual(remaining, 0)
+				assert.strictEqual(HashSet.size(remaining), 0)
 			}).pipe(run),
 	)
 
@@ -128,7 +132,7 @@ describe("regressions", () => {
 				yield* Effect.tx(
 					Effect.gen(function* () {
 						const registry = yield* TxRef.get(runtime.registry)
-						if (HashMap.has(registry, `\u0000${Service.key}`))
+						if (HashMap.has(registry, realmKey("", Service.key)))
 							return yield* Effect.txRetry
 					}),
 				)
@@ -156,9 +160,10 @@ describe("regressions", () => {
 					}),
 				)
 				yield* fork.await
-				yield* fork.dispose
+				const cleanup = yield* Effect.exit(fork.dispose)
+				assert.isTrue(Exit.isFailure(cleanup))
 				const registry = yield* TxRef.get(runtime.registry)
-				assert.isFalse(HashMap.has(registry, `\u0000${Service.key}`))
+				assert.isFalse(HashMap.has(registry, realmKey("", Service.key)))
 			}).pipe(run),
 	)
 
@@ -248,7 +253,7 @@ describe("regressions", () => {
 				assert.deepStrictEqual(
 					Option.map(
 						tree,
-						Arr.map((node) => node.name),
+						Array.map((node) => node.name),
 					),
 					Option.some(["first"]),
 				)
@@ -270,20 +275,21 @@ describe("regressions", () => {
 				}),
 			)
 			yield* Deferred.await(started)
-			yield* fork.dispose
+			const cleanup = yield* Effect.exit(fork.dispose)
+			assert.isTrue(Exit.isFailure(cleanup))
 			yield* Effect.log("Review log boundary")
 			const subscription = yield* PubSub.subscribe(runtime.logs)
 			const entries = yield* PubSub.takeAll(subscription)
-			const recorded = Arr.some(
+			const recorded = Array.some(
 				entries,
 				({ cause, message }) =>
-					Str.includes("cleanup defect")(Cause.pretty(cause)) ||
-					(Arr.isArray(message) &&
-						Arr.some(
+					String.includes("cleanup defect")(Cause.pretty(cause)) ||
+					(Array.isArray(message) &&
+						Array.some(
 							message,
 							(item) =>
 								Cause.isCause(item) &&
-								Str.includes("cleanup defect")(Cause.pretty(item)),
+								String.includes("cleanup defect")(Cause.pretty(item)),
 						)),
 			)
 			assert.isTrue(recorded)

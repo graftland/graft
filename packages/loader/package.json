@@ -1,5 +1,8 @@
 {
 	"name": "@graftland/loader",
+	"engines": {
+		"node": ">=22.19.0"
+	},
 	"version": "0.0.0",
 	"type": "module",
 	"description": "Loads plugins from a list of entries or a YAML config file",
@@ -12,7 +15,9 @@
 	"sideEffects": false,
 	"files": [
 		"dist",
-		"src"
+		"src",
+		"README.zh-CN.md",
+		"README.zh-TW.md"
 	],
 	"exports": {
 		".": {
@@ -26,7 +31,7 @@
 		"test": "vitest run"
 	},
 	"peerDependencies": {
-		"effect": "4.1.2"
+		"effect": "4.1.*"
 	},
 	"devDependencies": {
 		"@effect/vitest": "4.1.2",

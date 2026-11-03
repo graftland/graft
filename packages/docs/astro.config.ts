@@ -22,6 +22,7 @@ export default defineConfig({
 			locales: {
 				root: { label: "English", lang: "en" },
 				"zh-cn": { label: "简体中文", lang: "zh-CN" },
+				"zh-tw": { label: "繁體中文", lang: "zh-TW" },
 			},
 			// Starlight adds its Markdown features, such as the links next to
 			// headings, only to pages in `src/content/docs`. Our pages are in
@@ -41,22 +42,22 @@ export default defineConfig({
 			sidebar: [
 				{
 					label: "Start here",
-					translations: { "zh-CN": "开始" },
+					translations: { "zh-CN": "开始", "zh-TW": "開始" },
 					items: ["index", "quickstart", "cordis"],
 				},
 				{
 					label: "Guides",
-					translations: { "zh-CN": "指南" },
+					translations: { "zh-CN": "指南", "zh-TW": "指南" },
 					items: ["plugins", "services", "lifecycle", "isolation", "events"],
 				},
 				{
 					label: "Applications",
-					translations: { "zh-CN": "应用" },
+					translations: { "zh-CN": "应用", "zh-TW": "應用" },
 					items: ["config-file", "hot-reload", "cli", "embedding"],
 				},
 				{
 					label: "Project",
-					translations: { "zh-CN": "项目" },
+					translations: { "zh-CN": "项目", "zh-TW": "專案" },
 					items: ["releases"],
 				},
 			],

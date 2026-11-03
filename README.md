@@ -1,7 +1,9 @@
 # Graft
 
+English | [简体中文](README.zh-CN.md) | [繁體中文](README.zh-TW.md)
+
 A plugin framework built on [Effect](https://effect.website). Graft runs an
-application as a tree of plugins that publish and use services, and lets you
+application as a tree of plugins. Plugins publish and use services. You can
 load, reconfigure, replace and unload them while the process keeps running.
 
 ```ts
@@ -31,6 +33,10 @@ const hello = Plugin.make({
 })
 ```
 
+To run Graft on Node.js, you need version 22.19 or later. To develop this
+workspace, you need Node.js 22.22 or later. This includes building the
+documentation with Astro.
+
 ## Get started
 
 ```sh
@@ -39,9 +45,23 @@ cd my-app
 npx graft start --watch
 ```
 
-Read the [documentation](https://graftland.github.io/graft/)
-([简体中文](https://graftland.github.io/graft/zh-cn/)). Coming from cordis? See
+Read the [documentation](https://graftland.github.io/graft/) (also in
+[简体中文](https://graftland.github.io/graft/zh-cn/) and
+[繁體中文](https://graftland.github.io/graft/zh-tw/)). Do you know cordis? See
 [how its concepts map to Graft](https://graftland.github.io/graft/cordis/).
+
+## Samples
+
+[`samples/`](samples) starts with five short, numbered samples. Each one teaches
+one idea, from a first plugin to running from `graft.yml`.
+
+After those, larger applications show what Graft is for:
+
+- a chat bot built from plugins
+- a checkout that swaps its pricing engine and database under load
+- an HTTP gateway driven by `graft.yml`
+- a multi-tenant service
+- a market data pipeline that survives a flaky upstream
 
 ## Packages
 
@@ -54,8 +74,8 @@ Read the [documentation](https://graftland.github.io/graft/)
 | [`@graftland/create`](packages/create)                   | Generates a new Graft project. `graft create` uses it.                                    |
 | [`@graftland/package-manager`](packages/package-manager) | Installs dependencies with npm, pnpm or Yarn, and rolls back on failure.                  |
 
-All packages are released together with the same version, and need `effect`
-4.1.2.
+All packages are released together with the same version. They all need `effect`
+4.1.x.
 
 ## Contributing
 

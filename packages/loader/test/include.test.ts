@@ -1,6 +1,6 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Graft } from "@graftland/graft"
-import { Effect, FileSystem, Path, String as Str } from "effect"
+import { Effect, FileSystem, Path, String } from "effect"
 import { Include } from "../src/index.ts"
 import { echo, loaderService, run } from "./utils.ts"
 
@@ -59,7 +59,7 @@ describe("include", () => {
 				const onDisk = yield* fs.readFileString(file)
 				yield* fs.writeFileString(
 					file,
-					Str.replace("text: !env GREETING", "text: from disk")(onDisk),
+					String.replace("text: !env GREETING", "text: from disk")(onDisk),
 				)
 				yield* loader.update(id, { config: { text: "from memory" } })
 				const text = yield* fs.readFileString(file)
@@ -79,7 +79,7 @@ describe("include", () => {
 				const onDisk = yield* fs.readFileString(file)
 				yield* fs.writeFileString(
 					file,
-					Str.replace("text: !env GREETING", "text: edited")(onDisk),
+					String.replace("text: !env GREETING", "text: edited")(onDisk),
 				)
 				yield* journal.eventually(["start hi", "stop hi", "start edited"])
 			}),

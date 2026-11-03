@@ -1,11 +1,12 @@
 import { assert, it } from "@effect/vitest"
 import {
-	Array as Arr,
+	Array,
 	Context,
 	Effect,
 	Exit,
 	Fiber,
 	HashMap,
+	HashSet,
 	Option,
 	References,
 	Scope,
@@ -13,6 +14,7 @@ import {
 	TxSubscriptionRef,
 } from "effect"
 import { Graft, Plugin } from "../src/index.ts"
+import { realmKey } from "../src/internal/runtime.ts"
 import { supervise } from "../src/internal/activation.ts"
 import type { Spec } from "../src/internal/runtime.ts"
 import { run } from "./utils.ts"
@@ -29,27 +31,39 @@ it.effect(
 			yield* Graft.provide(Service, "ready")
 			const registry = yield* TxRef.get(runtime.registry)
 			const provision = Option.getOrThrow(
-				HashMap.get(registry, `\u0000${Service.key}`),
+				HashMap.get(registry, realmKey("", Service.key)),
 			)
 			const plugin = Plugin.make({
 				name: "consumer",
 				inject: [Service],
 				apply: () => Effect.never,
 			})
-			for (const ticks of Arr.range(0, 100)) {
+			for (const ticks of Array.range(0, 100)) {
 				const spec = yield* TxRef.make<Spec>({
 					plugin,
 					input: undefined,
 					revision: 0,
 				})
-				const supervisor = yield* supervise(runtime, -1, spec).pipe(
-					Effect.provideService(References.MaxOpsBeforeYield, 16),
+				const initial = yield* TxRef.get(spec)
+				const processing = yield* TxRef.make(initial)
+				const supervisor = yield* supervise(runtime, -1, spec, processing).pipe(
+					Effect.provideService(References.MaxOpsBeforeYield, 4),
 					Effect.forkScoped,
 				)
-				for (const _ of Arr.range(0, ticks)) yield* Effect.yieldNow
+				for (const _ of Array.range(0, ticks)) yield* Effect.yieldNow
 				yield* Fiber.interrupt(supervisor)
-				const count = yield* TxRef.get(provision.leases)
-				assert.strictEqual(count, 0, `Lease leaked after ${ticks} yields`)
+				const count = yield* TxRef.get(provision.consumers)
+				const active = yield* TxRef.get(runtime.active)
+				assert.strictEqual(
+					HashMap.size(active),
+					0,
+					`Activation leaked after ${ticks} yields`,
+				)
+				assert.strictEqual(
+					HashSet.size(count),
+					0,
+					`Lease leaked after ${ticks} yields`,
+				)
 			}
 		}).pipe(run),
 )
@@ -66,7 +80,7 @@ it.effect(
 			})
 			const registering = yield* Graft.plugin(plugin).pipe(
 				Effect.provideService(Scope.Scope, owner),
-				Effect.provideService(References.MaxOpsBeforeYield, 16),
+				Effect.provideService(References.MaxOpsBeforeYield, 4),
 				Effect.forkScoped,
 			)
 			yield* Effect.tx(

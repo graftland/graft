@@ -1,7 +1,7 @@
 import { NodeServices } from "@effect/platform-node"
 import { assert, describe, it } from "@effect/vitest"
 import { Entry } from "@graftland/loader"
-import { Effect, Exit, FileSystem, Path, Schema } from "effect"
+import { Effect, Exit, FileSystem, Path, Schema, String } from "effect"
 import type { Scope } from "effect"
 import { parse } from "yaml"
 import { create } from "../src/index.ts"
@@ -22,6 +22,10 @@ describe("create", () => {
 			const result = yield* create({ directory, packageManager: "pnpm@9.15.9" })
 			assert.strictEqual(result.name, "example")
 			const yaml = yield* fs.readFileString(path.join(directory, "graft.yml"))
+			assert.strictEqual(
+				String.split("\n")(yaml)[0],
+				"# yaml-language-server: $schema=https://cdn.jsdelivr.net/npm/@graftland/cli@0.0.0/schema.json",
+			)
 			const entries = yield* Schema.decodeUnknownEffect(
 				Schema.Array(Entry.Entry),
 			)(parse(yaml))

@@ -5,7 +5,7 @@
 		"tsBuildInfoFile": ".cache/test.tsbuildinfo",
 		"allowImportingTsExtensions": true
 	},
-	"include": ["src", "test"],
+	"include": ["src", "test", "package.json"],
 	"references": [
 		{
 			"path": "../core"

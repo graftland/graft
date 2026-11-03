@@ -3,20 +3,37 @@
  * needs, decodes its configuration with a schema, and runs `apply` inside a
  * scope that lives exactly as long as the plugin is active.
  */
-import type { Context, Schedule, Scope } from "effect"
-import { Array as Arr, Effect, Layer, Option, Predicate, Schema } from "effect"
-import { provide, type Graft, type ServiceConflict } from "./Graft"
+import type { Fiber, Schedule, Scope } from "effect"
+import { identity } from "effect/Function"
+import {
+	Array,
+	Context,
+	Data,
+	Effect,
+	Equal,
+	Layer,
+	Option,
+	Predicate,
+	Schema,
+} from "effect"
+import * as TaskGroup from "./internal/tasks"
+import type { Tasks } from "./internal/tasks"
+export type { Tasks } from "./internal/tasks"
+import { provide, Graft, type ServiceConflict } from "./Graft"
 
 const TypeId = "~@graftland/graft/Plugin"
+const Contract = "~@graftland/graft/Plugin/Contract"
+
+/** Dynamic Plugin<any> intentionally erases the contract; typed definitions retain it. */
+type Invariant<A> = 0 extends 1 & A ? unknown : (value: A) => A
 
 /**
  * Marks a dependency as optional: the plugin starts without it and restarts
  * whenever it appears or disappears. Read it with `Effect.serviceOption`.
  */
-export interface Optional<out Key extends Context.Key<any, any>> {
-	readonly _tag: "Optional"
-	readonly key: Key
-}
+export class Optional<
+	out Key extends Context.Key<any, any>,
+> extends Data.TaggedClass("Optional")<{ readonly key: Key }> {}
 
 export type Dependency = Context.Key<any, any> | Optional<Context.Key<any, any>>
 
@@ -34,10 +51,48 @@ export type Requirements<Inject extends ReadonlyArray<Dependency>> =
  * Returned from `apply` to accept configuration changes in place. Resolving
  * to `false` restarts the plugin with the new configuration instead.
  */
-export type Update<Config> = (next: Config) => Effect.Effect<boolean>
+export type Update<Config, E = never, R = never> = (
+	next: Config,
+) => Effect.Effect<boolean, never, Graft | Scope.Scope | R | Tasks<E>>
 
-export interface Plugin<in out Config = any, in Input = any, out E = any> {
+/** Starts an activation-owned worker. Its unhandled errors belong to the plugin, not the launch operation. */
+export const fork = <A, E, R>(
+	effect: Effect.Effect<A, E, R>,
+): Effect.Effect<
+	Fiber.Fiber<A, E>,
+	never,
+	Exclude<R, Scope.Scope> | Graft | Tasks<E>
+> =>
+	Effect.gen(function* () {
+		const { activation } = yield* Graft
+		if (Option.isNone(activation.tasks))
+			return yield* Effect.die(
+				new Error("Plugin.fork requires a plugin activation"),
+			)
+		return yield* TaskGroup.run(activation.tasks.value, effect)
+	})
+
+// A definition has one input/error contract even when referenced through aliases.
+export type Plugin<Config = any, Input = any, E = any> = 0 extends 1 & Input
+	? 0 extends 1 & E
+		? DynamicPlugin<Config>
+		: Definition<Config, Input, E | Schema.SchemaError>
+	: Definition<Config, Input, E | Schema.SchemaError>
+
+/** The dynamic boundary forgets contracts instead of pretending to instantiate them at any. */
+type DynamicPlugin<Config> = Omit<
+	Definition<Config, any, any>,
+	typeof Contract
+> & {
+	readonly [Contract]: unknown
+}
+
+export interface Definition<in out Config, in out Input, in out E> {
 	readonly [TypeId]: typeof TypeId
+	readonly [Contract]: {
+		readonly input: Invariant<Input>
+		readonly error: Invariant<E>
+	}
 	readonly name: string
 	readonly inject: ReadonlyArray<Dependency>
 	readonly retry: Schedule.Schedule<unknown, unknown> | undefined
@@ -48,15 +103,21 @@ export interface Plugin<in out Config = any, in Input = any, out E = any> {
 	/** Runs only inside an activation, which provides whatever `apply` needs. */
 	readonly apply: (
 		config: Config,
-	) => Effect.Effect<void | Update<Config>, E, unknown>
+	) => Effect.Effect<void | Update<Config, E, unknown>, E, unknown>
 }
+
+/** The external configuration accepted by a definition, including dynamic definitions. */
+export type InputOf<P extends Plugin> = Parameters<P["decode"]>[0]
+
+/** The error bound carried by a definition. */
+export type ErrorOf<P extends Plugin> = Effect.Error<ReturnType<P["apply"]>>
 
 export const isPlugin = (u: unknown): u is Plugin =>
 	Predicate.hasProperty(u, TypeId)
 
 /** The plugin a module exports: its default export, or else an export named `plugin`. */
 export const fromModule = (module: unknown): Option.Option<Plugin> =>
-	Arr.findFirst(
+	Array.findFirst(
 		[
 			Predicate.hasProperty(module, "default") ? module.default : undefined,
 			Predicate.hasProperty(module, "plugin") ? module.plugin : undefined,
@@ -66,14 +127,15 @@ export const fromModule = (module: unknown): Option.Option<Plugin> =>
 
 export const optional = <Key extends Context.Key<any, any>>(
 	key: Key,
-): Optional<Key> => ({ _tag: "Optional", key })
+): Optional<Key> => new Optional({ key })
 
 export const isOptional = (
 	dependency: Dependency,
 ): dependency is Optional<Context.Key<any, any>> =>
 	"_tag" in dependency && dependency._tag === "Optional"
 
-interface Options<Inject extends ReadonlyArray<Dependency>> {
+/** Options shared by `make`, `layer` and `service`. */
+export interface Options<Inject extends ReadonlyArray<Dependency>> {
 	readonly name: string
 	readonly inject?: Inject | undefined
 	/** Restarts a failed plugin on this schedule; without it, a failed plugin waits for a change. */
@@ -85,51 +147,62 @@ interface Options<Inject extends ReadonlyArray<Dependency>> {
  * required; anything else is a type error.
  */
 export const make: {
-	<const Inject extends ReadonlyArray<Dependency> = readonly [], E = never>(
+	<
+		const Inject extends ReadonlyArray<Dependency> = readonly [],
+		E = never,
+		Background = never,
+	>(
 		options: Options<Inject> & {
 			readonly config?: undefined
 			readonly apply: () => Effect.Effect<
-				void | Update<void>,
+				void | Update<void, Background, Required<Inject>>,
 				E,
-				NoInfer<Requirements<Inject>>
+				NoInfer<Requirements<Inject>> | Tasks<Background>
 			>
 		},
-	): Plugin<void, void, E>
+	): Definition<void, void, E | Background | Schema.SchemaError>
 	<
 		S extends Schema.Top,
 		const Inject extends ReadonlyArray<Dependency> = readonly [],
 		E = never,
+		Background = never,
 	>(
 		options: Options<Inject> & {
 			readonly config: S & {
-				readonly DecodingServices: NoInfer<Requirements<Inject>>
+				readonly DecodingServices:
+					NoInfer<Requirements<Inject>> | Tasks<Background>
 			}
 			readonly apply: (
 				config: S["Type"],
 			) => Effect.Effect<
-				void | Update<S["Type"]>,
+				void | Update<S["Type"], Background, Required<Inject>>,
 				E,
-				NoInfer<Requirements<Inject>>
+				NoInfer<Requirements<Inject>> | Tasks<Background>
 			>
 		},
-	): Plugin<S["Type"], S["Encoded"], E>
+	): Definition<S["Type"], S["Encoded"], E | Background | Schema.SchemaError>
 } = (
 	options: Options<ReadonlyArray<Dependency>> & {
 		readonly config?: Schema.Top | undefined
 		readonly apply: (config: never) => Effect.Effect<unknown, unknown, unknown>
 	},
-): Plugin => {
+) => {
 	const schema = options.config
-	return {
+	// Factory results also compare by reference in caller-owned Effect collections.
+	// The runtime uses its own identity keys, so copied definitions are supported too.
+	return Equal.byReference({
 		[TypeId]: TypeId,
+		[Contract]: { input: identity, error: identity },
 		name: options.name,
 		inject: options.inject ?? [],
 		retry: options.retry,
+		// Overloads connect the schema's decoded type to the callback; this implementation erases that type.
 		decode: (schema === undefined
 			? Effect.succeed
 			: Schema.decodeUnknownEffect(schema)) as Plugin["decode"],
+		// The public overload already checked that apply accepts the schema's output and declares its errors.
 		apply: options.apply as Plugin["apply"],
-	}
+	} satisfies Plugin)
 }
 
 /**
@@ -139,14 +212,14 @@ export const make: {
 export const layer = <
 	ROut,
 	E,
-	RIn extends Requirements<Inject>,
+	RIn extends Requirements<Inject> | Tasks<any>,
 	const Inject extends ReadonlyArray<Dependency> = readonly [],
 >(
 	self: Layer.Layer<ROut, E, RIn>,
 	options: Options<Inject> & {
 		readonly provides: ReadonlyArray<Context.Key<ROut, any>>
 	},
-): Plugin<void, void, E | ServiceConflict> =>
+): Plugin<void, void, E | TaskGroup.Errors<RIn> | ServiceConflict> =>
 	make({
 		...options,
 		apply: Effect.fnUntraced(function* () {
@@ -154,7 +227,7 @@ export const layer = <
 			const memoMap = yield* Layer.makeMemoMap
 			const context = yield* Layer.buildWithMemoMap(self, memoMap, scope)
 			for (const key of options.provides)
-				yield* provide(key, context.mapUnsafe.get(key.key))
+				yield* provide(key, Context.get(context, key))
 		}),
 	})
 
@@ -163,13 +236,13 @@ export const service = <
 	I,
 	S,
 	E,
-	R extends Requirements<Inject>,
+	R extends Requirements<Inject> | Tasks<any>,
 	const Inject extends ReadonlyArray<Dependency> = readonly [],
 >(
 	key: Context.Key<I, S>,
 	build: Effect.Effect<S, E, R>,
 	options: Options<Inject>,
-): Plugin<void, void, E | ServiceConflict> =>
+): Plugin<void, void, E | TaskGroup.Errors<R> | ServiceConflict> =>
 	make({
 		...options,
 		apply: () => Effect.flatMap(build, (value) => provide(key, value)),

@@ -1,0 +1,86 @@
+---
+title: 快速開始
+description: 建立並執行 Graft 專案，在執行期間修改設定和程式碼。
+---
+
+import { Steps } from "@astrojs/starlight/components"
+
+需要 Node.js 22.19 或更新版本，這是 CLI 所用 Effect
+Node 轉接器要求的版本。該版本也提供熱重載所需的 `module.registerHooks`。
+
+<Steps>
+
+1. 建立專案並安裝相依套件：
+
+   ```sh
+   npx @graftland/cli create my-app --install
+   cd my-app
+   ```
+
+   除了 `package.json`，專案還包含三個檔案：
+
+   | 檔案         | 用途                               |
+   | ------------ | ---------------------------------- |
+   | `graft.yml`  | 設定檔，指定要載入的外掛及其設定。 |
+   | `hello.mjs`  | 範例外掛。                         |
+   | `.gitignore` | 忽略 `node_modules` 和 `.env`。    |
+
+2. 啟動應用程式並監看檔案變更：
+
+   ```sh
+   npx graft start --watch
+   ```
+
+   `hello` 外掛會輸出 `Hello from Graft!`。行程會持續執行，直到你按下
+
+   <kbd>Ctrl</kbd>+<kbd>C</kbd>，此時 Graft 會卸載所有外掛。
+
+3. 在應用程式執行期間修改設定。開啟 `graft.yml`，修改訊息：
+
+   ```yaml
+   - id: hello
+     name: ./hello.mjs
+     config:
+       message: Hello again!
+   ```
+
+   儲存後，Graft 會卸載 `hello`，再用新訊息重新載入。你會先看到
+   `Hello plugin stopped`，然後是 `Hello again!`。
+
+4. 在應用程式執行期間修改程式碼。編輯
+   `hello.mjs`（例如讓它輸出兩次訊息），然後儲存。Graft 會匯入模組的新版本，用它取代正在執行的外掛。如果新程式碼匯入失敗，舊版本會繼續執行，Graft 會把錯誤記錄到日誌中。
+
+</Steps>
+
+## 範例外掛
+
+```js title="hello.mjs"
+import { Plugin } from "@graftland/graft"
+import { Effect, Schema } from "effect"
+
+// Module evaluation only defines the plugin; its activation owns all resources.
+export default Plugin.make({
+	name: "hello",
+	config: Schema.Struct({ message: Schema.String }),
+	apply: ({ message }) =>
+		Effect.acquireRelease(Effect.logInfo(message), () =>
+			Effect.logInfo("Hello plugin stopped"),
+		),
+})
+```
+
+外掛模組透過預設匯出或名為 `plugin`
+的匯出提供外掛。匯入模組時不應啟動任何工作。連線、計時器和伺服器都應在 `apply`
+內啟動，以便 Graft 能夠釋放這些資源。請參閱[外掛](../plugins/)。
+
+## 從 npm 新增外掛
+
+```sh
+npx graft add graft-plugin-review
+```
+
+`graft add` 使用專案的套件管理器安裝套件。如果安裝失敗，它會將 `package.json`
+和鎖定檔還原。安裝和復原期間，不要編輯專案檔案或執行其他安裝命令。還原會覆寫修改，不會合併修改。請參閱[安裝獨佔與復原](../cli/#套件管理器)。安裝後，在
+`graft.yml` 中新增該外掛的設定項目。`name` 可以使用短名稱
+`review`。Graft 會依序尋找 `review`、`@graftland/plugin-review` 和
+`graft-plugin-review`。請參閱[設定檔](../config-file/)。

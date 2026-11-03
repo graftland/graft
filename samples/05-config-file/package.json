@@ -1,0 +1,20 @@
+{
+	"name": "@graftland/sample-config-file",
+	"private": true,
+	"type": "module",
+	"description": "Run plugins from graft.yml and edit them while they run",
+	"scripts": {
+		"start": "graft start --watch",
+		"test": "vitest run"
+	},
+	"dependencies": {
+		"@effect/platform-node": "4.1.2",
+		"@graftland/cli": "workspace:*",
+		"@graftland/graft": "workspace:*",
+		"effect": "4.1.2"
+	},
+	"devDependencies": {
+		"@effect/vitest": "4.1.2",
+		"vitest": "5.1.0"
+	}
+}

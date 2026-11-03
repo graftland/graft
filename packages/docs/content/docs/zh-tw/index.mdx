@@ -1,0 +1,68 @@
+---
+title: Graft
+description: 基於 Effect 的外掛框架，可在行程執行期間載入、取代和卸載外掛。
+---
+
+import { Card, CardGrid } from "@astrojs/starlight/components"
+
+Graft 用外掛樹組織應用程式。每個外掛都可以發布服務，也可以使用其他外掛的服務。外掛可以在行程執行期間載入、重新設定、取代或卸載。卸載外掛時，Graft 會先停止所有依賴它的外掛，再釋放它自身的資源。
+
+Graft 基於 [Effect](https://effect.website) 建構。外掛是在 `Scope`
+中執行的 Effect。服務是 Effect 的 `Context` 鍵。失敗時會保留完整的
+`Cause`。Graft 只補充 Effect 尚未提供的能力：可在執行期間發布和撤回的服務、外掛樹、事件、設定檔和熱重載。
+
+```ts
+import { Graft, Plugin } from "@graftland/graft"
+import { Context, Effect, Schema } from "effect"
+
+class Greeter extends Context.Service<
+	Greeter,
+	{ readonly greet: (name: string) => Effect.Effect<void> }
+>()("app/Greeter") {}
+
+// Publishes a Greeter while it is loaded.
+const greeter = Plugin.make({
+	name: "greeter",
+	config: Schema.Struct({ greeting: Schema.String }),
+	apply: ({ greeting }) =>
+		Graft.provide(Greeter, {
+			greet: (name) => Effect.log(`${greeting}, ${name}!`),
+		}),
+})
+
+// Starts once a Greeter exists, and stops before it goes away.
+const hello = Plugin.make({
+	name: "hello",
+	inject: [Greeter],
+	apply: () => Effect.flatMap(Greeter, (greeter) => greeter.greet("world")),
+})
+```
+
+<CardGrid>
+	<Card title="快速上手" icon="rocket">
+		依照[快速開始](quickstart/)建立專案，並啟用熱重載執行。
+	</Card>
+	<Card title="撰寫外掛" icon="puzzle">
+		[外掛](plugins/)宣告所需的服務、解碼設定，並管理自身的資源。
+	</Card>
+	<Card title="共用服務" icon="random">
+		[服務](services/)可以在執行期間發布和撤回，Graft
+		會依安全的順序完成這些操作。
+	</Card>
+	<Card title="從 cordis 遷移" icon="open-book">
+		了解 [cordis 的概念在 Graft 中如何對應](cordis/)。
+	</Card>
+</CardGrid>
+
+## 套件
+
+| 套件                         | 功能                                                                                   |
+| ---------------------------- | -------------------------------------------------------------------------------------- |
+| `@graftland/graft`           | 基於 Effect 的外掛框架：外掛、fork、服務、隔離、事件和日誌。                           |
+| `@graftland/loader`          | 從設定項目清單或 YAML 設定檔載入外掛。                                                 |
+| `@graftland/hmr`             | 在 Node.js 中重載外掛模組，無需重新啟動行程。                                          |
+| `@graftland/cli`             | 提供 `graft` 命令：`start`、`create`、`add` 和 `remove`。                              |
+| `@graftland/create`          | 建立新的 Graft 專案，由 `graft create` 呼叫。                                          |
+| `@graftland/package-manager` | 使用 npm、pnpm 或 Yarn 安裝相依套件。安裝失敗時，透過[快照還原](cli/#套件管理器)復原。 |
+
+所有套件共用同一個版本號，一同發布，並需要 `effect` 4.1.x。

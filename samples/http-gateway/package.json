@@ -1,0 +1,21 @@
+{
+	"name": "@graftland/sample-http-gateway",
+	"private": true,
+	"type": "module",
+	"description": "A real HTTP server whose routes come from plugins listed in graft.yml",
+	"scripts": {
+		"start": "graft start --watch",
+		"test": "vitest run"
+	},
+	"dependencies": {
+		"@effect/platform-node": "4.1.2",
+		"@graftland/cli": "workspace:*",
+		"@graftland/graft": "workspace:*",
+		"@graftland/loader": "workspace:*",
+		"effect": "4.1.2"
+	},
+	"devDependencies": {
+		"@effect/vitest": "4.1.2",
+		"vitest": "5.1.0"
+	}
+}

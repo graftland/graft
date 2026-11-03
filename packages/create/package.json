@@ -1,5 +1,8 @@
 {
 	"name": "@graftland/create",
+	"engines": {
+		"node": ">=22.19.0"
+	},
 	"version": "0.0.0",
 	"type": "module",
 	"description": "Generates a new Graft project. graft create uses it",
@@ -12,7 +15,9 @@
 	"sideEffects": false,
 	"files": [
 		"dist",
-		"src"
+		"src",
+		"README.zh-CN.md",
+		"README.zh-TW.md"
 	],
 	"exports": {
 		".": {
@@ -26,18 +31,20 @@
 		"test": "vitest run"
 	},
 	"peerDependencies": {
-		"effect": "4.1.2"
+		"effect": "4.1.*"
 	},
 	"devDependencies": {
+		"@effect/platform-node": "4.1.2",
 		"@effect/vitest": "4.1.2",
+		"@graftland/graft": "workspace:*",
+		"@graftland/loader": "workspace:*",
 		"effect": "4.1.2",
 		"vitest": "5.1.0",
-		"@effect/platform-node": "4.1.2",
-		"@graftland/loader": "workspace:*",
-		"@graftland/graft": "workspace:*",
 		"yaml": "2.9.1"
 	},
-	"dependencies": {},
+	"dependencies": {
+		"@graftland/package-manager": "workspace:*"
+	},
 	"publishConfig": {
 		"exports": {
 			".": "./dist/index.js",

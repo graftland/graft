@@ -127,15 +127,17 @@ describe("events", () => {
 		}).pipe(run),
 	)
 
-	it.effect("treats calling next twice as a defect", () =>
+	it.effect("shares the result when next is called twice", () =>
 		Effect.gen(function* () {
+			const journal = yield* makeJournal
 			yield* Event.on(Render, (input, next) =>
-				Effect.andThen(next(input), next(input)),
+				Effect.andThen(next(input), next("ignored")),
 			)
-			const exit = yield* Effect.exit(
-				Event.waterfall(Render, "hi", Effect.succeed),
+			const result = yield* Event.waterfall(Render, "hi", (input) =>
+				journal.record(input).pipe(Effect.as(input)),
 			)
-			assert.isTrue(Exit.isFailure(exit) && Cause.hasDies(exit.cause))
+			assert.strictEqual(result, "hi")
+			yield* journal.expect(["hi"])
 		}).pipe(run),
 	)
 
@@ -218,11 +220,9 @@ describe("events", () => {
 				name: "slow listener",
 				apply: () =>
 					Event.on(Message, () =>
-						Effect.andThen(
-							Deferred.succeed(started, undefined),
-							Effect.onInterrupt(Effect.never, () =>
-								journal.record("interrupted"),
-							),
+						Deferred.succeed(started, undefined).pipe(
+							Effect.andThen(Effect.never),
+							Effect.onInterrupt(() => journal.record("interrupted")),
 						),
 					),
 			})
