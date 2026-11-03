@@ -233,6 +233,21 @@ describe("duplex transport", () => {
 				yield* until(Ref.get(closed), (n) => n === 2)
 			}).pipe(Effect.scoped),
 	)
+	it.live(
+		"notifies the server even when a failure observer cancels the publisher",
+		() =>
+			Effect.gen(function* () {
+				const { b, left, started, closed } = yield* setup
+				yield* Effect.forkScoped(b.Hold())
+				yield* Queue.take(started)
+				yield* Effect.raceFirst(
+					Effect.flip(Deferred.await(left.failed)),
+					left.fail(TransportError.make({ cause: Cause.empty })),
+				)
+				yield* until(Ref.get(closed), (count) => count === 1)
+			}).pipe(Effect.scoped),
+	)
+
 	it.live("discards stale sessions before decoding their RPC payload", () =>
 		Effect.gen(function* () {
 			const { a, ab, right } = yield* setup

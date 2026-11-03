@@ -1,5 +1,5 @@
 import { build } from "tsdown"
-import { rm } from "node:fs/promises"
+import { rm, cp, mkdir, writeFile } from "node:fs/promises"
 import { certificates } from "./certificates.mjs"
 
 const common = {
@@ -32,6 +32,26 @@ export default async function setup(project) {
 		].map((name) => new URL(`./fixtures/${name}.ts`, import.meta.url).pathname),
 		outDir: new URL("../.cache/integration", import.meta.url).pathname,
 	})
+	const installation = new URL("../.cache/runner-install", import.meta.url)
+		.pathname
+	const fixture = installation + "/node_modules/remote-fixture"
+	await rm(installation, { recursive: true, force: true })
+	await mkdir(fixture, { recursive: true })
+	await cp(
+		new URL("../.cache/integration", import.meta.url).pathname,
+		fixture,
+		{ recursive: true },
+	)
+	await writeFile(
+		fixture + "/package.json",
+		JSON.stringify({
+			name: "remote-fixture",
+			version: "1.0.0",
+			type: "module",
+			exports: "./services-contract.js",
+		}),
+	)
+	project.provide("remoteRoot", installation)
 	const directory = await certificates(
 		new URL("../.cache/certificates", import.meta.url).pathname,
 	)

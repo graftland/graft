@@ -557,6 +557,9 @@ export const make = (options: Options = {}) =>
 						Effect.gen(function* () {
 							const record = yield* live(entry)
 							const now = yield* Clock.monotonicTimeNanos
+							const unit = yield* Ref.get(entry.unit)
+							if (Option.isSome(unit) && unit.value.renew !== undefined)
+								yield* unit.value.renew(record.leaseMillis)
 							yield* Ref.set(entry.deadline, now + nanos(record.leaseMillis))
 							yield* wake(entry)
 							return record.leaseMillis
@@ -599,6 +602,20 @@ export const make = (options: Options = {}) =>
 															"An execution adapter registered more than one child",
 														)
 													yield* Ref.set(entry.unit, Option.some(unit))
+													if (unit.renew !== undefined) {
+														const remaining =
+															Number(
+																(yield* Ref.get(entry.deadline)) -
+																	(yield* Clock.monotonicTimeNanos),
+															) / 1_000_000
+														if (remaining <= 0)
+															return yield* failure(
+																"Expired",
+																"The lease expired before child registration",
+															)
+														yield* unit.renew(remaining)
+													}
+
 													yield* unit.exited.pipe(
 														Effect.tap((exit) =>
 															Ref.set(entry.exited, Option.some(exit)),

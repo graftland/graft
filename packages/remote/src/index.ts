@@ -13,7 +13,7 @@ import {
 	Stream,
 } from "effect"
 import type { Duration, Schedule, PlatformError } from "effect"
-import { ChildProcess, ChildProcessSpawner } from "effect/process"
+import { ChildProcessSpawner } from "effect/process"
 import {
 	RpcClient,
 	RpcGroup,
@@ -22,11 +22,17 @@ import {
 	type Rpc,
 } from "effect/rpc"
 import { SecureRandom } from "effect/crypto"
-import process from "node:process"
+import { local, runner, type Target } from "./Targets"
+export { local, runner }
+import * as Connection from "./internal/runner/Connection"
+import {
+	SessionError,
+	RemoteTerminationUnconfirmed,
+} from "./internal/runner/model"
+export { SessionError, RemoteTerminationUnconfirmed }
 import * as Services from "./internal/services"
 import { Instance } from "./Instance"
 export { Instance }
-import { fileURLToPath } from "node:url"
 import { cleanupCause } from "./internal/cleanup"
 import {
 	RemoteWithdrawn,
@@ -35,18 +41,19 @@ import {
 } from "./Errors"
 import * as Contract from "./Contract"
 import { Control } from "./internal/control"
-import * as Transport from "./internal/transport"
 export { Contract }
 export { ProcessExited, TransportError, RemoteWithdrawn } from "./Errors"
 
 export interface Options {
+	readonly target?: Target
+	readonly instance?: string
 	/** Contract module exported as default or named `contract`, resolved in the runner installation. */
 	readonly contractModule: string
 	readonly retry?: Schedule.Schedule<unknown, unknown> | undefined
 	readonly shutdownTimeout?: Duration.Input | undefined
 }
 
-/** Prototype: one fresh local process for every activation, with explicitly mapped services. */
+/** One owned execution per activation, with explicitly mapped services. */
 export const plugin = <
 	S extends Schema.Top & {
 		readonly Encoded: Schema.Json
@@ -72,11 +79,15 @@ export const plugin = <
 	| RpcClientError.RpcClientError
 	| Graft.ServiceConflict
 	| RemoteWithdrawn
+	| SessionError
+	| RemoteTerminationUnconfirmed
 > =>
 	Plugin.make({
 		name: contract.name,
 		inject: [
-			ChildProcessSpawner.ChildProcessSpawner,
+			...(options.target?._tag === "Runner"
+				? []
+				: [ChildProcessSpawner.ChildProcessSpawner]),
 			...Array.map(contract.inject, (service) => service.key),
 		],
 		config: Schema.toEncoded(contract.config),
@@ -133,37 +144,17 @@ export const plugin = <
 							return yield* Effect.failCause(cleanupCause(cause))
 					}),
 				)
-				const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
-				const child = yield* spawner
-					.spawn(
-						ChildProcess.make(
-							process.execPath,
-							[
-								fileURLToPath(new URL("../dist/bin.js", import.meta.url)),
-								options.contractModule,
-								session,
-							],
-							{
-								stdin: "pipe",
-								stdout: "pipe",
-								stderr: "pipe",
-								additionalFds: { fd3: { type: "output" } },
-								forceKillAfter: "1 second",
-							},
-						),
-					)
-					.pipe(Scope.provide(processScope))
-				const transport = yield* Transport.make(child, {
-					session,
-					local: localGroup,
-					remote: remoteGroup,
-				}).pipe(Scope.provide(resources))
-				yield* Ref.set(
-					diagnostics,
-					Fiber.join(transport.exited).pipe(
-						Effect.andThen(Ref.get(transport.failures)),
-					),
+				const connection = yield* Connection.open(
+					options.target ?? local(),
+					options.contractModule,
+					options.instance,
+					{ session, local: localGroup, remote: remoteGroup },
+					resources,
+					processScope,
 				)
+				const transport = connection.transport
+				yield* Ref.set(diagnostics, connection.diagnostics)
+
 				const aggregate = yield* RpcClient.make(remoteGroup).pipe(
 					Effect.provideService(RpcClient.Protocol, transport.protocol),
 					Scope.provide(resources),
@@ -184,7 +175,7 @@ export const plugin = <
 					Effect.forkIn(resources),
 				)
 				const race = <A, EX, R>(effect: Effect.Effect<A, EX, R>) =>
-					Effect.raceFirst(effect, Deferred.await(transport.failed))
+					Effect.raceFirst(effect, transport.failure)
 				const stopped = yield* Deferred.make<void>()
 				const remoteFailure = yield* Deferred.make<
 					never,
@@ -227,7 +218,7 @@ export const plugin = <
 							if (event.dropped > previous)
 								yield* Effect.logWarning("Remote logs were dropped").pipe(
 									Effect.annotateLogs({
-										"remote.pid": child.pid,
+										"remote.pid": connection.pid,
 										"remote.logs.dropped": event.dropped - previous,
 										"remote.logs.droppedTotal": event.dropped,
 									}),
@@ -249,7 +240,7 @@ export const plugin = <
 								cause,
 							).pipe(
 								Effect.annotateLogs({
-									"remote.pid": child.pid,
+									"remote.pid": connection.pid,
 									"remote.annotations": entry.annotations,
 								}),
 							)
@@ -271,22 +262,28 @@ export const plugin = <
 						// Control completion never waits behind logs; separately drain the bounded log tail.
 						yield* race(Deferred.await(stopped))
 						yield* race(Deferred.await(logsEnded))
-						yield* Ref.set(transport.stopping, true)
-						yield* transport.end
-						const status = yield* Fiber.join(transport.exited)
-						if (status.exitCode !== 0 || status.statusCause.reasons.length > 0)
-							return yield* status
 					}).pipe(
 						Effect.interruptible,
 						Effect.timeout(options.shutdownTimeout ?? "5 seconds"),
 						Effect.exit,
+						Effect.flatMap((graceful) =>
+							Effect.gen(function* () {
+								const terminated = yield* Effect.exit(
+									connection.terminate(Exit.isSuccess(graceful)),
+								)
+								if (Exit.isFailure(graceful) && Exit.isFailure(terminated))
+									return Exit.failCause(
+										Cause.combine(graceful.cause, terminated.cause),
+									)
+								return Exit.isFailure(graceful) ? graceful : terminated
+							}),
+						),
 					),
 				)
 				const loaded = yield* race(
 					Effect.raceFirst(
 						client.Load({
 							input: json,
-							instance: { id: session, generation: 1 },
 						}),
 						Deferred.await(remoteFailure),
 					),

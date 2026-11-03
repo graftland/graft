@@ -27,6 +27,9 @@ import { TransportError } from "./Errors"
 import { Instance } from "./Instance"
 import * as Duplex from "./internal/duplex"
 import * as Services from "./internal/services"
+import * as Multiplex from "./internal/runner/Multiplex"
+import * as Wire from "./internal/runner/Wire"
+import type { Bootstrap } from "./internal/runner/Bootstrap"
 import { Control, type Event, type Log } from "./internal/control"
 
 /** Import a contract in the runner installation; importing this module performs no I/O. */
@@ -45,7 +48,15 @@ export const load = (specifier: string) =>
 	})
 
 /** One local execution unit, owned by the executable's scope. */
-export const run = (contract: RunnerContract, session = "local") =>
+export const run = (
+	contract: RunnerContract,
+	session = "local",
+	bootstrap?: Bootstrap,
+	stop: Effect.Effect<
+		unknown,
+		import("./internal/runner/model").SessionError
+	> = Effect.never,
+) =>
 	Effect.scoped(
 		Effect.gen(function* () {
 			const releaseExports = yield* Deferred.make<void>()
@@ -87,27 +98,33 @@ export const run = (contract: RunnerContract, session = "local") =>
 				)
 				const localGroup = Services.combine(Control, contract.provides)
 				const remoteGroup = Services.combine(RpcGroup.make(), contract.inject)
-				const peer = yield* Duplex.make(
-					{
-						input: stdio.stdin.pipe(
-							Stream.mapError((error) =>
-								TransportError.make({ cause: Cause.fail(error) }),
-							),
+				const channel: Duplex.Channel = {
+					input: stdio.stdin.pipe(
+						Stream.mapError((error) =>
+							TransportError.make({ cause: Cause.fail(error) }),
 						),
-						output: NodeSink.fromWritable({
-							evaluate: () => output,
-							onError: (cause) =>
-								TransportError.make({ cause: Cause.die(cause) }),
-							endOnDone: false,
-						}),
-					},
-					{ session, local: localGroup, remote: remoteGroup },
-				)
+					),
+					output: NodeSink.fromWritable({
+						evaluate: () => output,
+						onError: (cause) =>
+							TransportError.make({ cause: Cause.die(cause) }),
+						endOnDone: false,
+					}),
+				}
+				const mux =
+					bootstrap === undefined ? undefined : yield* Multiplex.make(channel)
+				const bytes = mux === undefined ? channel : Wire.channel(mux, 1)
+				const peer = yield* Duplex.make(bytes, {
+					session,
+					local: localGroup,
+					remote: remoteGroup,
+					...(bootstrap === undefined ? {} : { limits: bootstrap.limits }),
+				})
 				const client = yield* RpcClient.make(remoteGroup).pipe(
 					Effect.provideService(RpcClient.Protocol, peer.clientProtocol),
 				)
 				const handlers = Control.toLayer({
-					Load: ({ input, instance: identity }) =>
+					Load: ({ input }) =>
 						Effect.gen(function* () {
 							const current = yield* Ref.get(instance)
 							if (Option.isSome(current))
@@ -129,7 +146,10 @@ export const run = (contract: RunnerContract, session = "local") =>
 								{ ...plugin.value, retry: undefined },
 								input,
 							).pipe(
-								Effect.provideService(Instance, identity),
+								Effect.provideService(
+									Instance,
+									bootstrap?.identity ?? { id: session, generation: 1 },
+								),
 								Scope.provide(instanceScope),
 							)
 							const observedFailure = yield* Ref.make<Cause.Cause<unknown>>(
@@ -311,7 +331,14 @@ export const run = (contract: RunnerContract, session = "local") =>
 					),
 					Layer.provide(Layer.succeed(RpcServer.Protocol, peer.serverProtocol)),
 				)
-				yield* Effect.flip(Deferred.await(peer.failed)).pipe(
+				yield* Effect.raceFirst(
+					Effect.flip(Deferred.await(peer.failed)),
+					stop.pipe(
+						Effect.tap(() =>
+							peer.fail(TransportError.make({ cause: Cause.empty })),
+						),
+					),
+				).pipe(
 					// @effect-diagnostics-next-line strictEffectProvide:off -- This runner owns the server until its channel closes.
 					Effect.provide(server),
 				)
@@ -326,3 +353,5 @@ export const run = (contract: RunnerContract, session = "local") =>
 		// @effect-diagnostics-next-line strictEffectProvide:off -- The runner entry point owns its Graft runtime and Node services.
 		Effect.provide(Layer.provideMerge(Graft.layer, NodeServices.layer)),
 	)
+
+export { serve } from "./internal/runner/Server"

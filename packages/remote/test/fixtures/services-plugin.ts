@@ -20,13 +20,24 @@ export default Plugin.make({
 			)
 			const service: ChildApi["Service"] = {
 				call: (value) =>
-					host.double(value).pipe(
-						Effect.map((value) => ({
-							value: value + 1,
-							pid: process.pid,
-							...instance,
-						})),
-					),
+					value === -999
+						? fs.writeFileString(directory + "/blocked", "ready").pipe(
+								Effect.orDie,
+								Effect.andThen(
+									Effect.sync((): never => {
+										while (true) {
+											/* Block only this fixture's main thread. */
+										}
+									}),
+								),
+							)
+						: host.double(value).pipe(
+								Effect.map((value) => ({
+									value: value + 1,
+									pid: process.pid,
+									...instance,
+								})),
+							),
 				values: Stream.iterate(0, (n) => n + 1).pipe(
 					Stream.ensuring(
 						fs

@@ -1,8 +1,9 @@
 # @graftland/remote
 
-Private remote-plugin implementation with a local process target. Each host
-activation owns one Node.js process. Contracts can bridge services in both
-directions. Network runners and security isolation are not implemented yet.
+Private remote-plugin implementation with local process and authenticated
+network runner targets. Each host activation owns one Node.js execution.
+Contracts bridge services in both directions; the network runner supervises
+executions without loading plugin implementations into its own process.
 
 ## Usage
 
@@ -35,6 +36,7 @@ import { contract } from "./contract.js"
 
 const proxy = Remote.plugin(contract, {
 	contractModule: new URL("./contract.js", import.meta.url).href,
+	target: Remote.local(),
 	shutdownTimeout: "5 seconds",
 })
 const activation = Graft.plugin(proxy, { greeting: "Hello" })
@@ -42,15 +44,19 @@ const activation = Graft.plugin(proxy, { greeting: "Hello" })
 
 Run `activation` inside the host's Graft runtime and scope. Provide
 `ChildProcessSpawner` through that runtime's environment, for example with
-`Layer.provideMerge(Graft.layer, NodeServices.layer)`. The proxy declares this
-service in `inject`; it does not create its own platform layer.
+`Layer.provideMerge(Graft.layer, NodeServices.layer)`. The local proxy declares
+this service in `inject`; it does not create its own platform layer. Network
+targets do not require a host process spawner.
 
 Build the contract and implementation to JavaScript first; the child has no
 TypeScript loader. Pass the same contract to the host and the generic runner.
-Use a file URL for local contract modules. Bare package specifiers resolve from
-the runner's installation, not from the host module. Resolve implementation
-paths with `new URL(...)` in the contract. The installed-package resolver
-described below is not yet wired into this local API.
+Use a file URL for local contract modules. Network targets accept bare package
+specifiers resolved from the runner's installation, not from the host module.
+Resolve implementation paths with `new URL(...)` in the contract.
+`Remote.local({ command })` can override the executable, using a nonempty array
+of command and arguments. Its default resolves `@graftland/remote/bin` through
+package exports. That executable must be built or installed; source development
+can supply a custom command.
 
 The config schema's encoded type must extend `Schema.Json`. Before spawning, the
 host validates JSON compatibility and decodes `contract.config`, including
@@ -67,8 +73,11 @@ require external encoding or decoding services.
   `false` and therefore restart through Graft's existing update behavior.
 - Dispose waits for the child fork's cleanup, a final log barrier, and process
   exit. The protocol remains alive while activation finalizers run. The default
-  graceful deadline is five seconds; expiry fails cleanup and closes the process
-  scope, whose Node spawner escalates to SIGKILL after one second.
+  business cleanup deadline is five seconds. For local targets, expiry fails
+  cleanup and closes the process scope, whose Node spawner escalates to SIGKILL
+  after one second. For network targets, the host still asks the supervisor to
+  terminate and confirm exit; a disconnected host waits out the lease and
+  margin.
 - Application failures travel as `Schema.Cause` values using the contract's
   typed error schema, without squashing Fail and Die reasons. Defects preserve
   diagnostic message and stack, not arbitrary JavaScript object identity.
@@ -125,9 +134,13 @@ the child's Failed state. It does mean such a late failure arrives through
 cleanup rather than the ordinary typed failure channel.
 
 Inside the implementation, inject `Remote.Instance` to read
-`{ id, generation }`. For now each local activation gets a new UUID and
-generation 1; these are not persistent fencing tokens. The reference's fallback
-outside a remote activation is `{ id: "local", generation: 0 }`.
+`{ id, generation }`. Each local activation gets a new UUID and generation 1;
+these local values are not persistent fencing tokens. A network execution gets
+the explicit logical instance id and a generation allocated durably by its
+runner. The runner injects these through trusted startup arguments, not business
+Load. Plugins can pass the generation to systems that enforce fencing. The
+reference's fallback outside a remote activation is
+`{ id: "local", generation: 0 }`.
 
 ## Duplex transport and limits
 
@@ -145,13 +158,13 @@ Admission is bounded separately per priority and direction: 8 control, 16 data,
 and 2 log requests by default. Excess local calls wait for a slot; waiting is
 interruptible and connection failure fails the waiters. Excess remote admissions
 fail the connection. Each inbound limit must be at least the peer's outbound
-limit: local peers share defaults, and the network handshake must negotiate
-these limits before starting RPC. Writer queues hold at most 64 control, 32
-data, and 4 log frames. Each admitted request has a two-message mailbox, and RPC
-ACKs bound outstanding stream chunks. A stalled stream does not block the shared
-reader. Connection failure stops dispatch and fails the client while
-interrupting the server's requests. Frames from retired sessions are discarded
-before decoding their RPC payloads.
+limit: local peers share defaults, and the network Open handshake negotiates
+these limits before starting business RPC. Writer queues hold at most 64
+control, 32 data, and 4 log frames. Each admitted request has a two-message
+mailbox, and RPC ACKs bound outstanding stream chunks. A stalled stream does not
+block the shared reader. Connection failure stops dispatch and fails the client
+while interrupting the server's requests. Frames from retired sessions are
+discarded before decoding their RPC payloads.
 
 RPC annotations select request priority; ACKs, interrupts, and terminal replies
 use control priority. The writer chooses control before data before logs.
@@ -160,10 +173,10 @@ The NDJSON reader rejects lines longer than 1,048,576 characters. These are
 count and line-length limits, not a complete heap or byte budget; network
 adapters must also bound received chunks and enforce their byte framing limits.
 
-There is no code distribution, lease, authentication, network target,
-scheduling, or stable logical instance identity yet. This implementation does
-not restrict the plugin's filesystem, network, or ability to escape a process
-group.
+There is no code distribution, placement, or automatic runner failover. This
+implementation does not restrict the plugin's filesystem, network, or ability to
+escape a process group. Deploy the runner inside the desired VM/container
+boundary.
 
 The runner buffers at most 128 pending log entries and reports cumulative losses
 on the `Logs` RPC. The host emits warnings with `remote.logs.dropped` (the new
@@ -200,134 +213,146 @@ devenv shell -- pnpm typecheck
 devenv shell -- pnpm build
 ```
 
-## Network runner work in progress: session control
+## Network runner
 
-The first half of Phase 3 is implemented under `src/internal/runner`. It is not
-wired to `Remote.plugin`, a TLS listener, or the runner executable yet.
+Install the contract and implementation packages under the runner's installation
+root, and run the built executable:
 
-- `Supervisor.make` owns session fibers, monotonic lease deadlines, generation
-  allocation, idempotent Open/Load/Dispose, and status records. Defaults are a
-  15-second lease, a five-second graceful deadline, and a five-second exit
-  confirmation deadline after requesting a kill. It never treats sending a
-  signal as proof of exit.
-- Open takes an authenticated identity and logical instance id separately from
-  its idempotency request id. Open also takes `expectedGeneration` (empty for
-  the first generation). A retained request id returns its original record.
-  Otherwise the expected generation must match the current high-water mark; a
-  mismatch returns `Stale` before disturbing the current child. A matching
-  request waits for confirmed termination before allocating its successor.
-  Concurrent replacements using the same comparison value cannot both win.
-  `highWater` lets an authenticated host recover the comparison value after
-  losing local state; the eventual network API must bind this query to the peer
-  identity just like Open.
-- Limits are negotiated to the per-priority minimum. Both endpoints and the
-  child must install the returned limits before starting business RPC. The TLS
-  handshake still needs to enforce this.
-- `Store.directory` writes schema-versioned records using file synchronization,
-  atomic rename, and directory synchronization. After committing a record it
-  compacts terminal history, retaining every unfinished record and the highest
-  generation for each key. It validates all records before deleting any, and the
-  new high-water file is durable before old files are removed. Startup finishes
-  interrupted compaction. The supervisor's in-memory history follows the same
-  retention rule. Storage grows with distinct logical keys and unfinished
-  sessions, rather than with every restart of a key. Compacted Open retries
-  return `Stale`, not a new allocation; Status/Dispose for compacted sessions
-  also return `Stale`. Only retained results are idempotently replayable. Files
-  keep the existing version 1 record format.
-- The state directory requires one exclusive supervisor owner. The store is not
-  a multi-process database, and daemon-level directory locking is not
-  implemented in this half. A storage failure or an unconfirmed stop fences
-  further admission; recovery must complete before a restarted supervisor
-  exposes its API.
-- `Execution` is an injectable process adapter contract. It must register a
-  gated child and its PID/start identity before returning from spawn;
-  registration is persisted before Load replies. The real child-process adapter
-  and OS orphan reaper are still pending. Recovery tests currently verify the
-  startup barrier and recorded identity with a controlled adapter, not OS-level
-  PID reuse safety.
-- Stored leases never resume across a supervisor restart. Construction invokes
-  recovery for every unfinished recorded child and waits for confirmed exit.
-  Only then can a new generation be opened.
-- The termination-wait helper preserves a failed confirmation's cause and waits
-  a full lease plus margin before adding `RemoteTerminationUnconfirmed`. It is
-  not yet connected to the host transport.
+```sh
+graft-remote serve --host 0.0.0.0 --port 7443 \
+  --root /srv/graft/install --state /var/lib/graft \
+  --cert /run/secrets/server.crt --key /run/secrets/server.key \
+  --ca /run/secrets/clients-ca.crt --lease 15000 --grace 5000
+```
 
-All session timing tests use TestClock. They cover renewal, expiry, grace,
-confirmation deadlines, an unfinished Load, superseding an instance, and loss of
-contact without relying on elapsed wall-clock time. State-directory tests use
-real temporary files. No network or real orphan-reaping guarantee is claimed by
-this intermediate implementation.
+Lease and grace arguments are milliseconds. Defaults are a 15-second lease and a
+five-second grace period. The ready message is a JSON line with
+`event: "Listening"` and `port`. `Runner.serve` also exposes a scoped Effect
+API; supply Node platform services and `Digest` in the application environment.
+The executable supplies these itself. The state directory requires a local
+filesystem and exclusive ownership. A scoped `node:sqlite` exclusive transaction
+holds the directory lock; a competing process fails startup, and the OS releases
+the lock on SIGKILL. The record store still uses synchronized JSON files, not
+SQLite tables.
 
-## Network transport and package resolution work in progress
+```ts
+const proxy = Remote.plugin(contract, {
+	contractModule: "my-plugin/contract",
+	instance: "billing-worker",
+	target: Remote.runner({
+		host: "runner.internal",
+		port: 7443,
+		tls: {
+			cert: clientCertificate,
+			key: Redacted.make(clientKey),
+			ca,
+			servername: "runner.internal",
+		},
+		lease: "15 seconds",
+		margin: "5 seconds",
+		expect: { version: "1.2.3", digest: installedPackageDigest },
+	}),
+})
+```
 
-These internal components are tested independently; they do not yet expose a
-network runner target or a `serve` command:
+`instance` is required for a network target. It is stable across host restarts;
+one runner owns it. The host queries the authenticated key's generation
+high-water mark, then supplies it as `expectedGeneration` in Open. A retained
+request id is replayed idempotently. Otherwise a mismatched comparison returns
+`Stale`; a matching replacement waits for confirmed old-process exit before
+allocating and persisting its successor. This guarantees serial admission on
+this runner, not exactly-once side effects. External systems must check
+generation fencing tokens.
 
-- `Tls.listen` requires a trusted client certificate and provides `Tls.Peer`
-  from exactly one SAN URI in the authenticated certificate. Its form is
-  `graft://name`, where the name matches `[a-z0-9][a-z0-9._-]*`; paths,
-  credentials, queries, encoded names, and additional URI SANs are rejected.
-  There is no CN fallback. Certificate renewal with the same URI preserves the
-  namespace and generation high-water mark. Use a dedicated CA: issuance of the
-  same name grants access to the same logical instances. SAN parsing respects
-  quoted fields, so a DNS value cannot impersonate a URI field. `Tls.connect`
-  verifies the server certificate and hostname. Both require TLS 1.3. Keys are
-  passed as `Redacted` values.
-- `Framing` uses an eight-byte header: wire version, channel, priority, kind,
-  and a big-endian 32-bit payload length. Version 1 permits two channels
-  (session 0, instance 1), three priorities (control 0, data 1, logs 2), and
-  data or credit frames. Payloads are opaque bytes, limited to 1 MiB before
-  allocation or payload decoding. Invalid headers and truncated frames fail the
-  connection.
-- `Multiplex` owns one byte reader and writer. Each channel/priority pair has
-  four credits and bounded queues. Sends wait interruptibly for credits;
-  consumption returns a credit through the writer. Inbound overflow and
-  unsolicited credits fail the connection. Credits and control frames are
-  written before queued data and logs; an in-progress socket write cannot be
-  preempted. `forwardInstance` relays only channel 1 in both directions and
-  leaves channel 0 local. The caller must authenticate and admit the instance
-  before attaching this relay. Existing local stdio RPC has not migrated to this
-  outer framing yet.
-- `Packages.resolve` accepts bare package specifiers rooted in the runner's
-  `node_modules`, including package-root symlinks used by pnpm. A short-lived
-  Node process resolves import exports without importing the contract and
-  without inherited loader options. Ancestor fallback, path specifiers, and
-  exports outside the selected package are rejected. Package contents may not
-  contain symlinks or special files. Internal symlinks are rejected even when
-  their targets stay inside the package.
-- The package digest streams sorted entries into SHA-256. Its domain prefix is
-  `graft-package-sha256-v1\0`; each entry contributes its type, UTF-8 path byte
-  length, file byte length (zero for directories), path bytes, and file
-  contents. Every `node_modules` subtree is excluded. Version and digest pins
-  are checked before returning the resolved entry. The installation must be
-  immutable during resolution and execution; this is a content digest, not an
-  installation signature, dependency digest, or filesystem snapshot.
+TLS requires version 1.3, trusted client certificates, and server hostname
+verification. Identity comes from exactly one SAN URI of the form
+`graft://name`, where name matches `[a-z0-9][a-z0-9._-]*`. There is no CN
+fallback. Renewing a certificate with the same URI preserves its namespace. Use
+a dedicated CA: issuing the same URI grants access to the same logical
+instances. SAN parsing respects quoted fields and rejects ambiguous, malformed,
+or missing identities. Session methods authorize every handle against the
+authenticated connection.
 
-`runner-framing.test.ts` covers incremental decoding, limits, priority, credit
-backpressure, interruption, connection failure, and opaque forwarding.
-`runner-tls.test.ts` uses localhost TLS and certificates generated by openssl
-inside an ignored temporary directory, removed at teardown. It covers trusted
-stable identity across certificate rotation, missing/untrusted certificates,
-missing/ambiguous SAN URIs, quoted-field spoofing, hostname verification, and
-rejection of an oversized frame before any payload arrives.
-`runner-packages.test.ts` uses real temporary installations and import-condition
-exports.
+The runner terminates only session RPC. Instance traffic is relayed as opaque
+frames to the child, so services still use one end-to-end RPC relationship. An
+eight-byte outer header identifies channel, priority, kind, and payload length;
+payloads over 1 MiB are rejected before allocation or JSON decoding. Each outer
+lane has four credits and bounded queues. Session traffic has independent
+control credits. The complete instance byte stream uses one ordered outer lane:
+applying a second priority scheduler to already-ordered inner Request/Interrupt
+frames could invert them. The inner duplex still prioritizes control over
+data/logs; up to four already-admitted outer instance frames can precede it. No
+transport can preempt bytes already written to the socket. Open negotiates RPC
+admission limits to their per-priority minimum and installs them in both host
+and child. An execution channel has only one attached reader; competing
+attachments fail.
 
-Still pending: the session RPC/Open handshake and its negotiated limits,
-exclusive state-directory ownership, a watchdog-backed execution/recovery
-adapter, trusted bootstrap identity, local/network host targets, renewals and
-termination results, and executable integration. The framing credit window is
-fixed by wire version; it is distinct from the RPC admission limits negotiated
-by the supervisor. No network plugin lifecycle or real orphan-reaping guarantee
-is claimed by this intermediate implementation.
+The host renews at approximately T/3. The supervisor and child both enforce the
+lease. fd 4 is reserved for supervision commands; a worker-thread watchdog owns
+it independently of plugin JavaScript. EOF or expiry kills the entire child,
+even if its main thread is looping. Normal Dispose first completes plugin
+finalizers and log draining, then requests process shutdown and waits for exit.
+The runner's graceful deadline escalates to kill and then bounded exit
+confirmation. The three outcomes are observable as follows:
 
-The planned child watchdog runs in a worker thread and kills the whole process
-on supervisor-channel EOF or lease expiry. It must use a process-wide signal:
-`process.exit()` in a worker only exits that worker. A blocked plugin main
-thread cannot block the watchdog, but suspending the whole process or VM also
-suspends it; this is not a hard real-time deadline. Recovery will check PID and
-start identity, signal only a matching process, and confirm exit before
-admission. The check-to-signal PID reuse window remains without an OS process
-handle. These execution protections are not implemented yet. An external
-supervisor must still terminate the whole process group or container to cover
-descendants.
+- Confirmed exit: `remote.termination: Exited` in host Graft logs.
+- Confirmed forced termination: `remote.termination: Killed` in those logs.
+- Lost confirmation: after a full T plus margin, `RemoteTerminationUnconfirmed`
+  in cleanup, retaining the transport cause. A timeout never counts as proof of
+  exit.
+
+Those logs include `remote.instance` and `remote.generation`; Status retains the
+termination result, exit status, stderr tail, and diagnostic cause. The margin
+default is five seconds. On unexpected exit, heartbeat/status observation fails
+the host proxy. A watchdog deadline or abrupt loss can prevent finalizers; only
+the graceful path promises cleanup completion. Whole-process/VM suspension also
+suspends the watchdog, so this is not a hard real-time bound.
+
+Before running plugin code, Execution records a gated child's PID, OS start
+time, and random bootstrap nonce durably. Recovery runs before the TLS listener
+opens. It compares PID, start time, and nonce in the command line; mismatches
+are not signaled. Matching survivors are killed and their exit confirmed. A
+zombie is already stopped; the parent still needs to reap it. There remains a
+small check-to-signal PID reuse window without an OS process handle. An external
+supervisor must terminate the whole cgroup or container to cover plugin-spawned
+descendants (for example, systemd `KillMode=control-group`). A failed recovery
+fences admission instead of assuming that the old process is gone.
+
+Stored leases never resume after restart. The store atomically synchronizes each
+record before returning a generation and compacts terminal history, keeping all
+unfinished records plus each key's highest generation. Compacted request ids
+cannot allocate a new generation through retry because their expected generation
+is stale. Status/Dispose of compacted records also return `Stale`; only retained
+results are replayable. Storage grows with logical keys and unfinished sessions.
+
+Only bare package specifiers under the configured root's `node_modules` are
+accepted. Package-root symlinks support pnpm; ancestor fallback, paths, exports
+outside the package, internal symlinks, and special files are rejected.
+Resolution uses import exports without importing the contract. Load reports
+package name, version, and digest. Host pins are checked before sending business
+Load; rejected pins never apply the plugin and dispose the allocated execution.
+
+The digest is SHA-256 over sorted package entries, excluding every
+`node_modules` subtree. Its domain prefix is `graft-package-sha256-v1\0`;
+entries encode type, UTF-8 path length, file length, path, and contents. Keep
+installations immutable through resolution and execution. This is a content
+digest, not an installation signature, dependency digest, or filesystem
+snapshot.
+
+## Network validation
+
+`network.test.ts` runs the real executable and real child processes with
+temporary openssl certificates. It covers nested calls in both directions,
+streams and interruption, trusted instance identity, consumer draining before
+confirmed normal exit, partitions and unconfirmed termination, SIGKILL and
+stalled-runner watchdog enforcement, serial generations, late renewals, restart
+recovery, PID/start mismatch safety, exclusive locking, authentication, pins,
+and the required logical instance id. Private keys are generated at setup and
+removed at teardown. Real-process deadlines have generous margins; supervisor
+timing and lease edge cases in `runner-session.test.ts` use TestClock.
+
+`runner-framing.test.ts`, `runner-tls.test.ts`, and `runner-packages.test.ts`
+independently test byte limits, credit backpressure, stable certificate
+identity, rejection paths, package resolution, and digest behavior. Loader
+configuration integration remains Phase 4; the programmatic local and network
+targets are usable.

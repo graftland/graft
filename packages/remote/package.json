@@ -3,17 +3,14 @@
 	"version": "0.0.0",
 	"private": true,
 	"type": "module",
-	"description": "Local process lifecycle prototype for Graft plugins",
+	"description": "Local and authenticated network execution for Graft plugins",
 	"sideEffects": false,
 	"exports": {
 		".": {
 			"source": "./src/index.ts",
 			"default": "./dist/index.js"
 		},
-		"./bin": {
-			"source": "./src/bin.ts",
-			"default": "./dist/bin.js"
-		},
+		"./bin": "./dist/bin.js",
 		"./Runner": {
 			"source": "./src/Runner.ts",
 			"default": "./dist/Runner.js"

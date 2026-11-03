@@ -137,11 +137,15 @@ export const make = Effect.fnUntraced(function* (
 		highWaterOutgoing: 0,
 		stale: 0,
 	})
+	// Publishing failure and notifying RpcServer form one handoff. A racing
+	// observer may cancel this caller immediately after the Deferred completes.
 	const fail = (failure: TransportError) =>
-		Effect.gen(function* () {
-			if (yield* Deferred.fail(failed, failure))
-				yield* Queue.offer(disconnects, 0)
-		})
+		Effect.uninterruptible(
+			Effect.gen(function* () {
+				if (yield* Deferred.fail(failed, failure))
+					yield* Queue.offer(disconnects, 0)
+			}),
+		)
 	const report = (cause: Cause.Cause<unknown>) =>
 		Cause.hasInterruptsOnly(cause)
 			? Effect.void

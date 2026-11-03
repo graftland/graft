@@ -80,6 +80,13 @@ export const ProcessIdentity = Schema.Struct({
 })
 export type ProcessIdentity = typeof ProcessIdentity.Type
 export const ExitStatus = Schema.Struct({
+	stderr: Schema.optionalKey(Schema.String),
+	cause: Schema.optionalKey(
+		Schema.Cause(
+			Schema.Defect({ includeStack: true }),
+			Schema.Defect({ includeStack: true }),
+		),
+	),
 	code: Schema.NullOr(Schema.Int),
 	signal: Schema.NullOr(Schema.String),
 })
@@ -136,6 +143,7 @@ export class Store extends Context.Service<
 >()("@graftland/remote/internal/runner/model/Store") {}
 
 export interface Unit {
+	readonly renew?: (millis: number) => Effect.Effect<void, SessionError>
 	readonly identity: ProcessIdentity
 	readonly exited: Effect.Effect<ExitStatus, SessionError>
 	/** Request graceful shutdown without requiring the peer's business RPC schemas. */
@@ -143,8 +151,8 @@ export interface Unit {
 	readonly kill: Effect.Effect<void, SessionError>
 }
 /**
- * The adapter starts a gated child bootstrap, registers it before restoring
- * interruption, and does not load plugin code before the session Load reply.
+ * The adapter starts a gated child bootstrap and persists its registration before
+ * releasing the gate. The child waits for business Load before applying the plugin.
  * Its scope owns the process even if registration or launch fails.
  */
 export class Execution extends Context.Service<

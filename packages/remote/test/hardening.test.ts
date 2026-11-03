@@ -295,7 +295,6 @@ describe("local remote hardening", () => {
 				)
 				const loaded = yield* client.Load({
 					input: { directory, mode: "flood", value: 2 },
-					instance: { id: "test", generation: 1 },
 				})
 				assert.equal(loaded._tag, "Success")
 				yield* Deferred.await(receivedLog)

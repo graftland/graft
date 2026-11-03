@@ -2,7 +2,6 @@ import { Schema } from "effect"
 import { Rpc, RpcGroup } from "effect/rpc"
 
 import { Priority } from "./duplex"
-import { Identity } from "../Instance"
 
 export const Result = Schema.Union([
 	Schema.TaggedStruct("Success", {}),
@@ -37,7 +36,7 @@ export const LogEvent = Schema.Union([
 ])
 export const Control = RpcGroup.make(
 	Rpc.make("Load", {
-		payload: { input: Schema.Json, instance: Identity },
+		payload: { input: Schema.Json },
 		success: Result,
 	}),
 	Rpc.make("Events", { success: Event, stream: true }),
