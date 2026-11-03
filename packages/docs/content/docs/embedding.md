@@ -75,6 +75,29 @@ program.pipe(
 )
 ```
 
+### Resolution plans
+
+`ModuleResolver.make` caches normalized candidate plans, never importer results.
+Without the optional `resolution` environment, each call still tries the
+original name before the naming conventions. The successful importer runs on
+every call, so custom importers keep their per-call behavior and resource
+scopes.
+
+A `resolution` environment can skip candidates known to be absent:
+
+- `revision` is an Effect returning the resolution-environment version. Advance
+  it after installation, removal or another resolution change to discard cached
+  plans, including negative decisions.
+- `exists(specifier)` checks a normalized candidate without importing it or
+  acquiring resources. Candidate priority stays unchanged.
+- `observe(specifiers, { observationScope })` runs on every resolve, including
+  cache hits and failed plans, to retain observations of missing names or paths.
+  Its resources follow the candidate and observation scopes.
+
+Supply both invalidation and observation when opting in. Without a reliable
+revision, leave `resolution` unset. An older in-flight plan cannot overwrite a
+newer cached revision.
+
 ## Load a config file
 
 `Include.Include` is the plugin behind `graft start`. It reads a YAML file and

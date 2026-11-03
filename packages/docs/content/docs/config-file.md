@@ -65,17 +65,21 @@ and plain objects may share references, and the snapshot keeps this sharing.
 Cycles also survive the snapshot, but a cycle still fails validation at the
 existing entry or tree boundary. Environment resolution keeps shared arrays and
 plain records as they are. It does not expand them into a tree. Its identity
-cache belongs to one execution, so a later activation or update reads the
-environment values again. Snapshot copying, cycle detection and config
-comparison also handle shared graphs. A comparison visits each pair of plain
-containers once. Opaque values keep Effect equality, including custom equality
-implementations.
+cache belongs to one execution, so an entry reads environment values again when
+it is activated or updated. An unrelated edit does not refresh unchanged healthy
+entries. Snapshot copying, cycle detection and config comparison also handle
+shared graphs. A comparison visits each pair of plain containers once. Opaque
+values keep Effect equality, including custom equality implementations.
 
 If you rewrite an anonymous tree and nothing changed, it keeps its assigned IDs
 and its running plugin instances. The loader first restores the child IDs, then
 matches the anonymous parent groups, then writes the IDs back to YAML. Use
 explicit IDs when you need to keep identity across config changes, or when
-identical entries are moved around in a way that is unclear.
+identical entries are moved around in a way that is unclear. Anonymous entries
+are matched by name and a conservative config fingerprint, then compared
+exactly. Duplicate matches retain their order. Cyclic and opaque configs use a
+conservative fallback, which can still require quadratic work within a single
+same-name bucket.
 
 Service and reference keys are the strings their classes were created with, such
 as `app/Database` for `Context.Service<...>()("app/Database")`.
@@ -161,13 +165,19 @@ only describes the value it needs.
 process environment wins. See [the command line](../cli/#graft-start) for
 details.
 
-`loader.retry` reads `!env` values again. A running entry whose resolved config
-changed gets the new config through `update`. An entry whose resolved intercept
-changed is loaded again. Entries whose values did not change keep running. An
-entry that is still importing its module reads the environment when the import
-ends. If a retry reaches an entry that is still loading, the entry reads them
-again once it is active. `ready` waits for that second read too, so after
-`retry` and `ready` every active entry has the current values.
+Ordinary API edits and YAML changes reconcile only changed entries. Unchanged
+healthy siblings and subtrees keep their current environment values; editing one
+leaf does not refresh the whole tree.
+
+`loader.retry` and `loader.root.update(entries)` explicitly refresh `!env`
+values throughout the tree, including nested groups and injection gates. A
+running entry whose resolved config changed gets the new config through
+`update`. An entry whose resolved intercept changed is loaded again. Entries
+whose values did not change keep running. An entry that is still importing its
+module reads the environment when the import ends. If a retry reaches an entry
+that is still loading, the entry reads them again once it is active. `ready`
+waits for these queued and executing refreshes too, so after an explicit refresh
+and `ready`, every active entry has the current values.
 
 A plugin that wants Effect's `Config` tools, such as defaults and fallbacks, can
 use them inside `apply` to read its own input:
@@ -238,7 +248,10 @@ declare the tag in the editor settings. For VS Code:
 ## Changes while running
 
 With `graft start --watch`, Graft watches the config file. When you save it,
-Graft compares the new entries with the running entries:
+Include merges notifications from the entry and physical-target watchers and
+waits for 100 ms without another notification before refreshing. Installing a
+watcher still requests a catch-up read, including after a symlink target
+changes. Graft then compares the new entries with the running entries:
 
 - An entry whose `config` changed gets the new input through
   [`update`](../lifecycle/#the-fork-handle). The plugin updates in place or
@@ -246,7 +259,13 @@ Graft compares the new entries with the running entries:
 - An entry whose `name`, `group`, `inject`, `isolate` or `intercept` changed is
   unloaded and loaded again.
 - New entries are loaded, and removed or disabled entries are unloaded.
-- Entries that did not change keep running.
+- Unchanged healthy entries keep running with their existing environment values.
+- Failed entries in a reconciled group are retried; unchanged resolutions that
+  are still in progress keep their activation.
+
+Independent sibling updates and removals run concurrently. Work for each entry
+remains serialized, and replacement waits for that entry's old cleanup. The
+group waits for all required work before accepting the target.
 
 If cleanup fails while Graft removes, disables or replaces an entry, Graft logs
 the complete cause with the entry and fork identifiers. Then it continues the
@@ -303,7 +322,7 @@ const admin = Plugin.make({
 | `update(id, patch)`       | Changes some fields of an entry.                                                               |
 | `remove(id)`              | Removes an entry.                                                                              |
 | `ready`                   | Waits until the current target is reconciled and no fork is Loading.                           |
-| `retry`                   | Requests another reconciliation to retry all failed entries and read `!env` values again.      |
+| `retry`                   | Retries all failed entries and refreshes `!env` values throughout the tree.                    |
 
 Edits are written to the file. Graft keeps the file's comments, formatting and
 `!env` tags. It writes to a temporary file first, so the config file is never
@@ -352,9 +371,10 @@ submit edits, but it must not wait for `ready`, because that would wait for the
 callback itself. `changes` also emits when `retry` publishes an unchanged target
 again. `retry` reaches failed plugins below lifecycle, injection and group
 wrappers, and restarts the failed plugin forks. It keeps healthy instances and
-unfinished resolutions. Ordinary target reconciliation also retries failed
-entries. `retry` returns after it publishes its request. To wait for
-reconciliation, call `ready` after it, outside lifecycle callbacks.
+unfinished resolutions unless refreshed values require an update or reload.
+Ordinary edits retry failed entries in reconciled groups without refreshing
+unchanged healthy subtrees. `retry` returns after it publishes its request. To
+wait for reconciliation, call `ready` after it, outside lifecycle callbacks.
 
 If someone edited the file since Graft last read it, Graft reads it again before
 it applies the edit. Suppose the edit changes a field that was also changed in
@@ -374,6 +394,16 @@ separate filesystem operations. An external editor can save between them, and
 that save can still be overwritten. Atomic replacement prevents partial files.
 It is not a transaction with arbitrary editors. If this remaining risk is not
 acceptable, do not save in an editor and write through the API at the same time.
+
+`loader.root.update(entries)` is also an explicit full-tree environment refresh,
+including when the supplied entries are unchanged. Use `loader.retry` to refresh
+the current saved target, and the ordinary edit methods to persist configuration
+changes.
+
+`ready` waits for the current target version, queued and executing environment
+refreshes, and all loading descendants. The core
+[`fork.stable`](../lifecycle/#the-fork-handle) barrier only describes current
+fork states; it does not replace these loader coordination checks.
 
 `ready` treats `Pending` and `Failed` forks as settled. A plugin can still be
 `Pending` for a moment after its provider started. So `ready` does not promise

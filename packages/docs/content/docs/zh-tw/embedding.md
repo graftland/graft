@@ -70,6 +70,24 @@ program.pipe(
 )
 ```
 
+### 解析計畫
+
+`ModuleResolver.make` 快取正規化的候選計畫，不快取 importer 的結果。未提供選用的
+`resolution`
+環境時，每次呼叫仍先嘗試原始名稱，再依命名慣例嘗試。成功的 importer 每次都會執行，因此自訂 importer 的逐次呼叫行為和資源 scope 保持不變。
+
+`resolution` 環境可以略過已知不存在的候選：
+
+- `revision`
+  是傳回解析環境版本的 Effect。安裝、移除相依套件或其他解析變更後，應更新版本，使舊計畫失效，包括「不存在」的判斷。
+- `exists(specifier)`
+  檢查正規化候選是否存在，不匯入模組，也不取得資源；候選優先順序保持不變。
+- `observe(specifiers, { observationScope })`
+  在每次解析時執行，包括快取命中和計畫失敗，用來保留缺少名稱或路徑的觀察。資源仍歸候選 scope 和觀察 scope 所有。
+
+啟用這個協定時，必須同時提供失效機制和觀察機制。無法可靠維護版本時，請勿設定
+`resolution`。尚未完成的舊計畫不會覆寫較新版本的快取。
+
 ## 載入設定檔
 
 `Include.Include` 是 `graft start`

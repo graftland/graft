@@ -162,4 +162,5 @@ const storage = Plugin.layer(StorageLive, {
 的导出提供插件，`Plugin.fromModule` 也按相同的方式读取。
 
 导入插件模块时，除了定义插件，不应执行其他操作。Graft 只能释放 `apply`
-获取的资源。另外，[热重载](../hot-reload/)会在每次变更时重新导入模块。
+获取的资源。另外，[热重载](../hot-reload/)会重新导入受变化影响的模块；公开的
+`hmr.reload` 则强制全量重载。

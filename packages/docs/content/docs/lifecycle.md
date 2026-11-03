@@ -81,14 +81,15 @@ failures to this supervisor.
 
 ## The fork handle
 
-| Member          | What it does                                                                                        |
-| --------------- | --------------------------------------------------------------------------------------------------- |
-| `id`            | A number that identifies the fork in the tree and in logs.                                          |
-| `state`         | A stream of the current state and every change, ending with `Disposed`.                             |
-| `await`         | Waits until the fork is no longer `Loading`. Fails with the plugin's error if it ended up `Failed`. |
-| `update(input)` | Gives the fork a new input. The plugin [updates in place](../plugins/#update-in-place) or restarts. |
-| `restart`       | Restarts the plugin with the same input.                                                            |
-| `dispose`       | Unloads the plugin and everything it loaded.                                                        |
+| Member          | What it does                                                                                                                                     |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `id`            | A number that identifies the fork in the tree and in logs.                                                                                       |
+| `state`         | A stream of the current state and every change, ending with `Disposed`.                                                                          |
+| `await`         | Waits until the fork is no longer `Loading`. Fails with the plugin's error if it ended up `Failed`.                                              |
+| `stable`        | Waits until this fork and its descendants have no `Loading` states. `Pending` and `Failed` count as settled; it does not fail on a failed child. |
+| `update(input)` | Gives the fork a new input. The plugin [updates in place](../plugins/#update-in-place) or restarts.                                              |
+| `restart`       | Restarts the plugin with the same input.                                                                                                         |
+| `dispose`       | Unloads the plugin and everything it loaded.                                                                                                     |
 
 `update` and `restart` return when their request has been handled or superseded
 by a newer request (or the fork has been disposed). The fork keeps only the
@@ -119,6 +120,15 @@ that disposal.
 
 `await` treats `Pending` as settled, because a pending fork may wait forever. To
 wait until a fork is running, watch `state` for `Active`.
+
+`fork.stable` has type `Effect<void>` and reads a subtree counter without
+constructing or subscribing to the fork tree. It describes current states, not
+queued configuration requests. Configuration coordinators must still check their
+request versions and pending refreshes. For loader edits, use
+[`loader.ready`](../config-file/#edit-entries-from-code), which also waits for
+that work. Observe failures through `state` or `await`.
+
+A `state` subscription started after disposal still emits `Disposed` and ends.
 
 ## Replace plugins
 

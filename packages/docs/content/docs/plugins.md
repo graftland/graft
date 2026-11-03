@@ -188,5 +188,6 @@ as the default export, or as an export named `plugin`. `Plugin.fromModule` reads
 it the same way.
 
 Importing a plugin module must do nothing except define the plugin. Graft can
-release only what `apply` acquires. Also, [hot reload](../hot-reload/) imports a
-module again for every change.
+release only what `apply` acquires. Also, automatic [hot reload](../hot-reload/)
+reimports modules affected by a change; public `hmr.reload` forces a full
+reload.

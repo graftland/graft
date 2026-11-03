@@ -163,4 +163,5 @@ const storage = Plugin.layer(StorageLive, {
 的匯出提供外掛，`Plugin.fromModule` 也按相同的方式讀取。
 
 匯入外掛模組時，除了定義外掛，不應執行其他操作。Graft 只能釋放 `apply`
-取得的資源。另外，[熱重載](../hot-reload/)會在每次變更時重新匯入模組。
+取得的資源。另外，[熱重載](../hot-reload/)會重新匯入受變更影響的模組；公開的
+`hmr.reload` 則強制完整重載。

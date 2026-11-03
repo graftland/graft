@@ -4,47 +4,73 @@ description:
   How Graft swaps plugin code in a running Node.js process, and its limits.
 ---
 
-With `graft start --watch`, saving a plugin module replaces the running plugin
-with the new code. The process keeps running. So does everything that was not
-loaded from a plugin module, such as the services in its environment.
+With `graft start --watch`, changing an observed plugin module or dependency
+replaces the affected plugins with the new code. The process keeps running. So
+does everything that was not loaded from a plugin module, such as the services
+in its environment.
 
 ## What happens on a save
 
-1. Graft imports every registered plugin module again, as a new **generation**.
-   Each module URL gets a generation number. Node's module hooks also give every
-   module that the plugin imports a new version in that generation. So a change
-   to a helper file reaches the plugins that use it.
-2. If every module imports and still exports a plugin, Graft calls
-   [`Graft.replace`](../lifecycle/#replace-plugins) with all the new plugins in
-   one transaction. Every module made a new plugin. So every fork that was
-   loaded from a module restarts with the new code, in the usual
-   [withdrawal order](../services/#how-withdrawal-works).
-3. If any module fails to import, Graft replaces nothing. The old code keeps
-   running, and the error is logged with its cause. There is one exception: a
-   plugin module whose file was deleted. Graft drops it from the reload and
-   replaces the other plugins as usual. Its forks keep running the old code
-   until they are unloaded.
+1. Graft checks observed files after merging native event paths. An event alone
+   does not trigger a reload: file contents or a tracked local resolution must
+   actually change. Saving identical bytes or changing an unrelated file does
+   not reload plugins.
+2. Automatic reload invalidates changed module instances and their transitive
+   importers, including cycles. Only affected entries are reimported. Entries
+   sharing the same old Plugin object are checked together; unchanged
+   dependencies and independent entries keep their existing instances.
+3. All candidates must pass import, export identity and resolution checks before
+   one [`Graft.replace`](../lifecycle/#replace-plugins) transaction publishes
+   the replacements. Affected forks restart in the usual
+   [withdrawal order](../services/#how-withdrawal-works). Shared dependencies
+   stay consistent across the batch.
+4. If a candidate fails, the old plugins keep running and the full cause is
+   logged. HMR retains the changed modules and failed observations for the next
+   change. A deleted plugin entry is an exception: it is dropped from the
+   reload, while its existing forks keep running until unloaded. Events arriving
+   during a reload remain available for the next pass.
 
-After a reload, Graft tries again the entries whose plugin could not be loaded
-before. So if you fix a broken plugin, it starts without a restart.
+After a reload attempt returns `Reloaded` or `Skipped`, the CLI calls
+`loader.retry`. This retries failed entries and refreshes `!env` values
+throughout the tree. Fixing a broken plugin can therefore start it without a
+process restart.
 
-Nearby file events are debounced for 50 ms. The CLI watches `.js`, `.mjs`,
-`.cjs`, `.ts`, `.mts`, and `.cts` files in all folders under the config
-directory, except `node_modules`. The loader handles YAML edits. They do not
-reload every plugin module.
+Public `hmr.reload` always forces a fresh import of every registered entry and
+its tracked dependencies. It also advances the import view when there are no
+entries, allowing a failed first import to be retried. This differs from the
+incremental reloads performed by `watch`.
 
-Native watchers can miss notifications, for example during startup on macOS. So
-HMR also checks the contents of loaded modules once per second, within the
-watched paths. The baseline comes from the bytes that were actually imported. So
-a save made before the watcher was installed is detected. Adding a plugin
-through configuration does not trigger a reload by itself. The checks compare
-content, so they also catch changes of the same size. They stop when the watcher
-stops. Each observation belongs to one import attempt and its actual source
-bytes. After a new attempt, polling checks against those bytes again. This
-includes the case where a file goes back to the previous snapshot during a
-reload. A failed attempt also moves this baseline forward, if its source bytes
-were read. An unchanged failure does not cause a polling retry loop. The cost of
-the checks grows with the contents of the loaded modules.
+Each module instance keeps its own resolution view. Late dynamic imports from
+old code, including activation cleanup, do not switch to a global latest
+version. Reused modules keep their dependency edges. Dynamic imports that have
+never run cannot be discovered in advance.
+
+Nearby file events are debounced for 50 ms. The CLI filters for `.js`, `.mjs`,
+`.cjs`, `.ts`, `.mts`, and `.cts` files under the config directory, including
+subdirectories, outside `node_modules`. YAML edits belong to the loader.
+
+HMR polls metadata and local resolutions once per second. A stat fast path
+avoids reading files whose metadata has not changed; native events force a
+content check even when stat is unchanged. While idle, HMR audits contents at
+least every ten seconds, so missed notifications for saves with the same size
+and timestamps are still detected. Import baselines are SHA-256 digests of the
+bytes actually loaded, so a save between import and watcher installation can
+also be detected. Adding a plugin through configuration does not itself trigger
+a reload.
+
+Even with `recursive: true`, HMR installs nonrecursive watches on directories
+from the observed dependency graph. It does not walk unrelated directories or
+`node_modules`. Loaded `dist` modules remain observable. Missing paths use the
+nearest existing ancestor, and the directory set is reconciled once per second.
+Checks respect the watched paths, `recursive` and `filter`, and stop when the
+stream closes. Reads run outside the session lock with bounded concurrency;
+results are accepted only if the observation version still matches.
+
+Each observation belongs to one import attempt and its actual source bytes.
+After a new attempt, polling uses those bytes as its baseline, including when a
+file returns to the previous snapshot during reload. A failed attempt advances
+the baseline if it read source bytes. An unchanged failure does not cause a
+polling retry loop.
 
 An incomplete write can make a reload fail. Graft logs the full cause and keeps
 watching. A later content change can recover, even without a native event. The
@@ -59,9 +85,10 @@ their exclusive CommonJS dependencies, cannot block the remaining entries.
 Polling also follows the leases. It covers the running dependency graph of each
 live entry and its latest uncommitted import attempt. This includes failed
 imports and missing local files that retries need. When the last owner is
-released, those paths leave polling. A successful replacement retires the old
-graph. Real I/O errors on paths that still have an owner continue to fail the
-watch stream.
+released, those paths leave polling. A successful replacement retires only
+observations no longer reachable from active or pending entries; reused
+dependency instances remain owned. Real I/O errors on paths that still have an
+owner continue to fail the watch stream.
 
 Failed first imports keep an observation lease owned by the configuration entry,
 separate from the candidate resource scope that closes immediately on failure.
@@ -94,8 +121,8 @@ notification, including when a plugin acquires the capability after startup. The
 periodic status check suppresses unchanged reports. This warning does not mean
 that a reload occurred.
 
-Local file entries and their reachable dependency edges retain the generation,
-importing parent, requested path and physical target. If an entry or helper
+Local file entries and their reachable dependency edges retain the importing
+module instance, requested path and physical target. If an entry or helper
 symlink changes targets, reload returns `Skipped / restart-required` with the
 affected request URLs before replacing any plugin. The same owned graph is
 checked before imports, before replacement and during polling. Failed attempts
@@ -111,14 +138,13 @@ failures still propagate to the consumer without duplicate logging.
 
 ## Rules for plugin modules
 
-- **Importing a module must have no side effects.** Graft imports modules again
-  for every reload, and only `apply` runs inside a scope that Graft can close.
-  Open connections, start servers and set timers in `apply`.
-- Only ECMAScript modules can be reloaded. If a CommonJS module or a native
-  addon changes, Graft logs that a restart is needed. Graft tracks dependencies
-  by generation for the whole session. This includes dynamic imports that
-  `apply` makes later. These dependencies also make later reloads return
-  `Skipped`.
+- **Importing a module must have no side effects.** Graft reimports affected
+  modules during reload, and only `apply` runs inside a scope that Graft can
+  close. Open connections, start servers and set timers in `apply`.
+- Only ECMAScript modules can be reloaded. CommonJS and native dependencies
+  require a process restart. Graft tracks dependencies by module instance,
+  including dynamic imports made during `apply`. While a leased entry can reach
+  such a dependency, reload returns `Skipped / restart-required`.
 - Packages in `node_modules` are shared and not reloaded. Effect and Graft
   themselves must stay one copy. There is one exception: the module that a
   plugin is loaded from. A plugin from a package is imported again, but the
@@ -128,10 +154,15 @@ failures still propagate to the consumer without duplicate logging.
 
 ## Limits
 
-Node keeps every module version that it imported in memory, and you cannot
-remove one. So each reload uses some memory that is never freed. This is fine
-while you develop. Restart long-running development processes now and then, and
-do not use `--watch` in production.
+Node's ESM cache does not evict versioned module instances. Incremental reload
+creates fewer instances, but they still accumulate during long development
+sessions. HMR reclaims source digests, dependency observations and reachability
+caches according to active and pending leases and the current import view.
+Compact routing views remain until the session closes so old code can still
+import modules. This does not put a hard upper bound on process memory or
+eliminate the accumulation in Node's cache. Restart the process when needed; HMR
+does not supervise or restart a child process. Do not use `--watch` in
+production.
 
 An import that never finishes holds up later reloads and shutdown. An example is
 a module with a top-level `await` that never resolves. This is because a dynamic
@@ -162,12 +193,12 @@ const program = Effect.gen(function* () {
 running imports and removes the module hooks. Importing the package starts
 nothing.
 
-| Member                    | What it does                                                                                                                                                                                           |
-| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `make({ base, include })` | `base` is the module URL that names are resolved from, usually `import.meta.url`. `include(url)` picks the files that get new versions. By default it picks every file outside `node_modules`.         |
-| `importer(specifier)`     | Imports a plugin module and keeps it registered until the HMR session closes.                                                                                                                          |
-| `reload`                  | Returns `Reloaded` with the reloaded modules, or `Skipped` when a restart is needed. Fails with `HmrError` if a module does not import or does not export a plugin. Its `cause` is the original error. |
-| `watch(paths, options)`   | A stream that reloads after files under `paths` change. It first waits `debounce` (50 ms by default) for more changes. A failed reload is emitted as `Failed` with its cause, and watching goes on.    |
+| Member                    | What it does                                                                                                                                                                                                                                                                    |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `make({ base, include })` | `base` is the module URL that names are resolved from, usually `import.meta.url`. `include(url)` picks the files that get new versions. By default it picks every file outside `node_modules`.                                                                                  |
+| `importer(specifier)`     | Imports a plugin module and keeps it registered until the HMR session closes.                                                                                                                                                                                                   |
+| `reload`                  | Forces a full reload of all registered entries and tracked dependencies. Returns `Reloaded` with the reloaded modules, or `Skipped` when a restart is needed. Fails with `HmrError` if a module does not import or does not export a plugin. Its `cause` is the original error. |
+| `watch(paths, options)`   | A stream that incrementally reloads affected entries when observed contents or local resolutions under `paths` change. It first waits `debounce` (50 ms by default) for more changes. A failed reload is emitted as `Failed` with its cause, and watching goes on.              |
 
 `importerScoped(specifier)` returns an Effect that needs a `Scope`. Each call
 holds an entry lease until that scope closes. Pass it to `ModuleResolver.make`.
@@ -180,6 +211,11 @@ the importer's second argument. Keep it alive while failed entries await retry,
 and close it when replacing the observation attempt or removing the entry.
 Candidate resources can close immediately on failure without deleting that
 observation. Omitting the option uses the caller's scope.
+
+Reacquiring an entry in the same import view preserves its cached identity. The
+current view retains facts needed for cache hits without watching unleased
+entries. A committed reload retires that cache; observations survive only where
+active, pending or reused graphs still need them.
 
 `WatchOptions.filter(absolutePath)` selects which files can trigger reloads. The
 same predicate applies to native events and to the periodic content checks. If

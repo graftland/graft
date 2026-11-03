@@ -70,6 +70,24 @@ program.pipe(
 )
 ```
 
+### 解析计划
+
+`ModuleResolver.make` 缓存规范化的候选计划，不缓存 importer 的结果。不提供可选的
+`resolution`
+环境时，每次调用仍先尝试原始名称，再按命名约定尝试。成功的 importer 每次都会执行，因此自定义 importer 的逐次调用行为和资源 scope 保持不变。
+
+`resolution` 环境可以跳过已知不存在的候选：
+
+- `revision`
+  是返回解析环境版本的 Effect。安装、移除依赖或其他解析变化后应推进版本，使旧计划失效，包括“不存在”的判断。
+- `exists(specifier)`
+  检查规范化候选是否存在，不导入模块，也不获取资源；候选优先级保持不变。
+- `observe(specifiers, { observationScope })`
+  在每次解析时执行，包括缓存命中和计划失败，用于保留缺失名称或路径的观察。资源仍归候选 scope 和观察 scope 所有。
+
+启用这个协议时，必须同时提供失效机制和观察机制。无法可靠维护版本时，不要设置
+`resolution`。尚未完成的旧计划不会覆盖较新版本的缓存。
+
 ## 加载配置文件
 
 `Include.Include` 是 `graft start`
