@@ -11,14 +11,13 @@ import {
 	Scope,
 } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
-import { RpcClient, RpcGroup, type RpcClientError } from "effect/rpc"
+import { RpcClient, type RpcClientError } from "effect/rpc"
 import type { Schema } from "effect"
 import type { RemoteTerminationUnconfirmed } from "./model"
 import type { Target } from "../../Targets"
 import { ProcessExited, TransportError } from "../../Errors"
 import { cleanupCause } from "../cleanup"
-import * as Services from "../services"
-import * as Duplex from "../duplex"
+import * as Port from "../port"
 import * as Transport from "../transport"
 import * as Multiplex from "./Multiplex"
 import * as Packages from "./Packages"
@@ -32,7 +31,7 @@ import {
 } from "./model"
 import { command } from "./command"
 
-type Peer = Effect.Success<ReturnType<typeof Duplex.make>>
+type Peer = Effect.Success<ReturnType<typeof Port.make>>
 interface Connected {
 	readonly pid: number
 	readonly diagnostics: Effect.Effect<Cause.Cause<unknown>>
@@ -48,7 +47,7 @@ interface Connected {
 		| RpcClientError.RpcClientError
 	>
 	readonly transport: {
-		readonly protocol: Peer["clientProtocol"]
+		readonly clientProtocol: Peer["clientProtocol"]
 		readonly serverProtocol: Peer["serverProtocol"]
 		readonly failure: Effect.Effect<never, ProcessExited | TransportError>
 		readonly report: (cause: Cause.Cause<unknown>) => Effect.Effect<void>
@@ -60,7 +59,7 @@ export const open = (
 	target: Target,
 	contractModule: string,
 	instance: string | undefined,
-	options: Duplex.Options,
+	options: Port.Options,
 	resources: Scope.Scope,
 	processScope: Scope.Scope,
 ) =>
@@ -115,13 +114,16 @@ export const open = (
 		const mux = yield* Multiplex.fromSocket(socket).pipe(
 			Scope.provide(resources),
 		)
-		const control = yield* Duplex.make(Wire.channel(mux, 0), {
+		const control = yield* Port.make(Wire.channel(mux, 0), {
 			session: "session-v1",
-			local: Services.combine(RpcGroup.make(), []),
-			remote: Services.combine(Wire.Session, []),
+			serve: {},
+			call: { session: Wire.Session },
 		}).pipe(Scope.provide(resources))
 		const session = yield* RpcClient.make(Wire.Session).pipe(
-			Effect.provideService(RpcClient.Protocol, control.clientProtocol),
+			Effect.provideService(
+				RpcClient.Protocol,
+				control.clientProtocol("session"),
+			),
 			Scope.provide(resources),
 		)
 		const expectedGeneration = yield* session.HighWater({ instance })
@@ -184,7 +186,7 @@ export const open = (
 		})
 		yield* Packages.verify(code, target.expect)
 		const loaded = yield* session.Status(record.handle)
-		const peer = yield* Duplex.make(Wire.channel(mux, 1), {
+		const peer = yield* Port.make(Wire.channel(mux, 1), {
 			...options,
 			session: record.handle.token,
 			limits: record.limits,
@@ -241,8 +243,7 @@ export const open = (
 				}),
 			transport: {
 				...peer,
-				protocol: peer.clientProtocol,
-				failure: Deferred.await(peer.failed),
+				failure: peer.await,
 				report,
 			},
 		})

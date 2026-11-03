@@ -2,7 +2,7 @@ import { Graft, Plugin } from "@graftland/graft"
 import { Effect, FileSystem, Schedule, Stream } from "effect"
 import process from "node:process"
 import { Instance } from "../../src/index"
-import { ChildApi, HostApi, config } from "./services-contract"
+import { ChildApi, ChildLabel, HostApi, config } from "./services-contract"
 export default Plugin.make({
 	name: "service-implementation",
 	config,
@@ -57,6 +57,9 @@ export default Plugin.make({
 						),
 					),
 			}
+			yield* Graft.provide(ChildLabel, {
+				read: Effect.succeed("independent endpoint"),
+			})
 			if (yield* fs.exists(`${directory}/delay-export`)) {
 				yield* Plugin.fork(
 					fs.exists(`${directory}/release-export`).pipe(

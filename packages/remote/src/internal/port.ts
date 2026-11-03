@@ -155,9 +155,9 @@ export const make = Effect.fnUntraced(function* (
 		stale: 0,
 	})
 	const queues = {
-		control: yield* TxQueue.bounded<Pending>(64),
-		data: yield* TxQueue.bounded<Pending>(32),
-		log: yield* TxQueue.bounded<Pending>(4),
+		control: yield* TxQueue.bounded<Pending, Cause.Done>(64),
+		data: yield* TxQueue.bounded<Pending, Cause.Done>(32),
+		log: yield* TxQueue.bounded<Pending, Cause.Done>(4),
 	}
 	const servers = yield* Effect.forEach(
 		Record.toEntries(options.serve),
@@ -268,7 +268,11 @@ export const make = Effect.fnUntraced(function* (
 		Effect.tx(
 			open.pipe(
 				Effect.andThen(
-					TxQueue.offer(queues[frame.priority], { frame, request }),
+					TxQueue.offer(queues[frame.priority], { frame, request }).pipe(
+						Effect.flatMap((accepted) =>
+							accepted ? Effect.void : error("Remote output has ended"),
+						),
+					),
 				),
 				Effect.asVoid,
 			),
@@ -323,6 +327,7 @@ export const make = Effect.fnUntraced(function* (
 		if (Option.isSome(canceled)) yield* Queue.end(canceled.value.queue)
 	})
 	const clientProtocol = (endpoint: string): RpcClient.Protocol["Service"] => {
+		// Accessors accept endpoints declared when the port was created.
 		const client = HashMap.getUnsafe(clients, endpoint)
 		return RpcClient.Protocol.of({
 			codecFor: RpcSerialization.json.codecFor,
@@ -376,6 +381,7 @@ export const make = Effect.fnUntraced(function* (
 		})
 	}
 	const serverProtocol = (endpoint: string): RpcServer.Protocol["Service"] => {
+		// Accessors accept endpoints declared when the port was created.
 		const server = HashMap.getUnsafe(servers, endpoint)
 		return RpcServer.Protocol.of({
 			codecFor: RpcSerialization.json.codecFor,
@@ -413,7 +419,7 @@ export const make = Effect.fnUntraced(function* (
 						} else
 							yield* enqueue(frame(endpoint, "response", "control", message))
 					}),
-				).pipe(Effect.orDie),
+				).pipe(Effect.catchTag("TransportError", () => Effect.void)),
 		})
 	}
 	const next = Effect.tx(
@@ -438,6 +444,12 @@ export const make = Effect.fnUntraced(function* (
 				}
 				return Option.some(frame)
 			}
+			if (
+				(yield* TxQueue.isDone(queues.control)) &&
+				(yield* TxQueue.isDone(queues.data)) &&
+				(yield* TxQueue.isDone(queues.log))
+			)
+				return yield* Cause.done()
 			return yield* Effect.txRetry
 		}),
 	)
@@ -452,7 +464,6 @@ export const make = Effect.fnUntraced(function* (
 		),
 		Stream.map((json) => new TextEncoder().encode(json + "\n")),
 		Stream.run(bytes.output),
-		Effect.andThen(error("Remote writer ended")),
 	)
 	const parser = RpcSerialization.makeNdjson({
 		maxBufferSize: 1024 * 1024,
@@ -563,12 +574,17 @@ export const make = Effect.fnUntraced(function* (
 		),
 		Effect.forkScoped,
 	)
-	yield* FiberSet.run(workers, writer)
+	const writing = yield* FiberSet.run(workers, writer)
 	yield* FiberSet.run(workers, reader)
 	return {
 		clientProtocol,
 		serverProtocol,
 		diagnostics,
-		await: FiberSet.join(workers),
+		await: FiberSet.join(workers).pipe(Effect.andThen(Effect.never)),
+		fail: (failure: TransportError) =>
+			FiberSet.run(workers, Effect.fail(failure)).pipe(Effect.asVoid),
+		end: Effect.tx(
+			Effect.forEach(Record.values(queues), TxQueue.end, { discard: true }),
+		).pipe(Effect.andThen(Fiber.join(writing))),
 	}
 })

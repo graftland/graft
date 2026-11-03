@@ -104,13 +104,14 @@ client back to the service interface. The latter explicitly chooses how to
 expose `RpcClientError`: retain it in the service's error type, translate it, or
 deliberately treat it as a defect. Calls are never automatically retried.
 
-RPC tags must be unique within each direction, including the control tags
-`Load`, `Events`, `Logs`, and `Dispose` in the child-facing direction. Use
-qualified tags for unrelated services; duplicate tags fail when defining the
-contract. Both contract modules must use matching service keys, RPC tags, and
-schemas. See `test/fixtures/services-contract.ts` for complete mappings,
-including a stream. Some nested handler parameters need explicit annotations
-with the current TypeScript/RPC types.
+Each service uses its key as a separate port endpoint. RPC tags may repeat
+across services or match control tags. Service keys must be unique across both
+`inject` and `provides`, and the control endpoint `@graftland/remote/control` is
+reserved; conflicting keys fail when defining the contract. Both contract
+modules must use matching service keys, RPC tags, and schemas. See
+`test/fixtures/services-contract.ts` for complete mappings, including a stream.
+Some nested handler parameters need explicit annotations with the current
+TypeScript/RPC types.
 
 The proxy declares host-side `inject` dependencies. Their implementations run on
 the host, and the child receives their clients as root provisions before its
@@ -142,13 +143,14 @@ Load. Plugins can pass the generation to systems that enforce fencing. The
 reference's fallback outside a remote activation is
 `{ id: "local", generation: 0 }`.
 
-## Duplex transport and limits
+## Port transport and limits
 
 Stdin carries host-to-child frames; fd 3 carries child-to-host frames. Either
 can contain requests or responses. Every frame includes a session nonce,
-direction, priority, and encoded RPC message. Each endpoint has one reader, one
-writer, one RpcClient, and one RpcServer. The channel interface accepts an
-Effect Stream and Sink and does not depend on ChildProcess.
+endpoint name, direction, priority, and encoded RPC message. A connection shares
+one reader and writer across endpoints; each endpoint has its own request IDs
+and typed RpcClient or RpcServer. The channel interface accepts an Effect Stream
+and Sink and does not depend on ChildProcess.
 
 Ordinary stdout is drained, so `console.log` cannot corrupt RPC; stdout is not
 converted into structured Graft logs. Stdin and fd 3 are reserved for the
@@ -201,7 +203,7 @@ annotations, contract module loading, loss accounting, and control progress
 while log consumption is suspended. `test/services.test.ts` covers nested
 bidirectional calls, instance identity, draining before process exit, dependency
 restart, publication cycles, streams and interruption, and failures during
-export withdrawal. `test/duplex.test.ts` exercises saturated admission, bounded
+export withdrawal. `test/port.test.ts` exercises saturated admission, bounded
 writer backpressure, priority ordering, disconnects in both directions, and
 stale-session rejection with in-memory byte channels.
 
@@ -280,7 +282,7 @@ payloads over 1 MiB are rejected before allocation or JSON decoding. Each outer
 lane has four credits and bounded queues. Session traffic has independent
 control credits. The complete instance byte stream uses one ordered outer lane:
 applying a second priority scheduler to already-ordered inner Request/Interrupt
-frames could invert them. The inner duplex still prioritizes control over
+frames could invert them. The inner port still prioritizes control over
 data/logs; up to four already-admitted outer instance frames can precede it. No
 transport can preempt bytes already written to the socket. Open negotiates RPC
 admission limits to their per-priority minimum and installs them in both host

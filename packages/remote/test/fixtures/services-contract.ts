@@ -26,7 +26,7 @@ const HostRpc = RpcGroup.make(
 	Rpc.make("Double", { payload: { value: Schema.Int }, success: Schema.Int }),
 )
 const ChildRpc = RpcGroup.make(
-	Rpc.make("Call", { payload: { value: Schema.Int }, success: Reply }),
+	Rpc.make("Load", { payload: { value: Schema.Int }, success: Reply }),
 	Rpc.make("Values", { success: Schema.Int, stream: true }),
 	Rpc.make("Hold"),
 )
@@ -41,15 +41,25 @@ export const hostService = Contract.service(HostApi, HostRpc, {
 })
 export const childService = Contract.service(ChildApi, ChildRpc, {
 	toHandlers: (value) => ({
-		Call: ({ value: n }: { readonly value: number }) => value.call(n),
+		Load: ({ value: n }: { readonly value: number }) => value.call(n),
 		Values: () => value.values,
 		Hold: () => value.hold,
 	}),
 	fromClient: (client) => ({
-		call: (value) => client.Call({ value }).pipe(Effect.orDie),
+		call: (value) => client.Load({ value }).pipe(Effect.orDie),
 		values: client.Values().pipe(Stream.orDie),
 		hold: client.Hold().pipe(Effect.orDie),
 	}),
+})
+// Both exports deliberately share a tag with each other and with Control.
+export class ChildLabel extends Context.Service<
+	ChildLabel,
+	{ readonly read: Effect.Effect<string> }
+>()("@graftland/remote/test/fixtures/services-contract/ChildLabel") {}
+const LabelRpc = RpcGroup.make(Rpc.make("Load", { success: Schema.String }))
+const labelService = Contract.service(ChildLabel, LabelRpc, {
+	toHandlers: (value) => ({ Load: () => value.read }),
+	fromClient: (client) => ({ read: client.Load().pipe(Effect.orDie) }),
 })
 export const config = Schema.Struct({
 	directory: Schema.String,
@@ -61,5 +71,5 @@ export const contract = Contract.make({
 	error: Schema.String,
 	module: new URL("./services-plugin.js", import.meta.url).href,
 	inject: [hostService],
-	provides: [childService],
+	provides: [childService, labelService],
 })

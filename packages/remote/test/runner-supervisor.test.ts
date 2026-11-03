@@ -1,3 +1,4 @@
+import type { SessionError } from "../src/internal/runner/Wire"
 import { assert, layer } from "@effect/vitest"
 import {
 	Array,
@@ -18,7 +19,6 @@ import * as Stores from "../src/internal/runner/Store"
 import {
 	Execution,
 	Store,
-	type SessionError,
 	type ExecutionFailure,
 	childOf,
 	RemoteTerminationUnconfirmed,

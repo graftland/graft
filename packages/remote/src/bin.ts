@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 /** The executable owns either a supervised child or a TLS supervisor. */
+import { Graft } from "@graftland/graft"
 import { NodeRuntime, NodeServices } from "@effect/platform-node"
 import {
 	Array,
@@ -7,6 +8,7 @@ import {
 	Console,
 	Effect,
 	FileSystem,
+	Layer,
 	Fiber,
 	Redacted,
 	Schema,
@@ -93,51 +95,60 @@ const serve = (args: ReadonlyArray<string>) =>
 		]),
 	)
 
+const main = Effect.scoped(
+	Effect.gen(function* () {
+		const args = Array.drop(process.argv, 2)
+		if (args[0] === "serve") return yield* serve(Array.drop(args, 1))
+		if (args[0] === "child") {
+			const [, specifier, session, encoded] = args
+			if (
+				specifier === undefined ||
+				session === undefined ||
+				encoded === undefined ||
+				args.length !== 4
+			)
+				return yield* Effect.die(
+					new Error("Invalid supervised child arguments"),
+				)
+			const bootstrap = yield* Schema.decodeEffect(
+				Schema.fromJsonString(Bootstrap),
+			)(encoded)
+			const watchdog = yield* Watchdog.start
+			// Stdio belongs to this executable. Node's shared stdin otherwise
+			// keeps the process alive after a supervisor-requested stop.
+			yield* Effect.addFinalizer(() =>
+				Effect.sync(() => {
+					process.stdin.destroy()
+				}),
+			)
+			const begin = yield* Effect.raceFirst(
+				watchdog.begin.pipe(Effect.as(true)),
+				watchdog.stop.pipe(Effect.as(false)),
+			)
+			if (!begin) return
+			const contract = yield* load(pathToFileURL(specifier).href)
+			return yield* run(contract, session, bootstrap, watchdog.stop)
+		}
+		const [specifier, session = "local"] = args
+		if (specifier === undefined || args.length > 2)
+			return yield* Effect.die(
+				new Error(
+					"Usage: graft-remote <contract-module-specifier> [session] | serve --root <directory> --state <directory> --cert <file> --key <file> --ca <file> [--host <host>] [--port <port>] [--lease <milliseconds>] [--grace <milliseconds>]",
+				),
+			)
+		return yield* load(specifier).pipe(
+			Effect.flatMap((contract) => run(contract, session)),
+		)
+	}),
+).pipe(Effect.tapCause((cause) => Console.error(Cause.pretty(cause))))
+
 NodeRuntime.runMain(
 	Effect.scoped(
 		Effect.gen(function* () {
-			const args = Array.drop(process.argv, 2)
-			if (args[0] === "serve") return yield* serve(Array.drop(args, 1))
-			if (args[0] === "child") {
-				const [, specifier, session, encoded] = args
-				if (
-					specifier === undefined ||
-					session === undefined ||
-					encoded === undefined ||
-					args.length !== 4
-				)
-					return yield* Effect.die(
-						new Error("Invalid supervised child arguments"),
-					)
-				const bootstrap = yield* Schema.decodeEffect(
-					Schema.fromJsonString(Bootstrap),
-				)(encoded)
-				const watchdog = yield* Watchdog.start
-				// Stdio belongs to this executable. Node's shared stdin otherwise
-				// keeps the process alive after a supervisor-requested stop.
-				yield* Effect.addFinalizer(() =>
-					Effect.sync(() => {
-						process.stdin.destroy()
-					}),
-				)
-				const begin = yield* Effect.raceFirst(
-					watchdog.begin.pipe(Effect.as(true)),
-					watchdog.stop.pipe(Effect.as(false)),
-				)
-				if (!begin) return
-				const contract = yield* load(pathToFileURL(specifier).href)
-				return yield* run(contract, session, bootstrap, watchdog.stop)
-			}
-			const [specifier, session = "local"] = args
-			if (specifier === undefined || args.length > 2)
-				return yield* Effect.die(
-					new Error(
-						"Usage: graft-remote <contract-module-specifier> [session] | serve --root <directory> --state <directory> --cert <file> --key <file> --ca <file> [--host <host>] [--port <port>] [--lease <milliseconds>] [--grace <milliseconds>]",
-					),
-				)
-			return yield* load(specifier).pipe(
-				Effect.flatMap((contract) => run(contract, session)),
+			const context = yield* Layer.build(
+				Layer.provideMerge(Graft.layer, NodeServices.layer),
 			)
+			return yield* main.pipe(Effect.provideContext(context))
 		}),
-	).pipe(Effect.tapCause((cause) => Console.error(Cause.pretty(cause)))),
+	),
 )

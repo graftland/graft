@@ -521,4 +521,54 @@ describe("endpoint port", () => {
 			assert.equal(disconnected, 0)
 		}).pipe(Effect.scoped),
 	)
+	it.live("drains queued frames before ending the output", () =>
+		Effect.gen(function* () {
+			const { peer, send, gate, started, written } = yield* capture
+			yield* send("writing", "Flood")
+			yield* Deferred.await(started)
+			yield* send("data", "Hold")
+			yield* send("control", "Ping")
+			const ended = yield* Deferred.make<void>()
+			const closing = yield* peer.end.pipe(
+				Effect.andThen(Deferred.succeed(ended, undefined)),
+				Effect.forkScoped,
+			)
+			yield* Effect.yieldNow
+			const premature = yield* Deferred.isDone(ended)
+			assert.isFalse(premature)
+			yield* Deferred.succeed(gate, undefined)
+			yield* Fiber.join(closing).pipe(Effect.timeout("1 second"))
+			const frames = yield* Effect.forEach(Array.range(1, 3), () =>
+				Queue.take(written),
+			)
+			assert.deepEqual(
+				Array.map(frames, (frame) => frame.message.id),
+				["writing", "control", "data"],
+			)
+			yield* peer.end
+		}).pipe(Effect.scoped),
+	)
+
+	it.live(
+		"allows a server to finish sending after the connection has failed",
+		() =>
+			Effect.gen(function* () {
+				const peer = yield* Port.make(
+					{ input: Stream.never, output: Sink.drain },
+					{ session: "current", serve: { main: Group }, call: {} },
+				)
+				const failure = TransportError.make({
+					cause: Cause.die("Disconnected"),
+				})
+				yield* peer.fail(failure)
+				const observed = yield* Effect.flip(peer.await)
+				assert.strictEqual(observed, failure)
+				const exit = yield* Effect.exit(
+					peer
+						.serverProtocol("main")
+						.send(0, { _tag: "Defect", defect: "Handler stopped" }),
+				)
+				assert.isTrue(Exit.isSuccess(exit))
+			}).pipe(Effect.scoped),
+	)
 })

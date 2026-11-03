@@ -10,21 +10,14 @@ import {
 	String,
 } from "effect"
 import type { ChildProcessSpawner } from "effect/process"
-import * as Duplex from "./duplex"
-import { Control } from "./control"
-import { combine } from "./services"
-import { RpcGroup } from "effect/rpc"
+import * as Port from "./port"
 import { Sink } from "effect"
 import { ProcessExited, TransportError } from "../Errors"
 
 /** One client and one process per activation; EOF is resolved by the exit observer. */
 export const make = Effect.fnUntraced(function* (
 	child: ChildProcessSpawner.ChildProcessHandle,
-	options: Duplex.Options = {
-		session: "local",
-		local: combine(RpcGroup.make(), []),
-		remote: combine(Control, []),
-	},
+	options: Port.Options,
 ) {
 	const failed = yield* Deferred.make<never, ProcessExited | TransportError>()
 	const stopping = yield* Ref.make(false)
@@ -76,7 +69,7 @@ export const make = Effect.fnUntraced(function* (
 		if (!(yield* Ref.get(stopping))) yield* record(error)
 		return error
 	}).pipe(Effect.forkScoped)
-	const peer = yield* Duplex.make(
+	const peer = yield* Port.make(
 		{
 			input: child.getOutputFd(3).pipe(
 				// A process exit closes fd 3 before Node reports its status. Let the exit
@@ -102,17 +95,16 @@ export const make = Effect.fnUntraced(function* (
 		},
 		options,
 	)
-	yield* Deferred.await(peer.failed).pipe(
-		Effect.catch((error) =>
+	yield* peer.await.pipe(
+		Effect.catchCause((cause) =>
 			Ref.get(stopping).pipe(
-				Effect.flatMap((stopping) => (stopping ? Effect.void : record(error))),
+				Effect.flatMap((stopping) => (stopping ? Effect.void : report(cause))),
 			),
 		),
 		Effect.forkScoped,
 	)
 	return {
 		...peer,
-		protocol: peer.clientProtocol,
 		report: (cause: Cause.Cause<unknown>) =>
 			Ref.get(stopping).pipe(
 				Effect.flatMap((stopping) => (stopping ? Effect.void : report(cause))),
@@ -121,6 +113,6 @@ export const make = Effect.fnUntraced(function* (
 		failed,
 		stopping,
 		exited,
-		end: peer.end.pipe(Effect.andThen(Fiber.join(peer.writer))),
+		end: peer.end,
 	}
 })

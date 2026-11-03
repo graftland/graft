@@ -1,6 +1,6 @@
 import { Cause, Deferred, Effect } from "effect"
 import { Worker } from "node:worker_threads"
-import { failure } from "./model"
+import { ExecutionError } from "./model"
 
 /**
  * fd 4 belongs exclusively to this worker. A blocked plugin main thread cannot
@@ -55,16 +55,15 @@ export const start = Effect.gen(function* () {
 	const ready = yield* Deferred.make<void>()
 	const begin = yield* Deferred.make<void>()
 	const stop = yield* Deferred.make<void>()
-	const failed = yield* Deferred.make<never, ReturnType<typeof failure>>()
+	const failed = yield* Deferred.make<never, ExecutionError>()
 	const worker = yield* Effect.acquireRelease(
 		Effect.try({
 			try: () => new Worker(source, { eval: true }),
 			catch: (cause) =>
-				failure(
-					"Execution",
-					"Starting the child watchdog failed",
-					Cause.die(cause),
-				),
+				ExecutionError.make({
+					detail: "Starting the child watchdog failed",
+					cause: Cause.die(cause),
+				}),
 		}),
 		(worker) => Effect.promise(() => worker.terminate()).pipe(Effect.asVoid),
 	)
@@ -77,14 +76,22 @@ export const start = Effect.gen(function* () {
 		Deferred.doneUnsafe(
 			failed,
 			Effect.fail(
-				failure("Execution", "Child watchdog failed", Cause.die(error)),
+				ExecutionError.make({
+					detail: "Child watchdog failed",
+					cause: Cause.die(error),
+				}),
 			),
 		),
 	)
 	worker.on("exit", (code) =>
 		Deferred.doneUnsafe(
 			failed,
-			Effect.fail(failure("Execution", "Child watchdog exited: " + code)),
+			Effect.fail(
+				ExecutionError.make({
+					detail: "Child watchdog exited: " + code,
+					cause: Cause.empty,
+				}),
+			),
 		),
 	)
 	yield* Effect.raceFirst(Deferred.await(ready), Deferred.await(failed))

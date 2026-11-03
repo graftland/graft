@@ -12,7 +12,7 @@ import {
 } from "effect"
 import type { Socket } from "effect/socket"
 import { TransportError } from "../../Errors"
-import type { Channel as ByteChannel } from "../duplex"
+import type { Channel as ByteChannel } from "../port"
 import * as Framing from "./Framing"
 
 const failure = (detail: string) =>

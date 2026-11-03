@@ -1,12 +1,8 @@
 import { Schema } from "effect"
 import { Rpc, RpcGroup } from "effect/rpc"
 
-import { Priority } from "./duplex"
+import { Priority } from "./port"
 
-export const Result = Schema.Union([
-	Schema.TaggedStruct("Success", {}),
-	Schema.TaggedStruct("Failure", { cause: Schema.Json }),
-])
 export const Log = Schema.Struct({
 	level: Schema.Literals([
 		"Fatal",
@@ -34,18 +30,20 @@ export const LogEvent = Schema.Union([
 	Schema.TaggedStruct("Log", { entry: Log, dropped: Schema.Int }),
 	Schema.TaggedStruct("LogsEnded", { dropped: Schema.Int }),
 ])
-export const Control = RpcGroup.make(
-	Rpc.make("Load", {
-		payload: { input: Schema.Json },
-		success: Result,
-	}),
-	Rpc.make("Events", { success: Event, stream: true }),
-	Rpc.make("Dispose", { success: Result }),
-)
-	.annotateRpcs(Priority, "control")
-	.add(
-		Rpc.make("Logs", { success: LogEvent, stream: true }).annotate(
-			Priority,
-			"log",
-		),
+export const endpoint = "@graftland/remote/control"
+export const make = <C extends Schema.Top>(cause: C) =>
+	RpcGroup.make(
+		Rpc.make("Load", {
+			payload: { input: Schema.Json },
+			error: cause,
+		}),
+		Rpc.make("Events", { success: Event, stream: true }),
+		Rpc.make("Dispose", { error: cause }),
 	)
+		.annotateRpcs(Priority, "control")
+		.add(
+			Rpc.make("Logs", { success: LogEvent, stream: true }).annotate(
+				Priority,
+				"log",
+			),
+		)

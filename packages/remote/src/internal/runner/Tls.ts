@@ -1,9 +1,9 @@
 import { NodeSocket, NodeSocketServer } from "@effect/platform-node"
-import { Array, Context, Effect, Option, Redacted, String } from "effect"
+import { Array, Cause, Context, Effect, Option, Redacted, String } from "effect"
 import type { Duration } from "effect"
 import type { Socket } from "effect/socket"
 import { TLSSocket } from "node:tls"
-import { failure } from "./model"
+import { InvalidSessionRequest } from "./model"
 
 export interface Credentials {
 	readonly key: Redacted.Redacted<string>
@@ -55,20 +55,21 @@ export const identityFromSubjectAltName = (san: string | undefined) =>
 			uris.length !== 1 ||
 			!/^URI:graft:\/\/[a-z0-9][a-z0-9._-]*$/.test(uris[0]!)
 		)
-			return yield* failure(
-				"InvalidRequest",
-				"The peer certificate must contain exactly one SAN URI of the form graft://name",
-			)
+			return yield* InvalidSessionRequest.make({
+				detail:
+					"The peer certificate must contain exactly one SAN URI of the form graft://name",
+				cause: Cause.empty,
+			})
 		return String.slice(4)(uris[0]!)
 	})
 
 const authenticated = Effect.gen(function* () {
 	const socket = yield* Effect.serviceOption(NodeSocket.NetSocket)
 	if (Option.isNone(socket))
-		return yield* failure(
-			"InvalidRequest",
-			"An authenticated TLS client certificate is required",
-		)
+		return yield* InvalidSessionRequest.make({
+			detail: "An authenticated TLS client certificate is required",
+			cause: Cause.empty,
+		})
 	const raw = socket.value
 	// Own the socket before validation: a rejected SAN must close even without a reader.
 	yield* Effect.addFinalizer(() =>
@@ -77,10 +78,10 @@ const authenticated = Effect.gen(function* () {
 		}),
 	)
 	if (!(raw instanceof TLSSocket) || !raw.authorized)
-		return yield* failure(
-			"InvalidRequest",
-			"An authenticated TLS client certificate is required",
-		)
+		return yield* InvalidSessionRequest.make({
+			detail: "An authenticated TLS client certificate is required",
+			cause: Cause.empty,
+		})
 	return yield* identityFromSubjectAltName(
 		raw.getPeerCertificate().subjectaltname,
 	)

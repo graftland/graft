@@ -17,7 +17,12 @@ import {
 } from "effect"
 import process from "node:process"
 import * as Remote from "../src/index"
-import { ChildApi, HostApi, contract } from "./fixtures/services-contract"
+import {
+	ChildApi,
+	ChildLabel,
+	HostApi,
+	contract,
+} from "./fixtures/services-contract"
 const contractModule = new URL(
 	"../.cache/integration/services-contract.js",
 	import.meta.url,
@@ -71,6 +76,32 @@ const waitFile = (file: string) =>
 		)
 	})
 describe("cross-process services", () => {
+	it.live(
+		"routes equal service tags independently from the control endpoint",
+		() =>
+			Effect.gen(function* () {
+				const { api } = yield* setup
+				const label = yield* Deferred.make<string>()
+				const consumer = yield* Graft.plugin(
+					Plugin.make({
+						name: "label-consumer",
+						inject: [ChildLabel],
+						apply: () =>
+							Effect.gen(function* () {
+								const service = yield* ChildLabel
+								const value = yield* service.read
+								yield* Deferred.succeed(label, value)
+							}),
+					}),
+				)
+				yield* consumer.await
+				const value = yield* Deferred.await(label)
+				assert.equal(value, "independent endpoint")
+				const reply = yield* api.call(20)
+				assert.equal(reply.value, 41)
+			}).pipe(run),
+	)
+
 	it.live(
 		"calls the host through the child service and exposes the local instance identity",
 		() =>

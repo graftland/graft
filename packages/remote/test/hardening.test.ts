@@ -26,7 +26,7 @@ import process from "node:process"
 import { fileURLToPath } from "node:url"
 import * as Remote from "../src/index"
 import { cleanupCause } from "../src/internal/cleanup"
-import { Control } from "../src/internal/control"
+import { endpoint } from "../src/internal/control"
 import * as Transport from "../src/internal/transport"
 import { contract, Rejected } from "./fixtures/contract"
 
@@ -254,9 +254,16 @@ describe("local remote hardening", () => {
 						),
 					)
 					.pipe(Scope.provide(processScope))
-				const transport = yield* Transport.make(child)
-				const client = yield* RpcClient.make(Control).pipe(
-					Effect.provideService(RpcClient.Protocol, transport.protocol),
+				const transport = yield* Transport.make(child, {
+					session: "local",
+					serve: {},
+					call: { [endpoint]: contract.control },
+				})
+				const client = yield* RpcClient.make(contract.control).pipe(
+					Effect.provideService(
+						RpcClient.Protocol,
+						transport.clientProtocol(endpoint),
+					),
 				)
 				const releaseLogs = yield* Deferred.make<void>()
 				const receivedLog = yield* Deferred.make<void>()
@@ -296,7 +303,7 @@ describe("local remote hardening", () => {
 				const loaded = yield* client.Load({
 					input: { directory, mode: "flood", value: 2 },
 				})
-				assert.equal(loaded._tag, "Success")
+				assert.isUndefined(loaded)
 				yield* Deferred.await(receivedLog)
 				yield* fs.writeFileString(`${directory}/fail`, "fail")
 				const failure = yield* Deferred.await(failed).pipe(
@@ -312,7 +319,7 @@ describe("local remote hardening", () => {
 				const disposed = yield* client
 					.Dispose()
 					.pipe(Effect.timeout("2 seconds"))
-				assert.equal(disposed._tag, "Success")
+				assert.isUndefined(disposed)
 				yield* Deferred.await(stopped).pipe(Effect.timeout("2 seconds"))
 				assert.isTrue(logFiber.pollUnsafe() === undefined)
 				yield* Deferred.succeed(releaseLogs, undefined)

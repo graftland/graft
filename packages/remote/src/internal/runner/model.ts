@@ -100,44 +100,6 @@ export class StateDirectoryLocked extends Schema.TaggedError<
 		return this.detail
 	}
 }
-/** Compatibility for callers outside the supervisor refactor; the RPC union lives in Wire. */
-export type SessionError = import("./Wire").SessionError
-// Temporary adapters for Packages and Watchdog, which are outside this refactor.
-export function failure(
-	reason: "InvalidRequest",
-	detail: string,
-	cause?: Cause.Cause<unknown>,
-): InvalidSessionRequest
-export function failure(
-	reason: "Conflict",
-	detail: string,
-	cause?: Cause.Cause<unknown>,
-): SessionConflict
-export function failure(
-	reason: "Execution",
-	detail: string,
-	cause?: Cause.Cause<unknown>,
-): ExecutionError
-export function failure(
-	reason: "InvalidRequest" | "Conflict" | "Execution",
-	detail: string,
-	cause?: Cause.Cause<unknown>,
-): InvalidSessionRequest | SessionConflict | ExecutionError
-export function failure(
-	reason: "InvalidRequest" | "Conflict" | "Execution",
-	detail: string,
-	cause: Cause.Cause<unknown> = Cause.empty,
-) {
-	switch (reason) {
-		case "InvalidRequest":
-			return InvalidSessionRequest.make({ detail, cause })
-		case "Conflict":
-			return SessionConflict.make({ detail, cause })
-		case "Execution":
-			return ExecutionError.make({ detail, cause })
-	}
-}
-
 export const Key = Schema.Struct({
 	identity: Schema.String,
 	instance: Schema.String,

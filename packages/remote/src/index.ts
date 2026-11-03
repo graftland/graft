@@ -3,7 +3,6 @@ import { Graft, Plugin } from "@graftland/graft"
 import {
 	Array,
 	Cause,
-	Context,
 	Deferred,
 	Effect,
 	Exit,
@@ -15,13 +14,7 @@ import {
 } from "effect"
 import type { Duration, Schedule, PlatformError } from "effect"
 import { ChildProcessSpawner } from "effect/process"
-import {
-	RpcClient,
-	RpcGroup,
-	RpcServer,
-	type RpcClientError,
-	type Rpc,
-} from "effect/rpc"
+import { RpcClient, type RpcClientError } from "effect/rpc"
 import { SecureRandom } from "effect/crypto"
 import { local, runner, type Target } from "./Targets"
 export { local, runner }
@@ -38,7 +31,7 @@ import {
 	type TransportError,
 } from "./Errors"
 import * as Contract from "./Contract"
-import { Control } from "./internal/control"
+import * as Control from "./internal/control"
 export { Contract }
 export { ProcessExited, TransportError, RemoteWithdrawn } from "./Errors"
 
@@ -93,8 +86,7 @@ export const plugin = <
 		apply: (input) =>
 			Effect.gen(function* () {
 				const session = yield* Effect.sync(() => SecureRandom.uuidV4Unsafe())
-				const localGroup = Services.combine(RpcGroup.make(), contract.inject)
-				const remoteGroup = Services.combine(Control, contract.provides)
+
 				const json = yield* Schema.decodeEffect(Schema.Json)(input)
 				yield* Schema.decodeEffect(contract.config)(input)
 				// Keep transport fibers alive until the process has exited, including forced cleanup.
@@ -146,32 +138,31 @@ export const plugin = <
 					options.target ?? local(),
 					options.contractModule,
 					options.instance,
-					{ session, local: localGroup, remote: remoteGroup },
+					{
+						session,
+						serve: Services.endpoints(contract.inject),
+						call: {
+							...Services.endpoints(contract.provides),
+							[Control.endpoint]: contract.control,
+						},
+					},
 					resources,
 					processScope,
 				)
 				const transport = connection.transport
 				yield* Ref.set(diagnostics, connection.diagnostics)
 
-				const aggregate = yield* RpcClient.make(remoteGroup).pipe(
-					Effect.provideService(RpcClient.Protocol, transport.protocol),
+				const client = yield* RpcClient.make(contract.control).pipe(
+					Effect.provideService(
+						RpcClient.Protocol,
+						transport.clientProtocol(Control.endpoint),
+					),
 					Scope.provide(resources),
 				)
-				// Control is a checked subset of the aggregate group's tags.
-				const client = aggregate as object as RpcClient.FromGroup<
-					typeof Control,
-					RpcClientError.RpcClientError
-				>
-				const context = yield* Effect.context<never>()
-				const bindings = yield* Services.handlers(contract.inject, context)
-				yield* RpcServer.make(localGroup, { disableFatalDefects: true }).pipe(
-					Effect.provideService(RpcServer.Protocol, transport.serverProtocol),
-					Effect.provideContext(
-						bindings as Context.Context<Rpc.ToHandler<Rpc.Any>>,
-					),
-					Effect.tapCause(transport.report),
-					Effect.forkIn(resources),
-				)
+				for (const service of contract.inject)
+					yield* service
+						.serve(transport)
+						.pipe(Effect.tapCause(transport.report), Effect.forkIn(resources))
 				const race = <A, EX, R>(effect: Effect.Effect<A, EX, R>) =>
 					Effect.raceFirst(effect, transport.failure)
 				const stopped = yield* Deferred.make<void>()
@@ -251,12 +242,15 @@ export const plugin = <
 				yield* Ref.set(
 					cleanup,
 					Effect.gen(function* () {
-						const disposed = yield* race(client.Dispose())
-						const remoteCause =
-							disposed._tag === "Failure"
-								? yield* contract.decodeCause(disposed.cause)
-								: Cause.empty
-						yield* Ref.set(remoteCleanupCause, remoteCause)
+						yield* race(
+							client
+								.Dispose()
+								.pipe(
+									Effect.catchIf(Cause.isCause, (cause) =>
+										Ref.set(remoteCleanupCause, cause),
+									),
+								),
+						)
 						// Control completion never waits behind logs; separately drain the bounded log tail.
 						yield* race(Deferred.await(stopped))
 						yield* race(Deferred.await(logsEnded))
@@ -278,20 +272,25 @@ export const plugin = <
 						),
 					),
 				)
-				const loaded = yield* race(
+				yield* race(
 					Effect.raceFirst(
-						client.Load({
-							input: json,
-						}),
+						client
+							.Load({ input: json })
+							.pipe(
+								Effect.catchIf(
+									(
+										cause,
+									): cause is Cause.Cause<
+										E["Type"] | Contract.UndeclaredFailure
+									> => Cause.isCause(cause),
+									Effect.failCause,
+								),
+							),
 						Deferred.await(remoteFailure),
 					),
 				)
-				if (loaded._tag === "Failure") {
-					const cause = yield* contract.decodeCause(loaded.cause)
-					return yield* Effect.failCause(cause)
-				}
 				for (const service of contract.provides)
-					yield* service.publish(aggregate)
+					yield* service.publish(transport).pipe(Scope.provide(resources))
 				yield* Plugin.fork(
 					Effect.raceFirst(Fiber.join(events), Deferred.await(remoteFailure)),
 				)

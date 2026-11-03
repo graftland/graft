@@ -9,9 +9,8 @@ import {
 	Semaphore,
 	Layer,
 } from "effect"
-import { RpcGroup, RpcServer } from "effect/rpc"
-import * as Services from "../services"
-import * as Duplex from "../duplex"
+import { RpcServer } from "effect/rpc"
+import * as Port from "../port"
 import * as ExecutionAdapter from "./Execution"
 import * as Lock from "./Lock"
 import * as Multiplex from "./Multiplex"
@@ -49,10 +48,10 @@ export const serve = (options: Options) =>
 					const identity = yield* Tls.Peer
 					const scope = yield* Effect.scope
 					const mux = yield* Multiplex.fromSocket(socket)
-					const peer = yield* Duplex.make(Wire.channel(mux, 0), {
+					const peer = yield* Port.make(Wire.channel(mux, 0), {
 						session: "session-v1",
-						local: Services.combine(Wire.Session, []),
-						remote: Services.combine(RpcGroup.make(), []),
+						serve: { session: Wire.Session },
+						call: {},
 					})
 					const attached = yield* Ref.make(Option.none<string>())
 					const loading = yield* Semaphore.make(1)
@@ -140,7 +139,10 @@ export const serve = (options: Options) =>
 						disableFatalDefects: true,
 					}).pipe(
 						Effect.provideContext(handlers),
-						Effect.provideService(RpcServer.Protocol, peer.serverProtocol),
+						Effect.provideService(
+							RpcServer.Protocol,
+							peer.serverProtocol("session"),
+						),
 						Effect.raceFirst(Deferred.await(mux.failed)),
 					)
 				}),

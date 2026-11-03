@@ -23,9 +23,8 @@ import {
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import process from "node:process"
 import * as Remote from "../src/index"
-import { RpcClient, RpcGroup } from "effect/rpc"
-import * as Duplex from "../src/internal/duplex"
-import * as Services from "../src/internal/services"
+import { RpcClient } from "effect/rpc"
+import * as Port from "../src/internal/port"
 import * as Multiplex from "../src/internal/runner/Multiplex"
 import * as Tls from "../src/internal/runner/Tls"
 import * as Wire from "../src/internal/runner/Wire"
@@ -214,13 +213,13 @@ const control = (port: number, name = "client") =>
 			servername: "localhost",
 		})
 		const mux = yield* Multiplex.fromSocket(socket)
-		const peer = yield* Duplex.make(Wire.channel(mux, 0), {
+		const peer = yield* Port.make(Wire.channel(mux, 0), {
 			session: "session-v1",
-			local: Services.combine(RpcGroup.make(), []),
-			remote: Services.combine(Wire.Session, []),
+			serve: {},
+			call: { session: Wire.Session },
 		})
 		return yield* RpcClient.make(Wire.Session).pipe(
-			Effect.provideService(RpcClient.Protocol, peer.clientProtocol),
+			Effect.provideService(RpcClient.Protocol, peer.clientProtocol("session")),
 		)
 	})
 const until = <A, E, R>(

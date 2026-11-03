@@ -1,7 +1,7 @@
 import { Cause, Effect, Sink, Stream, Schema } from "effect"
 import { Rpc, RpcGroup } from "effect/rpc"
 import { TransportError } from "../../Errors"
-import * as Duplex from "../duplex"
+import * as Port from "../port"
 import type * as Multiplex from "./Multiplex"
 import {
 	CodeIdentity,
@@ -73,15 +73,15 @@ export const Session = RpcGroup.make(
 		success: SessionRecord,
 		error: SessionError,
 	}),
-).annotateRpcs(Duplex.Priority, "control")
+).annotateRpcs(Port.Priority, "control")
 
 export type Peer = Effect.Success<ReturnType<typeof Multiplex.make>>
 /**
- * Preserve the duplex writer's order, including Request before Interrupt.
+ * Preserve the port writer's order, including Request before Interrupt.
  * The session channel has independent credits and takes priority over instance bytes.
  * The bounded outer window adds at most four already-admitted instance frames.
  */
-export const channel = (peer: Peer, id: 0 | 1): Duplex.Channel => ({
+export const channel = (peer: Peer, id: 0 | 1): Port.Channel => ({
 	input: Stream.fromEffectRepeat(peer.take(id, id === 0 ? 0 : 1)),
 	output: Sink.forEach((bytes: Uint8Array) =>
 		peer

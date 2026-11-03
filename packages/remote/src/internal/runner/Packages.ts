@@ -15,7 +15,12 @@ import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import { createHash } from "node:crypto"
 import process from "node:process"
 import { fileURLToPath } from "node:url"
-import { failure, type CodeIdentity, type SessionError } from "./model"
+import {
+	ExecutionError,
+	InvalidSessionRequest,
+	SessionConflict,
+	type CodeIdentity,
+} from "./model"
 
 const Manifest = Schema.Struct({ name: Schema.String, version: Schema.String })
 export interface Expected {
@@ -25,17 +30,17 @@ export interface Expected {
 export const verify = (actual: CodeIdentity, expected: Expected = {}) =>
 	expected.version !== undefined && actual.version !== expected.version
 		? Effect.fail(
-				failure(
-					"InvalidRequest",
-					`Package version mismatch: expected ${expected.version}, received ${actual.version}`,
-				),
+				InvalidSessionRequest.make({
+					detail: `Package version mismatch: expected ${expected.version}, received ${actual.version}`,
+					cause: Cause.empty,
+				}),
 			)
 		: expected.digest !== undefined && actual.digest !== expected.digest
 			? Effect.fail(
-					failure(
-						"InvalidRequest",
-						`Package digest mismatch: expected ${expected.digest}, received ${actual.digest}`,
-					),
+					InvalidSessionRequest.make({
+						detail: `Package digest mismatch: expected ${expected.digest}, received ${actual.digest}`,
+						cause: Cause.empty,
+					}),
 				)
 			: Effect.void
 
@@ -48,15 +53,18 @@ export const digest = Effect.fnUntraced(function* (directory: string) {
 	)
 	const visit = (
 		relative: string,
-	): Effect.Effect<void, SessionError | PlatformError.PlatformError> =>
+	): Effect.Effect<
+		void,
+		InvalidSessionRequest | SessionConflict | PlatformError.PlatformError
+	> =>
 		Effect.gen(function* () {
 			const filename = path.join(directory, relative)
 			const info = yield* fs.lstat(filename)
 			if (info.type !== "File" && info.type !== "Directory")
-				return yield* failure(
-					"InvalidRequest",
-					`Unsupported package entry: ${relative}`,
-				)
+				return yield* InvalidSessionRequest.make({
+					detail: `Unsupported package entry: ${relative}`,
+					cause: Cause.empty,
+				})
 			const name = new TextEncoder().encode(relative)
 			yield* Effect.sync(() => {
 				hash.update(
@@ -75,10 +83,10 @@ export const digest = Effect.fnUntraced(function* (directory: string) {
 					),
 				)
 				if (size !== info.size)
-					return yield* failure(
-						"Conflict",
-						"Package changed while its digest was being computed",
-					)
+					return yield* SessionConflict.make({
+						detail: "Package changed while its digest was being computed",
+						cause: Cause.empty,
+					})
 			} else {
 				const entries = yield* fs.readDirectory(filename)
 				for (const entry of Array.sort(entries, Order.String)) {
@@ -114,10 +122,10 @@ export const resolve = Effect.fnUntraced(
 					/[\\:%?#\x00-\x20]/.test(segment),
 			)
 		)
-			return yield* failure(
-				"InvalidRequest",
-				"A bare installed package specifier is required",
-			)
+			return yield* InvalidSessionRequest.make({
+				detail: "A bare installed package specifier is required",
+				cause: Cause.empty,
+			})
 		const fs = yield* FileSystem.FileSystem
 		const path = yield* Path.Path
 		const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
@@ -131,10 +139,10 @@ export const resolve = Effect.fnUntraced(
 				Effect.flatMap(Schema.decodeEffect(Schema.fromJsonString(Manifest))),
 			)
 		if (manifest.name !== name)
-			return yield* failure(
-				"InvalidRequest",
-				"The installed package name does not match its specifier",
-			)
+			return yield* InvalidSessionRequest.make({
+				detail: "The installed package name does not match its specifier",
+				cause: Cause.empty,
+			})
 		const resolved = yield* Effect.scoped(
 			Effect.gen(function* () {
 				const child = yield* spawner.spawn(
@@ -165,21 +173,20 @@ export const resolve = Effect.fnUntraced(
 					{ concurrency: "unbounded" },
 				)
 				if (code !== 0)
-					return yield* failure(
-						"InvalidRequest",
-						`Package resolution failed: ${stderr}`,
-					)
+					return yield* InvalidSessionRequest.make({
+						detail: `Package resolution failed: ${stderr}`,
+						cause: Cause.empty,
+					})
 				return stdout
 			}),
 		)
 		const filename = yield* Effect.try({
 			try: () => fileURLToPath(resolved),
 			catch: (error) =>
-				failure(
-					"InvalidRequest",
-					"The package export is not a file URL",
-					Cause.die(error),
-				),
+				InvalidSessionRequest.make({
+					detail: "The package export is not a file URL",
+					cause: Cause.die(error),
+				}),
 		})
 		const entry = yield* fs.realPath(filename)
 		const relative = path.relative(directory, entry)
@@ -188,10 +195,10 @@ export const resolve = Effect.fnUntraced(
 			String.startsWith(`..${path.sep}`)(relative) ||
 			path.isAbsolute(relative)
 		)
-			return yield* failure(
-				"InvalidRequest",
-				"The package export resolves outside its installed directory",
-			)
+			return yield* InvalidSessionRequest.make({
+				detail: "The package export resolves outside its installed directory",
+				cause: Cause.empty,
+			})
 		const identity: CodeIdentity = {
 			...manifest,
 			digest: yield* digest(directory),
@@ -201,7 +208,10 @@ export const resolve = Effect.fnUntraced(
 	},
 	Effect.catchCause((cause) =>
 		Effect.fail(
-			failure("Execution", "Resolving the installed package failed", cause),
+			ExecutionError.make({
+				detail: "Resolving the installed package failed",
+				cause: cause,
+			}),
 		),
 	),
 )
