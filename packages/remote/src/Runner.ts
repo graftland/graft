@@ -2,6 +2,8 @@ import { Graft, Plugin } from "@graftland/graft"
 import { NodeServices, NodeSink } from "@effect/platform-node"
 import {
 	Cause,
+	Context,
+	Array,
 	Deferred,
 	Effect,
 	Exit,
@@ -13,15 +15,18 @@ import {
 	Queue,
 	Ref,
 	Scope,
-	PlatformError,
 	References,
 	Stdio,
 	Stream,
 } from "effect"
-import { RpcSerialization, RpcServer } from "effect/rpc"
+import { RpcClient, RpcGroup, RpcServer } from "effect/rpc"
 // @effect-diagnostics-next-line nodeBuiltinImport:off -- Node's extra inherited descriptor is the dedicated protocol output, separate from console output.
 import { createWriteStream } from "node:fs"
 import { UndeclaredFailure, fromModule, type RunnerContract } from "./Contract"
+import { TransportError } from "./Errors"
+import { Instance } from "./Instance"
+import * as Duplex from "./internal/duplex"
+import * as Services from "./internal/services"
 import { Control, type Event, type Log } from "./internal/control"
 
 /** Import a contract in the runner installation; importing this module performs no I/O. */
@@ -40,10 +45,13 @@ export const load = (specifier: string) =>
 	})
 
 /** One local execution unit, owned by the executable's scope. */
-export const run = (contract: RunnerContract) =>
+export const run = (contract: RunnerContract, session = "local") =>
 	Effect.scoped(
 		Effect.gen(function* () {
-			const eof = yield* Deferred.make<void>()
+			const releaseExports = yield* Deferred.make<void>()
+			const hostDisposing = yield* Ref.make(false)
+			const withdrawing = yield* Ref.make(false)
+			const exportsReady = yield* Deferred.make<Context.Context<never>>()
 			const events =
 				yield* Queue.bounded<Effect.Effect<typeof Event.Type, never>>(2)
 			const logs = yield* Queue.dropping<
@@ -73,14 +81,41 @@ export const run = (contract: RunnerContract) =>
 				if (!accepted) MutableRef.increment(dropped)
 			})
 			return yield* Effect.gen(function* () {
+				const stdio = yield* Stdio.Stdio
+				const output = yield* Effect.sync(() =>
+					createWriteStream("", { fd: 3, autoClose: false }),
+				)
+				const localGroup = Services.combine(Control, contract.provides)
+				const remoteGroup = Services.combine(RpcGroup.make(), contract.inject)
+				const peer = yield* Duplex.make(
+					{
+						input: stdio.stdin.pipe(
+							Stream.mapError((error) =>
+								TransportError.make({ cause: Cause.fail(error) }),
+							),
+						),
+						output: NodeSink.fromWritable({
+							evaluate: () => output,
+							onError: (cause) =>
+								TransportError.make({ cause: Cause.die(cause) }),
+							endOnDone: false,
+						}),
+					},
+					{ session, local: localGroup, remote: remoteGroup },
+				)
+				const client = yield* RpcClient.make(remoteGroup).pipe(
+					Effect.provideService(RpcClient.Protocol, peer.clientProtocol),
+				)
 				const handlers = Control.toLayer({
-					Load: ({ input }) =>
+					Load: ({ input, instance: identity }) =>
 						Effect.gen(function* () {
 							const current = yield* Ref.get(instance)
 							if (Option.isSome(current))
 								return yield* Effect.die(
 									new Error("This runner already owns an instance"),
 								)
+							for (const service of contract.inject)
+								yield* service.publish(client).pipe(Effect.orDie)
 							const module = yield* Effect.tryPromise({
 								try: () => import(contract.module),
 								catch: (cause) => UndeclaredFailure.make({ original: cause }),
@@ -93,16 +128,81 @@ export const run = (contract: RunnerContract) =>
 							const fork = yield* Graft.plugin(
 								{ ...plugin.value, retry: undefined },
 								input,
+							).pipe(
+								Effect.provideService(Instance, identity),
+								Scope.provide(instanceScope),
+							)
+							const observedFailure = yield* Ref.make<Cause.Cause<unknown>>(
+								Cause.empty,
+							)
+							const observation = yield* fork.state.pipe(
+								Stream.runForEach((state) =>
+									state._tag === "Failed"
+										? Ref.set(observedFailure, state.cause)
+										: Effect.void,
+								),
+								Effect.forkIn(instanceScope),
+							)
+							const bridge = yield* Graft.plugin(
+								Plugin.make({
+									name: `${contract.name}/exports`,
+									inject: Array.map(
+										contract.provides,
+										(service) => service.key,
+									),
+									apply: () =>
+										Effect.gen(function* () {
+											const context = yield* Effect.context<never>()
+											const bound = yield* Services.handlers(
+												contract.provides,
+												context,
+											)
+											yield* Deferred.succeed(exportsReady, bound)
+											yield* Effect.addFinalizer(() =>
+												Effect.gen(function* () {
+													if (!(yield* Ref.get(hostDisposing))) {
+														yield* Ref.set(withdrawing, true)
+														yield* Queue.offer(
+															events,
+															Effect.succeed({ _tag: "Withdrawing" }),
+														)
+													}
+													yield* Deferred.await(releaseExports)
+												}),
+											)
+										}),
+								}),
 							).pipe(Scope.provide(instanceScope))
 							yield* Ref.set(
 								instance,
 								Option.some(
-									fork.dispose.pipe(
-										Effect.catchTag("CleanupError", (error) =>
-											// @effect-diagnostics-next-line anyUnknownInErrorContext:off -- Dynamic plugin cleanup is encoded without discarding its cause.
-											Effect.failCause(error.cause),
-										),
-									),
+									Effect.gen(function* () {
+										const pluginExit = yield* Effect.exit(fork.dispose)
+										const bridgeExit = yield* Effect.exit(bridge.dispose)
+										yield* Fiber.join(observation)
+										const failed = yield* Ref.get(observedFailure)
+										const retired = yield* Ref.get(withdrawing)
+										const cause = Array.reduce(
+											[bridgeExit, pluginExit],
+											retired ? failed : (Cause.empty as Cause.Cause<unknown>),
+											(cause, exit) =>
+												Exit.isFailure(exit)
+													? Cause.combine(
+															cause,
+															Cause.fromReasons(
+																Array.flatMap(exit.cause.reasons, (reason) =>
+																	reason._tag === "Fail"
+																		? reason.error.cause.reasons
+																		: [reason],
+																),
+															),
+														)
+													: cause,
+										)
+										if (cause.reasons.length > 0)
+											// @effect-diagnostics-next-line anyUnknownInErrorContext:off -- Dynamic plugin cleanup is encoded with its complete cause.
+											return yield* Effect.failCause(cause)
+									}),
 								),
 							)
 							const first = yield* Stream.runHead(
@@ -123,7 +223,7 @@ export const run = (contract: RunnerContract) =>
 							if (state._tag !== "Active")
 								return yield* Effect.die(
 									new Error(
-										"The remote plugin did not become active; cross-process dependencies are not supported",
+										"The remote plugin did not become active; check its declared dependencies",
 									),
 								)
 							yield* fork.state.pipe(
@@ -140,6 +240,24 @@ export const run = (contract: RunnerContract) =>
 								),
 								Effect.forkIn(instanceScope),
 							)
+							const exported = yield* bridge.state.pipe(
+								Stream.filter(
+									(state) =>
+										state._tag === "Active" ||
+										state._tag === "Failed" ||
+										state._tag === "Disposed",
+								),
+								Stream.runHead,
+							)
+							if (Option.isSome(exported) && exported.value._tag === "Failed")
+								return yield* Effect.failCause(exported.value.cause).pipe(
+									Effect.orDie,
+								)
+							if (Option.isNone(exported) || exported.value._tag !== "Active")
+								return yield* Effect.die(
+									new Error("The remote export bridge stopped during startup"),
+								)
+							yield* Deferred.await(exportsReady)
 							return { _tag: "Success" } as const
 						}),
 					Events: () =>
@@ -162,6 +280,8 @@ export const run = (contract: RunnerContract) =>
 						),
 					Dispose: () =>
 						Effect.gen(function* () {
+							yield* Ref.set(hostDisposing, true)
+							yield* Deferred.succeed(releaseExports, undefined)
 							const current = yield* Ref.get(instance)
 							const exit = yield* Effect.exit(
 								// @effect-diagnostics-next-line anyUnknownInErrorContext:off -- Dynamic plugin cleanup is observed as an Exit for wire encoding.
@@ -177,57 +297,26 @@ export const run = (contract: RunnerContract) =>
 								: ({ _tag: "Success" } as const)
 						}),
 				})
-				const stdio = yield* Stdio.Stdio
-				const output = yield* Effect.sync(() =>
-					createWriteStream("", { fd: 3, autoClose: false }),
-				)
-				const protocolStdio = Stdio.make({
-					args: stdio.args,
-					stdin: stdio.stdin.pipe(
-						Stream.ensuring(Deferred.succeed(eof, undefined)),
-					),
-					stdout: () =>
-						NodeSink.fromWritable({
-							evaluate: () => output,
-							onError: (cause) =>
-								PlatformError.systemError({
-									_tag: "Unknown",
-									module: "Remote",
-									method: "write",
-									cause,
-								}),
-							endOnDone: false,
-						}),
-					stderr: stdio.stderr,
-				})
-				// Stdio's writer finalizer interrupts its construction fiber. Construct it
-				// in a separate scoped fiber so shutdown cannot interrupt the runner root.
-				const ready = yield* Deferred.make<RpcServer.Protocol["Service"]>()
-				const owner = yield* Effect.gen(function* () {
-					const protocol = yield* RpcServer.makeProtocolStdio.pipe(
-						Effect.provideService(Stdio.Stdio, protocolStdio),
-						Effect.provideService(
-							RpcSerialization.RpcSerialization,
-							RpcSerialization.ndjson,
-						),
-					)
-					yield* Deferred.succeed(ready, protocol)
-					return yield* Effect.never
-				}).pipe(Effect.forkScoped)
-				const protocol = yield* Effect.raceFirst(
-					Deferred.await(ready),
-					Fiber.join(owner),
-				)
-				const server = RpcServer.layer(Control, {
+				const server = RpcServer.layer(localGroup, {
 					disableFatalDefects: true,
 				}).pipe(
 					Layer.provide(handlers),
-					Layer.provide(Layer.succeed(RpcServer.Protocol, protocol)),
+					Layer.provide(
+						Services.layer(
+							Services.deferredHandlers(
+								contract.provides,
+								Deferred.await(exportsReady),
+							),
+						),
+					),
+					Layer.provide(Layer.succeed(RpcServer.Protocol, peer.serverProtocol)),
 				)
-				yield* Effect.raceFirst(Deferred.await(eof), Fiber.join(owner)).pipe(
-					// @effect-diagnostics-next-line strictEffectProvide:off -- This executable runner entry point owns the RPC server and its logger until stdin closes.
+				yield* Effect.flip(Deferred.await(peer.failed)).pipe(
+					// @effect-diagnostics-next-line strictEffectProvide:off -- This runner owns the server until its channel closes.
 					Effect.provide(server),
 				)
+				yield* Ref.set(hostDisposing, true)
+				yield* Deferred.succeed(releaseExports, undefined)
 			}).pipe(
 				// @effect-diagnostics-next-line strictEffectProvide:off -- Both the protocol reader and plugin handlers must inherit the runner's event logger.
 				Effect.provide(Logger.layer([logger], { mergeWithExisting: true })),

@@ -7,11 +7,13 @@ import { load, run } from "./Runner"
 
 NodeRuntime.runMain(
 	Effect.suspend(() => {
-		const [, , specifier, ...rest] = process.argv
+		const [, , specifier, session = "local", ...rest] = process.argv
 		if (specifier === undefined || rest.length !== 0)
 			return Effect.die(
-				new Error("Usage: graft-remote <contract-module-specifier>"),
+				new Error("Usage: graft-remote <contract-module-specifier> [session]"),
 			)
-		return load(specifier).pipe(Effect.flatMap(run))
+		return load(specifier).pipe(
+			Effect.flatMap((contract) => run(contract, session)),
+		)
 	}).pipe(Effect.tapCause((cause) => Console.error(Cause.pretty(cause)))),
 )

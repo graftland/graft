@@ -1,8 +1,8 @@
 # @graftland/remote
 
-Private local-process prototype for Graft. Each host activation owns one Node.js
-process. This package proves lifecycle mapping; it is not a network runner or a
-security sandbox.
+Private remote-plugin implementation with a local process target. Each host
+activation owns one Node.js process. Contracts can bridge services in both
+directions. Network runners and security isolation are not implemented yet.
 
 ## Usage
 
@@ -85,37 +85,95 @@ require external encoding or decoding services.
   Buffered finalizer logs are delivered before successful dispose returns. When
   the log queue is full, new logs are dropped and counted.
 
-Control requests use stdin; responses use an extra inherited descriptor, fd 3.
-The runner uses Effect's stdio server protocol with an overridden
-`Stdio.stdout`. The host implements `RpcClient.Protocol` over the ChildProcess
-handle. Ordinary stdout is drained, so `console.log` cannot corrupt RPC; stdout
-is not converted into structured Graft logs. Stdin and fd 3 are reserved for the
-protocol.
+## Cross-process services
 
-## Prototype limits and verification
+Declare services in the shared contract with
+`Contract.service(key, group, { toHandlers, fromClient })`, then list the
+descriptors in `Contract.make({ inject: [...], provides: [...] })`. `toHandlers`
+maps a service implementation to the group's handlers; `fromClient` maps its RPC
+client back to the service interface. The latter explicitly chooses how to
+expose `RpcClientError`: retain it in the service's error type, translate it, or
+deliberately treat it as a defect. Calls are never automatically retried.
 
-There is no cross-process inject/provide, code distribution, lease,
-authentication, network transport, scheduling, or stable logical instance
-identity. Plugins may use the child runtime's own services. This implementation
-does not restrict the plugin's filesystem, network, or ability to escape a
-process group.
+RPC tags must be unique within each direction, including the control tags
+`Load`, `Events`, `Logs`, and `Dispose` in the child-facing direction. Use
+qualified tags for unrelated services; duplicate tags fail when defining the
+contract. Both contract modules must use matching service keys, RPC tags, and
+schemas. See `test/fixtures/services-contract.ts` for complete mappings,
+including a stream. Some nested handler parameters need explicit annotations
+with the current TypeScript/RPC types.
+
+The proxy declares host-side `inject` dependencies. Their implementations run on
+the host, and the child receives their clients as root provisions before its
+implementation loads. A child export bridge leases the declared `provides`; only
+after the child plugin and bridge are active does the proxy publish those
+clients on the host. Other child provisions remain internal.
+
+On host withdrawal, Graft drains host consumers before the proxy disposes its
+child. Both RPC directions remain available during consumer finalizers. Host
+dependency withdrawal uses the existing inject lifecycle and creates a new
+process when that dependency becomes available again. The host dependency graph
+includes the proxy, so publication-cycle detection remains effective.
+
+If the child withdraws an export first, its bridge requests host withdrawal and
+holds the export lease until Dispose releases it. The host uses the typed
+`RemoteWithdrawn` error to start teardown. A failure that only becomes
+observable after releasing that lease is returned through Dispose, retaining its
+reasons at the top level of the host cleanup cause (Fail becomes Die under the
+finalizer rule above). This avoids a circular wait between consumer draining and
+the child's Failed state. It does mean such a late failure arrives through
+cleanup rather than the ordinary typed failure channel.
+
+Inside the implementation, inject `Remote.Instance` to read
+`{ id, generation }`. For now each local activation gets a new UUID and
+generation 1; these are not persistent fencing tokens. The reference's fallback
+outside a remote activation is `{ id: "local", generation: 0 }`.
+
+## Duplex transport and limits
+
+Stdin carries host-to-child frames; fd 3 carries child-to-host frames. Either
+can contain requests or responses. Every frame includes a session nonce,
+direction, priority, and encoded RPC message. Each endpoint has one reader, one
+writer, one RpcClient, and one RpcServer. The channel interface accepts an
+Effect Stream and Sink and does not depend on ChildProcess.
+
+Ordinary stdout is drained, so `console.log` cannot corrupt RPC; stdout is not
+converted into structured Graft logs. Stdin and fd 3 are reserved for the
+protocol. Discard calls and notifications are not supported.
+
+Admission is bounded separately per priority and direction: 8 control, 16 data,
+and 2 log requests by default. Excess local calls wait for a slot; waiting is
+interruptible and connection failure fails the waiters. Excess remote admissions
+fail the connection. Each inbound limit must be at least the peer's outbound
+limit: local peers share defaults, and the network handshake must negotiate
+these limits before starting RPC. Writer queues hold at most 64 control, 32
+data, and 4 log frames. Each admitted request has a two-message mailbox, and RPC
+ACKs bound outstanding stream chunks. A stalled stream does not block the shared
+reader. Connection failure stops dispatch and fails the client while
+interrupting the server's requests. Frames from retired sessions are discarded
+before decoding their RPC payloads.
+
+RPC annotations select request priority; ACKs, interrupts, and terminal replies
+use control priority. The writer chooses control before data before logs.
+Already-written bytes and the frame currently being written cannot be preempted.
+The NDJSON reader rejects lines longer than 1,048,576 characters. These are
+count and line-length limits, not a complete heap or byte budget; network
+adapters must also bound received chunks and enforce their byte framing limits.
+
+There is no code distribution, lease, authentication, network target,
+scheduling, or stable logical instance identity yet. This implementation does
+not restrict the plugin's filesystem, network, or ability to escape a process
+group.
 
 The runner buffers at most 128 pending log entries and reports cumulative losses
 on the `Logs` RPC. The host emits warnings with `remote.logs.dropped` (the new
 loss count) and `remote.logs.droppedTotal` (the cumulative count). The final
 `LogsEnded` message reports the final count even when no log entry remains.
 
-`Failed` and `Stopped` use a separate bounded control stream. The client
-dispatches log responses through a separate scoped fiber and a one-frame queue,
-so a backpressured log consumer cannot stall control response decoding. RPC ACKs
-bound outstanding log frames. Already-written bytes share the same fd and cannot
-be preempted. After control completion the host drains the bounded log tail
-within the existing shutdown deadline.
-
-Defect/log payloads still use Effect's diagnostic JSON encoding. The bounded
-entry count is not a total byte budget; per-entry size limits and general duplex
-flow control belong to the next transport phase. The shutdown deadline is a
-local default, not a distributed lease.
+`Failed`, `Withdrawing`, and `Stopped` use a separate bounded control stream.
+The transport uses RPC priority annotations, not log method-name inspection.
+After control completion the host drains the bounded log tail within the
+existing shutdown deadline.
 
 `test/lifecycle.test.ts` runs actual child processes and covers startup gating,
 combined typed errors and defects, retry, process exit and SIGKILL, graceful
@@ -127,7 +185,12 @@ bin into `dist`. Library imports perform no I/O; executing the bin starts the
 runner. `test/hardening.test.ts` additionally covers ambient spawner
 replacement, host refinement rejection before spawn, flat cleanup reasons and
 annotations, contract module loading, loss accounting, and control progress
-while log consumption is suspended.
+while log consumption is suspended. `test/services.test.ts` covers nested
+bidirectional calls, instance identity, draining before process exit, dependency
+restart, publication cycles, streams and interruption, and failures during
+export withdrawal. `test/duplex.test.ts` exercises saturated admission, bounded
+writer backpressure, priority ordering, disconnects in both directions, and
+stale-session rejection with in-memory byte channels.
 
 Run from the workspace root:
 

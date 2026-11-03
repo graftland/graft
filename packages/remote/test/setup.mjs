@@ -21,9 +21,13 @@ export default async function setup() {
 	})
 	await build({
 		...common,
-		entry: ["contract", "default-contract", "plugin"].map(
-			(name) => new URL(`./fixtures/${name}.ts`, import.meta.url).pathname,
-		),
+		entry: [
+			"contract",
+			"default-contract",
+			"plugin",
+			"services-contract",
+			"services-plugin",
+		].map((name) => new URL(`./fixtures/${name}.ts`, import.meta.url).pathname),
 		outDir: new URL("../.cache/integration", import.meta.url).pathname,
 	})
 }

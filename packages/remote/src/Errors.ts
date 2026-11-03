@@ -19,3 +19,13 @@ export class TransportError extends Schema.TaggedError<
 >()("TransportError", {
 	cause: Schema.Cause(Schema.Unknown, Schema.Unknown),
 }) {}
+
+/** The remote export lease was withdrawn; host consumers must drain before Dispose. */
+export class RemoteWithdrawn extends Schema.TaggedError<
+	RemoteWithdrawn,
+	{ readonly brand: unique symbol }
+>()("RemoteWithdrawn", {}) {
+	override get message() {
+		return "Remote services were withdrawn"
+	}
+}

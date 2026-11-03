@@ -5,53 +5,33 @@ import {
 	Effect,
 	Exit,
 	Fiber,
-	Queue,
 	Ref,
-	Schema,
 	Stream,
 	String,
 } from "effect"
 import type { ChildProcessSpawner } from "effect/process"
-import { RpcClient, RpcClientError, RpcSerialization } from "effect/rpc"
+import * as Duplex from "./duplex"
+import { Control } from "./control"
+import { combine } from "./services"
+import { RpcGroup } from "effect/rpc"
+import { Sink } from "effect"
 import { ProcessExited, TransportError } from "../Errors"
-
-const Id = Schema.Union([Schema.String, Schema.Finite])
-const Reason = Schema.Union([
-	Schema.TaggedStruct("Fail", { error: Schema.Unknown }),
-	Schema.TaggedStruct("Die", { defect: Schema.Unknown }),
-	Schema.TaggedStruct("Interrupt", {
-		fiberId: Schema.UndefinedOr(Schema.NullOr(Schema.Finite)),
-	}),
-])
-const Response = Schema.Union([
-	Schema.TaggedStruct("Exit", {
-		requestId: Id,
-		exit: Schema.Union([
-			Schema.TaggedStruct("Success", { value: Schema.Unknown }),
-			Schema.TaggedStruct("Failure", { cause: Schema.Array(Reason) }),
-		]),
-	}),
-	Schema.TaggedStruct("Chunk", {
-		requestId: Id,
-		values: Schema.NonEmptyArray(Schema.Unknown),
-	}),
-	Schema.TaggedStruct("Defect", { defect: Schema.Unknown }),
-	Schema.TaggedStruct("Pong", {}),
-])
 
 /** One client and one process per activation; EOF is resolved by the exit observer. */
 export const make = Effect.fnUntraced(function* (
 	child: ChildProcessSpawner.ChildProcessHandle,
+	options: Duplex.Options = {
+		session: "local",
+		local: combine(RpcGroup.make(), []),
+		remote: combine(Control, []),
+	},
 ) {
-	const scope = yield* Effect.scope
 	const failed = yield* Deferred.make<never, ProcessExited | TransportError>()
 	const stopping = yield* Ref.make(false)
 	const failures = yield* Ref.make<Cause.Cause<ProcessExited | TransportError>>(
 		Cause.empty,
 	)
-	const outgoing = yield* Queue.bounded<Uint8Array, Cause.Done>(32)
 	const stderr = yield* Ref.make("")
-	const logRequest = yield* Ref.make<string | number | undefined>(undefined)
 	const record = (error: ProcessExited | TransportError) =>
 		Effect.gen(function* () {
 			yield* Ref.update(failures, (cause) =>
@@ -76,11 +56,6 @@ export const make = Effect.fnUntraced(function* (
 		Effect.tapCause(report),
 		Effect.forkScoped,
 	)
-	const writer = yield* Stream.fromQueue(outgoing).pipe(
-		Stream.run(child.stdin),
-		Effect.tapCause(report),
-		Effect.forkScoped,
-	)
 	const exited = yield* Effect.gen(function* () {
 		const status = yield* Effect.exit(child.exitCode)
 		const err = yield* Fiber.await(stderrFiber)
@@ -101,77 +76,51 @@ export const make = Effect.fnUntraced(function* (
 		if (!(yield* Ref.get(stopping))) yield* record(error)
 		return error
 	}).pipe(Effect.forkScoped)
-	const parser = RpcSerialization.makeNdjson({
-		maxBufferSize: 1024 * 1024,
-	}).makeUnsafe()
-	const protocol = RpcClient.Protocol.of({
-		codecFor: RpcSerialization.json.codecFor,
-		supportsAck: true,
-		supportsTransferables: false,
-		run: (_id, receive) =>
-			Effect.gen(function* () {
-				// RpcClient.receive can wait for a stream consumer. Isolate the single
-				// Logs request so its ACK backpressure cannot block control responses.
-				const logs = yield* Queue.bounded<typeof Response.Type>(1)
-				yield* Stream.fromQueue(logs).pipe(
-					Stream.runForEach(receive),
-					Effect.tapCause(report),
-					Effect.forkIn(scope),
-				)
-				return yield* child.getOutputFd(3).pipe(
-					Stream.runForEach((bytes) =>
-						Effect.gen(function* () {
-							const messages = yield* Effect.try({
-								try: () => parser.decode(bytes),
-								catch: (error) =>
-									TransportError.make({ cause: Cause.die(error) }),
-							}).pipe(Effect.orDie)
-							for (const message of messages) {
-								const decoded =
-									yield* Schema.decodeUnknownEffect(Response)(message)
-								if (
-									(decoded._tag === "Chunk" || decoded._tag === "Exit") &&
-									decoded.requestId === (yield* Ref.get(logRequest))
-								)
-									yield* Queue.offer(logs, decoded)
-								else yield* receive(decoded)
-							}
-						}),
-					),
-					Effect.catchCause((cause) => Effect.asVoid(report(cause))),
-					Effect.andThen(Effect.never),
-				)
-			}),
-		send: (_id, message) =>
-			Effect.gen(function* () {
-				if (message._tag === "Request" && message.tag === "Logs")
-					yield* Ref.set(logRequest, message.id)
-				const encoded = yield* Effect.try({
-					try: () => parser.encode(message),
-					catch: (cause) =>
-						RpcClientError.RpcClientError.make({
-							reason: RpcClientError.RpcClientDefect.make({
-								message: "Could not encode a control message",
-								cause,
-							}),
-						}),
-				})
-				if (encoded !== undefined)
-					yield* Queue.offer(
-						outgoing,
-						typeof encoded === "string"
-							? new TextEncoder().encode(encoded)
-							: encoded,
-					)
-			}),
-	})
+	const peer = yield* Duplex.make(
+		{
+			input: child.getOutputFd(3).pipe(
+				// A process exit closes fd 3 before Node reports its status. Let the exit
+				// observer publish complete diagnostics first, without waiting forever
+				// if a live process closes only its protocol descriptor.
+				Stream.concat(
+					Stream.fromEffect(
+						Fiber.join(exited).pipe(
+							Effect.timeoutOption("1 second"),
+							Effect.asVoid,
+						),
+					).pipe(Stream.drain),
+				),
+				Stream.mapError((error) =>
+					TransportError.make({ cause: Cause.fail(error) }),
+				),
+			),
+			output: child.stdin.pipe(
+				Sink.mapError((error) =>
+					TransportError.make({ cause: Cause.fail(error) }),
+				),
+			),
+		},
+		options,
+	)
+	yield* Deferred.await(peer.failed).pipe(
+		Effect.catch((error) =>
+			Ref.get(stopping).pipe(
+				Effect.flatMap((stopping) => (stopping ? Effect.void : record(error))),
+			),
+		),
+		Effect.forkScoped,
+	)
 	return {
-		protocol,
-		report,
+		...peer,
+		protocol: peer.clientProtocol,
+		report: (cause: Cause.Cause<unknown>) =>
+			Ref.get(stopping).pipe(
+				Effect.flatMap((stopping) => (stopping ? Effect.void : report(cause))),
+			),
 		failures,
 		failed,
 		stopping,
 		exited,
-		end: Queue.end(outgoing).pipe(Effect.andThen(Fiber.join(writer))),
+		end: peer.end.pipe(Effect.andThen(Fiber.join(peer.writer))),
 	}
 })

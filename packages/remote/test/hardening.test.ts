@@ -285,7 +285,7 @@ describe("local remote hardening", () => {
 						Effect.gen(function* () {
 							if (event._tag === "Stopped")
 								yield* Deferred.succeed(stopped, undefined)
-							else {
+							else if (event._tag === "Failed") {
 								const cause = yield* contract.decodeCause(event.cause)
 								yield* Deferred.succeed(failed, cause)
 							}
@@ -295,6 +295,7 @@ describe("local remote hardening", () => {
 				)
 				const loaded = yield* client.Load({
 					input: { directory, mode: "flood", value: 2 },
+					instance: { id: "test", generation: 1 },
 				})
 				assert.equal(loaded._tag, "Success")
 				yield* Deferred.await(receivedLog)
