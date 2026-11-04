@@ -12,7 +12,7 @@ import {
 } from "effect"
 import { RpcClient } from "effect/rpc"
 import { MtlsCredentials } from "../../Auth"
-import { TlsTransport } from "../../Transport"
+import { WebsocketTransport } from "../../Transport"
 import type { Runner as RunnerOptions } from "../../Targets"
 import type { Connected } from "../runner/Connection"
 import { ProcessExited, TransportError } from "../../Errors"
@@ -36,7 +36,7 @@ export const connect = <D extends ReadonlyArray<Plugin.Dependency>>(
 		const instance = target.instance
 
 		const margin = Duration.toMillis(target.margin ?? "5 seconds")
-		const transport = yield* TlsTransport
+		const transport = yield* WebsocketTransport
 		const auth = yield* MtlsCredentials
 		const certificate = yield* target.auth.read.pipe(
 			Effect.flatMap(auth.prepare),

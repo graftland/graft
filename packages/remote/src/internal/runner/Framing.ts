@@ -29,6 +29,14 @@ export const encode = (frame: Frame) =>
 		return bytes
 	})
 
+/** Check a message boundary; the decoder still validates the frame's contents. */
+export const isCompleteFrame = (bytes: Uint8Array): boolean =>
+	bytes.byteLength >= headerSize &&
+	new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint32(
+		4,
+	) ===
+		bytes.byteLength - headerSize
+
 /** The decoder owns its byte buffer. Results expose malformed frames without throwing through a generator. */
 export const decoder = () => {
 	const pending = MutableRef.make<Result.Result<Uint8Array, FrameError>>(

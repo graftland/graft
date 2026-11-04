@@ -2,10 +2,21 @@ import { Peer } from "../src/Auth"
 import { identityFromSubjectAltName } from "../src/internal/auth/mtls"
 import { assert, describe, it } from "@effect/vitest"
 import { NodeServices, NodeSocket } from "@effect/platform-node"
-import { Cause, Deferred, Effect, Exit, FileSystem, Redacted } from "effect"
-import { inject } from "vitest"
-import * as Tls from "../src/internal/runner/Tls"
-import * as Multiplex from "../src/internal/runner/Multiplex"
+import {
+	Array,
+	Cause,
+	Deferred,
+	Effect,
+	Exit,
+	FileSystem,
+	Redacted,
+} from "effect"
+import { inject, expectTypeOf } from "vitest"
+import { Socket } from "effect/socket"
+import WS from "ws"
+import * as Remote from "../src/index"
+import * as WebsocketClient from "../src/internal/websocket"
+import * as Websocket from "./websocket"
 import * as Framing from "../src/internal/runner/Framing"
 
 declare module "vitest" {
@@ -27,7 +38,7 @@ const credentials = (name: string) =>
 const bytes = (value: string) => new TextEncoder().encode(value)
 const text = (value: Uint8Array) => new TextDecoder().decode(value)
 const server = Effect.gen(function* () {
-	const listener = yield* Tls.listen({
+	const listener = yield* Websocket.listen({
 		host: "127.0.0.1",
 		port: 0,
 		tls: yield* credentials("server"),
@@ -38,7 +49,163 @@ const server = Effect.gen(function* () {
 	return { listener, port: listener.address.port }
 })
 
-describe("runner mutual TLS", () => {
+const httpResponse = (
+	port: number,
+	tls: Websocket.Credentials,
+	path: string,
+	protocol?: string,
+) =>
+	Effect.gen(function* () {
+		const socket = yield* NodeSocket.makeTls({
+			host: "127.0.0.1",
+			port,
+			servername: "localhost",
+			ca: tls.ca,
+			cert: tls.cert,
+			key: Redacted.value(tls.key),
+			rejectUnauthorized: true,
+		})
+		const reader = yield* socket.reader
+		const writer = yield* socket.writer
+		yield* writer.write(
+			`GET ${path} HTTP/1.1\r\nHost: localhost\r\n` +
+				(protocol === undefined
+					? "Connection: close\r\n"
+					: `Connection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Protocol: ${protocol}\r\n`) +
+				"\r\n",
+		)
+		const response = yield* reader.pull
+		return Array.join(
+			Array.map(response, (value) =>
+				typeof value === "string" ? value : text(value),
+			),
+			"",
+		)
+	}).pipe(Effect.scoped)
+
+describe("runner WebSocket mutual TLS", () => {
+	it("excludes literal ws targets from the mTLS runner API", () => {
+		expectTypeOf<
+			Parameters<
+				typeof Remote.runner<"ws://localhost", readonly []>
+			>[0]["transport"]
+		>().toEqualTypeOf<never>()
+	})
+
+	it.live("rejects a plain TLS HTTP request without a WebSocket upgrade", () =>
+		Effect.gen(function* () {
+			const { listener, port } = yield* server
+			yield* listener.run(() => Effect.never).pipe(Effect.forkScoped)
+			const tls = yield* credentials("client")
+			const response = yield* httpResponse(port, tls, "/graft")
+			assert.include(response, "HTTP/1.1 400")
+		}).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+	)
+
+	it.live("rejects a WebSocket handshake without a client certificate", () =>
+		Effect.gen(function* () {
+			const { listener, port } = yield* server
+			yield* listener.run(() => Effect.never).pipe(Effect.forkScoped)
+			const tls = yield* credentials("client")
+			const socket = yield* Socket.makeWebSocket(
+				`wss://127.0.0.1:${port}/graft`,
+				{
+					protocols: "graft-remote.v1",
+				},
+			).pipe(
+				Effect.provideService(
+					Socket.WebSocketConstructor,
+					(url) =>
+						new WS(url, "graft-remote.v1", {
+							ca: tls.ca,
+						}),
+				),
+			)
+			const rejected = yield* Effect.exit(socket.reader)
+			assert.isTrue(Exit.isFailure(rejected))
+		}).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+	)
+
+	it.live(
+		"returns 404 for another path and 400 for another subprotocol before upgrade",
+		() =>
+			Effect.gen(function* () {
+				const { listener, port } = yield* server
+				yield* listener.run(() => Effect.never).pipe(Effect.forkScoped)
+				const tls = yield* credentials("client")
+				// Both errors are HTTP responses, before ws sends a 101 Switching Protocols.
+				const path = yield* httpResponse(port, tls, "/other", "graft-remote.v1")
+				const protocol = yield* httpResponse(port, tls, "/graft", "other")
+				assert.include(path, "HTTP/1.1 404")
+				assert.include(protocol, "HTTP/1.1 400")
+				assert.notInclude(path + protocol, "101 Switching Protocols")
+			}).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+	)
+
+	it.live("rejects text messages and continues serving the next host", () =>
+		Effect.gen(function* () {
+			const { listener, port } = yield* server
+			const rejected = yield* Deferred.make<string>()
+			yield* listener
+				.run((socket) =>
+					Effect.gen(function* () {
+						const peer = yield* Websocket.multiplex(socket)
+						yield* peer.take(0).pipe(
+							Effect.flatMap((payload) => peer.send(0, payload)),
+							Effect.tapCause((cause) =>
+								Deferred.succeed(rejected, Cause.pretty(cause)),
+							),
+						)
+						return yield* peer.await
+					}),
+				)
+				.pipe(Effect.forkScoped)
+			const tls = yield* credentials("client")
+			yield* Effect.gen(function* () {
+				const socket = yield* Websocket.connect({
+					port,
+					tls,
+					servername: "localhost",
+				})
+				const reader = yield* socket.reader
+				const writer = yield* socket.writer
+				yield* writer.write("not a binary frame")
+				const ended = yield* Effect.exit(reader.pull)
+				assert.isTrue(Exit.isFailure(ended))
+			}).pipe(Effect.scoped)
+			const reason = yield* Deferred.await(rejected)
+			assert.include(reason, "messages must be binary")
+			const socket = yield* Websocket.connect({
+				port,
+				tls,
+				servername: "localhost",
+			})
+			const peer = yield* Websocket.multiplex(socket)
+			yield* peer.send(0, bytes("next host"))
+			const reply = yield* peer.take(0)
+			assert.equal(text(reply), "next host")
+		}).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+	)
+
+	it.live("rejects an environment URL using ws before dialing", () =>
+		Effect.gen(function* () {
+			const result = yield* Effect.exit(
+				WebsocketClient.connect(
+					{
+						url: String("ws://localhost"),
+						tls: { ca: "unused" },
+					},
+					{ cert: "unused", key: Redacted.make("unused") },
+				),
+			)
+			assert.isTrue(Exit.isFailure(result))
+			if (Exit.isFailure(result)) {
+				assert.isFalse(Cause.hasDies(result.cause))
+				assert.include(Cause.pretty(result.cause), "wss://")
+			}
+		}).pipe(Effect.scoped),
+	)
+
 	it.effect("reads the unique graft URI from a dedicated CA certificate", () =>
 		Effect.gen(function* () {
 			const valid = yield* identityFromSubjectAltName(
@@ -67,7 +234,7 @@ describe("runner mutual TLS", () => {
 						Effect.gen(function* () {
 							const authenticated = yield* Peer
 							yield* Deferred.succeed(identity, authenticated)
-							const peer = yield* Multiplex.fromSocket(socket)
+							const peer = yield* Websocket.multiplex(socket)
 							const input = yield* peer.take(1)
 							yield* peer.send(1, input)
 							yield* peer.send(0, bytes("session"))
@@ -75,13 +242,12 @@ describe("runner mutual TLS", () => {
 						}),
 					)
 					.pipe(Effect.forkScoped)
-				const socket = yield* Tls.connect({
-					host: "127.0.0.1",
+				const socket = yield* Websocket.connect({
 					port,
 					servername: "localhost",
 					tls: yield* credentials("client"),
 				})
-				const peer = yield* Multiplex.fromSocket(socket)
+				const peer = yield* Websocket.multiplex(socket)
 				yield* peer.send(1, new Uint8Array([255, 0, 1]))
 				const echoed = yield* peer.take(1)
 				const session = yield* peer.take(0)
@@ -102,7 +268,7 @@ describe("runner mutual TLS", () => {
 					.run((socket) =>
 						Effect.gen(function* () {
 							yield* Deferred.succeed(accepted, undefined)
-							const peer = yield* Multiplex.fromSocket(socket)
+							const peer = yield* Websocket.multiplex(socket)
 							yield* peer.send(0, bytes("accepted"))
 							return yield* Effect.never
 						}),
@@ -128,8 +294,7 @@ describe("runner mutual TLS", () => {
 				const untrusted = yield* Effect.exit(
 					Effect.scoped(
 						Effect.gen(function* () {
-							const socket = yield* Tls.connect({
-								host: "127.0.0.1",
+							const socket = yield* Websocket.connect({
 								port,
 								servername: "localhost",
 								tls: yield* credentials("rogue"),
@@ -144,8 +309,7 @@ describe("runner mutual TLS", () => {
 					const rejected = yield* Effect.exit(
 						Effect.scoped(
 							Effect.gen(function* () {
-								const socket = yield* Tls.connect({
-									host: "127.0.0.1",
+								const socket = yield* Websocket.connect({
 									port,
 									servername: "localhost",
 									tls: yield* credentials(name),
@@ -159,13 +323,12 @@ describe("runner mutual TLS", () => {
 				}
 				const prematurelyAccepted = yield* Deferred.isDone(accepted)
 				assert.isFalse(prematurelyAccepted)
-				const socket = yield* Tls.connect({
-					host: "127.0.0.1",
+				const socket = yield* Websocket.connect({
 					port,
 					servername: "localhost",
 					tls,
 				})
-				const peer = yield* Multiplex.fromSocket(socket)
+				const peer = yield* Websocket.multiplex(socket)
 				const response = yield* peer.take(0)
 				assert.equal(text(response), "accepted")
 			}).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
@@ -177,8 +340,7 @@ describe("runner mutual TLS", () => {
 			Effect.gen(function* () {
 				const { listener, port } = yield* server
 				yield* listener.run(() => Effect.never).pipe(Effect.forkScoped)
-				const socket = yield* Tls.connect({
-					host: "127.0.0.1",
+				const socket = yield* Websocket.connect({
 					port,
 					servername: "incorrect.example",
 					tls: yield* credentials("client"),
@@ -197,14 +359,13 @@ describe("runner mutual TLS", () => {
 				yield* listener
 					.run((socket) =>
 						Effect.gen(function* () {
-							const peer = yield* Multiplex.fromSocket(socket)
+							const peer = yield* Websocket.multiplex(socket)
 							const failure = yield* Effect.flip(peer.await)
 							yield* Deferred.succeed(rejected, Cause.pretty(failure.cause))
 						}),
 					)
 					.pipe(Effect.forkScoped)
-				const socket = yield* Tls.connect({
-					host: "127.0.0.1",
+				const socket = yield* Websocket.connect({
 					port,
 					servername: "localhost",
 					tls: yield* credentials("client"),
@@ -228,7 +389,7 @@ describe("runner mutual TLS", () => {
 					.run((socket) =>
 						Effect.gen(function* () {
 							const identity = yield* Peer
-							const peer = yield* Multiplex.fromSocket(socket)
+							const peer = yield* Websocket.multiplex(socket)
 							yield* peer.send(0, bytes(identity))
 							return yield* Effect.never
 						}),
@@ -237,13 +398,12 @@ describe("runner mutual TLS", () => {
 				const identities = yield* Effect.forEach(["client", "other"], (name) =>
 					Effect.scoped(
 						Effect.gen(function* () {
-							const socket = yield* Tls.connect({
-								host: "127.0.0.1",
+							const socket = yield* Websocket.connect({
 								port,
 								servername: "localhost",
 								tls: yield* credentials(name),
 							})
-							const peer = yield* Multiplex.fromSocket(socket)
+							const peer = yield* Websocket.multiplex(socket)
 							const identity = yield* peer.take(0)
 							return text(identity)
 						}),

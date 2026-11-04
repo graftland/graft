@@ -1,22 +1,32 @@
 import { Plugin } from "@graftland/graft"
-import { Console, Effect, FileSystem, Path, Redacted, Schema } from "effect"
+import { Console, Effect, FileSystem, Path, Schema } from "effect"
 import { MtlsAuthenticator } from "../Auth"
 import { Supervisor } from "../Supervisor"
 import { Directory } from "../internal/config"
-import * as Tls from "../internal/runner/Tls"
+import { createSecureServer } from "node:http2"
+import * as WebsocketServer from "../internal/websocketServer"
+import { Url, path as upgradePath } from "../internal/websocket"
+import { authenticate } from "../internal/auth/mtls"
 import * as Channel from "../internal/socketChannel"
-import { connectionEnded } from "../internal/runner/connectionEnded"
+
+export const Config = Schema.Struct({
+	url: Url.check(
+		Schema.makeFilter(
+			(url) => url.pathname === "/" || url.pathname === upgradePath,
+			{
+				expected: "a listener URL with no path or /graft",
+			},
+		),
+	),
+	cert: Schema.String,
+	key: Schema.String,
+	// The listener injects the authenticator selected by its configuration.
+	auth: Schema.Literal(MtlsAuthenticator.key),
+})
 
 export default Plugin.make({
-	name: "remote-tls-listener",
-	config: Schema.Struct({
-		host: Schema.String,
-		port: Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 65535 })),
-		cert: Schema.String,
-		key: Schema.String,
-		// Stage 1 has one authenticator. Later transports select their own supported keys.
-		auth: Schema.Literal(MtlsAuthenticator.key),
-	}),
+	name: "remote-websocket-listener",
+	config: Config,
 	inject: [Supervisor, MtlsAuthenticator, FileSystem.FileSystem, Path.Path],
 	apply: Effect.fnUntraced(function* (config) {
 		const supervisor = yield* Supervisor
@@ -26,24 +36,23 @@ export default Plugin.make({
 		const directory = yield* Directory
 		const key = yield* fs.readFileString(path.resolve(directory, config.key))
 		const cert = yield* fs.readFileString(path.resolve(directory, config.cert))
-		const listener = yield* Tls.listen(
-			{
-				host: config.host,
-				port: config.port,
-				tls: {
+		const listener = yield* WebsocketServer.listen(
+			() =>
+				createSecureServer({
+					allowHTTP1: true,
 					ca: auth.ca,
 					cert,
-					key: Redacted.make(key),
-				},
-			},
-			auth.authenticate,
+					key,
+					minVersion: "TLSv1.3",
+					requestCert: true,
+					rejectUnauthorized: true,
+				}),
+			{ host: config.url.hostname, port: Number(config.url.port || 443) },
+			authenticate(auth.authenticate),
 		)
 		yield* Plugin.fork(
 			listener.run((socket) =>
-				Channel.fromSocket(socket).pipe(
-					Effect.flatMap(supervisor.accept),
-					Effect.catchCause(connectionEnded),
-				),
+				Channel.fromSocket(socket).pipe(Effect.flatMap(supervisor.accept)),
 			),
 		)
 		const message = yield* Schema.encodeEffect(

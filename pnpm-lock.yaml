@@ -185,10 +185,16 @@ importers:
       pkijs:
         specifier: 4.0.1
         version: 4.0.1(asn1js@4.0.0)
+      ws:
+        specifier: 8.22.1
+        version: 8.22.1
     devDependencies:
       "@effect/vitest":
         specifier: 4.1.2
         version: 4.1.2(effect@4.1.2)(vitest@5.1.0(@types/node@26.6.6)(vite@8.3.5(@types/node@26.6.6)(yaml@2.9.1)))
+      "@types/ws":
+        specifier: 8.18.2
+        version: 8.18.2
       effect:
         specifier: 4.1.2
         version: 4.1.2

@@ -29,6 +29,10 @@ const invoke = (args: ReadonlyArray<string>) =>
 	})
 const serve = [
 	"serve",
+	"--listen",
+	"wss://127.0.0.1:0",
+	"--auth",
+	"mtls",
 	"--state",
 	"unused-state",
 	"--root",
@@ -46,8 +50,8 @@ describe("remote command line", () => {
 		() =>
 			Effect.gen(function* () {
 				const cases: ReadonlyArray<readonly [string, string, string]> = [
-					["--port", "65536", "Port must be between"],
-					["--port", "fraction", "integer"],
+					["--listen", "wss://localhost:65536", "URL"],
+					["--listen", "wss://localhost:fraction", "URL"],
 					["--lease", "0 millis", "finite and positive"],
 					["--grace", "Infinity", "finite and positive"],
 					["--lease", "soon", "Duration"],
@@ -70,8 +74,8 @@ describe("remote command line", () => {
 				"serve",
 				"--config",
 				"missing.yml",
-				"--host",
-				"127.0.0.1",
+				"--listen",
+				"wss://127.0.0.1:0",
 			])
 			assert.notEqual(result.code, 0)
 			assert.include(
@@ -100,10 +104,9 @@ describe("remote command line", () => {
   name: '@graftland/remote/runner/auth/mtls'
   config: { ca: '${inject("remoteTls")}/ca.crt' }
 - id: listener
-  name: '@graftland/remote/runner/tls'
+  name: '@graftland/remote/runner/websocket'
   config:
-    host: 127.0.0.1
-    port: 0
+    url: wss://127.0.0.1:0
     cert: missing.crt
     key: '${inject("remoteTls")}/server.key'
     auth: '@graftland/remote/Auth/MtlsAuthenticator'

@@ -110,7 +110,7 @@ export const start = Effect.fn("Lab.start")(function* (options: Options) {
 		[
 			options.runner,
 			"serve",
-			...["--host", "127.0.0.1", "--port", "0"],
+			...["--listen", "wss://127.0.0.1:0", "--auth", "mtls"],
 			...["--root", root, "--state", path.join(options.directory, "state")],
 			...["--cert", path.join(certificates, "server.crt")],
 			...["--key", path.join(certificates, "server.key")],

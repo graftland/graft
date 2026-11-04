@@ -20,10 +20,10 @@ export default defineConfig({
 		"src/Auth.ts",
 		"src/Supervisor.ts",
 		"src/host/local.ts",
-		"src/host/tls.ts",
+		"src/host/websocket.ts",
 		"src/host/auth/mtls.ts",
 		"src/runner/supervisor.ts",
-		"src/runner/tls.ts",
+		"src/runner/websocket.ts",
 		"src/runner/auth/mtls.ts",
 	],
 })

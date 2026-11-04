@@ -1,7 +1,7 @@
 import { Graft, Plugin } from "@graftland/graft"
 import { Effect, Layer } from "effect"
 import local from "../src/host/local"
-import tls from "../src/host/tls"
+import websocket from "../src/host/websocket"
 import mtls from "../src/host/auth/mtls"
 
 const load = (
@@ -17,6 +17,6 @@ export const localRuntime = Layer.provideMerge(
 	Graft.layer,
 )
 export const runnerRuntime = Layer.provideMerge(
-	Layer.effectDiscard(load([tls, mtls])),
+	Layer.effectDiscard(load([websocket, mtls])),
 	Graft.layer,
 )

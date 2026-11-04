@@ -4,7 +4,7 @@
 # The TLS transport and mTLS credentials plugins provide the host capabilities
 # used by the remote exporter.
 - id: tls-transport
-  name: "@graftland/remote/host/tls"
+  name: "@graftland/remote/host/websocket"
 - id: mtls-credentials
   name: "@graftland/remote/host/auth/mtls"
 

@@ -2,6 +2,7 @@ import { assert, describe, it } from "@effect/vitest"
 import { NodeServices, NodeSocketServer } from "@effect/platform-node"
 import { Graft, Plugin } from "@graftland/graft"
 import {
+	Cause,
 	Deferred,
 	Effect,
 	Exit,
@@ -10,6 +11,7 @@ import {
 	Option,
 	Redacted,
 	Stream,
+	Schema,
 } from "effect"
 import { Digest, SecureRandom } from "effect/crypto"
 import { inject } from "vitest"
@@ -20,9 +22,9 @@ import { MtlsAuthenticator } from "../src/Auth"
 import local from "../src/host/local"
 import supervisor from "../src/runner/supervisor"
 import mtls from "../src/runner/auth/mtls"
-import tls from "../src/runner/tls"
+import websocket, { Config as WebsocketConfig } from "../src/runner/websocket"
 import * as Lock from "../src/internal/runner/Lock"
-import * as Tls from "../src/internal/runner/Tls"
+import * as Websocket from "./websocket"
 import { contract } from "./fixtures/contract"
 
 const runtime = Layer.provideMerge(
@@ -62,8 +64,7 @@ const connection = Effect.fnUntraced(function* (port: number) {
 	const fs = yield* FileSystem.FileSystem
 	const root = inject("remoteTls")
 	const key = yield* fs.readFileString(root + "/client.key")
-	const socket = yield* Tls.connect({
-		host: "127.0.0.1",
+	const socket = yield* Websocket.connect({
 		port,
 		servername: "localhost",
 		tls: {
@@ -76,6 +77,35 @@ const connection = Effect.fnUntraced(function* (port: number) {
 })
 
 describe("remote capability plugins", () => {
+	it.effect(
+		"rejects listener URLs with a path other than /graft during decoding",
+		() =>
+			Effect.gen(function* () {
+				const config = {
+					cert: "unused.crt",
+					key: "unused.key",
+					auth: MtlsAuthenticator.key,
+				}
+				for (const url of [
+					"wss://localhost:7443",
+					"wss://localhost:7443/graft",
+				]) {
+					const decoded = yield* Schema.decodeEffect(WebsocketConfig)({
+						...config,
+						url,
+					})
+					assert.equal(decoded.url.href, new URL(url).href)
+				}
+				const rejected = yield* Schema.decodeEffect(WebsocketConfig)({
+					...config,
+					url: "wss://localhost:7443/other",
+				}).pipe(Effect.exit)
+				assert.isTrue(Exit.isFailure(rejected))
+				if (Exit.isFailure(rejected))
+					assert.include(Cause.pretty(rejected.cause), "no path or /graft")
+			}),
+	)
+
 	it.live("withdraws the proxy before its local transport is released", () =>
 		Effect.gen(function* () {
 			const fs = yield* FileSystem.FileSystem
@@ -107,7 +137,7 @@ describe("remote capability plugins", () => {
 		}).pipe(Effect.scoped, Effect.provide(runtime)),
 	)
 	it.live(
-		"closes a TLS listener when authentication is withdrawn without restarting the supervisor",
+		"closes a WebSocket listener when authentication is withdrawn without restarting the supervisor",
 		() =>
 			Effect.gen(function* () {
 				const fs = yield* FileSystem.FileSystem
@@ -123,9 +153,8 @@ describe("remote capability plugins", () => {
 				})
 				yield* auth.await
 				const port = yield* availablePort
-				const listener = yield* Graft.plugin(tls, {
-					host: "127.0.0.1",
-					port,
+				const listener = yield* Graft.plugin(websocket, {
+					url: `wss://127.0.0.1:${port}`,
 					cert: inject("remoteTls") + "/server.crt",
 					key: inject("remoteTls") + "/server.key",
 					auth: MtlsAuthenticator.key,

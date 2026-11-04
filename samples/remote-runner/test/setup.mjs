@@ -33,7 +33,7 @@ export default async function setup() {
 			"bin",
 			"watchdog",
 			"runner/supervisor",
-			"runner/tls",
+			"runner/websocket",
 			"runner/auth/mtls",
 		].map(
 			(name) =>

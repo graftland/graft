@@ -29,7 +29,7 @@ describe("remote runner", () => {
 								"./bin": "./dist/bin.js",
 								"./watchdog": "./dist/watchdog.js",
 								"./runner/supervisor": "./dist/runner/supervisor.js",
-								"./runner/tls": "./dist/runner/tls.js",
+								"./runner/websocket": "./dist/runner/websocket.js",
 								"./runner/auth/mtls": "./dist/runner/auth/mtls.js",
 							},
 						},

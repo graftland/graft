@@ -23,9 +23,9 @@
 			"source": "./src/host/local.ts",
 			"default": "./dist/host/local.js"
 		},
-		"./host/tls": {
-			"source": "./src/host/tls.ts",
-			"default": "./dist/host/tls.js"
+		"./host/websocket": {
+			"source": "./src/host/websocket.ts",
+			"default": "./dist/host/websocket.js"
 		},
 		"./Runner": {
 			"source": "./src/Runner.ts",
@@ -39,9 +39,9 @@
 			"source": "./src/runner/supervisor.ts",
 			"default": "./dist/runner/supervisor.js"
 		},
-		"./runner/tls": {
-			"source": "./src/runner/tls.ts",
-			"default": "./dist/runner/tls.js"
+		"./runner/websocket": {
+			"source": "./src/runner/websocket.ts",
+			"default": "./dist/runner/websocket.js"
 		},
 		"./Supervisor": {
 			"source": "./src/Supervisor.ts",
@@ -66,12 +66,14 @@
 		"@effect/platform-node": "4.1.2",
 		"@graftland/loader": "workspace:*",
 		"pkijs": "4.0.1",
-		"asn1js": "4.0.0"
+		"asn1js": "4.0.0",
+		"ws": "8.22.1"
 	},
 	"devDependencies": {
 		"@effect/vitest": "4.1.2",
 		"effect": "4.1.2",
-		"vitest": "5.1.0"
+		"vitest": "5.1.0",
+		"@types/ws": "8.18.2"
 	},
 	"publishConfig": {
 		"exports": {
@@ -80,11 +82,11 @@
 			"./bin": "./dist/bin.js",
 			"./host/auth/mtls": "./dist/host/auth/mtls.js",
 			"./host/local": "./dist/host/local.js",
-			"./host/tls": "./dist/host/tls.js",
+			"./host/websocket": "./dist/host/websocket.js",
 			"./Runner": "./dist/Runner.js",
 			"./runner/auth/mtls": "./dist/runner/auth/mtls.js",
 			"./runner/supervisor": "./dist/runner/supervisor.js",
-			"./runner/tls": "./dist/runner/tls.js",
+			"./runner/websocket": "./dist/runner/websocket.js",
 			"./Supervisor": "./dist/Supervisor.js",
 			"./Transport": "./dist/Transport.js",
 			"./watchdog": "./dist/watchdog.js",

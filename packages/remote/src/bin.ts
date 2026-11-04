@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/** Runs local children and TLS supervisors, and issues their deployment certificates. */
+/** Runs local children and WebSocket supervisors, and issues their deployment certificates. */
 import { Graft } from "@graftland/graft"
 import { NodeRuntime, NodeServices } from "@effect/platform-node"
 import {
@@ -21,6 +21,7 @@ import { Bootstrap } from "./internal/runner/Bootstrap"
 import * as Watchdog from "./internal/runner/Watchdog"
 import * as Serve from "./internal/serve"
 import { MtlsAuthenticator } from "./Auth"
+import { Url } from "./internal/websocket"
 import * as Certificates from "./internal/Certificates"
 import { Config as SupervisorConfig } from "./runner/supervisor"
 
@@ -44,14 +45,8 @@ const serve = Command.make(
 	"serve",
 	{
 		config: Flag.String("config").pipe(Flag.optional),
-		host: Flag.String("host").pipe(Flag.optional),
-		port: Flag.Int("port").pipe(
-			Flag.filter(
-				(value) => value >= 0 && value <= 65535,
-				() => "Port must be between 0 and 65535",
-			),
-			Flag.optional,
-		),
+		listen: Flag.String("listen").pipe(Flag.withSchema(Url), Flag.atLeast(0)),
+		auth: Flag.Literals("auth", ["mtls"]).pipe(Flag.optional),
 		state: Flag.String("state").pipe(Flag.optional),
 		root: Flag.String("root").pipe(Flag.optional),
 		cert: Flag.String("cert").pipe(Flag.optional),
@@ -63,10 +58,10 @@ const serve = Command.make(
 	Effect.fnUntraced(function* (options) {
 		if (Option.isSome(options.config)) {
 			if (
+				options.listen.length > 0 ||
 				Array.some(
 					[
-						options.host,
-						options.port,
+						options.auth,
 						options.state,
 						options.root,
 						options.cert,
@@ -84,6 +79,15 @@ const serve = Command.make(
 				})
 			return yield* Serve.run({ _tag: "Config", config: options.config.value })
 		}
+		if (options.listen.length === 0)
+			return yield* CliError.UserError.make({
+				cause: "Missing --listen",
+				userMessage: "--listen is required without --config",
+			})
+		yield* required(options.auth, "auth")
+		const addresses = yield* Effect.forEach(options.listen, (url) =>
+			Schema.encodeEffect(Url)(url),
+		)
 		const state = yield* required(options.state, "state")
 		const root = yield* required(options.root, "root")
 		const cert = yield* required(options.cert, "cert")
@@ -114,17 +118,11 @@ const serve = Command.make(
 					name: "@graftland/remote/runner/auth/mtls",
 					config: { ca },
 				},
-				{
-					id: "remote-listener",
-					name: "@graftland/remote/runner/tls",
-					config: {
-						host: Option.getOrElse(options.host, () => "127.0.0.1"),
-						port: Option.getOrElse(options.port, () => 7443),
-						cert,
-						key,
-						auth: MtlsAuthenticator.key,
-					},
-				},
+				...Array.map(addresses, (url, index) => ({
+					id: `remote-listener-${index}`,
+					name: "@graftland/remote/runner/websocket",
+					config: { url, cert, key, auth: MtlsAuthenticator.key },
+				})),
 			],
 		})
 	}),

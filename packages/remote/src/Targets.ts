@@ -2,7 +2,11 @@ import type { Plugin } from "@graftland/graft"
 import { Cause, Effect } from "effect"
 import type { Context, Duration, Scope } from "effect"
 import { MtlsCredentials, type ClientCertificate } from "./Auth"
-import { LocalTransport, TlsTransport, type TlsOptions } from "./Transport"
+import {
+	LocalTransport,
+	WebsocketTransport,
+	type WebsocketOptions,
+} from "./Transport"
 import { RemoteError } from "./Errors"
 import type { Expected } from "./internal/runner/Packages"
 
@@ -46,11 +50,15 @@ export function mtls<E, const D extends ReadonlyArray<Plugin.Dependency>>(
 		),
 	}
 }
-export interface Tls extends TlsOptions {
-	readonly _tag: "Tls"
+export interface Websocket<
+	Url extends string = string,
+> extends WebsocketOptions {
+	readonly _tag: "Websocket"
+	readonly url: Url
 }
-/** Temporary raw TLS target; replaced by websocket in the next protocol stage. */
-export const tls = (options: TlsOptions): Tls => ({ _tag: "Tls", ...options })
+export const websocket = <const Url extends string>(
+	options: Omit<Websocket<Url>, "_tag">,
+): Websocket<Url> => ({ _tag: "Websocket", ...options })
 export interface Local {
 	readonly _tag: "Local"
 	readonly command?: readonly [string, ...string[]]
@@ -62,7 +70,7 @@ export interface Runner<
 	readonly _tag: "Runner"
 	/** Defaults to the current loader entry id. Required outside a loader. */
 	readonly instance?: string
-	readonly transport: Tls
+	readonly transport: Websocket
 	readonly auth: Mtls<D>
 	readonly lease?: Duration.Input
 	readonly margin?: Duration.Input
@@ -73,9 +81,13 @@ export const local = (options: Omit<Local, "_tag"> = {}): Local => ({
 	...options,
 })
 export const runner = <
+	const Url extends string,
 	const D extends ReadonlyArray<Plugin.Dependency> = readonly [],
 >(
-	options: Omit<Runner<D>, "_tag">,
+	options: Omit<Runner<D>, "_tag" | "transport"> & {
+		readonly transport: Websocket<Url> &
+			(Url extends `ws://${string}` ? never : unknown)
+	},
 ): Runner<D> => ({ _tag: "Runner", ...options })
 export type Target<D extends ReadonlyArray<Plugin.Dependency> = readonly []> =
 	Local | Runner<D>
@@ -87,4 +99,4 @@ export const dependencies = <D extends ReadonlyArray<Plugin.Dependency>>(
 > =>
 	target._tag === "Local"
 		? [LocalTransport]
-		: [TlsTransport, MtlsCredentials, ...target.auth.inject]
+		: [WebsocketTransport, MtlsCredentials, ...target.auth.inject]

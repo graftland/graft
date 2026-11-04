@@ -26,19 +26,20 @@ export class LocalTransport extends Context.Service<
 	}
 >()("@graftland/remote/Transport/LocalTransport") {}
 
-export interface TlsOptions {
-	readonly host: string
-	readonly port: number
-	readonly ca: string
-	readonly servername: string
+export interface WebsocketOptions {
+	readonly url: string
+	readonly tls: {
+		readonly ca: string
+		readonly servername?: string
+	}
 	readonly openTimeout?: Duration.Input
 }
-export class TlsTransport extends Context.Service<
-	TlsTransport,
+export class WebsocketTransport extends Context.Service<
+	WebsocketTransport,
 	{
 		readonly connect: (
-			options: TlsOptions,
+			options: WebsocketOptions,
 			certificate: ClientCertificate,
 		) => Effect.Effect<Channel, TransportError, Scope.Scope>
 	}
->()("@graftland/remote/Transport/TlsTransport") {}
+>()("@graftland/remote/Transport/WebsocketTransport") {}

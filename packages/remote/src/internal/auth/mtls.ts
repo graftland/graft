@@ -1,3 +1,6 @@
+import { NodeHttpServerRequest } from "@effect/platform-node"
+import { HttpServerRequest } from "effect/http"
+import { TLSSocket } from "node:tls"
 import { Array, Effect, String } from "effect"
 import { PeerAuthenticationError } from "../runner/model"
 
@@ -16,3 +19,19 @@ export const identityFromSubjectAltName = (san: string | undefined) => {
 				}),
 			)
 }
+
+// Node verifies the certificate chain during the TLS handshake; only the SAN identifies the peer.
+export const authenticate = (
+	readIdentity: (
+		san: string | undefined,
+	) => Effect.Effect<string, PeerAuthenticationError>,
+) =>
+	Effect.gen(function* () {
+		const request = yield* HttpServerRequest.HttpServerRequest
+		const { socket } = NodeHttpServerRequest.toIncomingMessage(request)
+		if (!(socket instanceof TLSSocket))
+			return yield* PeerAuthenticationError.make({
+				detail: "Mutual TLS requires a secure WebSocket connection",
+			})
+		return yield* readIdentity(socket.getPeerCertificate().subjectaltname)
+	})

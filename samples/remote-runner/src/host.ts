@@ -1,4 +1,4 @@
-import tls from "@graftland/remote/host/tls"
+import websocket from "@graftland/remote/host/websocket"
 import mtls from "@graftland/remote/host/auth/mtls"
 /**
  * The host. It loads graft.yml, exports two invoices across two host restarts,
@@ -34,7 +34,7 @@ export const layer = (environment: Readonly<Record<string, string>>) =>
 			NodeServices.layer,
 			SecureRandom.layerWebCrypto,
 			ModuleResolver.fromRecord({
-				"@graftland/remote/host/tls": tls,
+				"@graftland/remote/host/websocket": websocket,
 				"@graftland/remote/host/auth/mtls": mtls,
 				"./src/ledger.ts": ledger,
 				"./src/exporter.ts": exporter,

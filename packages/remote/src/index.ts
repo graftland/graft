@@ -16,13 +16,13 @@ import { SecureRandom } from "effect/crypto"
 import {
 	local,
 	runner,
-	tls,
+	websocket,
 	mtls,
 	dependencies,
 	type Target,
 	type Runner,
 } from "./Targets"
-export { local, runner, tls, mtls }
+export { local, runner, websocket, mtls }
 import * as Connection from "./internal/runner/Connection"
 import * as Services from "./internal/services"
 import { Instance } from "./Instance"

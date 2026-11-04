@@ -30,8 +30,7 @@ import process from "node:process"
 import * as Remote from "../src/index"
 import { RpcClient } from "effect/rpc"
 import * as Port from "../src/internal/port"
-import * as Multiplex from "../src/internal/runner/Multiplex"
-import * as Tls from "../src/internal/runner/Tls"
+import * as Websocket from "./websocket"
 import * as Wire from "../src/internal/runner/Wire"
 import * as Model from "../src/internal/runner/model"
 import * as Processes from "../src/internal/runner/Processes"
@@ -72,10 +71,10 @@ const startRunner = (state: string, lease = 15000, config?: string) =>
 					? [
 							...Array.drop(argv, 1),
 							"serve",
-							"--host",
-							"127.0.0.1",
-							"--port",
-							"0",
+							"--listen",
+							"wss://127.0.0.1:0",
+							"--auth",
+							"mtls",
 							"--state",
 							state,
 							"--root",
@@ -186,11 +185,9 @@ const setup = (lease = 15000, partitionable = false) =>
 		const certificate = yield* credentials("client")
 		const target = Remote.runner({
 			instance: "worker",
-			transport: Remote.tls({
-				host: "127.0.0.1",
-				port: proxySocket?.port ?? daemon.port,
-				ca: certificate.ca,
-				servername: certificate.servername,
+			transport: Remote.websocket({
+				url: `wss://127.0.0.1:${proxySocket?.port ?? daemon.port}`,
+				tls: { ca: certificate.ca, servername: certificate.servername },
 			}),
 			auth: Remote.mtls(Effect.succeed(certificate)),
 			lease,
@@ -230,13 +227,12 @@ const setup = (lease = 15000, partitionable = false) =>
 
 const control = (port: number, name = "client") =>
 	Effect.gen(function* () {
-		const socket = yield* Tls.connect({
-			host: "127.0.0.1",
+		const socket = yield* Websocket.connect({
 			port,
 			tls: yield* credentials(name),
 			servername: "localhost",
 		})
-		const mux = yield* Multiplex.fromSocket(socket)
+		const mux = yield* Websocket.multiplex(socket)
 		const peer = yield* Port.make(Wire.channel(mux, 0), {
 			session: "session-v1",
 			serve: {},
@@ -366,10 +362,9 @@ ${Array.join(
 	Array.map(
 		Array.range(1, listeners),
 		(index) => `- id: listener-${index}
-  name: '@graftland/remote/runner/tls'
+  name: '@graftland/remote/runner/websocket'
   config:
-    host: 127.0.0.1
-    port: 0
+    url: wss://127.0.0.1:0
     cert: ${inject("remoteTls")}/server.crt
     key: ${inject("remoteTls")}/server.key
     auth: '@graftland/remote/Auth/MtlsAuthenticator'
@@ -499,8 +494,7 @@ describe("network runner end to end", () => {
 					directory + "/state",
 				)
 				yield* Effect.gen(function* () {
-					const socket = yield* Tls.connect({
-						host: "127.0.0.1",
+					const socket = yield* Websocket.connect({
 						port,
 						servername: "localhost",
 						tls: yield* credentials("client"),
@@ -594,11 +588,9 @@ describe("network runner end to end", () => {
 					Remote.plugin(empty, {
 						contractModule: "unused",
 						target: Remote.runner({
-							transport: Remote.tls({
-								host: "127.0.0.1",
-								port: 0,
-								servername: "localhost",
-								ca: "unused",
+							transport: Remote.websocket({
+								url: "wss://127.0.0.1:0",
+								tls: { servername: "localhost", ca: "unused" },
 							}),
 							auth: Remote.mtls(
 								Effect.succeed({
@@ -970,11 +962,12 @@ describe("network runner end to end", () => {
 							contractModule: "remote-fixture",
 							target: Remote.runner({
 								instance: expect === undefined ? "" : "pin-" + index,
-								transport: Remote.tls({
-									host: "127.0.0.1",
-									port: daemon.port,
-									ca: certificate.ca,
-									servername: certificate.servername,
+								transport: Remote.websocket({
+									url: `wss://127.0.0.1:${daemon.port}`,
+									tls: {
+										ca: certificate.ca,
+										servername: certificate.servername,
+									},
 								}),
 								auth: Remote.mtls(Effect.succeed(certificate)),
 								...(expect === undefined ? {} : { expect }),

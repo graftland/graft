@@ -13,11 +13,12 @@ const target = Effect.gen(function* () {
 	const read = (name: string) =>
 		Config.String(name).pipe(Effect.flatMap((path) => fs.readFileString(path)))
 	return Remote.runner({
-		transport: Remote.tls({
-			host: yield* Config.String("RUNNER_HOST"),
-			port: yield* Config.Port("RUNNER_PORT"),
-			servername: yield* Config.String("RUNNER_SERVERNAME"),
-			ca: yield* read("RUNNER_CA"),
+		transport: Remote.websocket({
+			url: `wss://${yield* Config.String("RUNNER_HOST")}:${yield* Config.Port("RUNNER_PORT")}`,
+			tls: {
+				servername: yield* Config.String("RUNNER_SERVERNAME"),
+				ca: yield* read("RUNNER_CA"),
+			},
 		}),
 		auth: Remote.mtls(
 			Effect.all({
