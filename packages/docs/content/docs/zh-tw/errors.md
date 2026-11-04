@@ -80,4 +80,4 @@ Graft 會保留每個失敗的完整 `Cause`
 | `RemoteEntryError`           | `graft.yml` 中的 `remote` 或 `remote/runner` 設定項目無效。`field` 指出是哪個欄位。 |
 
 defect 仍然是 defect。`RemoteError` 中可能包含哪些錯誤、該如何處理，請見
-[Remote 錯誤](../remote/reference/#錯誤)。
+[Remote 錯誤](../remote/hosts/#呼叫端看到的錯誤)。

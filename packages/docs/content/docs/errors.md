@@ -81,5 +81,5 @@ A plugin run through [Remote](../remote/overview/) fails with these, from
 | `RemoteWithdrawn`            | The plugin's services were withdrawn while a caller was using them.                                   |
 | `RemoteEntryError`           | A `remote` or `remote/runner` entry in `graft.yml` is invalid. `field` names the field.               |
 
-Defects stay defects. See [Remote errors](../remote/reference/#errors) for
-everything `RemoteError` may contain and what to do about it.
+Defects stay defects. See [Remote errors](../remote/hosts/#errors-callers-see)
+for everything `RemoteError` may contain and what to do about it.

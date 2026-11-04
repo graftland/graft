@@ -1,193 +1,105 @@
 ---
-title: 选择传输与认证
-description: 宿主和 runner 如何连接，每种方式能防住什么，以及各种警告的含义。
+title: 传输与认证
+description: 选择宿主如何连到 runner，以及 runner 如何识别宿主。
 ---
 
-本页帮助你决定宿主如何连接 runner，以及 runner 如何知道宿主是谁。这里说明每种选项能防住什么、防不住什么，以及日志里的警告是什么意思。直连的
-`local` 和 `worker` 插件不涉及这些：它们既没有网络连接，也不需要认证。
+一条 runner 连接由**传输**和**认证**组成：传输负责搬运字节，认证给宿主一个**身份**，例如
+`billing`。直连的 `local` 和 `worker` 插件两者都没有。
 
-## 简短的答案
+## 组合
 
-| 场景                         | 选用                                      |
-| ---------------------------- | ----------------------------------------- |
-| 宿主通过网络访问 runner      | `wss` 配合 JWT、mTLS 或 bearer token      |
-| 已经用 SSH 管理访问权限      | `command: [ssh, ...]` 配合 `stdio` runner |
-| 宿主和 runner 在同一台机器上 | Unix 套接字，用文件权限把关               |
-| 在 `127.0.0.1` 上试用        | `ws` 配合 `none`，会看到警告              |
+| 传输                           | 认证                            | 保护什么                                                                     | 警告                      |
+| ------------------------------ | ------------------------------- | ---------------------------------------------------------------------------- | ------------------------- |
+| `url: wss://…`                 | `mtls`、`bearer`、`jwt`、`none` | 加密；宿主校验 runner 的证书。                                               | 使用 `none` 时。          |
+| `url: ws://…`                  | `bearer`、`jwt`、`none`         | 线路上毫无保护，路径上的任何人都能读取、篡改流量和 token。只用于回环和测试。 | 总会有；带 token 时更多。 |
+| `unix: …`                      | `bearer`、`jwt`、`none`         | 能打开套接字文件的人就能连接。不读取对端的操作系统凭证。                     | 无。                      |
+| `command: […]` / `stdio: true` | 不接受 `auth`，`none` 也不行    | 命令本身提供的保护，例如 SSH。                                               | 无。                      |
 
-一条连接由两个独立的选择组成：
+其他组合在连接之前就会失败：宿主上是 `CapabilityCombinationError`，runner 上是
+`ListenerConfigError`。`ws` listener 不接受 `cert` 和 `key`，`wss`
+listener 两者都需要。
 
-- **传输**负责搬运字节：WebSocket、Unix 套接字，或某个命令的标准输入输出。
-- **认证**告诉 runner 宿主是谁，结果是一个**身份**，即 `billing`
-  这样的名字。身份与实例名一起决定一个连接属于哪个正在运行的插件，所以身份和实例名都相同的两个宿主会互相替换对方的插件。
+## 认证选项
 
-## 传输
+| 形式     | 宿主 `connect.auth`                | Runner `listen[].auth`                                                                                                                                                            | 身份                                                              |
+| -------- | ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
+| `mtls`   | `{ cert, key }` 文件。仅限 `wss`。 | `{ ca }`：客户端证书必须链到的 CA。                                                                                                                                               | 证书中唯一的 `graft://` URI SAN：`graft://billing` 即 `billing`。 |
+| `bearer` | `{ token }`                        | `{ tokens }`：JSON 文件 `{ "<token 的 sha256 十六进制>": "billing" }`。runner 从不保存 token 本身。                                                                               | 映射到的名字。                                                    |
+| `jwt`    | `{ token }`                        | `issuer`、`audience`（列表）、`algorithms`（仅限非对称）、`keys`（`{ publicKey: file }` 或 `{ jwksUrl }`）、`identityClaim`（默认 `sub`）、`clockTolerance`（默认 `5 seconds`）。 | 身份 claim，必须是非空字符串。                                    |
+| `none`   | `{}`，等同于不写 `auth`            | `{ identity }`，等同于不写 `auth`。什么都不检查。                                                                                                                                 | `identity`，默认 `anonymous`，所有调用方共用。                    |
+| 自定义   | `{ name, config }`                 | `{ name, config }`                                                                                                                                                                | 见[能力插件](../capabilities/)。                                  |
 
-**`wss://`**
-是基于 TLS 的 WebSocket。流量是加密的，宿主会校验 runner 的证书：设置了 `ca`
-就用它校验，否则用 Node 信任的 CA。当需要校验的名称与 URL 的主机名不同时，用
-`servername` 覆盖。只要流量经过网络，就应该用它。
+- 宿主以 `Authorization: Bearer <token>`
+  发送 token。bearer 摘要要按 token 的确切字节计算：`printf %s "$TOKEN" | shasum -a 256`。
+- JWT 必须有 `exp`；`nbf` 存在时才检查。`clockTolerance` 可以为零。
+- token 缺失或无效时，在 WebSocket 打开之前就会收到带 `WWW-Authenticate` 的 HTTP
+  401。
+- 客户端证书请用 Graft 专用的 CA：它签发的任何带 `graft://`
+  名称的证书都能以该身份连接。客户端证书必须恰好有一个 `graft://`
+  URI，可以另有其他 URI。服务器证书必须与宿主连接时用的名称一致。轮换证书时保持身份不变，宿主的实例也就保持不变。
 
-**`ws://`**
-是不加密的 WebSocket。路径上的任何人都能读取、篡改流量，包括宿主发送的 token。只在回环地址或测试中使用。
-
-**`unix:`**
-是同一台机器上的 Unix 套接字。能打开套接字文件的人就能连接，所以文件权限就是访问控制。runner 不读取对端的操作系统凭证。
-
-宿主上的 **`command:`** 与 runner 上的 **`stdio: true`**
-通过某个命令（通常是 SSH）的标准输入输出运行协议。认证和加密都由该命令提供，所以这两种形式完全不接受
-`auth`，`none` 也不行。
-
-WebSocket listener 只服务一个路径 `/graft`，子协议为
-`graft-remote.v1`。没有其他 HTTP 端点，也没有健康检查。
-
-## 认证
-
-**mTLS**（双向 TLS）：宿主出示由 runner 信任的 CA 签发的客户端证书，身份取自证书中的
-`graft://` 名称，`graft://billing` 即 `billing`。只能用于 `wss`。
-
-**Bearer
-token**：宿主发送一个共享密钥。runner 从不保存 token 本身，只在一个文件里保存它的 SHA-256 摘要到身份的映射。
-
-**JWT**：宿主发送由你运营或使用的签发方签名的 token。runner 用签发方的公钥或 JWKS 校验签名，并检查签发方、受众和过期时间，再从某个 claim（默认
-`sub`）中取出身份。
-
-**None**：什么都不检查。在 runner 上，`none` 给所有调用方同一个身份，没有设置
-`identity` 时为 `anonymous`。不写 `auth` 就等于 `none`。
-
-### Bearer token
-
-```yaml title="host.yml"
-connect:
-  url: wss://runner.example:7443
-  auth:
-    bearer:
-      token: { file: ./runner-token.txt }
-```
-
-```yaml title="runner.yml"
-listen:
-  - url: wss://0.0.0.0:7443
-    cert: ./certs/server.crt
-    key: ./certs/server.key
-    auth:
-      bearer:
-        tokens: ./tokens.json
-```
-
-```json title="tokens.json"
-{ "<sha256 hex of the token>": "billing" }
-```
-
-摘要要基于 token 的确切字节计算，例如
-`printf %s "$TOKEN" | shasum -a 256`。`{ file }`
-形式的 token 会原样读取，包括末尾的换行符，所以 token 文件不要以换行结尾。
-
-### JWT
-
-```yaml title="host.yml"
-auth:
-  jwt:
-    token: { file: ./runner-token.txt }
-```
-
-```yaml title="runner.yml"
-auth:
-  jwt:
-    issuer: https://issuer.example
-    audience: [graft]
-    algorithms: [ES256]
-    keys:
-      publicKey: ./issuer-public.pem
-```
-
-如果要从签发方获取公钥而不是读文件，用
-`keys: { jwksUrl: https://issuer.example/jwks }`。token 必须带 `exp` claim；有
-`nbf` 时也会检查；身份 claim 必须是非空字符串。`clockTolerance`（默认
-`5 seconds`）用于容忍时钟偏差。只接受非对称算法。
-
-### mTLS
-
-`graft-remote certificates` 可以一次签发专用 CA、服务器证书和客户端证书：
+`graft-remote certificates` 签发一个私有 CA 和证书：
 
 ```sh
 graft-remote certificates --out certs --server runner.example --identity billing
 ```
 
-| 文件                                       | 放到哪里              |
-| ------------------------------------------ | --------------------- |
-| `ca.key`                                   | 由管理员保管          |
-| `ca.crt`                                   | runner 和各个宿主     |
-| `server.crt`、`server.key`                 | runner                |
-| `client-billing.crt`、`client-billing.key` | 名为 `billing` 的宿主 |
+| 参数         | 默认值 | 含义                                                                 |
+| ------------ | ------ | -------------------------------------------------------------------- |
+| `--out`      | —      | 存放 CA 和证书的目录。                                               |
+| `--server`   | —      | runner 的 DNS 名称或 IP，可重复。签发 `server.crt` 和 `server.key`。 |
+| `--identity` | —      | 宿主身份，可重复。签发 `client-<identity>.crt` 和 `.key`。           |
+| `--days`     | `365`  | 有效期。                                                             |
+| `--force`    | 关     | 替换所请求的证书。不加时报 `CertificateExists`。                     |
 
-```yaml title="host.yml"
-connect:
-  url: wss://runner.example:7443
-  ca: ./certs/ca.crt
-  auth:
-    mtls:
-      cert: ./certs/client-billing.crt
-      key: ./certs/client-billing.key
+第一次运行创建 `ca.crt` 和
+`ca.key`，之后的运行复用它们；CA 从不被替换。身份在文件名中做 URI 编码，私钥以
+`0600` 权限写入。`ca.key` 留在运维人员手里；`ca.crt` 分发给 runner 和各个宿主。
+
+## 凭证来源
+
+| 来源                    | 适用于             | 行为                                                                                                         |
+| ----------------------- | ------------------ | ------------------------------------------------------------------------------------------------------------ |
+| 值，`token: "..."`      | YAML 和 TypeScript | 原样使用。                                                                                                   |
+| `token: { file: path }` | YAML 和 TypeScript | 每次连接都重新读取，因此可以轮换。整个文件就是 token，原样读取：末尾的换行符也会成为 token 的一部分。        |
+| Effect                  | 仅 `Remote.plugin` | 每次连接运行一次。token 返回 `Redacted<string>`；`mtls` 返回 PEM 格式的 `{ cert, key }`，其中 `key` 已脱敏。 |
+| `{ inject, read }`      | 仅 `Remote.plugin` | 需要服务的 Effect。其中某个服务被撤回时，远程插件停止，直到服务回来。                                        |
+
+证书、私钥和 CA 始终是文件路径，相对于配置文件。
+
+```ts
+connect: {
+	url: "wss://runner.example:7443",
+	instance: "greeter",
+	auth: { jwt: { token: Config.Redacted("RUNNER_TOKEN") } },
+}
 ```
 
-```yaml title="runner.yml"
-listen:
-  - url: wss://0.0.0.0:7443
-    cert: ./certs/server.crt
-    key: ./certs/server.key
-    auth:
-      mtls:
-        ca: ./certs/ca.crt
-```
+## 警告
 
-也可以用其他工具，规则是：服务器证书必须与宿主连接时使用的主机名相符；客户端证书的主题备用名称中必须恰好有一个
-`graft://`
-URI（可以同时存在其他 URI）。客户端证书请使用 Graft 专用的 CA：它签发的任何带
-`graft://`
-名称的证书，都能以该身份连接。轮换证书时保持身份不变，宿主就能保留它的实例。
+| 消息                                                                        | 何时出现                                               |
+| --------------------------------------------------------------------------- | ------------------------------------------------------ |
+| `ws:// listener is unencrypted`                                             | runner 启动时，针对 `ws` listener。                    |
+| `ws:// listener is unencrypted; credentials are transmitted in plaintext`   | 同上，且使用 bearer 或 JWT。                           |
+| `ws:// connection is unencrypted`                                           | 宿主，每条 `ws` 连接。                                 |
+| `ws:// connection is unencrypted; credentials are transmitted in plaintext` | 同上，且宿主发送了 token。                             |
+| `WebSocket listener has no authentication`                                  | runner 启动时，针对使用 `none` 的网络 listener。       |
+| `WebSocket connection has no authentication`                                | runner，经由这类 listener 的每条连接。                 |
+| `Remote host authentication failed`                                         | runner 拒绝宿主凭证时，附带 `reason`。                 |
+| `Remote host connection failed`                                             | runner，连接异常结束时，附带身份。                     |
+| `Remote listener failed`                                                    | runner，某个 listener 在启动后失败时。                 |
+| `Superseded remote execution cleanup failed`                                | runner，清理被替换的插件进程失败时。                   |
+| `Remote logs were dropped`                                                  | 宿主，转发来的插件日志在高负载下丢失时，附带丢失数量。 |
 
-## 所有组合
+Unix 套接字、命令和 `stdio` 从不记录传输类警告。要消除这些警告，请改用带认证的
+`wss`。
 
-| 传输                           | 认证                    | 效果                                             | 警告                                                                          |
-| ------------------------------ | ----------------------- | ------------------------------------------------ | ----------------------------------------------------------------------------- |
-| `local: {}`                    | 不可写                  | 独立进程，拥有普通的操作系统权限。               | 无。                                                                          |
-| `worker: {}`                   | 不可写                  | 宿主进程中的独立线程。隔离执行，**不隔离权限**。 | 无。                                                                          |
-| `url: wss://…`                 | mtls、bearer、jwt、none | 加密，并校验 runner 的证书。                     | 使用 `none` 时：runner 启动时和每次连接时。                                   |
-| `url: ws://…`                  | bearer、jwt、none       | 不加密。                                         | runner 启动时、宿主连接时；带 token 时措辞更严重。`none` 另有每次连接的警告。 |
-| `unix: …`                      | bearer、jwt、none       | 由文件权限控制访问。                             | 无。                                                                          |
-| `command: […]` / `stdio: true` | 不可写，`none` 也不行   | 取决于命令本身，例如 SSH。                       | 无。                                                                          |
+## 信任与局限
 
-表格以外的组合在连接前就会失败。mTLS 需要 `wss`；`ws` listener 不接受 `cert` 或
-`key`，`wss` listener 两者都必须提供。
-
-## 警告的含义
-
-| 警告                                                                      | 由谁记录           | 含义                                                          |
-| ------------------------------------------------------------------------- | ------------------ | ------------------------------------------------------------- |
-| `ws:// listener is unencrypted`                                           | runner，启动时     | 网络 listener 没有 TLS。                                      |
-| `ws:// listener is unencrypted; credentials are transmitted in plaintext` | runner，启动时     | 同上，而且它的 token 可以在线路上被读取。                     |
-| `ws:// connection is unencrypted`（以及带 credentials 的版本）            | 宿主，每次连接时   | 同一问题在宿主一侧的表现。                                    |
-| `WebSocket listener has no authentication`                                | runner，启动时     | 网络 listener 使用 `none`：任何能访问它的人都会得到它的身份。 |
-| `WebSocket connection has no authentication`                              | runner，每次连接时 | 有宿主通过这样的 listener 连接进来。                          |
-
-Unix 套接字、命令和 `stdio` 从不产生这些警告。解决办法总是一样：换成
-`wss`，并加上认证。
-
-## 认证做不到的事
-
-- **只检查一次。** bearer
-  token 和 JWT 在连接建立时检查。缺失或无效的 token 会在 WebSocket 打开之前收到 HTTP
-  401 和 `WWW-Authenticate` 头。之后才过期的 JWT 不会结束已经建立的会话。
-- **token 可以被重放。** 偷到 token 的人可以在其有效期内使用它。只通过 `wss`
-  发送 token，并让 JWT 的有效期尽量短。
-- **`none` 只是一个名字，不是检查。** 所有调用方共用它的身份。
-
-## Remote 信任什么
-
-Remote 信任 runner 的安装、配置、操作系统与本地权限、专用 CA，以及配置的 JWT 签发方和密钥。
-
-它不支持：浏览器宿主、Web
-Worker、token 刷新、会话期间重新认证、吊销列表、密码、对称 JWT 算法、由代理转发的证书头、关闭 TLS 校验、向 runner 分发代码、runner 故障转移，以及调用重放。
-
-如果这些选项都不满足需求，可以[编写自己的传输或认证](../capabilities/)。
+- Remote 信任 runner 的安装目录和配置、它的操作系统和本地权限、专用 CA，以及配置的 JWT 签发方和密钥。
+- token 和 JWT 只在连接打开时检查一次。之后才过期的 JWT 不会结束已经打开的会话。
+- 被盗的 token 在过期之前都有效。只通过 `wss`
+  发送 token，并让 JWT 的有效期保持短暂。
+- `none` 只是一个名字，不是一次检查。
+- 不支持：浏览器宿主、Web
+  Worker、token 刷新、会话期间重新认证、吊销列表、密码、对称 JWT 算法、代理转发的证书头、关闭 TLS 校验、向 runner 分发代码、runner 故障转移，以及重放调用。

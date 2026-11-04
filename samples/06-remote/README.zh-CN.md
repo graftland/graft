@@ -47,10 +47,17 @@ devenv shell -- pnpm start
       greeting: Hello
 ```
 
-`welcome` 条目和 [`src/welcome.ts`](src/welcome.ts) 都不变。
-[`src/greeter.ts`](src/greeter.ts) 也还是普通插件；
-[`src/contract.ts`](src/contract.ts)
-描述它的服务。构建后的 JavaScript 能由子进程单独加载，不依赖宿主的加载器。
+`welcome` 条目和 [`src/welcome.ts`](src/welcome.ts)
+都不变。greeter 拆成了两部分：
+
+| 文件                                 | 内容                                                                                                              | 由谁导入       |
+| ------------------------------------ | ----------------------------------------------------------------------------------------------------------------- | -------------- |
+| [`src/contract.ts`](src/contract.ts) | 插件名、配置 schema，以及 `Greeter` 如何跨越边界。`fromClient` 把 `RpcClientError` 映射为 `GreetingUnavailable`。 | 宿主和插件进程 |
+| [`src/greeter.ts`](src/greeter.ts)   | 插件本身，从契约导入 `config` 和 `Greeter`。                                                                      | 只有插件进程   |
+
+插件进程不使用宿主的 TypeScript 加载器，所以
+[`tsdown.config.ts`](tsdown.config.ts) 把两者构建到
+`dist/`。修改其中任何一个后，用 `devenv shell -- pnpm build` 重新构建。
 
 1. 把 `greeting: Hello` 改成 `greeting: Hi` 并保存。提供者重启后，welcome 打印
    `Hi, Alice!`。
@@ -62,7 +69,8 @@ connect:
 ```
 
 保存后，问候语就来自 Node
-worker 了。worker 与宿主共享进程，隔离执行，**不隔离权限**。local 使用独立进程，也保留当前用户的操作系统权限。
+worker 了。worker 与宿主共享进程，隔离执行，**不隔离权限**。local 使用独立进程，也保留当前用户的操作系统权限。`worker: { execArgv: [...] }`
+传入 Node 选项，`local: { command: [node, /path/to/bin.js] }` 改用其他命令。
 
 ## 换到 runner
 
@@ -89,7 +97,7 @@ connect:
 条目 id 就是实例名；替换时先确认旧子进程退出，再以更大的 generation 启动新实例。
 
 你会看到 WARN：`ws` 没有加密，`none`
-不验证调用方身份。本例只在回环地址上体验流程；部署时请使用 wss 和认证。详见[远程插件文档](../../packages/docs/content/docs/zh-cn/remote/transport-auth.md)。
+不验证调用方身份。本例只在回环地址上体验流程；部署时请使用 wss 和认证。详见[传输与认证](../../packages/docs/content/docs/zh-cn/remote/transport-auth.md)。
 
 退出时先在宿主终端按 **Ctrl+C**，再停止 runner。运行中可以改业务配置和
 `connect`；修改契约后，需要重新构建并重启宿主。

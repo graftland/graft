@@ -171,5 +171,5 @@ program.pipe(
 
 Remote needs `NodeServices.layer` and `SecureRandom.layerWebCrypto` in the
 environment. `hello` injects `Greeter` exactly as before. See
-[Load it from TypeScript](../remote/getting-started/#load-it-from-typescript)
-for the contract and the other options.
+[Load from TypeScript](../remote/hosts/#load-from-typescript) for the contract
+and the other options.

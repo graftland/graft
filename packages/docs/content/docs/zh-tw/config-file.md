@@ -40,7 +40,7 @@ description: 用 graft.yml 描述應用程式，並在執行期間修改設定�
 
 設定項目也可以讓它的外掛在子行程、worker 或另一台機器上執行：寫上
 `name: remote`，再把外掛的設定包一層，見
-[Remote 快速上手](../remote/getting-started/#4-用-name-remote-載入)。它仍然是一般的設定項目，同樣有 id、`disabled`、`inject`、`isolate`，也能在執行期間編輯。儲存的項目 id 同時也是 runner 上的實例名稱。
+[從 YAML 載入](../remote/hosts/#從-yaml-載入)。它仍然是一般的設定項目，同樣有 id、`disabled`、`inject`、`isolate`，也能在執行期間編輯。儲存的項目 id 同時也是 runner 上的實例名稱。
 
 從項目載入的外掛可從 `@graftland/loader` 匯入 `Entry`，讀取
 `yield* Entry.CurrentId`。它是

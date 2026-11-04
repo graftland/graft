@@ -18,14 +18,15 @@ Remote 隔离的是执行，不是权限。需要权限边界时，请把 runner
 
 ## 文档
 
-- [概览](https://graftland.github.io/graft/zh-cn/remote/overview/)：Remote 解决什么问题，各部分如何配合。
-- [快速上手](https://graftland.github.io/graft/zh-cn/remote/getting-started/)：把插件移到子进程或 worker。
-- [在另一台机器上运行插件](https://graftland.github.io/graft/zh-cn/remote/runners/)：用
-  `graft-remote serve` 部署 runner。
-- [选择传输与认证](https://graftland.github.io/graft/zh-cn/remote/transport-auth/)
-- [重启、替换与停止](https://graftland.github.io/graft/zh-cn/remote/restarts/)
-- [编写自己的传输或认证](https://graftland.github.io/graft/zh-cn/remote/capabilities/)
-- [参考](https://graftland.github.io/graft/zh-cn/remote/reference/)
+- [Remote](https://graftland.github.io/graft/zh-cn/remote/overview/)：Remote 做什么，有哪些局限。
+- [宿主条目](https://graftland.github.io/graft/zh-cn/remote/hosts/)：契约、`remote`
+  条目、服务与错误。
+- [Runner](https://graftland.github.io/graft/zh-cn/remote/runners/)：用
+  `graft-remote serve` 在另一台机器上运行插件。
+- [传输与认证](https://graftland.github.io/graft/zh-cn/remote/transport-auth/)
+- [替换与停止](https://graftland.github.io/graft/zh-cn/remote/lifecycle/)
+- [能力插件](https://graftland.github.io/graft/zh-cn/remote/capabilities/)
+- [API 参考](https://graftland.github.io/graft/reference/plugin-remote/readme/)
 
 ## 示例
 

@@ -21,16 +21,16 @@ runner in a container or a VM.
 
 ## Documentation
 
-- [Overview](https://graftland.github.io/graft/remote/overview/): what Remote is
-  for and how the pieces fit.
-- [Getting started](https://graftland.github.io/graft/remote/getting-started/):
-  move a plugin into a child process or a worker.
-- [Run plugins on another machine](https://graftland.github.io/graft/remote/runners/):
-  deploy a runner with `graft-remote serve`.
-- [Choose transport and authentication](https://graftland.github.io/graft/remote/transport-auth/)
-- [Restarts, replacements and stopping](https://graftland.github.io/graft/remote/restarts/)
-- [Write your own transport or authentication](https://graftland.github.io/graft/remote/capabilities/)
-- [Reference](https://graftland.github.io/graft/remote/reference/)
+- [Remote](https://graftland.github.io/graft/remote/overview/): what Remote does
+  and its limits.
+- [Host entries](https://graftland.github.io/graft/remote/hosts/): contracts,
+  `remote` entries, services and errors.
+- [Runners](https://graftland.github.io/graft/remote/runners/): run plugins on
+  another machine with `graft-remote serve`.
+- [Transport and authentication](https://graftland.github.io/graft/remote/transport-auth/)
+- [Replacement and stopping](https://graftland.github.io/graft/remote/lifecycle/)
+- [Capability plugins](https://graftland.github.io/graft/remote/capabilities/)
+- [API reference](https://graftland.github.io/graft/reference/plugin-remote/readme/)
 
 ## Samples
 

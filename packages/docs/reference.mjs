@@ -94,17 +94,15 @@ export function reference() {
 					force: true,
 				})
 				const packages = packageReferences()
-				let sidebar = context.config.sidebar.map((group) =>
-					group.label === "Reference"
-						? {
-								...group,
-								items: [
-									...packages.map(({ sidebar }) => sidebar),
-									...group.items,
-								],
-							}
-						: group,
-				)
+				const isReference = (group) => group.label === "Reference"
+				const reference = context.config.sidebar.find(isReference)
+				if (!reference)
+					throw new Error("The docs sidebar needs a Reference group")
+				// The generated reference always ends the sidebar.
+				let sidebar = [
+					...context.config.sidebar.filter((group) => !isReference(group)),
+					{ ...reference, items: packages.map(({ sidebar }) => sidebar) },
+				]
 				context.updateConfig({ sidebar })
 				for (const { plugin } of packages) {
 					await plugin.hooks["config:setup"]({

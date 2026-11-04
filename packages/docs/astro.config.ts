@@ -91,32 +91,28 @@ export default defineConfig({
 					translations: { "zh-CN": "Remote", "zh-TW": "Remote" },
 					items: [
 						"remote/overview",
-						"remote/getting-started",
+						"remote/hosts",
 						"remote/runners",
 						"remote/transport-auth",
-						"remote/restarts",
+						"remote/lifecycle",
 						"remote/capabilities",
-						"remote/reference",
 					],
 				},
 				{
-					label: "Reference",
-					translations: { "zh-CN": "参考", "zh-TW": "參考" },
-					items: [
-						{
-							label: "API guides",
-							translations: {
-								"zh-CN": "API 使用说明",
-								"zh-TW": "API 使用說明",
-							},
-							items: ["fork-handle", "loader-api", "hmr-api", "errors"],
-						},
-					],
+					label: "API guides",
+					translations: { "zh-CN": "API 使用说明", "zh-TW": "API 使用說明" },
+					items: ["fork-handle", "loader-api", "hmr-api", "errors"],
 				},
 				{
 					label: "Project",
 					translations: { "zh-CN": "项目", "zh-TW": "專案" },
 					items: ["releases"],
+				},
+				// Generated from the public entries at build time; always the last group.
+				{
+					label: "Reference",
+					translations: { "zh-CN": "参考", "zh-TW": "參考" },
+					items: [],
 				},
 			],
 		}),

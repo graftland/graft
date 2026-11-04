@@ -1,216 +1,116 @@
 ---
-title: Choose transport and authentication
+title: Transport and authentication
 description:
-  How hosts and runners connect, what each option protects against, and what the
-  warnings mean.
+  Choose how a host reaches a runner and how the runner identifies it.
 ---
 
-This page helps you decide how a host connects to a runner and how the runner
-knows who the host is. It explains what each option protects against, what it
-does not, and what the warnings in your logs mean. Direct `local` and `worker`
-plugins need none of this: they have no network connection and no
-authentication.
+A runner connection is a **transport**, which carries the bytes, and an
+**authentication**, which gives the host an **identity** such as `billing`.
+Direct `local` and `worker` plugins have neither.
 
-## The short answer
+## Combinations
 
-| Situation                               | Use                                         |
-| --------------------------------------- | ------------------------------------------- |
-| Hosts reach the runner over a network   | `wss` with a JWT, mTLS or a bearer token    |
-| You already manage access with SSH      | `command: [ssh, ...]` with a `stdio` runner |
-| Host and runner are on the same machine | A Unix socket, guarded by file permissions  |
-| Trying things out on `127.0.0.1`        | `ws` with `none`, and expect warnings       |
+| Transport                      | Authentication                  | Protects                                                                                                 | Warnings                    |
+| ------------------------------ | ------------------------------- | -------------------------------------------------------------------------------------------------------- | --------------------------- |
+| `url: wss://…`                 | `mtls`, `bearer`, `jwt`, `none` | Encrypted; the host verifies the runner's certificate.                                                   | With `none`.                |
+| `url: ws://…`                  | `bearer`, `jwt`, `none`         | Nothing on the wire. Anyone on the path can read and change traffic and tokens. Loopback and tests only. | Always; louder with tokens. |
+| `unix: …`                      | `bearer`, `jwt`, `none`         | Whoever can open the socket file can connect. Peer OS credentials are not read.                          | None.                       |
+| `command: […]` / `stdio: true` | No `auth`, not even `none`      | Whatever the command provides, such as SSH.                                                              | None.                       |
 
-Two separate choices make up a connection:
+Other combinations fail before connecting, with `CapabilityCombinationError` on
+the host or `ListenerConfigError` on the runner. A `ws` listener takes no `cert`
+or `key`, and a `wss` listener needs both.
 
-- The **transport** carries the bytes: WebSocket, a Unix socket, or a command's
-  standard input and output.
-- **Authentication** tells the runner who the host is. The result is an
-  **identity**, a name such as `billing`. Together with the instance name, it
-  decides which running plugin a connection belongs to, so two hosts with the
-  same identity and instance name replace each other's plugin.
+## Auth options
 
-## Transports
+| Form     | Host `connect.auth`                  | Runner `listen[].auth`                                                                                                                                                                   | Identity                                                                     |
+| -------- | ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| `mtls`   | `{ cert, key }` files. `wss` only.   | `{ ca }`: the CA client certificates chain to.                                                                                                                                           | The certificate's single `graft://` URI SAN: `graft://billing` is `billing`. |
+| `bearer` | `{ token }`                          | `{ tokens }`: a JSON file `{ "<sha256 hex of token>": "billing" }`. The runner never stores tokens.                                                                                      | The mapped name.                                                             |
+| `jwt`    | `{ token }`                          | `issuer`, `audience` (a list), `algorithms` (asymmetric only), `keys` (`{ publicKey: file }` or `{ jwksUrl }`), `identityClaim` (default `sub`), `clockTolerance` (default `5 seconds`). | The identity claim, a nonempty string.                                       |
+| `none`   | `{}`, the same as leaving `auth` out | `{ identity }`, the same as leaving `auth` out. Checks nothing.                                                                                                                          | `identity`, default `anonymous`, shared by every caller.                     |
+| custom   | `{ name, config }`                   | `{ name, config }`                                                                                                                                                                       | See [Capability plugins](../capabilities/).                                  |
 
-**`wss://`** is WebSocket over TLS. Traffic is encrypted, and the host checks
-the runner's certificate: against `ca` if you set it, otherwise against the CAs
-Node trusts. `servername` overrides the name checked when it differs from the
-URL's host. Use it whenever traffic crosses a network.
+- The host sends tokens as `Authorization: Bearer <token>`. Compute a bearer
+  digest from the exact bytes: `printf %s "$TOKEN" | shasum -a 256`.
+- A JWT needs `exp`; `nbf` is checked when present. `clockTolerance` may be
+  zero.
+- A missing or invalid token gets HTTP 401 with `WWW-Authenticate` before the
+  WebSocket opens.
+- Use a CA dedicated to Graft for client certificates: anything it signs with a
+  `graft://` name connects as that identity. A client certificate needs exactly
+  one `graft://` URI; other URIs may be present. The server certificate must
+  match the name hosts connect to. Rotating a certificate with the same identity
+  keeps the host's instances.
 
-**`ws://`** is plain WebSocket. Anyone on the path can read and change the
-traffic, including any token the host sends. Use it only on loopback or for
-tests.
-
-**`unix:`** is a Unix socket on the same machine. Whoever can open the socket
-file can connect, so file permissions are the access control. The runner does
-not read the peer's operating system credentials.
-
-**`command:`** on the host and **`stdio: true`** on the runner run the protocol
-over a command's standard input and output, usually SSH. The command provides
-authentication and encryption, so these forms take no `auth` at all, not even
-`none`.
-
-WebSocket listeners serve one path, `/graft`, with the subprotocol
-`graft-remote.v1`. There are no other HTTP endpoints and no health check.
-
-## Authentication
-
-**mTLS** (mutual TLS): the host presents a client certificate signed by a CA the
-runner trusts. The identity is the certificate's `graft://` name, so
-`graft://billing` means `billing`. It works only over `wss`.
-
-**Bearer token**: the host sends a shared secret. The runner never stores the
-token itself, only its SHA-256 digest, in a file that maps digests to
-identities.
-
-**JWT**: the host sends a signed token from an issuer you run or use. The runner
-checks the signature against the issuer's public key or JWKS, the issuer, the
-audience and the expiry, and takes the identity from a claim (`sub` by default).
-
-**None**: no check at all. On the runner, `none` assigns every caller one
-identity, `anonymous` unless you set `identity`. Leaving `auth` out means
-`none`.
-
-### Bearer tokens
-
-```yaml title="host.yml"
-connect:
-  url: wss://runner.example:7443
-  auth:
-    bearer:
-      token: { file: ./runner-token.txt }
-```
-
-```yaml title="runner.yml"
-listen:
-  - url: wss://0.0.0.0:7443
-    cert: ./certs/server.crt
-    key: ./certs/server.key
-    auth:
-      bearer:
-        tokens: ./tokens.json
-```
-
-```json title="tokens.json"
-{ "<sha256 hex of the token>": "billing" }
-```
-
-Compute the digest of the exact token bytes, for example with
-`printf %s "$TOKEN" | shasum -a 256`. A `{ file }` token is read as is,
-including any trailing newline, so write the token file without one.
-
-### JWT
-
-```yaml title="host.yml"
-auth:
-  jwt:
-    token: { file: ./runner-token.txt }
-```
-
-```yaml title="runner.yml"
-auth:
-  jwt:
-    issuer: https://issuer.example
-    audience: [graft]
-    algorithms: [ES256]
-    keys:
-      publicKey: ./issuer-public.pem
-```
-
-Use `keys: { jwksUrl: https://issuer.example/jwks }` to fetch keys from the
-issuer instead of a file. The token must have an `exp` claim; `nbf` is checked
-when present; the identity claim must be a nonempty string. `clockTolerance`
-(default `5 seconds`) allows for clock skew. Only asymmetric algorithms are
-accepted.
-
-### mTLS
-
-`graft-remote certificates` can issue a dedicated CA, a server certificate and
-client certificates in one go:
+`graft-remote certificates` issues a private CA and certificates:
 
 ```sh
 graft-remote certificates --out certs --server runner.example --identity billing
 ```
 
-| File                                       | Goes to                   |
-| ------------------------------------------ | ------------------------- |
-| `ca.key`                                   | Stays with the operator   |
-| `ca.crt`                                   | Both the runner and hosts |
-| `server.crt`, `server.key`                 | The runner                |
-| `client-billing.crt`, `client-billing.key` | The host named `billing`  |
+| Flag         | Default | Meaning                                                                  |
+| ------------ | ------- | ------------------------------------------------------------------------ |
+| `--out`      | —       | Directory for the CA and certificates.                                   |
+| `--server`   | —       | Runner DNS name or IP, repeatable. Issues `server.crt` and `server.key`. |
+| `--identity` | —       | Host identity, repeatable. Issues `client-<identity>.crt` and `.key`.    |
+| `--days`     | `365`   | Validity.                                                                |
+| `--force`    | off     | Replace requested certificates. Without it, `CertificateExists`.         |
 
-```yaml title="host.yml"
-connect:
-  url: wss://runner.example:7443
-  ca: ./certs/ca.crt
-  auth:
-    mtls:
-      cert: ./certs/client-billing.crt
-      key: ./certs/client-billing.key
+The first run creates `ca.crt` and `ca.key`, and later runs reuse them; the CA
+is never replaced. Identities are URI-encoded in file names, and keys are
+written with mode `0600`. Keep `ca.key` with the operator; `ca.crt` goes to the
+runner and the hosts.
+
+## Credential sources
+
+| Source                  | Where                | Behavior                                                                                                                       |
+| ----------------------- | -------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| A value, `token: "..."` | YAML and TypeScript  | Used as is.                                                                                                                    |
+| `token: { file: path }` | YAML and TypeScript  | Read on every connection, so it can rotate. The whole file is the token, read verbatim: a trailing newline becomes part of it. |
+| An Effect               | `Remote.plugin` only | Runs once per connection. A token returns `Redacted<string>`; `mtls` returns `{ cert, key }` in PEM with `key` redacted.       |
+| `{ inject, read }`      | `Remote.plugin` only | An Effect that needs services. If one is withdrawn, the remote plugin stops until it returns.                                  |
+
+Certificates, keys and CAs are always file paths, relative to the config file.
+
+```ts
+connect: {
+	url: "wss://runner.example:7443",
+	instance: "greeter",
+	auth: { jwt: { token: Config.Redacted("RUNNER_TOKEN") } },
+}
 ```
 
-```yaml title="runner.yml"
-listen:
-  - url: wss://0.0.0.0:7443
-    cert: ./certs/server.crt
-    key: ./certs/server.key
-    auth:
-      mtls:
-        ca: ./certs/ca.crt
-```
+## Warnings
 
-You can use other tools. The rules are: the server certificate must match the
-host name that hosts connect to, and a client certificate needs exactly one
-`graft://` URI in its subject alternative names (other URIs may be present too).
-Use a CA dedicated to Graft for client certificates: any certificate it signs
-with a `graft://` name can connect as that identity. When you rotate a
-certificate, keep the same identity and the host keeps its instances.
+| Message                                                                     | When                                                                   |
+| --------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| `ws:// listener is unencrypted`                                             | Runner startup, for a `ws` listener.                                   |
+| `ws:// listener is unencrypted; credentials are transmitted in plaintext`   | The same, with bearer or JWT.                                          |
+| `ws:// connection is unencrypted`                                           | Host, on each `ws` connection.                                         |
+| `ws:// connection is unencrypted; credentials are transmitted in plaintext` | The same, when the host sends a token.                                 |
+| `WebSocket listener has no authentication`                                  | Runner startup, for a network listener with `none`.                    |
+| `WebSocket connection has no authentication`                                | Runner, on each connection through such a listener.                    |
+| `Remote host authentication failed`                                         | Runner, when it rejects a host's credentials, with the `reason`.       |
+| `Remote host connection failed`                                             | Runner, when a connection ends abnormally, with the identity.          |
+| `Remote listener failed`                                                    | Runner, when a listener fails after startup.                           |
+| `Superseded remote execution cleanup failed`                                | Runner, when cleaning up a replaced plugin process fails.              |
+| `Remote logs were dropped`                                                  | Host, when forwarded plugin logs were lost under load, with the count. |
 
-## All combinations
+Unix sockets, commands and `stdio` never log the transport warnings. To silence
+them, use `wss` with authentication.
 
-| Transport                      | Authentication              | What you get                                                                    | Warnings                                                                                        |
-| ------------------------------ | --------------------------- | ------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| `local: {}`                    | None allowed                | A separate process with your normal OS permissions.                             | None.                                                                                           |
-| `worker: {}`                   | None allowed                | A separate thread in the host process. Isolates execution, **not permissions**. | None.                                                                                           |
-| `url: wss://…`                 | mtls, bearer, jwt, none     | Encrypted; the runner's certificate is verified.                                | With `none`: at runner startup and on every connection.                                         |
-| `url: ws://…`                  | bearer, jwt, none           | Not encrypted.                                                                  | Runner at startup, host on connect; louder with tokens. `none` adds the per-connection warning. |
-| `unix: …`                      | bearer, jwt, none           | Access controlled by file permissions.                                          | None.                                                                                           |
-| `command: […]` / `stdio: true` | None allowed, not even none | Whatever the command provides, such as SSH.                                     | None.                                                                                           |
+## Trust and limits
 
-Combinations outside this table fail before connecting. mTLS needs `wss`; a `ws`
-listener takes no `cert` or `key`, and a `wss` listener needs both.
-
-## What the warnings mean
-
-| Warning                                                                   | Logged by                  | Meaning                                                                    |
-| ------------------------------------------------------------------------- | -------------------------- | -------------------------------------------------------------------------- |
-| `ws:// listener is unencrypted`                                           | Runner, at startup         | A network listener without TLS.                                            |
-| `ws:// listener is unencrypted; credentials are transmitted in plaintext` | Runner, at startup         | The same, and its tokens can be read on the wire.                          |
-| `ws:// connection is unencrypted` (and the `credentials` variant)         | Host, on each connection   | The host side of the same problem.                                         |
-| `WebSocket listener has no authentication`                                | Runner, at startup         | A network listener uses `none`: anyone who can reach it gets its identity. |
-| `WebSocket connection has no authentication`                              | Runner, on each connection | A host connected through such a listener.                                  |
-
-Unix sockets, commands and `stdio` never produce these warnings. The fix is
-always the same: move to `wss`, and add authentication.
-
-## What authentication does not do
-
-- **It is checked once.** Bearer tokens and JWTs are checked when the connection
-  opens. A missing or invalid token gets HTTP 401 with a `WWW-Authenticate`
-  header before the WebSocket opens. A JWT that expires later does not end a
-  session that is already open.
-- **Tokens can be replayed.** Anyone who steals a token can use it while it is
-  valid. Send tokens only over `wss`, and keep JWT lifetimes short.
-- **`none` is a name, not a check.** All callers share its identity.
-
-## What Remote trusts
-
-Remote trusts the runner's installation, its configuration, its operating system
-and local permissions, the dedicated CA, and the configured JWT issuer and keys.
-
-It does not support: browser hosts, Web Workers, token refresh, reauthentication
-during a session, revocation lists, passwords, symmetric JWT algorithms,
-certificate headers forwarded by a proxy, turning off TLS verification,
-distributing code to runners, runner failover, or replaying calls.
-
-For connections that none of these options cover, you can
-[write your own transport or authentication](../capabilities/).
+- Remote trusts the runner's installation and configuration, its operating
+  system and local permissions, the dedicated CA, and the configured JWT issuer
+  and keys.
+- Tokens and JWTs are checked once, when the connection opens. A JWT that
+  expires later does not end an open session.
+- A stolen token works until it expires. Send tokens only over `wss`, and keep
+  JWT lifetimes short.
+- `none` is a name, not a check.
+- Not supported: browser hosts, Web Workers, token refresh, reauthentication
+  during a session, revocation lists, passwords, symmetric JWT algorithms,
+  certificate headers forwarded by a proxy, turning off TLS verification,
+  distributing code to runners, runner failover, and replaying calls.

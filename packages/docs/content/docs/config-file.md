@@ -40,9 +40,9 @@ entries, and each entry loads one plugin:
 
 An entry can also run its plugin in a child process, a worker or on another
 machine: give it `name: remote` and wrap the plugin's config, as in
-[Getting started with Remote](../remote/getting-started/#4-load-it-with-name-remote).
-It is still an ordinary entry, with an id, `disabled`, `inject`, `isolate` and
-edits while running. Its saved id also names the runner instance.
+[Load from YAML](../remote/hosts/#load-from-yaml). It is still an ordinary
+entry, with an id, `disabled`, `inject`, `isolate` and edits while running. Its
+saved id also names the runner instance.
 
 Plugins loaded from an entry can read `yield* Entry.CurrentId`, importing
 `Entry` from `@graftland/loader`. This `Context.Reference<Option<string>>` holds

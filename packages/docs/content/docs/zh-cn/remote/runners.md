@@ -1,54 +1,20 @@
 ---
-title: 在另一台机器上运行插件
-description: 部署 runner，在上面安装插件包，再让宿主通过 wss + JWT 或 SSH 连接。
+title: Runner
+description: 用 `graft-remote serve` 在另一台机器上运行插件。
 ---
 
-本指南介绍如何部署 runner 并让宿主连接它。前提是你已经像[快速上手](../getting-started/)那样，把插件拆成了契约和实现。主线使用
-`wss` 加 JWT，这也是真实网络部署通常的样子；SSH 和 Unix 套接字放在最后介绍。
+**runner**
+是一个供宿主连接的长期运行的进程。它认证每个宿主，在已安装的包中找到宿主指定的插件包，再为它启动插件进程。宿主从不发送代码。
 
-## Runner 是什么
+## 部署 runner
 
-**runner** 是用 `graft-remote serve`
-启动、供宿主连接的长期运行进程。对每个连接，它会：
-
-1. 确认宿主是谁（认证）。
-2. 查找宿主指定的插件包。这个包必须事先安装在 runner 上，宿主从不发送代码。
-3. 为它启动插件进程，并在宿主用完、宿主消失或有更新的副本替换它时停止该进程。
-
-runner 启动的每个插件都属于一个**实例**：一个稳定的名字，默认就是宿主配置条目的
-`id`。runner 在磁盘上维护一个小小的**状态目录**，记录每个实例被替换了多少次。这为什么重要，见[重启、替换与停止](../restarts/)。
-
-## 1. 准备机器
-
-runner 需要：
-
-- Linux 或 macOS，Node.js 22.22 或更高版本。
-- 一个**安装目录**，在它的 `node_modules` 中装好
-  `@graftland/plugin-remote`、构建好的插件包及其依赖。runner 按包名在这里查找契约包。
-
-由于 runner 按包名查找插件，契约要随一个包发布，并在包的 `exports` 中导出，例如
-`my-plugin/contract`。宿主也要安装同一个包，因为宿主同样要导入契约。
-
-runner 运行期间不要改动安装目录。部署新版本时，先安装，再重启用到它的插件（见[重新部署插件](../restarts/#重新部署插件)）。
-
-## 2. 准备服务器证书
-
-使用 `wss`
-时，宿主会校验 runner 的 TLS 证书，所以 runner 需要一张名称与宿主连接地址相符的证书。任何证书工具都可以；`graft-remote certificates`
-可以替你生成一个小型私有 CA 和服务器证书：
-
-```sh
-graft-remote certificates --out certs --server runner.example
-```
-
-这会写出 `certs/ca.crt`、`certs/ca.key`、`certs/server.crt` 和
-`certs/server.key`。`ca.key` 由管理员保管，`server.crt` 与 `server.key`
-放到 runner 上，`ca.crt` 交给每个宿主，让它们信任这个 runner。
-
-## 3. 编写 `runner.yml`
-
-runner 用一个 Graft [配置文件](../../config-file/)配置，其中包含一个
-`remote/runner` 条目：
+1. **安装**
+   `@graftland/plugin-remote`、构建好的插件包及其依赖，放进某个安装目录的
+   `node_modules`；系统为 Linux 或 macOS，Node.js 22.22 或更高。通过包的
+   `exports` 暴露每个契约，例如 `my-plugin/contract`，并在宿主上也安装同一个包。
+2. **编写**只含一个 `remote/runner` 条目的 `runner.yml`。
+3. **启动** runner：`graft-remote serve --config runner.yml`。
+4. **让**宿主的 `remote` 条目指向它，然后运行 `graft start host.yml`。
 
 ```yaml title="runner.yml"
 - id: runner
@@ -69,52 +35,13 @@ runner 用一个 Graft [配置文件](../../config-file/)配置，其中包含�
               jwksUrl: https://issuer.example/.well-known/jwks.json
 ```
 
-| 字段     | 含义                                                                                  |
-| -------- | ------------------------------------------------------------------------------------- |
-| `root`   | 第 1 步的安装目录。                                                                   |
-| `state`  | runner 存放记录的地方，不存在时会自动创建。                                           |
-| `listen` | 宿主从哪里连接、如何认证。每个地址一项。                                              |
-| `auth`   | 这里是来自你的签发方的 JWT，用它公布的公钥校验。宿主的身份取自 token 的 `sub` claim。 |
-
-所有路径，包括 `root`、`state` 和证书文件，都相对于
-`runner.yml`，而不是启动 runner 时所在的目录。[选择传输与认证](../transport-auth/)介绍其他
-`auth` 选项，[参考](../reference/#runner-条目)列出全部字段及默认值。
-
-照看好状态目录：
-
-- 它必须位于本地文件系统。
-- 同一时间只能有一个 runner 使用它。第二个 runner 使用同一目录时会以
-  `StateDirectoryLocked` 启动失败。
-- 重启时要保留它。它记录了替换次数，以及仍在运行的插件进程。
-- 如果某个部署的身份仍在别处使用，不要给它换上全新的空状态目录，否则计数会从头开始。
-
-## 4. 启动 runner
-
-```sh
-graft-remote serve --config runner.yml
-```
-
-`serve` 只接受 `--config`。runner 只在启动时读取一次
-`runner.yml`，修改后要重启才会生效。
-
-- 只有所有 listener 都就绪后，runner 才算启动完成。启动期间任一 listener 失败，runner 会关闭已经打开的资源，并带着原因退出。
-- 启动之后某个 listener 失败时，runner 记录
-  `Remote listener failed`，其他 listener 和正在运行的插件照常工作。
-
-请让服务管理器在 runner 停止时一并停止它的所有后代进程，例如 systemd 的
-`KillMode=control-group`。插件进程是 runner 的后代，而 runner 自身的检查有其局限（见[租约](../restarts/#租约)）。
-
-## 5. 连接宿主
-
-在宿主上，让 `remote` 条目指向 runner：
-
 ```yaml title="host.yml"
 - id: greeter
   name: remote
   config:
     contract: my-plugin/contract
     connect:
-      url: !env RUNNER_URL
+      url: wss://runner.example:7443
       ca: ./certs/ca.crt
       auth:
         jwt:
@@ -123,86 +50,73 @@ graft-remote serve --config runner.yml
       greeting: Hello
 ```
 
-把 `RUNNER_URL` 设为 `wss://runner.example:7443`，然后启动宿主：
+| 字段     | 必填 | 默认值       | 含义                                                           |
+| -------- | ---- | ------------ | -------------------------------------------------------------- |
+| `root`   | 是   | —            | 安装目录。契约包从它的 `node_modules` 中解析。                 |
+| `state`  | 是   | —            | 状态目录，不存在时自动创建。规则见下表。                       |
+| `lease`  | 否   | `15 seconds` | 实例的默认[租约](../lifecycle/#租约与断网)。                   |
+| `grace`  | 否   | `5 seconds`  | 从中断插件进程到杀掉它的时间。                                 |
+| `listen` | 是   | —            | listener，每个地址一个。见 [`listen` 的形式](#listen-的形式)。 |
 
-```sh
-graft start host.yml
-```
+| 规则                  | 说明                                                                                                         |
+| --------------------- | ------------------------------------------------------------------------------------------------------------ |
+| **路径**              | 相对于 `runner.yml`，包括 `root`、`state` 和证书文件。                                                       |
+| **安装目录**          | runner 运行期间保持不变。部署新版本时，先安装新包，再在宿主上重启该条目。                                    |
+| **状态目录**          | 放在本地文件系统上，同一时间只给一个 runner 用，重启后保留。第二个 runner 会以 `StateDirectoryLocked` 失败。 |
+| **全新状态**          | 身份仍在别处使用时，不要换一个空的状态目录：generation 会从头开始。                                          |
+| **`serve`**           | 只接受 `--config`。文件只读一次，改动需重启生效。日志写到标准错误。                                          |
+| **启动**              | 所有 listener 都就绪才算启动完成。失败时关闭已打开的部分，以 `StartupError` 非零退出。                       |
+| **listener 稍后失败** | runner 记录 `Remote listener failed`，其他 listener 和插件继续运行。                                         |
+| **服务管理器**        | 在一个会停止 runner 所有后代进程的服务管理器下运行，例如设置了 `KillMode=control-group` 的 systemd。         |
 
-- `contract` 现在是包名。宿主从自己的安装中导入它，runner 在自己的 `root`
-  下解析同一个名字。
-- `ca`
-  是第 2 步生成的 CA。如果 runner 的证书由宿主本来就信任的 CA 签发，可以省略。
-- `token: { file: ... }`
-  在宿主每次连接时读取文件，因此轮换 token 不必重启。文件的全部内容原样作为 token：末尾的换行符也会成为 token 的一部分，所以写文件时不要带换行。`token: "..."`
-  则直接以值的形式给出 token。
-- 路径相对于 `host.yml`。
+## `listen` 的形式
 
-条目的 `id`，也就是
-`greeter`，就是 runner 上的实例名。请保持它稳定：loader 会把生成的 id 保存到配置文件里，重启后仍然有效。
+| 形式                          | 字段                                                                            |
+| ----------------------------- | ------------------------------------------------------------------------------- |
+| `url: ws://host:port`         | 不写 `cert` 和 `key`。                                                          |
+| `url: wss://host:port`        | `cert` 和 `key`：服务器证书和私钥。                                             |
+| `unix: path`                  | 要创建的套接字文件。                                                            |
+| `stdio: true`                 | `identity`，默认 `anonymous`。不接受 `auth`。见 [SSH 与 stdio](#ssh-与-stdio)。 |
+| `transport: { name, config }` | [自定义 listener](../capabilities/)。                                           |
 
-### 实例名
+- 每个元素取一种传输形式，最多一个 `auth`，见[传输与认证](../transport-auth/)。
+- WebSocket listener 只服务一个路径 `/graft`，子协议为 `graft-remote.v1`。`url`
+  的路径必须为空或 `/graft`。没有其他 HTTP 端点，也没有健康检查。
+- 所有 listener 共用一套实例，合计最多使用一个 JWT 签发方。
 
-实例名决定一个连接属于哪个正在运行的插件。同一实例的新连接会替换旧的插件进程。注意以下情况：
+## 实例
 
-- **两个宿主，身份相同、实例名相同。**
-  它们在 runner 上共用一个位置，会不停地互相替换。请给每个宿主独立的身份，或者设置不同的
-  `connect.instance`。
-- **同一个条目派生出两个远程插件。**
-  子插件继承条目的 id，因而会冲突。请分别显式设置 `connect.instance`。
-- **嵌入的分组。** 分组 id 只在同级之间唯一。请确认最终的名字不重复。
-- **不经过 loader 加载。** 直接加载的 `Remote.plugin` 没有条目 id。请设置
-  `connect.instance`，否则加载会以 `MissingInstance` 失败。
+**实例**是 runner 上一个插件位置的名字。它与认证得到的宿主**身份**一起，决定一个连接属于哪个插件进程。同一身份、同一实例的新连接会替换旧进程，这次启动拿到下一个
+[generation](../lifecycle/#generation-与-fencing)。状态目录按身份和实例分别记录 generation。
 
-### 检查已安装的版本
+| 情况                             | 怎么办                                                                    |
+| -------------------------------- | ------------------------------------------------------------------------- |
+| 默认名称                         | loader 条目的 `id`。保持它稳定；loader 会把生成的 id 保存在配置文件里。   |
+| 两个宿主，身份和实例名都相同     | 它们会互相替换。给每个宿主独立的身份，或设置不同的 `connect.instance`。   |
+| 从同一个条目 fork 出两个远程插件 | 子插件继承条目 id。给每个都设置 `connect.instance`。                      |
+| 嵌入的分组                       | 分组 id 只在兄弟之间唯一。检查最终得到的名字。                            |
+| 不经 loader 使用 `Remote.plugin` | 没有条目 id。设置 `connect.instance`，否则加载以 `MissingInstance` 失败。 |
 
-宿主可以要求 runner 在插件启动前装有指定版本：
+`connect.expect` 在插件启动前锁定 runner 上安装的内容：
 
 ```yaml
 connect:
-  url: !env RUNNER_URL
+  url: wss://runner.example:7443
   expect:
     version: 1.4.0
 ```
 
-`version` 与契约包 `package.json` 中的版本比较。`digest`
-则比较包内文件的SHA-256，不含
-`node_modules`，因此不覆盖依赖。只有要求 digest 时 runner 才会计算它。不匹配时以
-`PackageError` 失败，错误消息中会同时给出期望值和实际值。
+| 字段      | 比较对象                                                                                     |
+| --------- | -------------------------------------------------------------------------------------------- |
+| `version` | runner 上契约包 `package.json` 中的 `version`。                                              |
+| `digest`  | 包内文件的 SHA-256 十六进制摘要，排除所有 `node_modules`，因此不涵盖依赖。只在设置时才计算。 |
 
-### 在代码中提供凭证
+不匹配时以 `PackageError` 失败，消息中同时显示两个值。
 
-使用 `Remote.plugin` 时，凭证也可以是一个 Effect，每次连接运行一次：
+## SSH 与 stdio
 
-```ts
-import * as Remote from "@graftland/plugin-remote"
-import { Config } from "effect"
-import { contract } from "my-plugin/contract"
-
-export default Remote.plugin(contract, {
-	contractModule: "my-plugin/contract",
-	connect: {
-		url: "wss://runner.example:7443",
-		instance: "greeter",
-		auth: { jwt: { token: Config.Redacted("RUNNER_TOKEN") } },
-	},
-	config: { greeting: "Hello" },
-})
-```
-
-- token 的 Effect 返回 `Redacted<string>`。mTLS 的 Effect 返回 PEM 格式的
-  `{ cert, key }`，其中 key 经过 redact。
-- 如果凭证需要某个服务，就用 `{ inject: [Vault], read: ... }`
-  代替单纯的 Effect。Remote 会在一个注入这些服务的子插件中运行它；其中任何服务被撤回，远程插件都会停止，直到服务恢复。
-
-## 改用 SSH 连接
-
-如果宿主本来就能通过 SSH 访问 runner 所在的机器，可以不用网络 listener。宿主把
-`ssh` 当作命令运行，通过它的标准输入输出与 `graft-remote serve`
-通信，认证和加密由 SSH 负责。
-
-在 runner 上写一份只有一个 `stdio`
-listener 的配置，并给每个 SSH 身份单独的状态目录：
+`stdio`
+runner 通过标准输入输出通信，宿主可以用 SSH 之类的命令连到它。认证和加密由 SSH 负责。
 
 ```yaml title="/srv/graft/stdio.yml"
 - id: runner
@@ -215,66 +129,23 @@ listener 的配置，并给每个 SSH 身份单独的状态目录：
         identity: billing
 ```
 
-在 runner 账户的 `authorized_keys` 中，把宿主的密钥限制为只能执行这条命令：
+在 runner 账户的 `authorized_keys` 中把宿主的密钥限制为这条命令，再用 `command`
+连接：
 
 ```text
 restrict,command="/usr/local/bin/graft-remote serve --config /srv/graft/stdio.yml" ssh-ed25519 AAAA... billing-host
 ```
 
-在宿主上使用 `connect` 的 `command` 形式：
-
-```yaml title="host.yml"
-- id: greeter
-  name: remote
-  config:
-    contract: my-plugin/contract
-    connect:
-      command: [ssh, -T, billing@runner.example]
-    config:
-      greeting: Hello
-```
-
-它的行为如下：
-
-- SSH 负责认证宿主。`identity` 只是给宿主在 runner 上一个稳定的名字，默认是
-  `anonymous`。不要给 `command` 连接或 `stdio` listener 写 `auth`，`none`
-  也不行。
-- 每个 SSH 会话运行各自的
-  `serve`。连接结束时，它会停止插件、确认插件已退出、释放状态目录，然后以状态码 0 退出。出错时以非零状态码退出并报告原因。
-- 同一状态目录上同时出现的第二个会话会被拒绝。
-- 标准输出承载协议字节，日志写到标准错误。不要分配终端（用
-  `-T`），也不要向标准输出打印 banner。
-- `stdio` listener 必须是所在 runner 的唯一 listener。
-- SSH 退出并不能证明插件进程已经停止，只有 runner 自己的确认才算数。
-
-`command` 还接受可选的 `cwd` 和 `env` 字段，作用于它运行的命令。
-
-## 通过 Unix 套接字连接
-
-在同一台机器上，Unix 套接字可以完全绕开网络，访问权限由套接字文件的权限控制：
-
-```yaml title="runner.yml"
-listen:
-  - unix: ./runner.sock
-    auth:
-      none:
-        identity: billing
-```
-
-```yaml title="host.yml"
+```yaml
 connect:
-  unix: /srv/graft/runner.sock
+  command: [ssh, -T, billing@runner.example]
 ```
 
-`none` 不做任何检查，直接给每个连接上来的宿主 `billing`
-这个身份。只有当文件权限已经决定了谁能连接时，这样做才合理。Unix 套接字上也可以使用 bearer 或 JWT 认证。
-
-## 多个 listener
-
-一个 `remote/runner` 条目可以有多个 `listen` 元素，例如给远程宿主用
-`wss`，给本机宿主用 Unix 套接字。它们共享同一组实例：无论宿主从哪个 listener 进来，相同的身份和实例名都指向同一个插件。一个 runner 的所有 listener 合起来最多只能使用一个 JWT 签发方。
-
-## 接下来
-
-- [选择传输与认证](../transport-auth/)：在 mTLS、bearer 与 JWT 之间选择，并理解各种警告。
-- [重启、替换与停止](../restarts/)：重新部署或断网时会发生什么。
+| 规则              | 说明                                                                                                  |
+| ----------------- | ----------------------------------------------------------------------------------------------------- |
+| **不写 `auth`**   | `command` 和 `stdio` 都不接受 `auth`，`none` 也不行。`identity` 只是给宿主起名。                      |
+| **唯一 listener** | `stdio` listener 是它所在 runner 唯一的 listener。                                                    |
+| **独立状态目录**  | 每个 SSH 身份用自己的状态目录。同一时间在同一目录上的第二个会话会被拒绝。                             |
+| **会话结束**      | 输入结束时，`serve` 停止插件、确认它已退出、释放状态目录，然后以 0 退出；失败时以非零退出并给出原因。 |
+| **干净的输出**    | 标准输出承载协议字节。使用 `-T`，不要打印 banner。                                                    |
+| **退出证明**      | SSH 退出不能证明插件已经停止，只有 runner 的确认才能。                                                |

@@ -48,10 +48,17 @@ This sample's `graft.yml` replaces just that entry:
       greeting: Hello
 ```
 
-The `welcome` entry and [`src/welcome.ts`](src/welcome.ts) do not change.
-[`src/greeter.ts`](src/greeter.ts) is also a normal plugin; its service is
-described by [`src/contract.ts`](src/contract.ts). The build produces JavaScript
-that a child can load independently of the host.
+The `welcome` entry and [`src/welcome.ts`](src/welcome.ts) do not change. The
+greeter is split in two:
+
+| File                                 | Holds                                                                                                                                  | Imported by             |
+| ------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------- | ----------------------- |
+| [`src/contract.ts`](src/contract.ts) | The plugin's name, config schema, and how `Greeter` crosses the boundary. `fromClient` maps `RpcClientError` to `GreetingUnavailable`. | Host and plugin process |
+| [`src/greeter.ts`](src/greeter.ts)   | The plugin itself, importing `config` and `Greeter` from the contract.                                                                 | Plugin process only     |
+
+The plugin process does not use the host's TypeScript loader, so
+[`tsdown.config.ts`](tsdown.config.ts) builds both to `dist/`. Rebuild with
+`devenv shell -- pnpm build` after changing either.
 
 1. Change `greeting: Hello` to `greeting: Hi` and save. The provider restarts,
    then welcome prints `Hi, Alice!`.
@@ -64,7 +71,9 @@ connect:
 
 Save again. The same greeting now comes from a Node worker. A worker shares the
 host process: it isolates execution, **not permissions**. Local uses a separate
-process, also with your normal OS permissions.
+process, also with your normal OS permissions. `worker: { execArgv: [...] }`
+passes Node options, and `local: { command: [node, /path/to/bin.js] }` runs a
+different command.
 
 ## Move it to a runner
 
@@ -95,8 +104,8 @@ exit before starting a larger generation.
 
 You will see WARNs: `ws` is unencrypted and `none` does not authenticate
 callers. This loopback tutorial is for trying the flow; use wss and
-authentication when deploying it. See the
-[remote guide](../../packages/docs/content/docs/remote/transport-auth.md).
+authentication when deploying it. See
+[Transport and authentication](../../packages/docs/content/docs/remote/transport-auth.md).
 
 Press **Ctrl+C** in the host terminal first, then the runner terminal. Edit
 business config or `connect` while running; after editing the contract, rebuild

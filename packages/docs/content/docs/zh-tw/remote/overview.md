@@ -1,77 +1,54 @@
 ---
-title: 概覽
-description: Remote 做什麼、什麼時候該用，以及宿主、runner 與外掛行程如何配合。
+title: Remote
+description: 讓單一外掛在子行程、Node worker 或另一台機器上執行。
 ---
 
-Remote 讓外掛的程式碼在應用程式行程之外執行，應用程式的其他部分仍把它當成一般服務使用。本頁說明這在什麼時候有用、什麼時候不適合，以及各部分如何配合。閱讀其他 Remote 頁面之前，請先看這一頁。
+Remote 讓外掛的程式碼在應用程式行程之外執行：放在子行程、Node worker，或
+**runner**
+上。runner 是在另一台機器上替宿主啟動外掛的服務。應用程式，也就是**宿主**，依然看得到外掛的[服務](../../services/)，注入這些服務的外掛不必修改。
 
-## 它解決什麼問題
+|            | 直連：`local`、`worker` | Runner                                              |
+| ---------- | ----------------------- | --------------------------------------------------- |
+| 在哪裡執行 | 宿主上的子行程或 worker | runner 啟動的行程，通常在另一台機器上               |
+| 要安裝什麼 | 只需建置好的外掛        | 在 runner 上安裝外掛套件並執行 `graft-remote serve` |
+| 連線       | 宿主私有                | `ws`/`wss`、Unix socket，或 SSH 這類命令            |
+| 驗證       | 無                      | mTLS、bearer token、JWT，或命令本身的驗證           |
+| 替換外掛   | 每次啟動都是全新的行程  | 舊行程必須先退出；每次啟動都是一個 generation       |
 
-Graft
-[外掛](../../plugins/)通常都在應用程式行程裡執行。有時你會希望某個外掛在別處執行：
+每個載入的 `remote`
+設定項目都有自己的外掛行程。停止設定項目就會停止它，重新啟動設定項目就會替換它。搬移外掛有以下限制：
 
-- **放進獨立的行程**：這個外掛當機、記憶體洩漏或卡住事件迴圈時，不會拖垮整個應用程式。
-- **放進 Node worker**：讓它的工作在另一條執行緒上進行。
-- **放到另一台機器上**：靠近它需要的資料、硬體或網路。
+- **隔離的是執行，不是權限。**
+  子行程以你的使用者身分執行，worker 與宿主共用行程，runner 啟動的外掛擁有 runner 帳號的權限。需要權限邊界時，請把 runner 放進容器或虛擬機器。只想限制同一行程內外掛能看到什麼，請使用
+  [realm](../../isolation/)。
+- **設定必須能編碼為 JSON。** 外掛行程會自行解碼。
+- **呼叫會經過連線。** 每次呼叫都是一則訊息，因連線中斷而失敗的呼叫不會重試。
 
-有了 Remote，只要修改一個[設定項目](../../config-file/)就能搬走外掛。外掛照常發布[服務](../../services/)，使用這些服務的外掛照常注入。差別只在於呼叫會經過一條連線，送到外掛實際執行的地方。
+## 搬移外掛
 
-## 什麼時候不該用
+要在別處執行的外掛分成兩部分。**契約**給出外掛名稱、設定 schema 與跨越邊界的服務，雙方都會匯入它。**實作**就是外掛本身，建置為 JavaScript，只有外掛行程會匯入。
 
-Remote 隔離的是**執行**，不是**權限**。
+```ts title="src/contract.ts"
+export const config = Schema.Struct({ greeting: Schema.String })
 
-- 子行程中的外掛以你的作業系統使用者身分執行，權限與應用程式相同。
-- Node worker 與應用程式共用同一個行程。
-- runner 啟動的外掛，擁有 runner 所用帳號的權限。
-
-如果外掛不能存取應用程式能存取的檔案、網路或機密，請把 runner 放進容器或虛擬機器，在那裡劃定邊界。如果只是想控制同一行程內外掛能看到哪些服務，請使用[realm](../../isolation/)。
-
-搬走外掛也有代價：它的設定必須能編碼為 JSON，每次呼叫都會變成連線上的一則訊息，而因連線中斷而失敗的呼叫不會自動重試。
-
-## 如何理解它
-
-Remote 各頁反覆用到以下術語：
-
-| 術語         | 意義                                                                           |
-| ------------ | ------------------------------------------------------------------------------ |
-| **宿主**     | 你的 Graft 應用程式。它透過名為 `remote` 的項目載入外掛。                      |
-| **契約**     | 雙方都會匯入的小模組。它給出外掛名稱、設定與共享服務的描述，並指向外掛程式碼。 |
-| **實作**     | 外掛本身：一個普通的 Graft 外掛，建置為 JavaScript。                           |
-| **外掛行程** | 實作執行的地方：子行程、Node worker，或 runner 啟動的行程。                    |
-| **Runner**   | 長期執行的服務，通常在另一台機器上，接受宿主連線並為它們啟動外掛行程。         |
-
-把外掛放到別處有兩種方式：
-
-```text
-直連：          host ─────────────────────── child process or worker
-                                              (implementation)
-
-透過 runner：   host ──────── runner ──────── plugin process
-                     wss, unix                (implementation)
-                     or ssh
+export const contract = Contract.make({
+	name: "greeter",
+	config,
+	module: new URL("./greeter.js", import.meta.url).href,
+	provides: [greeter],
+})
 ```
 
-**直連**最簡單。宿主在本機啟動一個子行程（`local`）或 Node
-worker（`worker`），不需要另外安裝或執行任何東西。
-
-**透過 runner**
-用於其他機器。你在 runner 所在的機器上安裝外掛套件並啟動 runner。宿主連線過去、證明自己的身分，再請它啟動外掛。宿主從不上傳程式碼。
-
-|            | 直連                    | 透過 runner                                         |
-| ---------- | ----------------------- | --------------------------------------------------- |
-| 外掛執行於 | 宿主上的子行程或 worker | runner 啟動的行程，通常在另一台機器上               |
-| 需要準備   | 建置外掛即可            | 在 runner 上安裝套件並執行 `graft-remote serve`     |
-| 連線       | 宿主私有                | WebSocket（`ws`/`wss`）、Unix socket 或 SSH 等命令  |
-| 驗證       | 不需要                  | mTLS、bearer token、JWT，或命令本身的驗證（如 SSH） |
-| 替換外掛   | 每次啟動都是全新的行程  | 舊行程必須先結束；每次替換都有編號                  |
-
-無論哪種方式，每個載入的 `remote`
-項目都有自己的外掛行程，並跟隨項目的生命週期：停止項目就停止行程，重新啟動項目就替換行程。
-
-## 一個小例子
-
-假設 `greeter` 外掛提供 `Greeter` 服務，另一個外掛注入 `Greeter` 來打招呼。要讓
-`greeter` 在子行程中執行，把它的項目換成 `remote` 項目：
+```ts title="src/greeter.ts"
+export default Plugin.make({
+	name: "greeter",
+	config,
+	apply: ({ greeting }) =>
+		Graft.provide(Greeter, {
+			greet: (name) => Effect.succeed(`${greeting}, ${name}!`),
+		}),
+})
+```
 
 ```yaml title="graft.yml"
 - id: greeter
@@ -84,26 +61,7 @@ worker（`worker`），不需要另外安裝或執行任何東西。
       greeting: Hello
 ```
 
-- `contract` 是建置好的契約模組。
-- `connect` 指定外掛在哪裡執行。`local: {}` 是子行程，`worker: {}` 是 Node
-  worker，runner 的位址也寫在這裡。
-- 內層的 `config` 是外掛自己的設定。
-
-注入 `Greeter`
-的外掛完全不需要修改。[快速上手](../getting-started/)會一步步完成這個例子。
-
-## 範例
-
-- [06 · 遠端外掛](https://github.com/graftland/graft/tree/main/samples/06-remote/README.zh-TW.md)：在子行程、worker 與 runner 之間搬移同一個外掛，呼叫端不變。
-- [聊天機器人](https://github.com/graftland/graft/tree/main/samples/chat-bot/README.zh-TW.md)：把天氣整合放進子行程執行。
-
-## 接下來
-
-| 頁面                                     | 適合在你想……的時候閱讀                     |
-| ---------------------------------------- | ------------------------------------------ |
-| [快速上手](../getting-started/)          | 把第一個外掛移到子行程或 worker。          |
-| [在另一台機器上執行外掛](../runners/)    | 部署 runner，並讓宿主連線過去。            |
-| [選擇傳輸與驗證](../transport-auth/)     | 決定宿主與 runner 如何連線，能防範什麼。   |
-| [重新啟動、替換與停止](../restarts/)     | 了解重新部署、斷線和停止緩慢時會發生什麼。 |
-| [編寫自己的傳輸或驗證](../capabilities/) | 用內建選項以外的方式連線或驗證。           |
-| [參考](../reference/)                    | 查詢設定欄位、預設值、命令與錯誤。         |
+`greeter` 描述 `Greeter` 如何跨越邊界，見[定義契約](../hosts/#定義契約)。把
+`local: {}` 改成 `worker: {}` 或 runner 的位址，就能再次搬移外掛。
+[06 · Remote](https://github.com/graftland/graft/tree/main/samples/06-remote)
+範例逐步示範這三種方式。

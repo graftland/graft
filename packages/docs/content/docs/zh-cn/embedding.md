@@ -164,4 +164,4 @@ program.pipe(
 
 Remote 需要环境中有 `NodeServices.layer` 和
 `SecureRandom.layerWebCrypto`。`hello` 仍然像以前一样注入
-`Greeter`。契约和其他选项见[在 TypeScript 中加载](../remote/getting-started/#在-typescript-中加载)。
+`Greeter`。契约和其他选项见[从 TypeScript 加载](../remote/hosts/#从-typescript-加载)。

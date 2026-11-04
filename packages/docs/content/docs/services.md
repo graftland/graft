@@ -64,7 +64,7 @@ The publisher does not have to run in your process. A plugin moved into a child
 process, a worker or another machine with [Remote](../remote/overview/) still
 publishes its services here, and `uptime` would inject `Clock` the same way.
 Calls then cross a connection, and their failures reach the caller as
-[remote errors](../remote/getting-started/#errors-callers-see).
+[remote errors](../remote/hosts/#errors-callers-see).
 
 ## How withdrawal works
 

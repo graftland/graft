@@ -47,10 +47,16 @@ devenv shell -- pnpm start
       greeting: Hello
 ```
 
-`welcome` 條目和 [`src/welcome.ts`](src/welcome.ts) 都不變。
-[`src/greeter.ts`](src/greeter.ts) 也仍是一般外掛；
-[`src/contract.ts`](src/contract.ts)
-描述它的服務。建置後的 JavaScript 能由子行程獨立載入，不依賴宿主的載入器。
+`welcome` 條目和 [`src/welcome.ts`](src/welcome.ts) 都不變。greeter 拆成兩部分：
+
+| 檔案                                 | 內容                                                                                                                | 由誰匯入       |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------- | -------------- |
+| [`src/contract.ts`](src/contract.ts) | 外掛名稱、設定 schema，以及 `Greeter` 如何跨越邊界。`fromClient` 把 `RpcClientError` 轉換成 `GreetingUnavailable`。 | 宿主與外掛行程 |
+| [`src/greeter.ts`](src/greeter.ts)   | 外掛本身，從契約匯入 `config` 與 `Greeter`。                                                                        | 只有外掛行程   |
+
+外掛行程不使用宿主的 TypeScript 載入器，所以
+[`tsdown.config.ts`](tsdown.config.ts) 會把兩者建置到
+`dist/`。修改任一檔案後，請執行 `devenv shell -- pnpm build` 重新建置。
 
 1. 把 `greeting: Hello` 改成 `greeting: Hi`
    並儲存。提供者重新啟動後，welcome 印出 `Hi, Alice!`。
@@ -62,7 +68,9 @@ connect:
 ```
 
 儲存後，問候語就來自 Node
-worker 了。worker 與宿主共用行程，隔離執行，**不隔離權限**。local 使用獨立行程，同樣保留目前使用者的作業系統權限。
+worker 了。worker 與宿主共用行程，隔離執行，**不隔離權限**。local 使用獨立行程，同樣保留目前使用者的作業系統權限。`worker: { execArgv: [...] }`
+可傳入 Node 選項，`local: { command: [node, /path/to/bin.js] }`
+則改用其他命令執行。
 
 ## 換到 runner
 
@@ -89,7 +97,7 @@ connect:
 條目 id 就是實例名稱；替換時先確認舊子行程退出，再以更大的 generation 啟動新實例。
 
 你會看到 WARN：`ws` 沒有加密，`none`
-不驗證呼叫端身分。本例只在回環位址上體驗流程；部署時請使用 wss 與驗證。詳見[遠端外掛文件](../../packages/docs/content/docs/zh-tw/remote/transport-auth.md)。
+不驗證呼叫端身分。本例只在回環位址上體驗流程；部署時請使用 wss 與驗證。詳見[傳輸與驗證](../../packages/docs/content/docs/zh-tw/remote/transport-auth.md)。
 
 結束時先在宿主終端機按 **Ctrl+C**，再停止 runner。執行中可以改業務設定與
 `connect`；修改契約後，需要重新建置並重新啟動宿主。
