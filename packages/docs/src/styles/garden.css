@@ -45,6 +45,11 @@ h1#_top,
 	font-weight: 600;
 }
 
+/* Each word of the hero title sits on its own line at every width. */
+.hero h1 span {
+	display: block;
+}
+
 .hero .tagline {
 	max-width: 36rem;
 }
