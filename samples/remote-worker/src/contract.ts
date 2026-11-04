@@ -7,7 +7,11 @@ export class WorkerUnavailable extends Schema.TaggedError<
 	{ readonly brand: unique symbol }
 >()("WorkerUnavailable", { cause: Schema.Defect() }) {}
 
-export const Reply = Schema.Struct({ text: Schema.String, pid: Schema.Int })
+export const Reply = Schema.Struct({
+	text: Schema.String,
+	pid: Schema.Int,
+	threadId: Schema.Int,
+})
 export class Formatter extends Context.Service<
 	Formatter,
 	{

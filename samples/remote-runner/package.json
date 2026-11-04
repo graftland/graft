@@ -3,7 +3,7 @@
 	"private": true,
 	"version": "0.0.0",
 	"type": "module",
-	"description": "Run a plugin on a runner over mutual TLS and fence its writes by generation",
+	"description": "Run a plugin on a runner over WebSocket and JWT and fence its writes by generation",
 	"exports": {
 		"./contract": "./dist/contract.js"
 	},

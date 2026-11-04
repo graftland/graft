@@ -2,9 +2,11 @@
 
 English | [简体中文](README.zh-CN.md) | [繁體中文](README.zh-TW.md)
 
-Run a Graft plugin in a local Node.js child or on another machine. Declare the
-services that cross the boundary; host plugins keep using their usual service
-interfaces.
+Run a Graft plugin in a child process, a Node worker, or on a runner. Declare
+the services that cross the boundary; consumers keep their usual interfaces.
+
+Keep the contract separate from the implementation. The host imports only the
+contract. Build both modules to JavaScript, then load the capability and entry:
 
 ```ts
 import * as Remote from "@graftland/remote"
@@ -16,24 +18,32 @@ export default Remote.plugin(contract, {
 })
 ```
 
-Keep the shared `Contract.make(...)` definition separate from the
-implementation. The host imports only the contract. Build the contract and
-implementation to JavaScript before starting the child, then load this entry
-with `Graft.plugin` or `graft.yml`. A custom host provides `NodeServices.layer`
-and `SecureRandom.layerWebCrypto` (from `effect/crypto`) to its Graft runtime.
+```yaml
+- name: "@graftland/remote/host/local"
+- name: ./entry.ts
+```
 
-Use `Remote.runner(...)` for an authenticated network runner. Install plugin
-packages on that machine and provision certificates from a dedicated CA using
-`graft-remote certificates` or your usual certificate tooling. With `graft.yml`,
+For threads, use `Remote.worker()` with `host/worker`. Workers share the host
+process and permissions. For runners, use `Remote.runner({ transport, auth })`:
+websocket (ws/wss), unix socket, or command/stdio; choose mTLS, bearer, JWT, or
+none where supported. Load the matching `host/*` and `host/auth/*` plugins
+explicitly. Missing capabilities leave the proxy Pending; `Remote.plugin`
+installs none automatically.
+
+Start a runner with `graft-remote serve --config runner.yml` or CLI shorthand.
+Install its plugin packages in advance and preserve its state directory.
+`graft-remote certificates` can issue deployment certificates. With `graft.yml`,
 the saved entry id names the instance by default.
 
-- [Remote plugins](https://graftland.github.io/graft/remote/): contracts,
-  services, configuration, deployment, and stopping.
-- [Runnable example](../../samples/remote-worker/): call a child service and
-  confirm exit on shutdown.
+A custom host provides `NodeServices.layer` and `SecureRandom.layerWebCrypto`
+(from `effect/crypto`) to its Graft runtime.
 
-This workspace package is private. It separates execution, not permissions; use
-a VM or container when plugins need an isolation boundary.
+- [Remote plugin guide](https://graftland.github.io/graft/remote/)
+- [Local and Node worker sample](../../samples/remote-worker/)
+- [JWT runner and SSH sample](../../samples/remote-runner/)
+
+This workspace package remains private. A separate process is not a permission
+sandbox.
 
 Part of [Graft](https://github.com/graftland/graft). Licensed under
 [Apache 2.0](https://github.com/graftland/graft/blob/main/LICENSE).

@@ -2,9 +2,9 @@
 
 English | [简体中文](README.zh-CN.md) | [繁體中文](README.zh-TW.md)
 
-The host asks a child process to format `hello`. The child publishes
-`Formatter`; the host injects it and receives `Worker: HELLO` with the child's
-PID. The host imports the contract, never the worker implementation.
+The host calls the same `Formatter` service twice: once in a child process with
+`Remote.local()`, then in a Node worker with `Remote.worker()`. Both return
+`Worker: HELLO`. The host imports only the contract.
 
 ## Run it
 
@@ -16,31 +16,20 @@ devenv shell -- pnpm --filter @graftland/sample-remote-worker start
 devenv shell -- pnpm --filter @graftland/sample-remote-worker test
 ```
 
-The program prints `Worker: HELLO (child ..., host ...)` with two different
-PIDs, then closes its scope and waits for the child to exit. No certificates or
-network services are needed. The test checks the reply, separate PID, and
-confirmed exit. It builds its own child executable so it can run alongside the
-package tests.
+The local result has a different PID and thread 0. The worker result shares the
+host PID and has a positive threadId. Closing each scope disposes its proxy and
+waits for exit. Neither needs a runner or credentials; generation is always 1.
 
-## Files
+`src/host.ts` explicitly loads `host/local` and `host/worker` before loading the
+proxy and its consumer. `src/contract.ts` defines the RPC mapping;
+`src/worker.ts` provides the service. `src/main.ts` selects each target. The
+tests check both replies, process/thread identity, and local process exit. Build
+first: the worker target starts the installed remote worker executable.
 
-| File                         | Purpose                                                        |
-| ---------------------------- | -------------------------------------------------------------- |
-| `src/contract.ts`            | Config, service key, RPC mapping, and implementation location. |
-| `src/worker.ts`              | Publishes the formatter in the child.                          |
-| `src/host.ts`                | Loads the proxy, injects the service, and makes a call.        |
-| `src/main.ts`                | Supplies Node services, runs the host, and prints the result.  |
-| `test/remote-worker.test.ts` | Checks the call and cleanup with a real child.                 |
+`WorkerUnavailable` keeps connection failures in the service's error channel.
+Calls are not retried. A Node worker shares the host process and permissions: it
+isolates execution, not access to files or the network. A child process also has
+normal OS permissions.
 
-`WorkerUnavailable` keeps connection failures in the service's typed error
-channel. Calls are not retried. The child has normal OS permissions; a separate
-process is not a security sandbox.
-
-## Run the worker on another machine
-
-The [remote-runner](../remote-runner) sample runs a plugin on a real runner over
-mutual TLS, loaded from `graft.yml`. Its README covers certificates, installing
-packages on the runner, and starting `graft-remote serve`. To point this sample
-at a runner, pass `Remote.runner(...)` as the `target` in `src/main.ts`, with
-`contractModule: "@graftland/sample-remote-worker/contract"`. This sample's test
-only runs the local target.
+For a wss/JWT runner, persistent generations, and SSH/stdio instructions, see
+[remote-runner](../remote-runner/).

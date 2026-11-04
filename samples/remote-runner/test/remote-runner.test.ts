@@ -1,8 +1,9 @@
 import { assert, describe, it } from "@effect/vitest"
 import { NodeServices } from "@effect/platform-node"
-import { Effect, FileSystem, Result } from "effect"
+import { Effect, FileSystem, Layer, Result } from "effect"
 import process from "node:process"
 import { fileURLToPath } from "node:url"
+import { crypto } from "../src/credentials.ts"
 import { demo } from "../src/host.ts"
 import * as Lab from "../src/lab.ts"
 
@@ -30,7 +31,7 @@ describe("remote runner", () => {
 								"./watchdog": "./dist/watchdog.js",
 								"./runner/supervisor": "./dist/runner/supervisor.js",
 								"./runner/websocket": "./dist/runner/websocket.js",
-								"./runner/auth/mtls": "./dist/runner/auth/mtls.js",
+								"./runner/auth/jwt": "./dist/runner/auth/jwt.js",
 							},
 						},
 						{
@@ -59,6 +60,9 @@ describe("remote runner", () => {
 				const fs = yield* FileSystem.FileSystem
 				const ledger = yield* fs.readFileString(environment.LEDGER_FILE)
 				assert.include(ledger, "INV-2")
-			}).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+			}).pipe(
+				Effect.scoped,
+				Effect.provide(Layer.merge(NodeServices.layer, crypto)),
+			),
 	)
 })

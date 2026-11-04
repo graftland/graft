@@ -15,12 +15,16 @@ NodeRuntime.runMain(
 					Layer.merge(NodeServices.layer, SecureRandom.layerWebCrypto),
 				),
 			)
-			const reply = yield* formatInChild({
-				contractModule: new URL("./contract.js", import.meta.url).href,
-				target: Remote.local(),
-			}).pipe(Effect.provideContext(context))
-			yield* Console.log(
-				`${reply.text} (child ${reply.pid}, host ${process.pid})`,
+			yield* Effect.forEach([Remote.local(), Remote.worker()], (target) =>
+				Effect.gen(function* () {
+					const reply = yield* formatInChild({
+						contractModule: new URL("./contract.js", import.meta.url).href,
+						target,
+					})
+					yield* Console.log(
+						`${target._tag}: ${reply.text} (pid ${reply.pid}, thread ${reply.threadId}, host ${process.pid})`,
+					)
+				}).pipe(Effect.scoped, Effect.provideContext(context)),
 			)
 		}),
 	),

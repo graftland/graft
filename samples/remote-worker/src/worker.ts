@@ -1,5 +1,6 @@
 import { Graft, Plugin } from "@graftland/graft"
 import { Effect, String } from "effect"
+import { threadId } from "node:worker_threads"
 import process from "node:process"
 import { config, Formatter } from "./contract"
 
@@ -12,6 +13,7 @@ export default Plugin.make({
 				Effect.succeed({
 					text: prefix + String.toUpperCase(text),
 					pid: process.pid,
+					threadId,
 				}),
 		}),
 })

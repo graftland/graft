@@ -1,6 +1,7 @@
 import { NodeRuntime, NodeServices } from "@effect/platform-node"
-import { Console, Effect } from "effect"
+import { Console, Effect, Layer } from "effect"
 import { fileURLToPath } from "node:url"
+import { crypto } from "./credentials.ts"
 import { demo } from "./host.ts"
 import * as Lab from "./lab.ts"
 
@@ -24,5 +25,5 @@ NodeRuntime.runMain(
 			yield* Console.log(`Runner listening on port ${environment.RUNNER_PORT}`)
 			yield* demo(environment)
 		}),
-	).pipe(Effect.provide(NodeServices.layer)),
+	).pipe(Effect.provide(Layer.merge(NodeServices.layer, crypto))),
 )

@@ -1,12 +1,12 @@
 ---
 title: Remote plugins
-description: Run a plugin in a child process or on another machine.
+description: Run a plugin in a child process, a Node worker, or on a runner.
 ---
 
-Use `@graftland/remote` to move a plugin out of the host process. Choose
-`Remote.local()` for a local Node.js child, or `Remote.runner(...)` for a runner
-on another machine. The host still loads an ordinary Graft plugin. Its consumers
-wait for services, restart on withdrawal, and stop before their providers do.
+Use `Remote.local()` to start a Node.js child, `Remote.worker()` for a Node
+worker thread, or `Remote.runner(...)` to connect to a runner. The host still
+loads an ordinary Graft plugin: consumers wait for services, restart on
+withdrawal, and stop before providers.
 
 This separates execution, not permissions. A plugin can still access its
 machine's files and network. Use a container or VM when you need that boundary.
@@ -17,8 +17,8 @@ The
 includes a working service, host, child, and test. It needs no network or
 certificates. The
 [remote-runner sample](https://github.com/graftland/graft/tree/main/samples/remote-runner)
-runs a `graft.yml` entry on a real runner over mutual TLS and shows generations
-fencing out a stale write.
+runs a `graft.yml` entry on a real runner over wss with JWT and shows
+generations fencing out a stale write.
 
 ## Separate the contract from the implementation
 
@@ -56,10 +56,36 @@ plugin. Use matching config schemas; config must encode as JSON. Put expected
 plugin errors in the contract's `error` schema. Contract codecs must not need
 external services.
 
-Build both modules to JavaScript before starting a child. Children do not use
+Build both modules to JavaScript before starting a child or worker. Neither uses
 the host's TypeScript loader.
 
-## Start a local child
+## Load the capabilities you use
+
+Remote uses ordinary Graft plugins on both sides. `Remote.plugin` injects the
+capabilities selected by its target; it installs no providers. Missing providers
+leave the proxy Pending. Withdrawing a transport or credential provider also
+withdraws its dependent proxies.
+
+The public contract modules `@graftland/remote/Transport`, `Auth`, and
+`Supervisor` contain service keys and interfaces, not implementations.
+`Auth.Peer` carries the authenticated identity. Load implementations by their
+module names in YAML, or import their default exports and use `Graft.plugin`:
+
+| Side   | Plugin subpaths under `@graftland/remote/`                                      | Purpose                                                                                     |
+| ------ | ------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| Host   | `host/local`, `host/worker`                                                     | Create a child process or Node worker. No auth plugin.                                      |
+| Host   | `host/websocket`, `host/unix`, `host/command`                                   | Connect to a runner using the selected transport.                                           |
+| Host   | `host/auth/mtls`, `host/auth/bearer`, `host/auth/jwt`, `host/auth/none`         | Prepare the chosen credentials; command needs none of these.                                |
+| Runner | `runner/supervisor`                                                             | Own execution, persistent generations, leases, and the state-directory lock.                |
+| Runner | `runner/websocket`, `runner/unix`, `runner/stdio`                               | Accept host sessions. Multiple network listeners share the supervisor's instance namespace. |
+| Runner | `runner/auth/mtls`, `runner/auth/bearer`, `runner/auth/jwt`, `runner/auth/none` | Map credentials to stable identities. Stdio does not use an authenticator.                  |
+
+There can be only one provider per service key in a realm. Listener `auth`
+values are full service keys, such as `@graftland/remote/Auth/JwtAuthenticator`,
+not entry ids. Withdrawing that authenticator closes its listeners; the
+supervisor stays active.
+
+## Start a local child or Node worker
 
 ```ts title="entry.ts"
 import * as Remote from "@graftland/remote"
@@ -71,6 +97,19 @@ export default Remote.plugin(contract, {
 	shutdownTimeout: "5 seconds",
 })
 ```
+
+Load `host/local` alongside the entry:
+
+```yaml title="graft.yml"
+- name: "@graftland/remote/host/local"
+- name: ./entry.ts
+  config:
+    greeting: Hello
+```
+
+For a Node worker, change the target to `Remote.worker()` and the capability to
+`host/worker`. It shares the host process and permissions. Forwarded Effect logs
+identify it by `remote.threadId` instead of a separate PID.
 
 Load this entry with `Graft.plugin(entry, { greeting: "Hello" })` or through
 [graft.yml](../config-file/). A custom host supplies `NodeServices.layer` and
@@ -136,7 +175,10 @@ Point the entry at a local module. Its config remains the plugin's business
 input:
 
 ```yaml title="graft.yml"
-- name: ./greeter.ts
+- name: "@graftland/remote/host/websocket"
+- name: "@graftland/remote/host/auth/jwt"
+- id: greeter
+  name: ./greeter.ts
   config:
     greeting: Hello
 ```
@@ -146,22 +188,20 @@ Config:
 
 ```ts title="greeter.ts"
 import * as Remote from "@graftland/remote"
-import { Config, Effect, FileSystem, Redacted } from "effect"
+import { Config, Effect, FileSystem } from "effect"
 import { contract } from "my-plugin/contract"
 
 const target = Effect.gen(function* () {
 	const fs = yield* FileSystem.FileSystem
-	const read = (name: string) =>
-		Config.String(name).pipe(Effect.flatMap((path) => fs.readFileString(path)))
+	const ca = yield* Config.String("RUNNER_CA").pipe(
+		Effect.flatMap((path) => fs.readFileString(path)),
+	)
 	return Remote.runner({
-		host: yield* Config.String("RUNNER_HOST"),
-		port: yield* Config.Port("RUNNER_PORT"),
-		tls: {
-			servername: yield* Config.String("RUNNER_SERVERNAME"),
-			ca: yield* read("RUNNER_CA"),
-			cert: yield* read("RUNNER_CERT"),
-			key: yield* read("RUNNER_KEY").pipe(Effect.map(Redacted.make)),
-		},
+		transport: Remote.websocket({
+			url: yield* Config.String("RUNNER_URL"),
+			tls: { ca },
+		}),
+		auth: Remote.jwt(Config.Redacted("RUNNER_TOKEN")),
 	})
 })
 
@@ -171,16 +211,14 @@ export default Remote.plugin(contract, {
 })
 ```
 
-Replace `my-plugin/contract` with your package's contract export. Install
-matching contract versions on host and runner. Set `expect: { version, digest }`
-to require a particular package version and content digest before the plugin
-starts; either check can be used alone. The three certificate variables are file
-paths on the host. `RUNNER_SERVERNAME` must match the runner's server
-certificate. Config and files are read when the plugin activates, not when the
-module is imported.
+Replace `my-plugin/contract` with your contract export. Install matching
+versions on host and runner. `expect: { version, digest }` can require either or
+both checks before starting. `RUNNER_URL` is a wss URL matching the server
+certificate; `RUNNER_CA` is the host's CA file path. `RUNNER_TOKEN` is the JWT.
+Config and files are read on activation, never on module import.
 
-Set these options inside `Remote.runner({ ... })`, alongside `host`, `port`, and
-`tls`:
+Set these options inside `Remote.runner({ ... })`, alongside `transport` and
+`auth`:
 
 | Option     | Default and meaning                                                                                                                                                                                                   |
 | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -195,34 +233,155 @@ is an `Option<string>` reference, inherited by child plugins forked inside that
 entry. Two runner proxies forked from one entry without explicit `instance`
 values therefore replace each other. Give them distinct names. Directly embedded
 `Group.Group` only requires sibling ids to be unique, so ids from different
-groups can collide too. Multiple hosts using the same certificate identity and
+groups can collide too. Multiple hosts using the same authenticated identity and
 the same instance name also address the same instance.
+
+## Choose transport and authentication
+
+| Target                                 | Allowed auth            | Protection and warnings                                                                                                                                   |
+| -------------------------------------- | ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Remote.local()`                       | No `auth`               | Separate process, normal OS permissions. No transport WARN.                                                                                               |
+| `Remote.worker({ execArgv? })`         | No `auth`               | Same process, separate execution; **no permission isolation**. No transport WARN.                                                                         |
+| `Remote.websocket({ url: "wss://…" })` | mtls, bearer, jwt, none | Encrypted, server certificate checked. None warns at runner startup and on every connection.                                                              |
+| `Remote.websocket({ url: "ws://…" })`  | bearer, jwt, none       | No encryption. Runner warns at startup, host on connection; bearer/JWT warnings say credentials travel in plaintext. None also warns on every connection. |
+| `Remote.unix({ path })`                | bearer, jwt, none       | Access controlled by filesystem permissions; no peer credentials are read. No transport/auth WARN.                                                        |
+| `Remote.command(argv, { cwd?, env? })` | No `auth`               | Starts a stdio runner; authentication and encryption belong to the command, for example SSH. No transport/auth WARN.                                      |
+
+Wrap websocket, unix, and command in `Remote.runner({ transport, auth?, ... })`.
+Local and worker are direct targets and do not use a supervisor. Omitting auth
+on websocket/unix means `Remote.none()`; still load `host/auth/none` and
+`runner/auth/none`. Its configured identity defaults to `anonymous`; every
+connecting host shares that namespace.
+
+- **mTLS:** load both `auth/mtls` plugins. Runner config is
+  `{ ca: "clients-ca.crt" }`. The host uses
+  `Remote.mtls(Effect.succeed({ cert, key }))`, with PEM strings and a
+  `Redacted<string>` key. Only wss supports it.
+- **Bearer:** runner config is `{ tokens: "tokens.json" }`. The JSON file maps
+  SHA-256 hex digests to identities: `{ "<sha256 hex>": "billing" }`. Send the
+  original token with `Remote.bearer(Config.Redacted("RUNNER_TOKEN"))`.
+- **JWT:** use `Remote.jwt(Config.Redacted("RUNNER_TOKEN"))`. Runner config
+  selects one `issuer`, an `audience` list, and a nonempty asymmetric
+  `algorithms` allowlist. Set either
+  `keys: { jwksUrl: "https://issuer.example/jwks" }` or
+  `keys: { publicKey: "jwt-public.pem" }` (SPKI PEM). `identityClaim` defaults
+  to `sub`; the selected claim must be a nonempty string. `clockTolerance`
+  defaults to `5 seconds`. `exp` is required; `nbf` is checked when present.
+- **None:** runner config is `{ identity: "billing" }`. It assigns an identity;
+  it does not authenticate callers.
+
+Credentials are read once per connection. For a service-backed credential
+source, pass
+`{ inject: [Credentials], read: Credentials.pipe(Effect.flatMap(...)) }` to
+`Remote.jwt`, `Remote.bearer`, or `Remote.mtls`; those dependencies join the
+proxy's inject list. JWT is verified only at upgrade. Expiry during an
+established session does not disconnect it. Invalid or missing bearer/JWT
+credentials return 401 with `WWW-Authenticate: Bearer` before a WebSocket is
+established.
+
+Stolen tokens can be replayed while valid. Use wss and short token lifetimes.
+The runner trusts its configured issuer and keys. There is no token refresh,
+mid-session reauthentication, revocation list, password auth, symmetric JWT, or
+trust in forwarded certificate headers. TLS verification cannot be disabled.
+Only Node hosts are supported, not browser hosts or Web Workers.
+
+WebSocket uses `/graft` (added when omitted) and `graft-remote.v1`. There are no
+other HTTP endpoints, including health checks.
 
 ## Prepare a runner
 
-Use Node.js 22.22 or later on Linux or macOS. Install `@graftland/remote` and
-the built plugin package, including its dependencies, under the installation
-root. Network `contractModule` values are package specifiers resolved there. The
-host does not upload code. Keep installed packages unchanged while they are
-running.
+Use Node.js 22.22 or later on Linux or macOS. Install `@graftland/remote`, the
+built plugin package, and their dependencies under the installation root. Runner
+`contractModule` values are package specifiers resolved there. The host does not
+upload code. Keep installed packages unchanged while running.
 
-Provision server and client certificates from a **dedicated CA**. Use
-`graft-remote certificates --out certs --server runner.example --identity billing`,
-or any other tool that produces certificates meeting these requirements. Keep
-`ca.key` with the operator; deploy `server.crt` / `server.key` to the runner and
-`client-billing.crt` / `client-billing.key` to the host, with `ca.crt` on both.
-TLS checks the server hostname and requires a client certificate. Each client
-certificate needs exactly one `graft://` SAN URI, such as `graft://billing`;
-other SAN URIs may also be present. That identity owns an instance namespace:
-issuing another certificate with the same URI grants the same access. Renewing a
-certificate with the same URI keeps that namespace.
+`serve --config` loads ordinary Graft entries. This complete configuration uses
+wss and JWT; paths in the file are relative to its directory.
+
+```yaml title="runner.yml"
+- id: remote-supervisor
+  name: "@graftland/remote/runner/supervisor"
+  config:
+    root: /srv/graft/install
+    state: /var/lib/graft
+    lease: 15 seconds
+    grace: 5 seconds
+
+- id: remote-auth
+  name: "@graftland/remote/runner/auth/jwt"
+  config:
+    issuer: https://issuer.example
+    audience: [graft]
+    algorithms: [ES256]
+    identityClaim: sub
+    clockTolerance: 5 seconds
+    keys:
+      publicKey: /run/secrets/jwt-public.pem
+
+- id: public
+  name: "@graftland/remote/runner/websocket"
+  config:
+    url: wss://0.0.0.0:7443/graft
+    cert: /run/secrets/server.crt
+    key: /run/secrets/server.key
+    auth: "@graftland/remote/Auth/JwtAuthenticator"
+```
 
 ```sh
-graft-remote serve --host 0.0.0.0 --port 7443 \
-  --root /srv/graft/install --state /var/lib/graft \
-  --cert /run/secrets/server.crt --key /run/secrets/server.key \
-  --ca /run/secrets/clients-ca.crt --lease "15 seconds" --grace "5 seconds"
+graft-remote serve --config runner.yml
 ```
+
+The command-line shorthand creates equivalent supervisor, authenticator, and
+listener entries. It cannot be combined with `--config`. Repeat `--listen` for
+multiple network listeners using the same auth:
+
+```sh
+# wss + mTLS
+graft-remote serve --listen wss://0.0.0.0:7443 --auth mtls \
+  --cert server.crt --key server.key --ca clients-ca.crt \
+  --root /srv/graft/install --state /var/lib/graft
+
+# ws + JWT (unencrypted)
+graft-remote serve --listen ws://127.0.0.1:7080 --auth jwt \
+  --jwt-issuer https://issuer.example --jwt-audience graft \
+  --jwt-algorithm ES256 --jwt-public-key jwt-public.pem \
+  --root /srv/graft/install --state /var/lib/graft
+
+# Unix socket + none
+graft-remote serve --listen /run/graft/runner.sock --auth none --identity billing \
+  --root /srv/graft/install --state /var/lib/graft
+
+# One session over stdin/stdout
+graft-remote serve --stdio --identity billing \
+  --root /srv/graft/install --state /var/lib/graft
+```
+
+For bearer use `--auth bearer --tokens tokens.json`. JWT also accepts
+`--jwt-jwks URL` instead of `--jwt-public-key FILE`, repeated `--jwt-audience`
+and `--jwt-algorithm`, `--jwt-identity-claim`, and `--jwt-clock-tolerance`.
+Auth-specific flags must match the selected auth. For ws, omit cert/key; wss
+requires both. mTLS is rejected on ws and unix.
+
+Stdio is exclusive: one listener and one session per process, with no `auth`.
+Its identity defaults to `anonymous`. Authentication belongs to an external
+mechanism, such as an SSH `authorized_keys` forced command. Stdout contains only
+protocol bytes; logs go to stderr. EOF stops the execution units, confirms exit,
+then releases the state lock and exits successfully; cleanup failure preserves
+its cause and exits nonzero. A second concurrent invocation using the same state
+directory fails. See the sample's
+[SSH instructions](https://github.com/graftland/graft/tree/main/samples/remote-runner#connect-over-ssh).
+The SSH process exiting alone is not proof that a remote execution stopped.
+
+For wss, provision a server certificate and its trusted CA. For mTLS, use a
+**dedicated CA** for client certificates too:
+`graft-remote certificates --out certs --server runner.example --identity billing`,
+or any tool meeting these requirements. Keep `ca.key` with the operator. Deploy
+`server.crt`/`server.key` to the runner; for mTLS deploy
+`client-billing.crt`/`client-billing.key` to the host. Both need the relevant
+`ca.crt`. TLS checks the server hostname. An mTLS client certificate must have
+exactly one `graft://` SAN URI, for example `graft://billing`; other URI SANs
+may coexist. Keep the same identity when rotating credentials to retain the
+instance namespace.
 
 `--grace` defaults to five seconds: after the runner requests interruption, it
 waits that long before escalating to a forced kill. This is separate from the
@@ -241,10 +400,10 @@ directory, and operating system. It is not a sandbox for untrusted plugins.
 
 ## Replacement, leases, and stopping
 
-For the same certificate identity and instance id, one runner confirms that the
-old process has exited **before** admitting a replacement. The replacement gets
-a larger, persisted generation. This continues after runner recovery. If exit
-cannot be confirmed, the runner refuses a replacement rather than assuming
+For the same authenticated identity and instance id, one runner confirms that
+the old process has exited **before** admitting a replacement. The replacement
+gets a larger, persisted generation. This continues after runner recovery. If
+exit cannot be confirmed, the runner refuses a replacement rather than assuming
 success.
 
 The host renews a lease while it is connected. Without renewal, the execution
@@ -258,8 +417,8 @@ Inside a remote plugin, read `Remote.Instance` for `{ id, generation }`.
 External systems can reject writes from older generations: this is _fencing_.
 They must enforce it themselves. Generations do not undo completed writes or
 make calls exactly once, and they are not coordinated across independent
-runners. Local children get a new id and generation 1 each time, not a
-persistent fencing token.
+runners. Local children and Node workers get a new id and generation 1 each
+time, not a persistent fencing token.
 
 Normal stopping first waits for plugin finalizers and final logs. The proxy's
 `shutdownTimeout` defaults to five seconds and bounds this graceful Dispose step
@@ -268,11 +427,13 @@ only. Process termination follows it:
 - A local child gets one more second to finish output and exit naturally. If it
   stays alive, cleanup reports the exit timeout and terminates it. The process
   spawner escalates to SIGKILL after another second and confirms exit.
-- A network host waits at most the negotiated lease plus `margin` for
+- A Node worker gets the same one-second exit window. On timeout, cleanup
+  reports it, calls `worker.terminate()`, and waits for its actual exit.
+- A runner-connected host waits at most the negotiated lease plus `margin` for
   termination confirmation. The runner uses its separate `--grace` window before
   forced killing.
 
-Network stopping has three observable results:
+Runner stopping has three observable results:
 
 | Result                         | What you can rely on                                                                                                                                             |
 | ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -285,6 +446,10 @@ The first two appear as `remote.termination` in host logs, with
 `Remote.RemoteTerminationUnconfirmed` is exported so you can recognize it there.
 Cleanup errors remain errors even if the process was subsequently stopped. Logs
 may be dropped under overload; the host reports the loss count.
+
+A clean host disconnect ends its session without an ERROR. Abnormal disconnects
+produce a Warning with the cause and peer identity; the runner keeps serving.
+Execution lifetime is governed by Dispose and leases, not the connection alone.
 
 ## Handle failures
 

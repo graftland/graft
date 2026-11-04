@@ -34,4 +34,26 @@ describe("remote worker", () => {
 				assert.throws(() => process.kill(reply.pid, 0))
 			}),
 	)
+	it.live("calls the service in a Node worker sharing the host process", () =>
+		formatInChild({
+			contractModule,
+			// Do not inherit the test runner's TypeScript source conditions.
+			target: Remote.worker({ execArgv: [] }),
+		}).pipe(
+			Effect.scoped,
+			Effect.provide(
+				Layer.provideMerge(
+					Graft.layer,
+					Layer.merge(NodeServices.layer, SecureRandom.layerWebCrypto),
+				),
+			),
+			Effect.tap((reply) =>
+				Effect.sync(() => {
+					assert.equal(reply.text, "Worker: HELLO")
+					assert.equal(reply.pid, process.pid)
+					assert.isAbove(reply.threadId, 0)
+				}),
+			),
+		),
+	)
 })

@@ -34,7 +34,7 @@ export default async function setup() {
 			"watchdog",
 			"runner/supervisor",
 			"runner/websocket",
-			"runner/auth/mtls",
+			"runner/auth/jwt",
 		].map(
 			(name) =>
 				new URL(`../../../packages/remote/src/${name}.ts`, import.meta.url)

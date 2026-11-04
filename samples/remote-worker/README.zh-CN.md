@@ -1,13 +1,13 @@
-# 远程 worker
+# Remote worker
 
 [English](README.md) | 简体中文 | [繁體中文](README.zh-TW.md)
 
-宿主请子进程转换文本 `hello`。子进程发布 `Formatter`，宿主注入服务后得到
-`Worker: HELLO` 和子进程 PID。宿主只导入契约，不导入 worker 实现。
+宿主两次调用同一个 `Formatter` 服务：先用 `Remote.local()` 启动子进程，再用
+`Remote.worker()` 启动 Node worker。两者都返回 `Worker: HELLO`。宿主只导入契约。
 
 ## 运行
 
-使用 Linux 或 macOS，以及 Node.js 22.22 或更高版本。在仓库根目录执行：
+使用 Linux 或 macOS、Node.js 22.22 或更高版本。在仓库根目录运行：
 
 ```sh
 devenv shell -- pnpm build
@@ -15,27 +15,15 @@ devenv shell -- pnpm --filter @graftland/sample-remote-worker start
 devenv shell -- pnpm --filter @graftland/sample-remote-worker test
 ```
 
-程序输出
-`Worker: HELLO (child ..., host ...)`，两个 PID 不同；随后关闭作用域，等待子进程退出。不需要证书或网络服务。测试验证结果、独立 PID 和退出确认；它构建自己的子进程可执行文件，可以和包测试并行运行。
+local 结果的 PID 与宿主不同，thread 为 0；worker 与宿主共享 PID，threadId 为正数。每个 scope 关闭时都会 dispose 代理并等待退出。两者都不需要 runner 或凭证，generation 每次都是 1。
 
-## 文件
+`src/host.ts` 显式加载 `host/local`、`host/worker`，再加载代理和消费者。
+`src/contract.ts` 定义 RPC 映射，`src/worker.ts` 提供服务， `src/main.ts`
+依次选择两个 target。测试验证两次返回值、进程与线程身份，以及子进程退出。先 build 再运行：worker
+target 会启动已安装的 remote worker 可执行文件。
 
-| 文件                         | 作用                                 |
-| ---------------------------- | ------------------------------------ |
-| `src/contract.ts`            | 配置、服务 key、RPC 映射和实现位置。 |
-| `src/worker.ts`              | 在子进程发布文本转换服务。           |
-| `src/host.ts`                | 加载代理、注入服务并调用。           |
-| `src/main.ts`                | 提供 Node 服务、运行宿主并输出结果。 |
-| `test/remote-worker.test.ts` | 用真实子进程验证调用和清理。         |
+`WorkerUnavailable` 将连接失败保留为服务错误，调用不会重试。Node
+worker 与宿主共享进程和权限，只隔离执行，不隔离文件或网络访问。子进程也拥有正常的操作系统权限。
 
-`WorkerUnavailable`
-把连接失败保留在服务的类型化错误通道里。调用不会重试。子进程拥有普通操作系统权限，独立进程不等于安全沙箱。
-
-## 放到另一台机器运行
-
-[remote-runner](../remote-runner)
-示例通过双向 TLS 在真实 runner 上运行插件，并从 `graft.yml`
-加载。它的 README 讲了证书、在 runner 上安装包以及启动
-`graft-remote serve`。要让本示例连接runner，在 `src/main.ts` 里把 `target` 换成
-`Remote.runner(...)`，并设置
-`contractModule: "@graftland/sample-remote-worker/contract"`。本示例的测试只运行本机 target。
+wss/JWT runner、持久化 generation 和 SSH/stdio 用法见
+[remote-runner](../remote-runner/README.zh-CN.md)。

@@ -15,6 +15,7 @@ import {
 import type { PlatformError } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import process from "node:process"
+import { issue } from "./credentials.ts"
 
 export class LabFailed extends Schema.TaggedError<
 	LabFailed,
@@ -94,8 +95,6 @@ export const start = Effect.fn("Lab.start")(function* (options: Options) {
 				"localhost",
 				"--server",
 				"127.0.0.1",
-				"--identity",
-				"billing",
 			],
 			{ stdout: "inherit", stderr: "inherit" },
 		),
@@ -105,16 +104,23 @@ export const start = Effect.fn("Lab.start")(function* (options: Options) {
 			reason: `The certificate command exited with ${code}`,
 		})
 
+	const credentials = yield* issue(options.directory)
 	const runner = yield* ChildProcess.make(
 		process.execPath,
 		[
 			options.runner,
 			"serve",
-			...["--listen", "wss://127.0.0.1:0", "--auth", "mtls"],
+			...["--listen", "wss://127.0.0.1:0", "--auth", "jwt"],
 			...["--root", root, "--state", path.join(options.directory, "state")],
 			...["--cert", path.join(certificates, "server.crt")],
 			...["--key", path.join(certificates, "server.key")],
-			...["--ca", path.join(certificates, "ca.crt")],
+			...["--jwt-issuer", "https://issuer.example", "--jwt-audience", "graft"],
+			...[
+				"--jwt-algorithm",
+				"ES256",
+				"--jwt-public-key",
+				credentials.publicKey,
+			],
 		],
 		{ stdin: "ignore", stdout: "pipe", stderr: "inherit" },
 	)
@@ -152,8 +158,7 @@ export const start = Effect.fn("Lab.start")(function* (options: Options) {
 		RUNNER_PORT: `${port}`,
 		RUNNER_SERVERNAME: "localhost",
 		RUNNER_CA: path.join(certificates, "ca.crt"),
-		RUNNER_CERT: path.join(certificates, "client-billing.crt"),
-		RUNNER_KEY: path.join(certificates, "client-billing.key"),
+		RUNNER_TOKEN: credentials.token,
 		LEDGER_FILE: path.join(options.directory, "ledger.json"),
 	}
 })

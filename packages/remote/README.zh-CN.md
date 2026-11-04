@@ -2,7 +2,10 @@
 
 [English](README.md) | 简体中文 | [繁體中文](README.zh-TW.md)
 
-让 Graft 插件在本机 Node.js 子进程或另一台机器上运行。声明跨边界的服务后，宿主插件继续使用原来的服务接口。
+让 Graft 插件在子进程、Node
+worker 或 runner 上运行。声明跨边界服务后，消费者仍使用原来的服务接口。
+
+契约与实现分开放，宿主只导入契约。先把两者编译成 JavaScript，再加载能力插件和入口：
 
 ```ts
 import * as Remote from "@graftland/remote"
@@ -14,19 +17,31 @@ export default Remote.plugin(contract, {
 })
 ```
 
-把共享的 `Contract.make(...)`
-契约与实现模块分开，宿主只导入契约。先将契约和实现编译成 JavaScript，再用
-`Graft.plugin` 或 `graft.yml` 加载入口。自行嵌入 Graft 时，为宿主运行环境提供
-`NodeServices.layer` 和 `effect/crypto` 的 `SecureRandom.layerWebCrypto`。
+```yaml
+- name: "@graftland/remote/host/local"
+- name: ./entry.ts
+```
 
-连接网络 runner 时使用 `Remote.runner(...)`。在 runner 机器上预装插件包，并用
-`graft-remote certificates` 或现有工具准备专用 CA 签发的证书。使用 `graft.yml`
-时，默认以保存的条目 id 命名实例。
+线程模式用 `Remote.worker()` 和
+`host/worker`；worker 与宿主共享进程和权限。连接 runner 用
+`Remote.runner({ transport, auth })`：支持 websocket（ws/wss）、unix
+socket 和 command/stdio，并按传输选择 mTLS、bearer、JWT 或 none。须显式加载对应的
+`host/*`、`host/auth/*` 插件；缺少能力时代理保持 Pending， `Remote.plugin`
+不自动安装提供者。
 
-- [远程插件文档](https://graftland.github.io/graft/zh-cn/remote/)：契约、服务、配置、部署和停止行为。
-- [可运行示例](../../samples/remote-worker/README.zh-CN.md)：调用子进程服务，并验证关闭后进程退出。
+runner 通过 `graft-remote serve --config runner.yml`
+或命令行简写启动。提前安装插件包，保留状态目录。部署证书可用
+`graft-remote certificates` 签发。通过 `graft.yml`
+加载时，保存的条目 id 默认就是实例名。
 
-这个工作区包保持私有。它分开执行进程，不隔离权限；需要权限边界时，请使用虚拟机或容器。
+自行嵌入 Graft 时，为运行时提供 `NodeServices.layer` 和 `effect/crypto` 的
+`SecureRandom.layerWebCrypto`。
 
-[Graft](https://github.com/graftland/graft) 的一部分，使用
-[Apache 2.0](https://github.com/graftland/graft/blob/main/LICENSE) 许可证。
+- [远程插件指南](https://graftland.github.io/graft/zh-cn/remote/)
+- [本机子进程与 Node worker 示例](../../samples/remote-worker/README.zh-CN.md)
+- [JWT runner 与 SSH 示例](../../samples/remote-runner/README.zh-CN.md)
+
+这个工作区包仍为 private。独立进程不等于权限沙箱。
+
+Part of [Graft](https://github.com/graftland/graft). Licensed under
+[Apache 2.0](https://github.com/graftland/graft/blob/main/LICENSE).

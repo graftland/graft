@@ -1,10 +1,10 @@
 /**
  * The graft.yml entry. It runs the exporter on a runner and reads the runner's
- * address and certificate paths from environment variables.
+ * address, CA path, and JWT from environment variables.
  */
 import type { Plugin } from "@graftland/graft"
 import * as Remote from "@graftland/remote"
-import { Config, Effect, FileSystem, Redacted } from "effect"
+import { Config, Effect, FileSystem } from "effect"
 import { contract } from "./contract.ts"
 
 // Importing the entry reads nothing. Settings and files are read on activation.
@@ -20,12 +20,7 @@ const target = Effect.gen(function* () {
 				ca: yield* read("RUNNER_CA"),
 			},
 		}),
-		auth: Remote.mtls(
-			Effect.all({
-				cert: read("RUNNER_CERT"),
-				key: read("RUNNER_KEY").pipe(Effect.map(Redacted.make)),
-			}),
-		),
+		auth: Remote.jwt(Config.Redacted("RUNNER_TOKEN")),
 	})
 })
 

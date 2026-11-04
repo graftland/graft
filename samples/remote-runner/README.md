@@ -2,15 +2,10 @@
 
 English | [简体中文](README.zh-CN.md) | [繁體中文](README.zh-TW.md)
 
-An invoice exporter writes to a ledger. You want the exporter on another
-machine. When the host restarts, an exporter from before the restart must not
-keep writing next to the new one. Network delays are another problem: a write
-from the old exporter can arrive after the new one has started.
-
-Here the exporter runs on a runner, reached over mutual TLS. The runner starts
-the new exporter only after the old one has exited. Each start gets a larger
-_generation_. The ledger records the newest generation it has seen and rejects
-writes from older ones.
+An invoice exporter runs on a runner over **wss + JWT** and calls the host's
+ledger. Restarting the host creates a new exporter only after the old one has
+exited. Its larger generation lets the ledger reject delayed writes from the old
+exporter.
 
 ## Run it
 
@@ -22,107 +17,125 @@ devenv shell -- pnpm --filter @graftland/sample-remote-runner start
 devenv shell -- pnpm --filter @graftland/sample-remote-runner test
 ```
 
-Everything runs on this machine. `src/lab.ts` plays the runner machine. It uses
-the installed `graft-remote` to create certificates, installs the built plugin
-under `.cache/lab/install`, and starts `graft-remote serve` on 127.0.0.1. The
-program prints:
+Everything runs on this machine. `src/lab.ts` uses `graft-remote certificates`
+for the server certificate, generates an ES256 key and a ten-minute JWT with
+`sub: billing`, installs the built package under `.cache/lab/install`, and
+starts a runner on 127.0.0.1.
+
+The host loads `graft.yml` twice. It explicitly loads `host/websocket` and
+`host/auth/jwt`; `ledger` runs locally and `exporter` runs on the runner. The
+saved entry id `exporter` is its instance name. Expect:
 
 ```text
 Runner listening on port 52341
 INV-1 exported by generation 1 (runner child 68017)
-… Remote execution terminated … remote.generation: 1, remote.termination: Exited
+… remote.generation: 1, remote.termination: Exited
 INV-2 exported by generation 2 (runner child 68072)
 A late write from generation 1 was rejected: the ledger has seen 2
-… Remote execution terminated … remote.generation: 2, remote.termination: Exited
+… remote.generation: 2, remote.termination: Exited
 ```
 
-What happened:
+Each stop waits for confirmed process exit. The second host uses the same
+instance, so generation advances. The ledger rejects a deliberately delayed
+generation-1 write with `StaleGeneration`. The test verifies both calls, exits,
+and fencing. Each demo run recreates `.cache/lab`; a real deployment preserves
+its state directory so generations keep increasing.
 
-1. A host loads `graft.yml`. The `ledger` entry runs on the host. The `exporter`
-   entry starts the worker on the runner, with the entry id `exporter` as its
-   instance name. A host plugin calls `Exporter.export("INV-1")`. The worker
-   then calls the host's `Ledger` over the same connection, passing its
-   generation.
-2. The host stops. It waits until the runner confirms that the worker's process
-   exited (`remote.termination: Exited`).
-3. A second, fresh host loads the same file. The entry id is the same, so it
-   asks for the same instance. The runner starts it as generation 2, in a new
-   process.
-4. The host then sends a write stamped with generation 1, as if it had been
-   delayed on the network. The ledger has already seen generation 2 and rejects
-   it with `StaleGeneration`.
+`src/contract.ts` defines `Ledger` and `Exporter`. `src/worker.ts` is the runner
+implementation; `src/exporter.ts` reads host settings on activation.
+`src/host.ts` runs the restart story. `src/credentials.ts` signs demo tokens;
+`src/issue-token.ts` exposes that helper as a standalone script.
 
-The ledger keeps its writes in `.cache/lab/ledger.json`. The runner keeps its
-generations in `.cache/lab/state`, so they count up for as long as that
-directory exists. Each `start` recreates `.cache/lab`, so the program prints the
-same generations every time. The test runs the same story with a real runner and
-checks the generations, the process exits, and the rejection.
-
-## Files
-
-| File                         | Purpose                                                                     |
-| ---------------------------- | --------------------------------------------------------------------------- |
-| `graft.yml`                  | The two entries. The exporter's entry id is its instance name.              |
-| `src/contract.ts`            | Shared by both sides: config, `Ledger` and `Exporter`, RPCs, errors.        |
-| `src/worker.ts`              | Runs on the runner. Injects `Ledger`, provides `Exporter`.                  |
-| `src/exporter.ts`            | The entry. Reads the runner's address and certificate paths from env vars.  |
-| `src/ledger.ts`              | A host plugin that stands in for an external system and checks generations. |
-| `src/host.ts`                | Loads `graft.yml` in a fresh host runtime twice and tells the story.        |
-| `src/lab.ts`                 | Plays the runner machine: certificates, installation, `graft-remote serve`. |
-| `test/remote-runner.test.ts` | Runs the story against a real runner.                                       |
-
-The runner promises that the old process has exited before the new one starts.
-Generations are for what that promise cannot cover: writes already in flight,
-and systems outside Graft. Those systems must check generations themselves, as
-`src/ledger.ts` does. A generation does not undo a write that was accepted
-earlier, and does not make calls happen exactly once.
+Generation checks belong in the external system. They reject stale writes; they
+do not undo accepted writes or make calls exactly once.
 
 ## Use a real runner machine
 
-With `@graftland/remote` installed, create certificates for the runner's
-hostname. The host's identity becomes `graft://billing`:
+From this sample directory after building, generate the demo token and server
+certificate:
 
 ```sh
-graft-remote certificates --out certs --server runner.example --identity billing
+CREDENTIALS_DIR=.cache/credentials node dist/issue-token.js
+pnpm exec graft-remote certificates --out certs --server runner.example
 ```
 
-Repeat `--server` to add DNS names or IP addresses to the runner certificate;
-repeat `--identity` to issue certificates for more hosts. Certificates default
-to 365 days; use `--days N` to change the lifetime. An existing P-256 `ca.crt` /
-`ca.key` pair is reused. To renew a leaf certificate, rerun its command with
-`--force`; the CA stays unchanged, including its expiry. Client files are named
-`client-<identity>.crt` and `.key` (names are URI-encoded). Private keys are
-unencrypted PKCS#8 PEM files, written with mode 0600.
+The script writes `jwt-public.pem` and `token`, and does not save the private
+signing key. Tokens expire in ten minutes. Rerunning generates a new key:
+replace the runner's public key and restart it too. This is a demonstration, not
+an issuer service; for deployment, use your issuer's token and public key or
+JWKS URL. JWT expiry does not close an already authenticated session. Stolen
+tokens can be replayed while valid, so use wss and short lifetimes.
 
-Copy `ca.crt`, `server.crt`, and `server.key` to the runner. Keep `ca.crt`,
-`client-billing.crt`, and `client-billing.key` on the host. Keep `ca.key` on
-neither: it can sign new certificates.
+Copy `server.crt`/`server.key` and `jwt-public.pem` to the runner. Keep `ca.crt`
+and `token` on the host; keep `ca.key` with the operator. No client TLS
+certificate is used. Existing CA files are reused by `certificates`; `--force`
+replaces requested leaf certificates.
 
-On the runner, make an installation root with its own `package.json`. Install
-`@graftland/remote` and this built package there, with their dependencies, so
-that `node_modules/@graftland/sample-remote-runner/package.json` exists. These
-are workspace packages; no registry release is assumed. Then start the runner
-under a supervisor that stops its whole process group, and keep its state
-directory across restarts:
+Install `@graftland/remote` and this built package with dependencies under
+`/srv/graft/install`, with its own `package.json`. These are workspace packages;
+no registry release is assumed. Run under an external supervisor that stops the
+whole process group, and preserve `/var/lib/graft`:
 
 ```sh
-graft-remote serve --host 0.0.0.0 --port 7443 \
-  --root /srv/graft/install --state /var/lib/graft \
-  --cert server.crt --key server.key --ca ca.crt
+graft-remote serve --listen wss://0.0.0.0:7443 --auth jwt \
+  --cert server.crt --key server.key \
+  --jwt-issuer https://issuer.example --jwt-audience graft \
+  --jwt-algorithm ES256 --jwt-public-key jwt-public.pem \
+  --root /srv/graft/install --state /var/lib/graft
 ```
 
-On the host, from this directory, set the variables that `src/exporter.ts` and
-`src/ledger.ts` read and start `graft.yml`:
+On the host, from this directory:
 
 ```sh
 RUNNER_HOST=runner.example RUNNER_PORT=7443 RUNNER_SERVERNAME=runner.example \
-RUNNER_CA=certs/ca.crt RUNNER_CERT=certs/client-billing.crt RUNNER_KEY=certs/client-billing.key \
+RUNNER_CA=certs/ca.crt RUNNER_TOKEN="$(cat .cache/credentials/token)" \
 LEDGER_FILE=ledger.json pnpm exec graft start
 ```
 
-The exporter starts on the runner. Press <kbd>Ctrl</kbd>+<kbd>C</kbd>: the host
-logs `remote.termination: Exited`. Start it again and the generation in the log
-is one higher. Nothing calls the exporter in this mode; add a host plugin that
-injects `Exporter` to use it. The
-[remote plugin guide](https://graftland.github.io/graft/remote/) covers leases,
-stopping outcomes, and what the runner trusts.
+Press Ctrl+C and wait for `remote.termination: Exited`. Start again with the
+same YAML and the generation increases. This manual mode only loads the
+exporter; add a host plugin injecting `Exporter` to make calls.
+
+## Connect over SSH
+
+Instead of wss/JWT, load `@graftland/remote/host/command` in the host YAML in
+place of `host/websocket` and `host/auth/jwt`. Use:
+
+```ts
+Remote.runner({
+	transport: Remote.command([
+		"ssh",
+		"-T",
+		"graft@runner.example",
+		"graft-remote",
+		"serve",
+		"--stdio",
+		"--identity",
+		"billing",
+		"--root",
+		"/srv/graft/install",
+		"--state",
+		"/var/lib/graft-ssh",
+	]),
+	// The loader entry id supplies instance; do not add auth.
+})
+```
+
+For a key restricted to this runner command, put the following on one line in
+the remote account's `~/.ssh/authorized_keys`, replacing the public-key
+placeholder and executable path:
+
+```text
+restrict,command="/srv/graft/install/node_modules/.bin/graft-remote serve --stdio --identity billing --root /srv/graft/install --state /var/lib/graft-ssh" ssh-ed25519 AAAA... billing-host
+```
+
+SSH authenticates the caller; the forced command fixes the runner identity. Do
+not allocate a TTY or print banners to stdout: it carries protocol bytes, while
+logs go to stderr. Stdio serves one session per process and holds the state lock
+until execution units have exited. Concurrent invocations cannot share that
+directory; sequential ones retain increasing generations. SSH exit alone does
+not confirm remote termination. This SSH recipe is documentation only; the
+automated sample tests wss/JWT.
+
+See the [remote guide](https://graftland.github.io/graft/remote/) for leases,
+three stopping outcomes, configuration files, and the trust boundaries.

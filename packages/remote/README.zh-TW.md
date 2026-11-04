@@ -2,7 +2,10 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md) | 繁體中文
 
-讓 Graft 外掛在本機 Node.js 子行程或另一台機器上執行。宣告跨邊界的服務後，宿主外掛繼續使用原來的服務介面。
+讓 Graft 外掛在子行程、Node
+worker 或 runner 上執行。宣告跨邊界服務後，服務使用者仍使用原來的介面。
+
+契約與實作分開放，宿主只匯入契約。先把兩者編譯成 JavaScript，再載入能力外掛與入口：
 
 ```ts
 import * as Remote from "@graftland/remote"
@@ -14,20 +17,31 @@ export default Remote.plugin(contract, {
 })
 ```
 
-把共用的 `Contract.make(...)`
-契約與實作模組分開，宿主只匯入契約。先將契約和實作編譯成 JavaScript，再用
-`Graft.plugin` 或 `graft.yml` 載入入口。自行嵌入 Graft 時，為宿主執行環境提供
-`NodeServices.layer` 和 `effect/crypto` 的 `SecureRandom.layerWebCrypto`。
+```yaml
+- name: "@graftland/remote/host/local"
+- name: ./entry.ts
+```
 
-連線到網路 runner 時使用
-`Remote.runner(...)`。在 runner 機器上預先安裝外掛套件，並用
-`graft-remote certificates` 或現有工具準備專用 CA 簽發的憑證。使用 `graft.yml`
-時，預設以儲存的項目 id 命名實例。
+執行緒模式用 `Remote.worker()` 和
+`host/worker`；worker 與宿主共用行程和權限。連線到 runner 用
+`Remote.runner({ transport, auth })`：支援 websocket（ws/wss）、unix
+socket 和 command/stdio，並依傳輸選擇 mTLS、bearer、JWT 或 none。須明確載入對應的
+`host/*`、`host/auth/*` 外掛；缺少能力時代理保持 Pending， `Remote.plugin`
+不會自動安裝提供者。
 
-- [遠端外掛文件](https://graftland.github.io/graft/zh-tw/remote/)：契約、服務、設定、部署與停止行為。
-- [可執行範例](../../samples/remote-worker/README.zh-TW.md)：呼叫子行程服務，並確認關閉後行程退出。
+runner 透過 `graft-remote serve --config runner.yml`
+或命令列簡寫啟動。事先安裝外掛套件，保留狀態目錄。部署憑證可用
+`graft-remote certificates` 簽發。透過 `graft.yml`
+載入時，儲存的項目 id 預設就是實例名稱。
 
-這個工作區套件維持私有。它分開執行行程，不隔離權限；需要權限邊界時，請使用虛擬機或容器。
+自行嵌入 Graft 時，為執行環境提供 `NodeServices.layer` 和 `effect/crypto` 的
+`SecureRandom.layerWebCrypto`。
 
-[Graft](https://github.com/graftland/graft) 的一部分，採用
-[Apache 2.0](https://github.com/graftland/graft/blob/main/LICENSE) 授權條款。
+- [遠端外掛指南](https://graftland.github.io/graft/zh-tw/remote/)
+- [本機子行程與 Node worker 範例](../../samples/remote-worker/README.zh-TW.md)
+- [JWT runner 與 SSH 範例](../../samples/remote-runner/README.zh-TW.md)
+
+這個工作區套件仍為 private。獨立行程不等於權限沙箱。
+
+Part of [Graft](https://github.com/graftland/graft). Licensed under
+[Apache 2.0](https://github.com/graftland/graft/blob/main/LICENSE).
