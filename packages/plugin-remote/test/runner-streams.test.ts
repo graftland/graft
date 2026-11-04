@@ -412,3 +412,48 @@ for (const target of ["local", "worker"] satisfies ReadonlyArray<
 		)
 	}
 }
+
+it.live("rejects two runner entries sharing the process stdio channel", () =>
+	Effect.gen(function* () {
+		const fs = yield* FileSystem.FileSystem
+		const directory = yield* fs.makeTempDirectoryScoped()
+		const file = yield* runnerConfig(directory + "/first", [{ stdio: true }], {
+			root: inject("remoteRoot"),
+		})
+		const entries = yield* fs
+			.readFileString(file)
+			.pipe(
+				Effect.flatMap(
+					Schema.decodeEffect(Schema.fromJsonString(Schema.Array(Schema.Json))),
+				),
+			)
+		const contents = yield* Schema.encodeEffect(
+			Schema.fromJsonString(Schema.Json),
+		)([
+			...entries,
+			{
+				id: "second",
+				name: "remote/runner",
+				config: {
+					root: inject("remoteRoot"),
+					state: directory + "/second",
+					listen: [{ stdio: true }],
+				},
+			},
+		])
+		yield* fs.writeFileString(file, contents)
+		const { child, stderr } = yield* spawn(["start", file, "--stdio"])
+		const output = yield* child.stdout.pipe(
+			Stream.runCollect,
+			Effect.forkScoped,
+		)
+		const code = yield* child.exitCode
+		assert.equal(code, 1)
+		const diagnostics = yield* Fiber.join(stderr)
+		assert.include(
+			diagnostics,
+			"Only one runner may own the process stdio channel",
+		)
+		yield* Fiber.join(output)
+	}).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+)

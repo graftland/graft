@@ -8,7 +8,7 @@ const common = {
 	platform: "node",
 	dts: false,
 	deps: {
-		alwaysBundle: ["@graftland/graft", "@graftland/loader", "@graftland/cli"],
+		alwaysBundle: [/^@graftland\/(?:graft|loader|cli)(?:\/|$)/],
 		neverBundle: [/^effect(?:\/|$)/, /^@effect\//],
 	},
 	inputOptions: { resolve: { conditionNames: ["source", "import", "node"] } },

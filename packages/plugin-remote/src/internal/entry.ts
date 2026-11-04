@@ -1,4 +1,4 @@
-import { Graft, Plugin, Release, type Fork } from "@graftland/graft"
+import { Graft, Plugin, type Fork } from "@graftland/graft"
 import { ConfigDirectory, Entry, ModuleResolver } from "@graftland/loader"
 import {
 	Cause,
@@ -9,7 +9,6 @@ import {
 	References,
 	Scope,
 	String,
-	Stream,
 } from "effect"
 import { ChildProcessSpawner } from "effect/process"
 import * as Contract from "../Contract"
@@ -158,53 +157,28 @@ const directTarget = Effect.fnUntraced(function* <
 				),
 			)
 		: Effect.succeed(contract)
-	const consumer = Effect.map(current, (contract) =>
+	const loaded = yield* current
+	const consumer = Effect.succeed(
 		executionPlugin(
-			contract,
+			loaded,
 			{ ...options, contractModule: module },
 			selected,
 			annotations,
 		),
 	)
+	if (Option.isSome(watch)) {
+		const implementation = String.startsWith("file:")(loaded.module)
+			? loaded.module
+			: yield* resolveEntry(directory, loaded.module)
+		yield* ModuleResolver.observe([module, implementation])
+	}
 	const fork = yield* direct(
 		capability.plugin,
 		consumer,
 		input.config,
 		selected._tag === "Local" ? LocalTransport : WorkerTransport,
 	)
-	if (Option.isSome(watch)) {
-		const observe = watch.value
-		const changed = current.pipe(
-			Effect.flatMap((contract) =>
-				(String.startsWith("file:")(contract.module)
-					? Effect.succeed(contract.module)
-					: resolveEntry(directory, contract.module)
-				).pipe(
-					Effect.flatMap((implementation) =>
-						observe([module, implementation]).pipe(
-							Stream.take(1),
-							Stream.runDrain,
-						),
-					),
-				),
-			),
-			Release.scoped,
-		)
-		yield* changed.pipe(
-			Effect.andThen(fork.restart),
-			// Release.scoped distinguishes interrupted finalizers from cancellation of this watcher.
-			Effect.catchCauseIf(
-				(cause) => !Cause.hasInterruptsOnly(cause),
-				(cause) =>
-					Effect.logError(
-						"Remote source observation failed; retrying",
-						cause,
-					).pipe(Effect.andThen(Effect.sleep("1 second"))),
-			),
-			Effect.forever,
-			Effect.forkScoped,
-		)
-	}
+
 	return fork
 })
 const runnerTarget = Effect.fnUntraced(function* <

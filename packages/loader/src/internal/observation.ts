@@ -1,9 +1,8 @@
-import { Context, Option, type Scope } from "effect"
+import { Context, Option } from "effect"
+import type { Observation } from "../ModuleResolver"
 
-/** The loader entry owns failed imports until its next attempt or disposal. */
-export const ObservationScope = Context.Reference(
-	"@graftland/loader/internal/ObservationScope",
-	{
-		defaultValue: (): Option.Option<Scope.Scope> => Option.none(),
-	},
+/** Raw-module observations belong to the entry, not to an activation. */
+export const CurrentObservation = Context.Reference(
+	"@graftland/loader/internal/CurrentObservation",
+	{ defaultValue: (): Option.Option<Observation> => Option.none() },
 )

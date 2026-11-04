@@ -22,7 +22,8 @@ import {
 	Logger,
 	Path,
 	Scope,
-	Stream,
+	Semaphore,
+	Cause,
 	Option,
 	Array,
 } from "effect"
@@ -62,7 +63,26 @@ export const run = (
 	Effect.gen(function* () {
 		const scope = yield* Effect.scope
 		const done = yield* Deferred.make<void, ApplicationError>()
+		const protocol = yield* Semaphore.make(1)
 		yield* Graft.provide(Application, {
+			claimProtocol: Effect.acquireRelease(
+				protocol
+					.takeIfAvailable(1)
+					.pipe(
+						Effect.flatMap((acquired) =>
+							acquired
+								? Effect.void
+								: Effect.fail(
+										ApplicationError.make({
+											cause: Cause.fail(
+												"Only one runner may own the process stdio channel",
+											),
+										}),
+									),
+						),
+					),
+				() => protocol.release(1),
+			),
 			finish: (exit) =>
 				Deferred.done(
 					done,
@@ -90,16 +110,21 @@ export const run = (
 			importModule: modules.importModule,
 		})
 		const fs = yield* FileSystem.FileSystem
-		const observe = (files: ReadonlyArray<string>) =>
-			hmr.observe(files).pipe(
-				Stream.provideService(FileSystem.FileSystem, fs),
-				Stream.mapError((cause) =>
-					ModuleResolver.ModuleInvalid.make({
-						specifier: Array.join(files, ", "),
-						cause,
-					}),
-				),
-			)
+		const observe = hmr.observation.pipe(
+			Effect.provideService(FileSystem.FileSystem, fs),
+			Effect.map((source) => ({
+				...source,
+				watch: (files: ReadonlyArray<string>) =>
+					source.watch(files).pipe(
+						Effect.mapError((cause) =>
+							ModuleResolver.ModuleInvalid.make({
+								specifier: Array.join(files, ", "),
+								cause,
+							}),
+						),
+					),
+			})),
+		)
 		const included = yield* Graft.plugin(Include.Include, {
 			path: file,
 			watch: options.watch,

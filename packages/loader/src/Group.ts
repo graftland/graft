@@ -3,7 +3,7 @@
  * changes: untouched entries keep running, configuration changes are applied
  * through `Fork.update`, and anything else is unloaded and loaded again.
  */
-import { ObservationScope } from "./internal/observation"
+import { CurrentObservation } from "./internal/observation"
 import { Select } from "./Entry"
 
 import { Graft, Plugin, Fork } from "@graftland/graft"
@@ -30,7 +30,7 @@ import {
 import { equalConfig } from "./internal/equalConfig"
 import { PendingRefreshes, track } from "./internal/pending"
 import { CurrentId, Entry, resolveEnv, type CyclicConfig } from "./Entry"
-import { ModuleResolver } from "./ModuleResolver"
+import { ModuleResolver, Watch } from "./ModuleResolver"
 import * as Intercept from "./Intercept"
 import { GroupEntries, validateGroup, type InvalidOperation } from "./Tree"
 
@@ -318,6 +318,25 @@ const definition = Plugin.make({
 					refresh(entry.id, identity, source)
 				const parent = yield* Effect.scope
 				const owner = yield* Scope.fork(parent)
+				const watching = yield* Watch
+				const source = yield* Option.match(watching, {
+					onNone: () => Effect.succeedNone,
+					onSome: (make) => make.pipe(Scope.provide(owner), Effect.asSome),
+				})
+				if (Option.isSome(source))
+					yield* source.value.changes.pipe(
+						Stream.runForEach(() =>
+							Ref.get(targetFork).pipe(
+								Effect.flatMap(
+									Option.match({
+										onNone: () => Effect.void,
+										onSome: (fork) => fork.restart,
+									}),
+								),
+							),
+						),
+						Effect.forkIn(owner),
+					)
 				// Observation generations survive failed activations until retry or entry disposal.
 				const observations = yield* ScopedRef.fromAcquire(Effect.scope).pipe(
 					Scope.provide(owner),
@@ -354,9 +373,7 @@ const definition = Plugin.make({
 								intercept: [
 									...intercept,
 									Graft.intercept(CurrentId, () => Option.some(entry.id)),
-									Graft.intercept(ObservationScope, () =>
-										Option.some(observationScope),
-									),
+									Graft.intercept(CurrentObservation, () => source),
 								],
 							})
 							yield* Ref.set(targetFork, Option.some(fork))

@@ -26,6 +26,7 @@ import {
 	Scope,
 } from "effect"
 import type { Duration, PlatformError } from "effect"
+import * as SourceObservation from "./internal/sourceObservation"
 import { digest } from "./internal/digest"
 import { changes } from "./internal/changes"
 import {
@@ -81,7 +82,22 @@ export interface ImportOptions {
 	readonly observationScope: Scope.Scope
 }
 
+/** An entry-owned observation collection; successful imports replace old dependencies, failures retain them. */
+export interface Observation {
+	readonly scope: Scope.Scope
+	readonly watch: (
+		files: ReadonlyArray<string>,
+	) => Effect.Effect<void, PlatformError.PlatformError>
+	readonly changes: Stream.Stream<void>
+}
+
 export interface Hmr {
+	/** Makes a collection independent of individual activation and retry scopes. */
+	readonly observation: Effect.Effect<
+		Observation,
+		never,
+		Scope.Scope | FileSystem.FileSystem
+	>
 	/** Keeps imported entries registered until this HMR session closes. */
 	readonly importer: (specifier: string) => Promise<unknown>
 	/** Uses the application context and Node cache, without watching or replacing the module. */
@@ -137,6 +153,21 @@ export const make = (
 				}
 			>(),
 		)
+		const sourceObservers = yield* Ref.make<
+			ReadonlyArray<Effect.Success<ReturnType<typeof SourceObservation.make>>>
+		>([])
+		const observation = Effect.gen(function* () {
+			const source = yield* SourceObservation.make()
+			yield* Effect.acquireRelease(
+				Ref.update(sourceObservers, Array.append(source)),
+				() =>
+					Ref.update(
+						sourceObservers,
+						Array.filter((current) => current !== source),
+					),
+			)
+			return source
+		})
 		const closed = yield* Ref.make(false)
 		const session = yield* Effect.scope
 		// Transfer the complete Exit before restoring interruption. Effect may replace
@@ -449,7 +480,7 @@ export const make = (
 			Effect.uninterruptibleMask((restore) =>
 				Effect.gen(function* () {
 					const caller = yield* Effect.scope
-					const { token, exit } = yield* serial(
+					const { token, exit, managed } = yield* serial(
 						Effect.gen(function* () {
 							yield* checkOpen
 							const generation = hooks.prepare()
@@ -476,20 +507,38 @@ export const make = (
 									onSome: (request) => ({ request }),
 								}),
 							}))
-							yield* Ref.update(
-								owners,
-								HashMap.set(token, {
-									active: Exit.isSuccess(exit) ? attempt : Option.none(),
-									pending: Exit.isFailure(exit) ? attempt : Option.none(),
-								}),
-							)
-							return { token, exit }
+							const observers = yield* Ref.get(sourceObservers)
+							const observer =
+								options === undefined
+									? Option.none()
+									: Array.findFirst(
+											observers,
+											(source) => source.scope === options.observationScope,
+										)
+							if (Option.isSome(observer)) {
+								yield* observer.value.imported(
+									Option.match(attempt, {
+										onNone: () => specifier,
+										onSome: (value) => value.request ?? value.url,
+									}),
+									hooks.files(Option.toArray(attempt)),
+									Exit.isSuccess(exit),
+								)
+							} else
+								yield* Ref.update(
+									owners,
+									HashMap.set(token, {
+										active: Exit.isSuccess(exit) ? attempt : Option.none(),
+										pending: Exit.isFailure(exit) ? attempt : Option.none(),
+									}),
+								)
+							return { token, exit, managed: Option.isSome(observer) }
 						}).pipe(Effect.ensuring(Effect.sync(hooks.discard))),
 					)
-					// Failed candidates close immediately; their observations belong to the entry's retry generation.
-					// Successful raw graphs stay with the caller, so local restarts do not retain old graphs.
+					// Collections already copied the observed digests; they do not retain per-attempt leases.
+					// Without a collection, failed imports keep the caller's explicit observation lease.
 					yield* Scope.addFinalizer(
-						Exit.isFailure(exit)
+						!managed && Exit.isFailure(exit)
 							? (options?.observationScope ?? caller)
 							: caller,
 						serial(
@@ -818,6 +867,7 @@ export const make = (
 			importer,
 			importerScoped,
 			importModule,
+			observation,
 			importModuleScoped,
 			observe,
 			reload: reloadChanged(),

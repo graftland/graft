@@ -1,7 +1,7 @@
 import { NodeSink } from "@effect/platform-node"
 import { Context, Effect, Logger, Option, PlatformError, Stdio } from "effect"
 // @effect-diagnostics-next-line nodeBuiltinImport:off -- a native Writable retains the protocol writer while Node forwards all diagnostic output to stderr.
-import { Writable } from "node:stream"
+import { Writable, finished } from "node:stream"
 import process from "node:process"
 
 export const ProtocolStdio = Context.Reference(
@@ -27,16 +27,31 @@ export const reserve = <A, E, R>(program: Effect.Effect<A, E, R>) =>
 					const drain = () => {
 						process.stdout.emit("drain")
 					}
+					const error = (cause: Error) => {
+						stream.destroy(cause)
+					}
+					process.stdout.on("error", error)
 					process.stderr.on("drain", drain)
 					// Node's console and default worker forwarding use this same writer.
 					process.stdout.write = process.stderr.write.bind(process.stderr)
-					return { original, stream, drain }
+					return { original, stream, drain, error }
 				}),
-				({ original, stream, drain }) =>
-					Effect.sync(() => {
-						process.stderr.off("drain", drain)
-						process.stdout.write = original
-						stream.destroy()
+				({ original, stream, drain, error }) =>
+					Effect.callback<void>((resume) => {
+						const cleanup = finished(stream, (cause) => {
+							cleanup()
+							const restore = () => {
+								process.stdout.off("error", error)
+								process.stderr.off("drain", drain)
+								process.stdout.write = original
+								resume(cause == null ? Effect.void : Effect.die(cause))
+							}
+							// Keep the native error listener until every accepted write and delayed error has settled.
+							if (process.stdout.destroyed && !process.stdout.closed)
+								process.stdout.once("close", restore)
+							else restore()
+						})
+						stream.end()
 					}),
 			)
 			const reserved = {

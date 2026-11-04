@@ -185,4 +185,10 @@ The following nested tags are diagnostics carried in `RemoteError.cause`:
 | A local/worker contract or implementation file under `graft start --watch` | The matching remote fork restarts with fresh code. Imported contract dependencies are observed too. Rebuild first when the entry points at built JavaScript. |
 | A network runner's implementation                                          | The host does not watch it. Install the new code on the runner and restart the entry.                                                                        |
 
+Observation lasts until the entry is removed or disabled, even if importing,
+validating or starting it fails. Fixing a known contract, dependency or
+implementation file retries the entry. A successful import replaces its old
+dependencies. Watcher failures are logged and retried against the previous file
+digests, so edits made during recovery still trigger a restart.
+
 Without `--watch`, restart the host after rebuilding its contract.

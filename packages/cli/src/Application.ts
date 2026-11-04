@@ -1,6 +1,15 @@
 import { ProtocolStdio } from "./internal/protocolOutput"
 import { NodeServices } from "@effect/platform-node"
-import { Context, Effect, Exit, Layer, Option, Schema, Stdio } from "effect"
+import {
+	Context,
+	Effect,
+	Exit,
+	Layer,
+	Option,
+	Schema,
+	Stdio,
+	Scope,
+} from "effect"
 import { Digest, SecureRandom, Signature } from "effect/crypto"
 import { FetchHttpClient } from "effect/http"
 
@@ -22,6 +31,8 @@ export class ApplicationError extends Schema.TaggedError<
 export class Application extends Context.Service<
 	Application,
 	{
+		/** Exclusively reserves the process protocol channel until the caller releases its scope. */
+		readonly claimProtocol: Effect.Effect<void, ApplicationError, Scope.Scope>
 		readonly finish: (exit: Exit.Exit<void, unknown>) => Effect.Effect<void>
 		readonly onExit: (release: Effect.Effect<void>) => Effect.Effect<void>
 	}

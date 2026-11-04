@@ -57,7 +57,12 @@ const startListener = Effect.fnUntraced(function* (
 const owner = Plugin.make({
 	name: "remote-supervised-runtime",
 	config: Configuration.Runner,
-	inject: [ModuleResolver.ModuleResolver, Path.Path, SecureRandom.SecureRandom],
+	inject: [
+		ModuleResolver.ModuleResolver,
+		Path.Path,
+		SecureRandom.SecureRandom,
+		Plugin.optional(Application),
+	],
 	apply: Effect.fnUntraced(function* (config) {
 		const options = yield* Schema.encodeEffect(SupervisorConfig)(config)
 		const engine = yield* Graft.plugin(supervisor, options)
@@ -84,6 +89,10 @@ const owner = Plugin.make({
 				detail:
 					"A stdio runner requires graft start --stdio and exactly one stdio listener",
 			})
+		if (protocol) {
+			const application = yield* Effect.serviceOption(Application)
+			if (Option.isSome(application)) yield* application.value.claimProtocol
+		}
 		yield* Deferred.succeed(begin, undefined)
 		yield* Effect.forEach(
 			listeners,

@@ -7,6 +7,7 @@ import {
 	Exit,
 	Layer,
 	Option,
+	PlatformError,
 	Ref,
 	Schema,
 	Sink,
@@ -118,3 +119,65 @@ for (const location of ["output", "session"]) {
 		)
 	}
 }
+
+it.effect(
+	"ends stdio after an output failure even when the session handles the disconnect",
+	() =>
+		Effect.gen(function* () {
+			const cleaned = yield* Ref.make(false)
+			const failure = PlatformError.systemError({
+				module: "Stdio",
+				method: "stdout",
+				_tag: "Unknown",
+				cause: "write EPIPE",
+			})
+			yield* Graft.provide(
+				Stdio.Stdio,
+				Stdio.make({
+					args: Effect.succeed([]),
+					stdin: Stream.never,
+					stderr: () => Sink.drain,
+					stdout: () => Sink.fail(failure),
+				}),
+			)
+			const provider = yield* Graft.plugin(stdio, {})
+			yield* provider.await
+			const caller = yield* Graft.plugin(
+				Plugin.make({
+					name: "broken stdio session",
+					inject: [Listener],
+					apply: Effect.fnUntraced(function* () {
+						const listener = yield* Listener
+						const serving = yield* listener.bind(Option.none())
+						yield* Plugin.fork(
+							serving.serve(() =>
+								Effect.succeed((channel: Channel) =>
+									Effect.addFinalizer(() => Ref.set(cleaned, true)).pipe(
+										Effect.andThen(
+											Stream.run(
+												Stream.make(new Uint8Array([1])),
+												channel.output,
+											),
+										),
+										Effect.catchCause((cause) =>
+											Effect.logWarning("Session disconnected", cause),
+										),
+									),
+								),
+							),
+						)
+					}),
+				}),
+			)
+			const state = yield* caller.state.pipe(
+				Stream.filter((state) => state._tag === "Failed"),
+				Stream.runHead,
+				Effect.flatMap(Effect.fromOption),
+			)
+			assert.equal(state._tag, "Failed")
+			if (state._tag === "Failed")
+				assert.include(Cause.pretty(state.cause), "write EPIPE")
+			const finalized = yield* Ref.get(cleaned)
+			assert.isTrue(finalized)
+		}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
+)

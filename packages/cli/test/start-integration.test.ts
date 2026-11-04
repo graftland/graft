@@ -1,6 +1,7 @@
 import { NodeServices } from "@effect/platform-node"
 import { assert, describe, it } from "@effect/vitest"
 import {
+	Array,
 	Deferred,
 	Effect,
 	Exit,
@@ -465,14 +466,25 @@ syncBuiltinESMExports();
 	}).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 )
 
-it.live.each([
-	{ target: "local", initiallyBroken: false },
-	{ target: "worker", initiallyBroken: false },
-	{ target: "local", initiallyBroken: true },
-	{ target: "worker", initiallyBroken: true },
-])(
-	"reloads remote $target files after an initial contract failure: $initiallyBroken",
-	({ target, initiallyBroken }) =>
+it.live.each(
+	Array.flatMap(["local", "worker"], (target) =>
+		Array.map(
+			[
+				{ failure: "none", repair: "contract" },
+				{ failure: "import", repair: "contract" },
+				{ failure: "import", repair: "dependency" },
+				{ failure: "exports", repair: "contract" },
+				{ failure: "exports", repair: "dependency" },
+				{ failure: "startup", repair: "contract" },
+				{ failure: "startup", repair: "dependency" },
+				{ failure: "startup", repair: "implementation" },
+			],
+			(scenario) => ({ target, ...scenario }),
+		),
+	),
+)(
+	"reloads remote $target after $failure failure repaired in $repair",
+	({ target, failure, repair }) =>
 		Effect.gen(function* () {
 			const fs = yield* FileSystem.FileSystem
 			const directory = yield* fs.makeTempDirectoryScoped()
@@ -511,17 +523,28 @@ it.live.each([
 				`
 import { make } from ${contract};
 import { Schema } from ${effect};
-export const contract = make({ name: 'cli-remote', config: Schema.String,
-module: new URL('./implementation.mjs', import.meta.url).href });
+import { valid, selected } from './helper.mjs';
+export const contract = valid ? make({ name: 'cli-remote', config: Schema.String,
+module: new URL(selected ?? './implementation.mjs', import.meta.url).href }) : undefined;
 `,
 			)
 			const validContract = yield* fs.readFileString(
 				`${directory}/contract.mjs`,
 			)
-			if (initiallyBroken)
+			const validHelper =
+				"export const valid = true; export const selected = undefined;"
+			yield* fs.writeFileString(`${directory}/helper.mjs`, validHelper)
+			if (failure === "import")
 				yield* fs.writeFileString(
-					`${directory}/contract.mjs`,
-					"export const contract = ;",
+					`${directory}/${repair === "dependency" ? "helper" : "contract"}.mjs`,
+					"export const broken = ;",
+				)
+			if (failure === "exports")
+				yield* fs.writeFileString(
+					`${directory}/${repair === "dependency" ? "helper" : "contract"}.mjs`,
+					repair === "dependency"
+						? "export const valid = false; export const selected = undefined;"
+						: "export const wrongName = 1;",
 				)
 			const implementation = (marker: string) => `
 import { Plugin } from ${plugin};
@@ -534,6 +557,12 @@ apply: (value) => Effect.acquireRelease(Effect.logInfo('${marker} ' + value),
 				`${directory}/implementation.mjs`,
 				implementation("REMOTE_STARTED"),
 			)
+			if (failure === "startup")
+				yield* fs.writeFileString(
+					`${directory}/implementation.mjs`,
+					"export default ;",
+				)
+
 			const executable = yield* quote(process.execPath)
 			const bin = yield* quote(
 				new URL("internal/childMain.js", remote).pathname,
@@ -577,13 +606,47 @@ Start.run({ config: ${config}, watch: true }).pipe(NodeRuntime.runMain);`,
 				),
 				Effect.forkChild,
 			)
-			if (initiallyBroken) {
+			if (failure !== "none") {
 				yield* Queue.take(messages).pipe(
 					Effect.repeat({
-						until: (line) => String.includes("could not be loaded")(line),
+						until: (line) =>
+							String.includes(
+								failure === "startup"
+									? "ModuleImportFailed"
+									: "could not be loaded",
+							)(line),
 					}),
 				)
-				yield* fs.writeFileString(`${directory}/contract.mjs`, validContract)
+				if (failure === "startup") {
+					if (repair === "implementation")
+						yield* fs.writeFileString(
+							`${directory}/implementation.mjs`,
+							implementation("REMOTE_STARTED"),
+						)
+					else {
+						yield* fs.writeFileString(
+							`${directory}/fixed.mjs`,
+							implementation("REMOTE_STARTED"),
+						)
+						if (repair === "contract")
+							yield* fs.writeFileString(
+								`${directory}/contract.mjs`,
+								String.replace(
+									"./implementation.mjs",
+									"./fixed.mjs",
+								)(validContract),
+							)
+						else
+							yield* fs.writeFileString(
+								`${directory}/helper.mjs`,
+								"export const valid = true; export const selected = './fixed.mjs';",
+							)
+					}
+				} else
+					yield* fs.writeFileString(
+						`${directory}/${repair === "dependency" ? "helper" : "contract"}.mjs`,
+						repair === "dependency" ? validHelper : validContract,
+					)
 			}
 			yield* Deferred.await(started).pipe(
 				Effect.raceFirst(
@@ -600,12 +663,28 @@ Start.run({ config: ${config}, watch: true }).pipe(NodeRuntime.runMain);`,
 					Effect.raceFirst(
 						Fiber.join(output).pipe(Effect.flatMap((text) => Effect.die(text))),
 					),
-				)
+				) // Keep the same process alive through a failed reload and a repair of its implementation.
+			const running =
+				failure === "startup" && repair !== "implementation"
+					? "fixed"
+					: "implementation"
 			yield* fs.writeFileString(
-				`${directory}/implementation.mjs`,
+				`${directory}/${running}.mjs`,
+				"export default ;",
+			)
+			yield* waitFor("ModuleImportFailed")
+			yield* fs.writeFileString(
+				`${directory}/${running}.mjs`,
 				implementation("REMOTE_UPDATED"),
 			)
 			yield* waitFor("REMOTE_UPDATED hello")
+			if (failure === "startup" && repair !== "implementation") {
+				yield* child.kill()
+				const text = yield* Fiber.join(output)
+				assert.include(text, "REMOTE_STOPPED")
+				return
+			}
+
 			yield* fs.writeFileString(
 				`${directory}/next.mjs`,
 				implementation("CONTRACT_UPDATED"),

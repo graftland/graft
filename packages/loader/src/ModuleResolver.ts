@@ -1,7 +1,7 @@
 /**
  * Turns the `name` of an entry into a plugin.
  */
-import { ObservationScope } from "./internal/observation"
+import { CurrentObservation } from "./internal/observation"
 import { ConfigDirectory } from "./ConfigDirectory"
 import { isOnlyFailure } from "./internal/recovery"
 import { Plugin } from "@graftland/graft"
@@ -341,13 +341,16 @@ export const make = <E>(
 				options?: ImportOptions,
 			) {
 				const caller = yield* Effect.scope
-				const observation = yield* ObservationScope
+				const observation = yield* CurrentObservation
 				const candidate = yield* normalize(specifier)
 				return yield* load(
 					specifier,
 					candidate,
 					options?.observationScope ??
-						Option.getOrElse(observation, () => caller),
+						Option.match(observation, {
+							onNone: () => caller,
+							onSome: (value) => value.scope,
+						}),
 				).pipe(inCandidateScope)
 			}),
 			resolve: Effect.fnUntraced(function* (
@@ -405,12 +408,31 @@ export const fromRecord = (
 			),
 	})
 
-/** Optional file invalidation supplied by a development host. It never imports an implementation. */
+/** Files belonging to one entry, retained independently of its activation and retries. */
+export interface Observation {
+	readonly scope: Scope.Scope
+	readonly watch: (
+		files: ReadonlyArray<string>,
+	) => Effect.Effect<void, ModuleInvalid>
+	readonly changes: Stream.Stream<void>
+}
+
+/** A development host supplies entry-owned source collections. */
 export const Watch = Context.Reference(
 	"@graftland/loader/ModuleResolver/Watch",
 	{
 		defaultValue: (): Option.Option<
-			(files: ReadonlyArray<string>) => Stream.Stream<void, ModuleInvalid>
+			Effect.Effect<Observation, never, Scope.Scope>
 		> => Option.none(),
 	},
 )
+
+/** Replaces an entry's explicit source files after a successful load without importing them. */
+export const observe = (files: ReadonlyArray<string>) =>
+	Effect.flatMap(
+		CurrentObservation,
+		Option.match({
+			onNone: () => Effect.void,
+			onSome: (source) => source.watch(files),
+		}),
+	)

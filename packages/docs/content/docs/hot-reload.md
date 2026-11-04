@@ -177,4 +177,7 @@ Fixing the module can therefore recover through polling even when the native
 notification is lost. Retry replaces the observation generation; removal or
 disabling closes it.
 
+Remote entries keep their observation collection across activation and retry
+failures; see [remote recovery](../remote/hosts/#config-changes-and-hot-reload).
+
 To use HMR outside the CLI, see [HMR API](../hmr-api/).

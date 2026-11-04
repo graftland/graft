@@ -30,7 +30,7 @@ export default Plugin.make({
 			},
 			bind: Effect.fnUntraced(function* () {
 				const ready = yield* Deferred.make<void>()
-				const eof = yield* Deferred.make<void>()
+				const eof = yield* Deferred.make<void, TransportError>()
 				const channel = {
 					input: stdio.stdin.pipe(
 						Stream.onExit((exit) =>
@@ -42,13 +42,16 @@ export default Plugin.make({
 							TransportError.make({ cause: Cause.fail(error) }),
 						),
 					),
-					output: stdio
-						.stdout({ endOnDone: false })
-						.pipe(
-							Sink.mapError((error) =>
-								TransportError.make({ cause: Cause.fail(error) }),
-							),
+					output: stdio.stdout({ endOnDone: false }).pipe(
+						Sink.mapError((error) =>
+							TransportError.make({ cause: Cause.fail(error) }),
 						),
+						Sink.onExit((exit) =>
+							Exit.isFailure(exit) && !Cause.hasInterruptsOnly(exit.cause)
+								? Deferred.failCause(eof, exit.cause)
+								: Effect.void,
+						),
+					),
 				}
 				return {
 					ready: Deferred.await(ready),
