@@ -6,21 +6,20 @@ import { type Todo, TodoStore } from "../TodoStore.ts"
 export default Plugin.make({
 	name: "todo-store",
 	config: Schema.Struct({ seed: Schema.Array(Schema.String) }),
-	apply: ({ seed }) =>
-		Effect.gen(function* () {
-			const todos = yield* Ref.make<ReadonlyArray<Todo>>(
-				Array.map(seed, (title, index) => ({ id: index + 1, title })),
-			)
-			yield* Effect.acquireRelease(Effect.log("Todo store opened"), () =>
-				Effect.log("Todo store closed"),
-			)
-			yield* Graft.provide(TodoStore, {
-				list: Ref.get(todos),
-				add: (title) =>
-					Ref.modify(todos, (current) => {
-						const todo = { id: current.length + 1, title }
-						return [todo, Array.append(current, todo)]
-					}),
-			})
-		}),
+	apply: Effect.fn("todo-store.apply")(function* ({ seed }) {
+		const todos = yield* Ref.make<ReadonlyArray<Todo>>(
+			Array.map(seed, (title, index) => ({ id: index + 1, title })),
+		)
+		yield* Effect.acquireRelease(Effect.log("Todo store opened"), () =>
+			Effect.log("Todo store closed"),
+		)
+		yield* Graft.provide(TodoStore, {
+			list: Ref.get(todos),
+			add: (title) =>
+				Ref.modify(todos, (current) => {
+					const todo = { id: current.length + 1, title }
+					return [todo, Array.append(current, todo)]
+				}),
+		})
+	}),
 })

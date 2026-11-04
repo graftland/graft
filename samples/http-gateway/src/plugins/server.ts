@@ -14,31 +14,30 @@ import { Gateway, Route } from "../Gateway.ts"
 export default Plugin.make({
 	name: "server",
 	config: Schema.Struct({ port: Schema.Int }),
-	apply: ({ port }) =>
-		Effect.gen(function* () {
-			const server = yield* NodeHttpServer.make(() => createServer(), {
-				port,
-			})
-			const handler = Effect.flatMap(
-				HttpServerRequest.HttpServerRequest,
-				(request) =>
-					Effect.map(
-						Event.bail(Route, request),
-						Option.getOrElse(() =>
-							HttpServerResponse.text("Not found\n", { status: 404 }),
-						),
+	apply: Effect.fn("server.apply")(function* ({ port }) {
+		const server = yield* NodeHttpServer.make(() => createServer(), {
+			port,
+		})
+		const handler = Effect.flatMap(
+			HttpServerRequest.HttpServerRequest,
+			(request) =>
+				Effect.map(
+					Event.bail(Route, request),
+					Option.getOrElse(() =>
+						HttpServerResponse.text("Not found\n", { status: 404 }),
 					),
-			)
-			yield* HttpServer.serveEffect()(handler).pipe(
-				Effect.provideService(HttpServer.HttpServer, server),
-			)
-			const url =
-				server.address._tag === "UnixPathAddress"
-					? HttpServer.formatAddress(server.address)
-					: `http://localhost:${server.address.port}`
-			yield* Effect.acquireRelease(Effect.log(`Listening on ${url}`), () =>
-				Effect.log(`Stopped listening on ${url}`),
-			)
-			yield* Graft.provide(Gateway, { url })
-		}),
+				),
+		)
+		yield* HttpServer.serveEffect()(handler).pipe(
+			Effect.provideService(HttpServer.HttpServer, server),
+		)
+		const url =
+			server.address._tag === "UnixPathAddress"
+				? HttpServer.formatAddress(server.address)
+				: `http://localhost:${server.address.port}`
+		yield* Effect.acquireRelease(Effect.log(`Listening on ${url}`), () =>
+			Effect.log(`Stopped listening on ${url}`),
+		)
+		yield* Graft.provide(Gateway, { url })
+	}),
 })

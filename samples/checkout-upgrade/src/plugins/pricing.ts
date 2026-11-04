@@ -14,17 +14,19 @@ const subtotal = (order: Order) =>
 		),
 	)
 
-const engine = (version: string, quote: (order: Order) => number) =>
-	Effect.gen(function* () {
-		yield* Effect.acquireRelease(Effect.log(`Pricing ${version} loaded`), () =>
-			Effect.log(`Pricing ${version} unloaded`),
-		)
-		yield* Graft.provide(Pricing, {
-			version,
-			// Quoting takes a moment, like a call to a tax service would.
-			quote: (order) => Effect.as(Effect.sleep("15 millis"), quote(order)),
-		})
+const engine = Effect.fn("pricing.engine")(function* (
+	version: string,
+	quote: (order: Order) => number,
+) {
+	yield* Effect.acquireRelease(Effect.log(`Pricing ${version} loaded`), () =>
+		Effect.log(`Pricing ${version} unloaded`),
+	)
+	yield* Graft.provide(Pricing, {
+		version,
+		// Quoting takes a moment, like a call to a tax service would.
+		quote: (order) => Effect.as(Effect.sleep("15 millis"), quote(order)),
 	})
+})
 
 /** List prices. */
 export const pricingV1 = Plugin.make({

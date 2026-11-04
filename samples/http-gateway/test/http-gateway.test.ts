@@ -42,35 +42,35 @@ const run = <A, E>(
 	)
 
 /** Reads a service from the registry through a plugin that injects it. */
-const capture = <I, S>(key: Context.Key<I, S>) =>
-	Effect.gen(function* () {
-		const deferred = yield* Deferred.make<S>()
-		yield* Graft.plugin(
-			Plugin.make({
-				name: `capture ${key.key}`,
-				inject: [key],
-				apply: () =>
-					Effect.flatMap(Effect.service(key), (value) =>
-						Effect.asVoid(Deferred.succeed(deferred, value)),
-					),
-			}),
-		)
-		return yield* Deferred.await(deferred)
-	})
+const capture = Effect.fn("capture")(function* <I, S>(key: Context.Key<I, S>) {
+	const deferred = yield* Deferred.make<S>()
+	yield* Graft.plugin(
+		Plugin.make({
+			name: `capture ${key.key}`,
+			inject: [key],
+			apply: () =>
+				Effect.flatMap(Effect.service(key), (value) =>
+					Effect.asVoid(Deferred.succeed(deferred, value)),
+				),
+		}),
+	)
+	return yield* Deferred.await(deferred)
+})
 
-const request = (method: "GET" | "POST", url: string, body?: unknown) =>
-	Effect.gen(function* () {
-		const client = yield* HttpClient.HttpClient
-		const base =
-			method === "GET"
-				? HttpClientRequest.get(url)
-				: HttpClientRequest.post(url)
-		const response = yield* client.execute(
-			body === undefined ? base : HttpClientRequest.bodyJsonUnsafe(base, body),
-		)
-		const text = yield* response.text
-		return { status: response.status, text }
-	}).pipe(Effect.orDie)
+const request = Effect.fn("request")(function* (
+	method: "GET" | "POST",
+	url: string,
+	body?: unknown,
+) {
+	const client = yield* HttpClient.HttpClient
+	const base =
+		method === "GET" ? HttpClientRequest.get(url) : HttpClientRequest.post(url)
+	const response = yield* client.execute(
+		body === undefined ? base : HttpClientRequest.bodyJsonUnsafe(base, body),
+	)
+	const text = yield* response.text
+	return { status: response.status, text }
+}, Effect.orDie)
 
 const text = (entry: Graft.LogEntry) =>
 	Array.join(
@@ -78,16 +78,15 @@ const text = (entry: Graft.LogEntry) =>
 		" ",
 	)
 
-const logged = (message: string) =>
-	Effect.gen(function* () {
-		yield* Effect.log("end of log")
-		const entries = yield* Stream.runCollect(
-			Stream.takeUntil(Graft.logs, (entry) => text(entry) === "end of log"),
-		)
-		return Array.filter(entries, (entry) =>
-			String.startsWith(message)(text(entry)),
-		).length
-	})
+const logged = Effect.fn("logged")(function* (message: string) {
+	yield* Effect.log("end of log")
+	const entries = yield* Stream.runCollect(
+		Stream.takeUntil(Graft.logs, (entry) => text(entry) === "end of log"),
+	)
+	return Array.filter(entries, (entry) =>
+		String.startsWith(message)(text(entry)),
+	).length
+})
 
 describe("http-gateway", () => {
 	it.live("adds and removes routes without restarting the server", () =>
@@ -141,6 +140,24 @@ describe("http-gateway", () => {
 			yield* store.dispose
 			const after = yield* request("GET", `${url}/todos`)
 			assert.strictEqual(after.status, 404)
+		}).pipe(run),
+	)
+
+	it.live("matches routes on the request path, whatever its shape", () =>
+		Effect.gen(function* () {
+			yield* Graft.plugin(server, { port: 0 })
+			const { url } = yield* capture(Gateway)
+			yield* Graft.plugin(todoStore, { seed: ["Ship it"] })
+			const todosFork = yield* Graft.plugin(todos)
+			yield* todosFork.await
+			const ok = yield* request("GET", `${url}/todos`)
+			assert.strictEqual(ok.status, 200)
+			// A path that is not a valid relative URL matches no route.
+			const malformed = yield* request("GET", `${url}//`)
+			assert.strictEqual(malformed.status, 404)
+			// A protocol-relative path must not resolve to another host's /todos.
+			const elsewhere = yield* request("GET", `${url}//evil/todos`)
+			assert.strictEqual(elsewhere.status, 404)
 		}).pipe(run),
 	)
 

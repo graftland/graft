@@ -9,12 +9,11 @@ import { contract, Greeter } from "../src/contract"
 const consumer = Plugin.make({
 	name: "caller",
 	inject: [Greeter],
-	apply: () =>
-		Effect.gen(function* () {
-			const greeter = yield* Greeter
-			const greeting = yield* greeter.greet("Alice")
-			assert.equal(greeting, "Hello, Alice!")
-		}),
+	apply: Effect.fn("caller.apply")(function* () {
+		const greeter = yield* Greeter
+		const greeting = yield* greeter.greet("Alice")
+		assert.equal(greeting, "Hello, Alice!")
+	}),
 })
 
 describe("06 · Remote", () => {

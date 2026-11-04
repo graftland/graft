@@ -36,12 +36,11 @@ export const french = Plugin.make({
 export const welcome = Plugin.make({
 	name: "welcome",
 	inject: [Greeter],
-	apply: () =>
-		Effect.gen(function* () {
-			const greeter = yield* Greeter
-			yield* greeter.greet("world")
-			yield* Effect.addFinalizer(() => Effect.log("welcome stopped"))
-		}),
+	apply: Effect.fn("welcome.apply")(function* () {
+		const greeter = yield* Greeter
+		yield* greeter.greet("world")
+		yield* Effect.addFinalizer(() => Effect.log("welcome stopped"))
+	}),
 })
 
 // Waits until a fork is running. `fork.await` returns earlier: as soon as the

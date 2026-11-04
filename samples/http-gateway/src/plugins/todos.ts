@@ -13,27 +13,33 @@ const NewTodo = Schema.Struct({ title: Schema.String })
 export default Plugin.make({
 	name: "todos",
 	inject: [TodoStore],
-	apply: () =>
-		Effect.gen(function* () {
-			const store = yield* TodoStore
-			yield* route("GET", "/todos", () =>
-				Effect.flatMap(store.list, (todos) =>
-					HttpServerResponse.json(todos),
-				).pipe(Effect.orDie),
-			)
-			yield* route("POST", "/todos", (request) =>
-				request.json.pipe(
-					Effect.flatMap(Schema.decodeUnknownEffect(NewTodo)),
-					Effect.flatMap(({ title }) => store.add(title)),
-					Effect.flatMap((todo) =>
-						HttpServerResponse.json(todo, { status: 201 }),
+	apply: Effect.fn("todos.apply")(function* () {
+		const store = yield* TodoStore
+		yield* route("GET", "/todos", () =>
+			Effect.flatMap(store.list, (todos) =>
+				HttpServerResponse.json(todos),
+			).pipe(Effect.orDie),
+		)
+		yield* route("POST", "/todos", (request) =>
+			request.json.pipe(
+				Effect.flatMap(Schema.decodeUnknownEffect(NewTodo)),
+				Effect.flatMap(({ title }) =>
+					store.add(title).pipe(
+						Effect.flatMap((todo) =>
+							HttpServerResponse.json(todo, { status: 201 }),
+						),
+						Effect.orDie,
 					),
-					Effect.orElseSucceed(() =>
+				),
+				// Only a body that cannot be read or decoded is the client's fault.
+				Effect.catchTag(["HttpServerError", "SchemaError"], () =>
+					Effect.succeed(
 						HttpServerResponse.text('Expected {"title": "..."}\n', {
 							status: 400,
 						}),
 					),
 				),
-			)
-		}),
+			),
+		)
+	}),
 })

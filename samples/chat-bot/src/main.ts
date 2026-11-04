@@ -16,12 +16,11 @@ import help from "./plugins/help.ts"
 import moderation from "./plugins/moderation.ts"
 import weather from "./plugins/weather.ts"
 
-const say = (user: string, text: string) =>
-	Effect.gen(function* () {
-		yield* Effect.log(`${user}: ${text}`)
-		const reply = yield* receive({ user, text })
-		if (Option.isSome(reply)) yield* Effect.log(`bot: ${reply.value}`)
-	})
+const say = Effect.fn("say")(function* (user: string, text: string) {
+	yield* Effect.log(`${user}: ${text}`)
+	const reply = yield* receive({ user, text })
+	if (Option.isSome(reply)) yield* Effect.log(`bot: ${reply.value}`)
+})
 
 const step = (title: string) => Effect.log(`--- ${title} ---`)
 

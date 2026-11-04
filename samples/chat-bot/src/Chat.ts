@@ -38,22 +38,21 @@ export const Inbound = Event.middleware<Message, Option.Option<string>>(
  * Registers a command for as long as the calling plugin is loaded: its
  * handler and its line in `/help` come and go together with the plugin.
  */
-export const command = <R>(
+export const command = Effect.fn("Chat.command")(function* <R>(
 	name: string,
 	description: string,
 	run: (invocation: Invocation) => Effect.Effect<string, never, R>,
-): Effect.Effect<void, never, Graft.Graft | Scope.Scope | R> =>
-	Effect.gen(function* () {
-		yield* Effect.acquireRelease(Effect.log(`/${name} is available`), () =>
-			Effect.log(`/${name} is gone`),
-		)
-		yield* Event.on(Command, (invocation) =>
-			invocation.name === name
-				? Effect.asSome(run(invocation))
-				: Effect.succeedNone,
-		)
-		yield* Event.on(Describe, () => Effect.succeed(`/${name}: ${description}`))
-	})
+): Effect.fn.Return<void, never, Graft.Graft | Scope.Scope | R> {
+	yield* Effect.acquireRelease(Effect.log(`/${name} is available`), () =>
+		Effect.log(`/${name} is gone`),
+	)
+	yield* Event.on(Command, (invocation) =>
+		invocation.name === name
+			? Effect.asSome(run(invocation))
+			: Effect.succeedNone,
+	)
+	yield* Event.on(Describe, () => Effect.succeed(`/${name}: ${description}`))
+})
 
 const parse = (message: Message): Option.Option<Invocation> => {
 	if (!String.startsWith("/")(message.text)) return Option.none()
@@ -81,12 +80,10 @@ const dispatch = (message: Message) =>
 	})
 
 /** Handles one incoming message and returns the bot's reply, if any. */
-export const receive = (
+export const receive: (
 	message: Message,
-): Effect.Effect<Option.Option<string>, never, Graft.Graft> =>
-	Effect.gen(function* () {
-		const context = yield* Effect.context<Graft.Graft>()
-		return yield* Event.waterfall(Inbound, message, (message) =>
-			Effect.provideContext(dispatch(message), context),
-		)
-	})
+) => Effect.Effect<Option.Option<string>, never, Graft.Graft> = Effect.fn(
+	"Chat.receive",
+)(function* (message: Message) {
+	return yield* Event.waterfall(Inbound, message, dispatch)
+})
