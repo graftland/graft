@@ -163,6 +163,50 @@ it.effect("does not let an old in-flight plan replace a newer revision", () =>
 	}).pipe(Effect.scoped, Effect.provide(Path.layer)),
 )
 
+it.effect(
+	"does not let a call that read an older revision reset the plan cache",
+	() =>
+		Effect.gen(function* () {
+			const revision = yield* Ref.make(0)
+			const stall = yield* Ref.make(true)
+			const started = yield* Deferred.make<void>()
+			const release = yield* Deferred.make<void>()
+			const probes = yield* Ref.make(0)
+			const resolver = yield* ModuleResolver.make({
+				base: "/app",
+				resolution: {
+					// The first call reads its revision, then stalls before consulting the cache.
+					revision: Effect.gen(function* () {
+						const current = yield* Ref.get(revision)
+						if (yield* Ref.getAndSet(stall, false)) {
+							yield* Deferred.succeed(started, undefined)
+							yield* Deferred.await(release)
+						}
+						return current
+					}),
+					observe: () => Effect.void,
+					exists: (name) =>
+						Ref.update(probes, (n) => n + 1).pipe(
+							Effect.as(name === "@graftland/plugin-example"),
+						),
+				},
+				importer: () => Effect.succeed({ default: plugin }),
+			})
+			const old = yield* Effect.scoped(resolver.resolve("example")).pipe(
+				Effect.forkScoped,
+			)
+			yield* Deferred.await(started)
+			yield* Ref.set(revision, 1)
+			yield* Effect.scoped(resolver.resolve("example"))
+			yield* Deferred.succeed(release, undefined)
+			yield* Fiber.join(old)
+			const before = yield* Ref.get(probes)
+			yield* Effect.scoped(resolver.resolve("example"))
+			const after = yield* Ref.get(probes)
+			assert.strictEqual(after, before)
+		}).pipe(Effect.scoped, Effect.provide(Path.layer)),
+)
+
 for (const preferred of ["present", "missing", "disappeared"] as const) {
 	it.effect(
 		`defers fallback resolution errors until needed: ${preferred}`,

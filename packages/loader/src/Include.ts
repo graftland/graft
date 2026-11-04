@@ -185,140 +185,138 @@ const normalizeGroups = (document: Document) => {
  * previous version (same name and config) keeps that entry's id, so editing
  * an anonymous entry by hand does not restart it under a new identity.
  */
-const planIds = (
+const planIds = Effect.fnUntraced(function* (
 	document: Document,
 	logical: unknown,
 	previous: ReadonlyArray<Entry>,
-) =>
-	Effect.gen(function* () {
-		let used = HashSet.empty<string>()
-		const collectIds = (node: unknown): void => {
-			if (!isSeq(node)) return
-			for (const item of node.items) {
-				if (!isMap(item)) continue
-				const id = item.get("id")
-				if (typeof id === "string") used = HashSet.add(used, id)
-				if (item.get("group") === true) collectIds(item.get("config"))
-			}
+) {
+	let used = HashSet.empty<string>()
+	const collectIds = (node: unknown): void => {
+		if (!isSeq(node)) return
+		for (const item of node.items) {
+			if (!isMap(item)) continue
+			const id = item.get("id")
+			if (typeof id === "string") used = HashSet.add(used, id)
+			if (item.get("group") === true) collectIds(item.get("config"))
 		}
-		collectIds(document.contents)
+	}
+	collectIds(document.contents)
 
-		const fingerprint = makeFingerprint()
-		const available = Array.filter(
-			flatten(previous),
-			(entry) => !HashSet.has(used, entry.id),
-		)
-		let buckets = HashMap.empty<string, Chunk.Chunk<Entry>>()
-		let fallbackNames = HashSet.empty<string>()
-		const keyOf = (name: unknown, config: unknown) =>
-			`${typeof name === "string" ? name.length : 0}:${typeof name === "string" ? name : ""}:${fingerprint(config) ?? "opaque"}`
-		for (const entry of available) {
-			if (fingerprint(entry.config) === undefined)
-				fallbackNames = HashSet.add(fallbackNames, entry.name)
-			const key = keyOf(entry.name, entry.config)
-			buckets = HashMap.set(
-				buckets,
-				key,
-				Chunk.append(
-					HashMap.get(buckets, key).pipe(
-						Option.getOrElse(() => Chunk.empty<Entry>()),
-					),
-					entry,
+	const fingerprint = makeFingerprint()
+	const available = Array.filter(
+		flatten(previous),
+		(entry) => !HashSet.has(used, entry.id),
+	)
+	let buckets = HashMap.empty<string, Chunk.Chunk<Entry>>()
+	let fallbackNames = HashSet.empty<string>()
+	const keyOf = (name: unknown, config: unknown) =>
+		`${typeof name === "string" ? name.length : 0}:${typeof name === "string" ? name : ""}:${fingerprint(config) ?? "opaque"}`
+	for (const entry of available) {
+		if (fingerprint(entry.config) === undefined)
+			fallbackNames = HashSet.add(fallbackNames, entry.name)
+		const key = keyOf(entry.name, entry.config)
+		buckets = HashMap.set(
+			buckets,
+			key,
+			Chunk.append(
+				HashMap.get(buckets, key).pipe(
+					Option.getOrElse(() => Chunk.empty<Entry>()),
 				),
-			)
-		}
-		// Materialize each bucket once. A cursor skips its consumed prefix without
-		// copying slices; unmatched hash collisions remain available in order.
-		const pools = HashMap.map(buckets, Chunk.toReadonlyArray)
-		let cursors = HashMap.empty<string, number>()
-		let assignments = Chunk.empty<{
-			readonly map: YAMLMap<unknown, unknown>
-			readonly id: string
-			readonly path: EntryPath
-		}>()
+				entry,
+			),
+		)
+	}
+	// Materialize each bucket once. A cursor skips its consumed prefix without
+	// copying slices; unmatched hash collisions remain available in order.
+	const pools = HashMap.map(buckets, Chunk.toReadonlyArray)
+	let cursors = HashMap.empty<string, number>()
+	let assignments = Chunk.empty<{
+		readonly map: YAMLMap<unknown, unknown>
+		readonly id: string
+		readonly path: EntryPath
+	}>()
 
-		// Build logical entries bottom-up. No YAML nodes change during matching,
-		// so parent identity depends on restored child identities, not raw syntax.
-		const visit = (
-			node: unknown,
-			logical: unknown,
-			path: EntryPath = [],
-		): Effect.Effect<unknown, StoreError> =>
-			Effect.gen(function* () {
-				if (!isSeq(node)) return logical === undefined ? [] : logical
-				return yield* Effect.forEach(
-					(node as YAMLSeq<unknown>).items,
-					(item, index) =>
-						Effect.gen(function* () {
-							const raw = Array.isArray(logical) ? logical[index] : undefined
-							if (!isMap(item)) return raw
-							const map = item as YAMLMap<unknown, unknown>
-							const fields = raw as Record<string, unknown>
+	// Build logical entries bottom-up. No YAML nodes change during matching,
+	// so parent identity depends on restored child identities, not raw syntax.
+	const visit: (
+		node: unknown,
+		logical: unknown,
+		path?: EntryPath,
+	) => Effect.Effect<unknown, StoreError> = Effect.fnUntraced(function* (
+		node: unknown,
+		logical: unknown,
+		path: EntryPath = [],
+	) {
+		if (!isSeq(node)) return logical === undefined ? [] : logical
+		return yield* Effect.forEach(
+			(node as YAMLSeq<unknown>).items,
+			Effect.fnUntraced(function* (item: unknown, index: number) {
+				const raw = Array.isArray(logical) ? logical[index] : undefined
+				if (!isMap(item)) return raw
+				const map = item as YAMLMap<unknown, unknown>
+				const fields = raw as Record<string, unknown>
 
-							const plain =
-								map.get("group") === true
-									? {
-											...fields,
-											config: yield* visit(
-												map.get("config"),
-												fields["config"],
-												[...path, index, "config"],
-											),
-										}
-									: fields
-							if (map.has("id")) return plain
-							const key = keyOf(plain["name"], plain["config"])
-							const bucket = Option.getOrElse(
-								HashMap.get(pools, key),
-								Array.empty<Entry>,
-							)
-							const name = plain["name"]
-							if (
-								typeof name === "string" &&
-								fingerprint(plain["config"]) === undefined
-							)
-								fallbackNames = HashSet.add(fallbackNames, name)
-							const fallback =
-								typeof name === "string" && HashSet.has(fallbackNames, name)
-							const pool = fallback
-								? Array.filter(available, (entry) => entry.name === name)
-								: bucket
-							let cursor = fallback
-								? 0
-								: Option.getOrElse(HashMap.get(cursors, key), () => 0)
-							while (
-								cursor < pool.length &&
-								HashSet.has(used, pool[cursor]!.id)
-							)
-								cursor++
-							if (!fallback) cursors = HashMap.set(cursors, key, cursor)
-							let match = Option.none<Entry>()
-							for (let index = cursor; index < pool.length; index++) {
-								const entry = pool[index]!
-								if (
-									!HashSet.has(used, entry.id) &&
-									equalConfig(entry.config, plain["config"])
-								) {
-									match = Option.some(entry)
-									break
-								}
+				const plain =
+					map.get("group") === true
+						? {
+								...fields,
+								config: yield* visit(map.get("config"), fields["config"], [
+									...path,
+									index,
+									"config",
+								]),
 							}
-							let id = Option.isSome(match) ? match.value.id : yield* newId
-							while (HashSet.has(used, id)) id = yield* newId
-							used = HashSet.add(used, id)
-							assignments = Chunk.append(assignments, {
-								map,
-								id,
-								path: [...path, index],
-							})
-
-							return { ...plain, id }
-						}),
+						: fields
+				if (map.has("id")) return plain
+				const key = keyOf(plain["name"], plain["config"])
+				const bucket = Option.getOrElse(
+					HashMap.get(pools, key),
+					Array.empty<Entry>,
 				)
-			})
-		const target = yield* visit(document.contents, logical)
-		return { target, assignments: Chunk.toReadonlyArray(assignments) }
+				const name = plain["name"]
+				if (
+					typeof name === "string" &&
+					fingerprint(plain["config"]) === undefined
+				)
+					fallbackNames = HashSet.add(fallbackNames, name)
+				const fallback =
+					typeof name === "string" && HashSet.has(fallbackNames, name)
+				const pool = fallback
+					? Array.filter(available, (entry) => entry.name === name)
+					: bucket
+				let cursor = fallback
+					? 0
+					: Option.getOrElse(HashMap.get(cursors, key), () => 0)
+				while (cursor < pool.length && HashSet.has(used, pool[cursor]!.id))
+					cursor++
+				if (!fallback) cursors = HashMap.set(cursors, key, cursor)
+				let match = Option.none<Entry>()
+				for (let index = cursor; index < pool.length; index++) {
+					const entry = pool[index]!
+					if (
+						!HashSet.has(used, entry.id) &&
+						equalConfig(entry.config, plain["config"])
+					) {
+						match = Option.some(entry)
+						break
+					}
+				}
+				let id = Option.isSome(match) ? match.value.id : yield* newId
+				while (HashSet.has(used, id)) id = yield* newId
+				used = HashSet.add(used, id)
+				assignments = Chunk.append(assignments, {
+					map,
+					id,
+					path: [...path, index],
+				})
+
+				return { ...plain, id }
+			}),
+		)
 	})
+	const target = yield* visit(document.contents, logical)
+	return { target, assignments: Chunk.toReadonlyArray(assignments) }
+})
 
 /** Materialize all affected references against the original graph before any mutation. */
 const protectAliases = (
@@ -552,220 +550,209 @@ export const Include = Plugin.make({
 	name: "include",
 	config: Config,
 	inject: [FileSystem.FileSystem, Path.Path],
-	apply: ({ path: file, watch, initial }) =>
-		Effect.gen(function* () {
-			const fs = yield* FileSystem.FileSystem
-			const path = yield* Path.Path
+	apply: Effect.fnUntraced(function* ({ path: file, watch, initial }) {
+		const fs = yield* FileSystem.FileSystem
+		const path = yield* Path.Path
 
-			const directory = yield* ConfigDirectory
-			const entry = path.resolve(
-				Option.getOrElse(directory, () => "."),
-				file,
-			)
-			const watchedTarget = yield* SubscriptionRef.make(entry)
-			const resolveTarget = fileTarget(entry).pipe(
-				Effect.provideService(FileSystem.FileSystem, fs),
-				Effect.provideService(Path.Path, path),
-				Effect.tap((target) => SubscriptionRef.set(watchedTarget, target)),
-			)
-			const write = (
-				target: string,
-				text: string,
-				expected: Option.Option<string>,
-			) =>
-				atomicWrite(
-					target,
-					text,
-					expected,
-					Effect.flatMap(resolveTarget, (current) =>
-						current === target
-							? Effect.void
-							: Effect.fail(WriteConflict.make({ path: entry })),
-					),
-				).pipe(Effect.provideService(FileSystem.FileSystem, fs))
+		const directory = yield* ConfigDirectory
+		const entry = path.resolve(
+			Option.getOrElse(directory, () => "."),
+			file,
+		)
+		const watchedTarget = yield* SubscriptionRef.make(entry)
+		const resolveTarget = fileTarget(entry).pipe(
+			Effect.provideService(FileSystem.FileSystem, fs),
+			Effect.provideService(Path.Path, path),
+			Effect.tap((target) => SubscriptionRef.set(watchedTarget, target)),
+		)
+		const write = (
+			target: string,
+			text: string,
+			expected: Option.Option<string>,
+		) =>
+			atomicWrite(
+				target,
+				text,
+				expected,
+				Effect.flatMap(resolveTarget, (current) =>
+					current === target
+						? Effect.void
+						: Effect.fail(WriteConflict.make({ path: entry })),
+				),
+			).pipe(Effect.provideService(FileSystem.FileSystem, fs))
 
-			/** Persist only a fully prepared document at the target that supplied its contents. */
-			const read = Effect.fnUntraced(function* (
-				target: string,
-				text: string,
-				previous: ReadonlyArray<Entry>,
-			) {
-				const prepared = yield* prepare(text, previous)
-				if (prepared.text !== text)
-					yield* write(target, prepared.text, Option.some(text))
-				return { ...prepared, target } satisfies Loaded
-			})
+		/** Persist only a fully prepared document at the target that supplied its contents. */
+		const read = Effect.fnUntraced(function* (
+			target: string,
+			text: string,
+			previous: ReadonlyArray<Entry>,
+		) {
+			const prepared = yield* prepare(text, previous)
+			if (prepared.text !== text)
+				yield* write(target, prepared.text, Option.some(text))
+			return { ...prepared, target } satisfies Loaded
+		})
 
-			const initialize = retryWrite(
-				Effect.gen(function* () {
-					const target = yield* resolveTarget
-					if (!(yield* fs.exists(target))) {
-						const text = yield* yaml(() =>
-							new Document(initial ?? [], { customTags: [envTag] }).toString(),
-						)
-						const prepared = yield* prepare(text, [])
-						yield* write(target, prepared.text, Option.none())
-						return Option.some({ ...prepared, target })
-					}
-					return yield* fs.readFileString(target).pipe(
-						Effect.flatMap((contents) => read(target, contents, [])),
-						Effect.asSome,
+		const initialize = retryWrite(
+			Effect.gen(function* () {
+				const target = yield* resolveTarget
+				if (!(yield* fs.exists(target))) {
+					const text = yield* yaml(() =>
+						new Document(initial ?? [], { customTags: [envTag] }).toString(),
 					)
-				}),
-			)
-			const initialSynced = yield* watch === true
-				? initialize.pipe(
-						Effect.catchCauseIf(
-							(cause) => !Cause.hasInterrupts(cause) && !Cause.hasDies(cause),
-							(cause) =>
-								Effect.logError(
-									`Waiting for valid configuration in ${file}`,
-									cause,
-								).pipe(Effect.as(Option.none<Loaded>())),
-						),
-					)
-				: initialize
-			// None means no valid document has been loaded. Never treat invalid text
-			// as an empty document: edits must successfully re-read it first.
-			const synced = yield* Ref.make(initialSynced)
-			const entriesOf = (snapshot: Option.Option<Loaded>) =>
-				Option.match(snapshot, {
-					onNone: () => [],
-					onSome: (value) => value.entries,
-				})
-
-			// Loader owns serialization. Documents are local to a read or edit;
-			// only the resolved path, text and entries are retained in the shared snapshot.
-			const fresh = (previous: Option.Option<Loaded>) =>
-				Effect.gen(function* () {
-					const target = yield* resolveTarget
-					const disk = yield* fs.readFileString(target)
-					return Option.isSome(previous) &&
-						target === previous.value.target &&
-						disk === previous.value.text
-						? previous.value
-						: yield* read(target, disk, entriesOf(previous)).pipe(
-								Effect.mapError((cause) =>
-									Schema.is(StoreError)(cause) ||
-									Schema.is(WriteConflict)(cause)
-										? cause
-										: StoreError.make({ cause }),
-								),
-							)
-				})
-
-			const applyOp = (op: Op) =>
-				Effect.gen(function* () {
-					const previous = yield* Ref.get(synced)
-					// Keep the original baseline across retries to detect same-field edits.
-					return yield* retryWrite(
-						Effect.gen(function* () {
-							const current = yield* fresh(previous)
-							if (conflicts(op, entriesOf(previous), current.entries)) {
-								yield* Effect.logWarning(
-									`Dropped an edit to "${op._tag === "Update" ? op.id : ""}": the file changed it too`,
-								)
-								yield* Ref.set(synced, Option.some(current))
-								return current.entries
-							}
-							const entries = yield* Effect.fromResult(
-								apply(current.entries, op),
-							)
-							const document = yield* parse(current.text)
-							const text = yield* yaml(() => {
-								detachAliases(document, current.entries, op)
-								edit(document, current.entries, op)
-								return document.toString()
-							})
-							const verified = yield* parse(text)
-							const value = yield* yaml(() => verified.toJS())
-							const decoded = yield* decodeEntries(value).pipe(
-								Effect.mapError((cause) => StoreError.make({ cause })),
-							)
-							if (!equalConfig(decoded, entries))
-								return yield* StoreError.make({
-									cause: new Error(
-										"Serialized entries do not match the edited target",
-									),
-								})
-							yield* write(current.target, text, Option.some(current.text))
-							yield* Ref.set(
-								synced,
-								Option.some({ target: current.target, text, entries: decoded }),
-							)
-							return decoded
-						}),
-					)
-				})
-
-			const refresh = retryWrite(
-				Effect.gen(function* () {
-					const previous = yield* Ref.get(synced)
-					const current = yield* fresh(previous)
-					if (Option.isSome(previous) && current === previous.value)
-						return Option.none<ReadonlyArray<Entry>>()
-					yield* Ref.set(synced, Option.some(current))
-					return Option.some(current.entries)
-				}),
-			)
-
-			const notifications = (target: string) =>
-				Stream.unwrap(
-					Effect.gen(function* () {
-						const ready = yield* Deferred.make<void>()
-						const events = fs
-							.watch(path.dirname(target), {
-								onReady: () => Deferred.doneUnsafe(ready, Effect.void),
-							})
-							.pipe(
-								observeSource,
-								Stream.filter(
-									(event) =>
-										path.basename(event.path) === path.basename(target),
-								),
-								Stream.as(undefined),
-							)
-						// Observe again once installed, including changes made during a target switch.
-						return Stream.merge(
-							events,
-							Stream.fromEffect(Deferred.await(ready)),
-						)
-					}),
-				).pipe(
-					Stream.catchCause((cause) =>
-						Stream.fromEffect(
-							Effect.logError(`Stopped watching ${target}`, cause).pipe(
-								Effect.andThen(Effect.never),
-							),
-						),
+					const prepared = yield* prepare(text, [])
+					yield* write(target, prepared.text, Option.none())
+					return Option.some({ ...prepared, target })
+				}
+				return yield* fs.readFileString(target).pipe(
+					Effect.flatMap((contents) => read(target, contents, [])),
+					Effect.asSome,
+				)
+			}),
+		)
+		const initialSynced = yield* watch === true
+			? initialize.pipe(
+					Effect.catchCauseIf(
+						(cause) => !Cause.hasInterrupts(cause) && !Cause.hasDies(cause),
+						(cause) =>
+							Effect.logError(
+								`Waiting for valid configuration in ${file}`,
+								cause,
+							).pipe(Effect.as(Option.none<Loaded>())),
 					),
 				)
-			const external =
-				watch === true
-					? Stream.merge(
-							notifications(entry),
-							SubscriptionRef.changes(watchedTarget).pipe(
-								Stream.changes,
-								Stream.switchMap((target) =>
-									target === entry ? Stream.never : notifications(target),
-								),
-							),
-						).pipe(
-							// Only refresh reads configuration, under Loader's lock.
-							Stream.debounce("100 millis"),
-						)
-					: Stream.never
+			: initialize
+		// None means no valid document has been loaded. Never treat invalid text
+		// as an empty document: edits must successfully re-read it first.
+		const synced = yield* Ref.make(initialSynced)
+		const entriesOf = (snapshot: Option.Option<Loaded>) =>
+			Option.match(snapshot, {
+				onNone: () => [],
+				onSome: (value) => value.entries,
+			})
 
-			yield* start({
-				initial: entriesOf(initialSynced),
-				apply: applyOp,
-				refresh,
-				external,
-			}).pipe(
-				Effect.provideService(
-					ConfigDirectory,
-					Option.some(path.dirname(entry)),
+		// Loader owns serialization. Documents are local to a read or edit;
+		// only the resolved path, text and entries are retained in the shared snapshot.
+		const fresh = Effect.fnUntraced(function* (
+			previous: Option.Option<Loaded>,
+		) {
+			const target = yield* resolveTarget
+			const disk = yield* fs.readFileString(target)
+			return Option.isSome(previous) &&
+				target === previous.value.target &&
+				disk === previous.value.text
+				? previous.value
+				: yield* read(target, disk, entriesOf(previous)).pipe(
+						Effect.mapError((cause) =>
+							Schema.is(StoreError)(cause) || Schema.is(WriteConflict)(cause)
+								? cause
+								: StoreError.make({ cause }),
+						),
+					)
+		})
+
+		const applyOp = Effect.fnUntraced(function* (op: Op) {
+			const previous = yield* Ref.get(synced)
+			// Keep the original baseline across retries to detect same-field edits.
+			return yield* retryWrite(
+				Effect.gen(function* () {
+					const current = yield* fresh(previous)
+					if (conflicts(op, entriesOf(previous), current.entries)) {
+						yield* Effect.logWarning(
+							`Dropped an edit to "${op._tag === "Update" ? op.id : ""}": the file changed it too`,
+						)
+						yield* Ref.set(synced, Option.some(current))
+						return current.entries
+					}
+					const entries = yield* Effect.fromResult(apply(current.entries, op))
+					const document = yield* parse(current.text)
+					const text = yield* yaml(() => {
+						detachAliases(document, current.entries, op)
+						edit(document, current.entries, op)
+						return document.toString()
+					})
+					const verified = yield* parse(text)
+					const value = yield* yaml(() => verified.toJS())
+					const decoded = yield* decodeEntries(value).pipe(
+						Effect.mapError((cause) => StoreError.make({ cause })),
+					)
+					if (!equalConfig(decoded, entries))
+						return yield* StoreError.make({
+							cause: new Error(
+								"Serialized entries do not match the edited target",
+							),
+						})
+					yield* write(current.target, text, Option.some(current.text))
+					yield* Ref.set(
+						synced,
+						Option.some({ target: current.target, text, entries: decoded }),
+					)
+					return decoded
+				}),
+			)
+		})
+
+		const refresh = retryWrite(
+			Effect.gen(function* () {
+				const previous = yield* Ref.get(synced)
+				const current = yield* fresh(previous)
+				if (Option.isSome(previous) && current === previous.value)
+					return Option.none<ReadonlyArray<Entry>>()
+				yield* Ref.set(synced, Option.some(current))
+				return Option.some(current.entries)
+			}),
+		)
+
+		const notifications = (target: string) =>
+			Stream.unwrap(
+				Effect.gen(function* () {
+					const ready = yield* Deferred.make<void>()
+					const events = fs
+						.watch(path.dirname(target), {
+							onReady: () => Deferred.doneUnsafe(ready, Effect.void),
+						})
+						.pipe(
+							observeSource,
+							Stream.filter(
+								(event) => path.basename(event.path) === path.basename(target),
+							),
+							Stream.as(undefined),
+						)
+					// Observe again once installed, including changes made during a target switch.
+					return Stream.merge(events, Stream.fromEffect(Deferred.await(ready)))
+				}),
+			).pipe(
+				Stream.catchCause((cause) =>
+					Stream.fromEffect(
+						Effect.logError(`Stopped watching ${target}`, cause).pipe(
+							Effect.andThen(Effect.never),
+						),
+					),
 				),
 			)
-		}),
+		const external =
+			watch === true
+				? Stream.merge(
+						notifications(entry),
+						SubscriptionRef.changes(watchedTarget).pipe(
+							Stream.changes,
+							Stream.switchMap((target) =>
+								target === entry ? Stream.never : notifications(target),
+							),
+						),
+					).pipe(
+						// Only refresh reads configuration, under Loader's lock.
+						Stream.debounce("100 millis"),
+					)
+				: Stream.never
+
+		yield* start({
+			initial: entriesOf(initialSynced),
+			apply: applyOp,
+			refresh,
+			external,
+		}).pipe(
+			Effect.provideService(ConfigDirectory, Option.some(path.dirname(entry))),
+		)
+	}),
 })

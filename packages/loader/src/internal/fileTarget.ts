@@ -9,24 +9,20 @@ export const fileTarget = Effect.fnUntraced(function* (entry: string) {
 		Effect.catchCauseIf(
 			(cause) =>
 				isOnlyFailure(cause, (error) => error.reason._tag === "NotFound"),
-			(cause) =>
-				Effect.gen(function* () {
-					const info = yield* fs.lstat(entry).pipe(
-						Effect.asSome,
-						Effect.catchCauseIf(
-							(cause) =>
-								isOnlyFailure(
-									cause,
-									(error) => error.reason._tag === "NotFound",
-								),
-							() => Effect.succeedNone,
-						),
-					)
-					// A dangling link is an existing entry, not permission to replace it.
-					if (Option.isSome(info)) return yield* Effect.failCause(cause)
-					const parent = yield* fs.realPath(path.dirname(entry))
-					return path.join(parent, path.basename(entry))
-				}),
+			Effect.fnUntraced(function* (cause) {
+				const info = yield* fs.lstat(entry).pipe(
+					Effect.asSome,
+					Effect.catchCauseIf(
+						(cause) =>
+							isOnlyFailure(cause, (error) => error.reason._tag === "NotFound"),
+						() => Effect.succeedNone,
+					),
+				)
+				// A dangling link is an existing entry, not permission to replace it.
+				if (Option.isSome(info)) return yield* Effect.failCause(cause)
+				const parent = yield* fs.realPath(path.dirname(entry))
+				return path.join(parent, path.basename(entry))
+			}),
 		),
 	)
 })

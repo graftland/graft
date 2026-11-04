@@ -32,18 +32,17 @@ const original = `- id: a
   config: *other
 `
 
-const setup = (text = original) =>
-	Effect.gen(function* () {
-		const fs = yield* FileSystem.FileSystem
-		const path = yield* Path.Path
-		const directory = yield* fs.makeTempDirectoryScoped()
-		const file = path.join(directory, "graft.yml")
-		yield* fs.writeFileString(file, text)
-		yield* Graft.plugin(Include.Include, { path: file })
-		const loader = yield* loaderService
-		yield* loader.ready
-		return { fs, file, loader }
-	})
+const setup = Effect.fn("setup")(function* (text: string = original) {
+	const fs = yield* FileSystem.FileSystem
+	const path = yield* Path.Path
+	const directory = yield* fs.makeTempDirectoryScoped()
+	const file = path.join(directory, "graft.yml")
+	yield* fs.writeFileString(file, text)
+	yield* Graft.plugin(Include.Include, { path: file })
+	const loader = yield* loaderService
+	yield* loader.ready
+	return { fs, file, loader }
+})
 
 describe("YAML alias edits", () => {
 	for (const operation of ["update", "create", "remove"] as const) {

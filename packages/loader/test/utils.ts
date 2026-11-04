@@ -54,9 +54,10 @@ export const makeJournal = Effect.gen(function* () {
 })
 
 /** Runs a test in a graft whose environment has Node services, an env var and the given plugins. */
-export const run =
-	(plugins: (journal: Journal) => Readonly<Record<string, Plugin.Plugin>>) =>
-	<A, E>(
+export const run = (
+	plugins: (journal: Journal) => Readonly<Record<string, Plugin.Plugin>>,
+) =>
+	Effect.fnUntraced(function* <A, E>(
 		test: (
 			journal: Journal,
 		) => Effect.Effect<
@@ -64,19 +65,18 @@ export const run =
 			E,
 			Graft.Graft | Scope.Scope | FileSystem.FileSystem | Path.Path
 		>,
-	) =>
-		Effect.gen(function* () {
-			const journal = yield* makeJournal
-			const environment = Layer.mergeAll(
-				NodeServices.layer,
-				ModuleResolver.fromRecord(plugins(journal)),
-				ConfigProvider.layer(ConfigProvider.fromEnvRecord({ GREETING: "hi" })),
-			)
-			return yield* test(journal).pipe(
-				Effect.scoped,
-				Effect.provide(Layer.provideMerge(Graft.layer, environment)),
-			)
-		})
+	) {
+		const journal = yield* makeJournal
+		const environment = Layer.mergeAll(
+			NodeServices.layer,
+			ModuleResolver.fromRecord(plugins(journal)),
+			ConfigProvider.layer(ConfigProvider.fromEnvRecord({ GREETING: "hi" })),
+		)
+		return yield* test(journal).pipe(
+			Effect.scoped,
+			Effect.provide(Layer.provideMerge(Graft.layer, environment)),
+		)
+	})
 
 /** Gets the loader service published by a loader plugin. */
 export const loaderService: Effect.Effect<

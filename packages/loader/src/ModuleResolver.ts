@@ -187,10 +187,10 @@ const inCandidateScope = <A, E>(effect: Effect.Effect<A, E, Scope.Scope>) =>
  * Importers may attach observation-only leases to the separate observationScope.
  * The caller keeps that scope through failure and closes it on retry or disposal.
  */
-export const make = <E>(
+export const make: <E>(
 	options: Options<E>,
-): Effect.Effect<(typeof ModuleResolver)["Service"], never, Path.Path> =>
-	Effect.gen(function* () {
+) => Effect.Effect<(typeof ModuleResolver)["Service"], never, Path.Path> =
+	Effect.fnUntraced(function* <E>(options: Options<E>) {
 		const path = yield* Path.Path
 		/** Keep the import target and Node's possible missing names in one normalization step. */
 		const normalize = Effect.fnUntraced(function* (specifier: string) {
@@ -234,11 +234,21 @@ export const make = <E>(
 			const environment = options.resolution
 			const revision =
 				environment === undefined ? 0 : yield* environment.revision
-			const cached = yield* Ref.get(plans)
-			if (cached.revision === revision) {
-				const found = HashMap.get(cached.entries, key)
-				if (Option.isSome(found)) return found.value
-			} else yield* Ref.set(plans, { revision, entries: HashMap.empty() })
+			// Revisions only grow: a call that read an older one must not roll the cache back.
+			const found = yield* Ref.modify(plans, (current) =>
+				current.revision === revision
+					? [HashMap.get(current.entries, key), current]
+					: revision > current.revision
+						? [
+								Option.none(),
+								{
+									revision,
+									entries: HashMap.empty<PlanKey, ReadonlyArray<Candidate>>(),
+								},
+							]
+						: [Option.none(), current],
+			)
+			if (Option.isSome(found)) return found.value
 			const normalized = yield* Effect.forEach(candidates(name), (specifier) =>
 				Effect.map(normalize(specifier), (candidate) => ({
 					...candidate,

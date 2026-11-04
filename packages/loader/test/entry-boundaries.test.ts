@@ -14,18 +14,17 @@ import { expectTypeOf } from "vitest"
 import { parse } from "yaml"
 import { run, loaderService, echo } from "./utils.ts"
 
-const setup = (text: string) =>
-	Effect.gen(function* () {
-		const fs = yield* FileSystem.FileSystem
-		const directory = yield* fs.makeTempDirectoryScoped()
-		const file = `${directory}/graft.yml`
-		yield* fs.writeFileString(file, text)
-		const included = yield* Graft.plugin(Include.Include, { path: file })
-		yield* included.await
-		const loader = yield* loaderService
-		yield* loader.ready
-		return { fs, file, loader }
-	})
+const setup = Effect.fn("setup")(function* (text: string) {
+	const fs = yield* FileSystem.FileSystem
+	const directory = yield* fs.makeTempDirectoryScoped()
+	const file = `${directory}/graft.yml`
+	yield* fs.writeFileString(file, text)
+	const included = yield* Graft.plugin(Include.Include, { path: file })
+	yield* included.await
+	const loader = yield* loaderService
+	yield* loader.ready
+	return { fs, file, loader }
+})
 
 it.effect("preserves anonymous group identity and running children", () =>
 	run((journal) => ({ echo: echo(journal) }))((journal) =>
