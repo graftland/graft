@@ -87,6 +87,19 @@ export default defineConfig({
 					items: ["config-file", "cli", "hot-reload", "embedding"],
 				},
 				{
+					label: "Remote",
+					translations: { "zh-CN": "Remote", "zh-TW": "Remote" },
+					items: [
+						"remote/overview",
+						"remote/getting-started",
+						"remote/runners",
+						"remote/transport-auth",
+						"remote/restarts",
+						"remote/capabilities",
+						"remote/reference",
+					],
+				},
+				{
 					label: "Reference",
 					translations: { "zh-CN": "参考", "zh-TW": "參考" },
 					items: [
@@ -98,19 +111,6 @@ export default defineConfig({
 							},
 							items: ["fork-handle", "loader-api", "hmr-api", "errors"],
 						},
-					],
-				},
-				{
-					label: "Remote",
-					translations: { "zh-CN": "Remote", "zh-TW": "Remote" },
-					items: [
-						"remote/overview",
-						"remote/getting-started",
-						"remote/runners",
-						"remote/transport-auth",
-						"remote/restarts",
-						"remote/capabilities",
-						"remote/reference",
 					],
 				},
 				{

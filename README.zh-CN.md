@@ -48,6 +48,10 @@ const hello = Plugin.make({
 - **高接换种。** 不砍树，只换品种。`graft start --watch`
   只重新导入受改动影响的部分，并在一次事务中替换相关插件。新代码失败时，旧插件继续运行。
 
+某根枝条需要单独栽种时，[Remote](https://graftland.github.io/graft/zh-cn/remote/overview/)
+可以让这个插件在子进程、Node
+worker 或另一台机器上运行，使用它服务的插件不必改动。
+
 在 Node.js 上运行 Graft 需要 22.19 或更高版本。开发本工作区需要 Node.js
 22.22 或更高版本，其中包括用 Astro 构建文档。
 
@@ -69,12 +73,12 @@ Graft 的插件模型借鉴自
 ## 示例
 
 [`samples/`](samples)
-以五个简短的编号示例开头。每个示例讲一个概念，从第一个插件到通过 `graft.yml`
-运行。
+以六个简短的编号示例开头。每个示例讲一个概念，从第一个插件到通过 `graft.yml`
+运行，再到把插件移到另一个进程。
 
 之后是更大的应用，展示 Graft 的用途：
 
-- 由插件构成的聊天机器人
+- 由插件构成的聊天机器人，天气集成在子进程中运行
 - 在负载下替换定价引擎和数据库的结账服务
 - 由 `graft.yml` 驱动的 HTTP 网关
 - 多租户服务
@@ -82,14 +86,15 @@ Graft 的插件模型借鉴自
 
 ## 软件包
 
-| 软件包                                                   | 作用                                                         |
-| -------------------------------------------------------- | ------------------------------------------------------------ |
-| [`@graftland/graft`](packages/core)                      | 基于 Effect 的插件框架：插件、fork、服务、隔离、事件和日志。 |
-| [`@graftland/loader`](packages/loader)                   | 从条目列表或 YAML 配置文件加载插件。                         |
-| [`@graftland/hmr`](packages/hmr)                         | 在 Node.js 上重载插件模块，无需重启进程。                    |
-| [`@graftland/cli`](packages/cli)                         | `graft` 命令：`start`、`create`、`add` 和 `remove`。         |
-| [`@graftland/create`](packages/create)                   | 生成新的 Graft 项目。`graft create` 使用它。                 |
-| [`@graftland/package-manager`](packages/package-manager) | 用 npm、pnpm 或 Yarn 安装依赖，失败时回滚。                  |
+| 软件包                                                   | 作用                                                                   |
+| -------------------------------------------------------- | ---------------------------------------------------------------------- |
+| [`@graftland/graft`](packages/core)                      | 基于 Effect 的插件框架：插件、fork、服务、隔离、事件和日志。           |
+| [`@graftland/loader`](packages/loader)                   | 从条目列表或 YAML 配置文件加载插件。                                   |
+| [`@graftland/hmr`](packages/hmr)                         | 在 Node.js 上重载插件模块，无需重启进程。                              |
+| [`@graftland/cli`](packages/cli)                         | `graft` 命令：`start`、`create`、`add` 和 `remove`。                   |
+| [`@graftland/create`](packages/create)                   | 生成新的 Graft 项目。`graft create` 使用它。                           |
+| [`@graftland/package-manager`](packages/package-manager) | 用 npm、pnpm 或 Yarn 安装依赖，失败时回滚。                            |
+| [`@graftland/plugin-remote`](packages/remote)            | 让插件在子进程、worker 或另一台机器上运行；提供 `graft-remote serve`。 |
 
 所有软件包以相同版本一起发布。它们都需要 `effect` 4.1.x。
 

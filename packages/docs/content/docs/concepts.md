@@ -26,6 +26,10 @@ Each row links to the page that explains it.
 2. A fork can **publish** services and **inject** services from others.
 3. A fork can **load children**. They stop when the parent stops.
 4. Realms and intercepts shape what a fork and its children can see.
+5. A fork's code usually runs in the application's process. With
+   [Remote](../remote/overview/), it runs in a child process, a worker or on
+   another machine instead, and its services are still published and injected in
+   the application as usual.
 
 ## Guarantees
 
@@ -62,3 +66,4 @@ time, the plugin tree, events, config files and hot reload.
 | Know why a plugin is not running | [Lifecycle](../lifecycle/)     |
 | Configure an app without code    | [Config file](../config-file/) |
 | Understand an error name         | [Errors](../errors/)           |
+| Run a plugin in another process  | [Remote](../remote/overview/)  |

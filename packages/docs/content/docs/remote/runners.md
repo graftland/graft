@@ -63,8 +63,8 @@ runner.
 
 ## 3. Write `runner.yml`
 
-A runner is configured with a Graft config file containing one `remote/runner`
-entry:
+A runner is configured with a Graft [config file](../../config-file/) containing
+one `remote/runner` entry:
 
 ```yaml title="runner.yml"
 - id: runner

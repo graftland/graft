@@ -65,3 +65,19 @@ Graft 會保留每個失敗的完整 `Cause`
 | `Failed`                        | 重載失敗。值中包含完整的 `Cause`；舊外掛繼續執行。       |
 
 請參閱[熱重載](../hot-reload/)。
+
+## Remote
+
+透過 [Remote](../remote/overview/) 執行的外掛會以下列錯誤失敗，它們來自
+`@graftland/plugin-remote`：
+
+| 名稱                         | 觸發時機                                                                            |
+| ---------------------------- | ----------------------------------------------------------------------------------- |
+| 已宣告的錯誤                 | 外掛以契約 `error` 中宣告的錯誤失敗。                                               |
+| `Contract.UndeclaredFailure` | 外掛以契約未宣告的錯誤失敗。                                                        |
+| `RemoteError`                | Remote 本身失敗：行程結束、連線中斷或 runner 拒絕。`cause` 說明具體原因。           |
+| `RemoteWithdrawn`            | 呼叫端使用外掛的服務時，這些服務被撤回。                                            |
+| `RemoteEntryError`           | `graft.yml` 中的 `remote` 或 `remote/runner` 設定項目無效。`field` 指出是哪個欄位。 |
+
+defect 仍然是 defect。`RemoteError` 中可能包含哪些錯誤、該如何處理，請見
+[Remote 錯誤](../remote/reference/#錯誤)。

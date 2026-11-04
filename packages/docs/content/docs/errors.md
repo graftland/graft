@@ -67,3 +67,19 @@ See [Loader API](../loader-api/).
 | `Failed`                        | A reload failed. The value holds the full `Cause`; old plugins keep running.        |
 
 See [Hot reload](../hot-reload/#when-a-reload-does-not-apply).
+
+## Remote
+
+A plugin run through [Remote](../remote/overview/) fails with these, from
+`@graftland/plugin-remote`:
+
+| Name                         | Raised when                                                                                           |
+| ---------------------------- | ----------------------------------------------------------------------------------------------------- |
+| A declared error             | The plugin failed with an error its contract declares in `error`.                                     |
+| `Contract.UndeclaredFailure` | The plugin failed with an error the contract does not declare.                                        |
+| `RemoteError`                | Remote itself failed: the process exited, the connection broke, a runner refused. `cause` says which. |
+| `RemoteWithdrawn`            | The plugin's services were withdrawn while a caller was using them.                                   |
+| `RemoteEntryError`           | A `remote` or `remote/runner` entry in `graft.yml` is invalid. `field` names the field.               |
+
+Defects stay defects. See [Remote errors](../remote/reference/#errors) for
+everything `RemoteError` may contain and what to do about it.

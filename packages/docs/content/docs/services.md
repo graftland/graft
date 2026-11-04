@@ -60,6 +60,12 @@ const uptime = Plugin.make({
 The finalizer above calls `clock` while the plugin stops. This is safe: a
 service stays usable until every plugin that injects it has stopped.
 
+The publisher does not have to run in your process. A plugin moved into a child
+process, a worker or another machine with [Remote](../remote/overview/) still
+publishes its services here, and `uptime` would inject `Clock` the same way.
+Calls then cross a connection, and their failures reach the caller as
+[remote errors](../remote/getting-started/#errors-callers-see).
+
 ## How withdrawal works
 
 When a fork that publishes services stops, Graft follows this order:

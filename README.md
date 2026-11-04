@@ -55,6 +55,11 @@ const hello = Plugin.make({
   affected plugins in one transaction. If the new code fails, the old plugins
   keep running.
 
+When one branch needs ground of its own,
+[Remote](https://graftland.github.io/graft/remote/overview/) runs that plugin in
+a child process, a Node worker or on another machine. The plugins that use its
+services do not change.
+
 To run Graft on Node.js, you need version 22.19 or later. To develop this
 workspace, you need Node.js 22.22 or later. This includes building the
 documentation with Astro.
@@ -82,12 +87,13 @@ To let a coding agent do the port, install the [migration skills](skills).
 
 ## Samples
 
-[`samples/`](samples) starts with five short, numbered samples. Each one teaches
-one idea, from a first plugin to running from `graft.yml`.
+[`samples/`](samples) starts with six short, numbered samples. Each one teaches
+one idea, from a first plugin to running from `graft.yml` and moving a plugin
+into another process.
 
 After those, larger applications show what Graft is for:
 
-- a chat bot built from plugins
+- a chat bot built from plugins, with its weather integration in a child process
 - a checkout that swaps its pricing engine and database under load
 - an HTTP gateway driven by `graft.yml`
 - a multi-tenant service
@@ -103,6 +109,7 @@ After those, larger applications show what Graft is for:
 | [`@graftland/cli`](packages/cli)                         | The `graft` command: `start`, `create`, `add` and `remove`.                               |
 | [`@graftland/create`](packages/create)                   | Generates a new Graft project. `graft create` uses it.                                    |
 | [`@graftland/package-manager`](packages/package-manager) | Installs dependencies with npm, pnpm or Yarn, and rolls back on failure.                  |
+| [`@graftland/plugin-remote`](packages/remote)            | Runs a plugin in a child process, a worker or on another machine; `graft-remote serve`.   |
 
 All packages are released together with the same version. They all need `effect`
 4.1.x.

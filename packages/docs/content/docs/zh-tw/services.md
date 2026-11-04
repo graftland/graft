@@ -59,6 +59,11 @@ const uptime = Plugin.make({
 上面的終結器在外掛停止時呼叫
 `clock`。這樣做是安全的：在所有注入該服務的外掛停止之前，服務始終可用。
 
+發布方不一定在你的行程裡執行。用 [Remote](../remote/overview/)
+移到子行程、worker 或另一台機器上的外掛，仍然在這裡發布它的服務，`uptime`
+也照樣注入
+`Clock`。只是呼叫會經過一條連線，失敗時呼叫端看到的是[遠端錯誤](../remote/getting-started/#呼叫端看到的錯誤)。
+
 ## 服務撤回流程
 
 發布服務的 fork 停止時，Graft 依序執行以下步驟：

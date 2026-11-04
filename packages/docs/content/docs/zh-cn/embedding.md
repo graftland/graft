@@ -5,12 +5,13 @@ description: 从自己的 Effect 程序运行插件，无需 CLI。
 
 CLI 是建立在这些库之上的一个小程序。你也可以用同样的方式，在自己的 Effect 程序中运行 Graft。
 
-| 你想要……                | 使用                                | 章节                          |
-| ----------------------- | ----------------------------------- | ----------------------------- |
-| 从代码中加载少量插件    | `Graft.layer` 和 `Graft.plugin`     | [直接运行插件](#直接运行插件) |
-| 从配置项列表加载插件    | `Loader.plugin` 和 `ModuleResolver` | [加载配置项](#加载配置项)     |
-| 从 YAML 文件加载插件    | `Include.Include`                   | [加载配置文件](#加载配置文件) |
-| 不使用 CLI 也能重载代码 | `@graftland/hmr`                    | [HMR API](../hmr-api/)        |
+| 你想要……                 | 使用                                | 章节                              |
+| ------------------------ | ----------------------------------- | --------------------------------- |
+| 从代码中加载少量插件     | `Graft.layer` 和 `Graft.plugin`     | [直接运行插件](#直接运行插件)     |
+| 从配置项列表加载插件     | `Loader.plugin` 和 `ModuleResolver` | [加载配置项](#加载配置项)         |
+| 从 YAML 文件加载插件     | `Include.Include`                   | [加载配置文件](#加载配置文件)     |
+| 不使用 CLI 也能重载代码  | `@graftland/hmr`                    | [HMR API](../hmr-api/)            |
+| 让插件在另一个进程中运行 | `Remote.plugin`                     | [在别处运行插件](#在别处运行插件) |
 
 ## 直接运行插件
 
@@ -125,3 +126,42 @@ const program = Effect.gen(function* () {
 | `watch`     | 获取手动做的修改。                                              |
 
 从代码中编辑配置项，请参阅 [Loader API](../loader-api/)。
+
+## 在别处运行插件
+
+`@graftland/plugin-remote` 的 `Remote.plugin`
+会构建一个插件，让契约的实现在子进程、worker 或 runner 上运行。像其他插件一样用
+`Graft.plugin` 加载它：
+
+```ts
+import * as Remote from "@graftland/plugin-remote"
+import { SecureRandom } from "effect/crypto"
+import { contract } from "./contract.js"
+
+const greeter = Remote.plugin(contract, {
+	contractModule: new URL("./contract.js", import.meta.url).href,
+	connect: { local: {} },
+	config: { greeting: "Hello" },
+})
+
+const program = Effect.gen(function* () {
+	yield* Graft.plugin(greeter)
+	yield* Graft.plugin(hello)
+	return yield* Effect.never
+})
+
+program.pipe(
+	Effect.scoped,
+	Effect.provide(
+		Layer.provideMerge(
+			Graft.layer,
+			Layer.mergeAll(NodeServices.layer, SecureRandom.layerWebCrypto),
+		),
+	),
+	NodeRuntime.runMain,
+)
+```
+
+Remote 需要环境中有 `NodeServices.layer` 和
+`SecureRandom.layerWebCrypto`。`hello` 仍然像以前一样注入
+`Greeter`。契约和其他选项见[在 TypeScript 中加载](../remote/getting-started/#在-typescript-中加载)。

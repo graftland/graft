@@ -96,6 +96,10 @@ const hello = Plugin.make({
 	<Card title="运行应用" icon="setting">
 		用[配置文件](config-file/)描述应用，用[命令行](cli/)启动，再通过[热重载](hot-reload/)修改。
 	</Card>
+	<Card title="在别处运行插件" icon="laptop">
+		用 [Remote](remote/overview/) 把某个插件放到子进程、worker
+		或另一台机器上运行，使用它的插件不必改动。
+	</Card>
 	<Card title="从 cordis 迁移" icon="open-book">
 		了解 [cordis 的概念在 Graft 中如何对应](cordis/)。
 	</Card>
@@ -103,14 +107,15 @@ const hello = Plugin.make({
 
 ## 文档地图
 
-| 分区         | 页面                                                                                              | 阅读目的                   |
-| ------------ | ------------------------------------------------------------------------------------------------- | -------------------------- |
-| **入门**     | [快速开始](quickstart/)、[核心概念](concepts/)、[从 cordis 迁移](cordis/)                         | 了解模型并运行示例。       |
-| **构建插件** | [插件](plugins/)、[服务](services/)、[事件](events/)                                              | 编写代码。                 |
-| **结构**     | [生命周期](lifecycle/)、[领域](isolation/)、[Intercept](intercepts/)、[替换插件](replace/)        | 控制插件之间的关系与变化。 |
-| **应用**     | [配置文件](config-file/)、[命令行](cli/)、[热重载](hot-reload/)、[在程序中使用 Graft](embedding/) | 运行和维护应用。           |
-| **参考**     | [Fork 句柄](fork-handle/)、[Loader API](loader-api/)、[HMR API](hmr-api/)、[错误](errors/)        | 查阅确切行为。             |
-| **项目**     | [发布](releases/)                                                                                 | 检查并发布 Graft。         |
+| 分区         | 页面                                                                                                                                | 阅读目的                               |
+| ------------ | ----------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------- |
+| **入门**     | [快速开始](quickstart/)、[核心概念](concepts/)、[从 cordis 迁移](cordis/)                                                           | 了解模型并运行示例。                   |
+| **构建插件** | [插件](plugins/)、[服务](services/)、[事件](events/)                                                                                | 编写代码。                             |
+| **结构**     | [生命周期](lifecycle/)、[领域](isolation/)、[Intercept](intercepts/)、[替换插件](replace/)                                          | 控制插件之间的关系与变化。             |
+| **应用**     | [配置文件](config-file/)、[命令行](cli/)、[热重载](hot-reload/)、[在程序中使用 Graft](embedding/)                                   | 运行和维护应用。                       |
+| **Remote**   | [概览](remote/overview/)、[快速上手](remote/getting-started/)、[在另一台机器上运行插件](remote/runners/)、[参考](remote/reference/) | 让插件在另一个进程或另一台机器上运行。 |
+| **参考**     | [Fork 句柄](fork-handle/)、[Loader API](loader-api/)、[HMR API](hmr-api/)、[错误](errors/)                                          | 查阅确切行为。                         |
+| **项目**     | [发布](releases/)                                                                                                                   | 检查并发布 Graft。                     |
 
 ## 包
 
@@ -122,11 +127,10 @@ const hello = Plugin.make({
 | `@graftland/cli`             | 提供 `graft` 命令：`start`、`create`、`add` 和 `remove`。                        |
 | `@graftland/create`          | 创建新的 Graft 项目，由 `graft create` 调用。                                    |
 | `@graftland/package-manager` | 使用 npm、pnpm 或 Yarn 安装依赖。安装失败时，通过[快照回滚](cli/#包管理器)撤销。 |
+| `@graftland/plugin-remote`   | 让插件在子进程、worker 或另一台机器上运行。见 [Remote](remote/overview/)。       |
 
 所有包共用同一个版本号，一同发布，并需要 `effect` 4.1.x。
 
 园艺只出现在这一页。在其余文档和代码里，`Scope` 仍然叫
 `Scope`。Graft的插件模型借鉴自
 [cordis](https://github.com/cordiverse/cordis)。cordis 在时空中组合，Graft 只照料自己的园子。
-
-要让插件在另一个进程或另一台机器上运行，请看 [Remote](remote/overview/)。

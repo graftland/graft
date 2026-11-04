@@ -8,7 +8,8 @@ description: 讓外掛樹的某個分支擁有自己的服務和事件。
 
 `Graft.plugin` 的 `isolate` 選項對該 fork 及其所有後代生效。
 
-要讓插件在另一個進程或另一台機器上執行，請看 [Remote](../remote/overview/)。
+領域是一個行程內的**可見性**邊界：它決定 fork 能看到什麼，而不決定程式碼在哪裡執行。要把外掛的程式碼移到子行程、worker 或另一台機器上，請使用
+[Remote](../remote/overview/)，它劃出的是**執行**邊界。兩者都不限制外掛程式碼能做什麼；如需權限邊界，請把 Remote 的 runner 放進容器或虛擬機器。
 
 ## 領域
 

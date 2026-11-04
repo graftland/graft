@@ -38,7 +38,9 @@ description: 用 graft.yml 描述应用，并在运行期间修改配置。
 | 保存文件时会发生什么     | [在运行期间修改配置](#在运行期间修改配置) |
 | 从插件或代码中编辑配置项 | [Loader API](../loader-api/)              |
 
-要让配置项在子进程或另一台机器上运行，可将它指向[远程插件入口](../remote/getting-started/)；保存的条目 id 也可以作为 runner 实例名。
+条目也可以让它的插件在子进程、worker 或另一台机器上运行：写上
+`name: remote`，再把插件的配置包一层，见
+[Remote 快速上手](../remote/getting-started/#4-用-name-remote-加载)。它仍然是普通条目，同样有 id、`disabled`、`inject`、`isolate`，也能在运行期间编辑。保存的条目 id 同时也是 runner 上的实例名。
 
 从条目加载的插件可从 `@graftland/loader` 导入 `Entry`，读取
 `yield* Entry.CurrentId`。它是
@@ -124,7 +126,8 @@ description: 用 graft.yml 描述应用，并在运行期间修改配置。
 | 以 `@` 开头，或包含 `:` | 直接使用。                                                            |
 | 其他（例如 `review`）   | 依次尝试原名称、`@graftland/plugin-<name>` 和 `graft-plugin-<name>`。 |
 
-包从应用目录解析。
+包从应用目录解析。例如，`name: remote` 会找到
+`@graftland/plugin-remote`，`name: remote/runner` 会找到它的 `runner` 导出。
 
 ### 模块无法加载时
 

@@ -47,7 +47,8 @@ graft-remote certificates --out certs --server runner.example
 
 ## 3. 编写 `runner.yml`
 
-runner 用一个 Graft 配置文件配置，其中包含一个 `remote/runner` 条目：
+runner 用一个 Graft [配置文件](../../config-file/)配置，其中包含一个
+`remote/runner` 条目：
 
 ```yaml title="runner.yml"
 - id: runner

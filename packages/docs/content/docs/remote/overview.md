@@ -12,16 +12,17 @@ together. Read it before the other Remote pages.
 
 ## What problem it solves
 
-Every Graft plugin normally runs inside the application's process. Sometimes you
-want one plugin to run elsewhere:
+Every Graft [plugin](../../plugins/) normally runs inside the application's
+process. Sometimes you want one plugin to run elsewhere:
 
 - **In its own process**, so that a crash, a memory leak or a blocked event loop
   in that plugin does not take the application down with it.
 - **In a Node worker**, so that its work runs on a separate thread.
 - **On another machine**, close to the data, hardware or network it needs.
 
-With Remote, you move the plugin by changing one config entry. The plugin still
-publishes its services, and the plugins that use them still inject them as
+With Remote, you move the plugin by changing one
+[config entry](../../config-file/). The plugin still publishes its
+[services](../../services/), and the plugins that use them still inject them as
 usual. Their calls now travel over a connection to wherever the plugin runs.
 
 ## When not to use it

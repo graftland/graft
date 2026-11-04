@@ -41,6 +41,8 @@ Graft 沿用 [cordis](https://github.com/cordiverse/cordis)
 - **保留情境的處理函式。**
   事件處理函式使用所屬外掛自身的服務、領域（realm）和 intercept 執行。
 - **原子性取代。** `Graft.replace` 在一筆交易中完成所有外掛的取代。
+- **在其他行程中執行外掛。** [Remote](../remote/overview/)
+  讓某個外掛在子行程、worker 或另一台機器上執行，使用它服務的外掛不必修改。
 
 ## Graft 不提供的部分
 

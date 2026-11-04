@@ -4,7 +4,8 @@ English | [简体中文](README.zh-CN.md) | [繁體中文](README.zh-TW.md)
 
 Run a Graft plugin somewhere else: in a child process, in a Node worker, or on
 another machine through a runner. The plugins that use it keep injecting its
-services as usual; only its config entry changes.
+[services](https://graftland.github.io/graft/services/) as usual; only its
+[config entry](https://graftland.github.io/graft/config-file/) changes.
 
 ```yaml
 - id: greeter
@@ -35,8 +36,6 @@ runner in a container or a VM.
 
 - [06 · Remote](../../samples/06-remote/)
 - [Chat bot](../../samples/chat-bot/)
-
-This workspace package remains private.
 
 Part of [Graft](https://github.com/graftland/graft). Licensed under
 [Apache 2.0](https://github.com/graftland/graft/blob/main/LICENSE).

@@ -102,6 +102,10 @@ const hello = Plugin.make({
 		Describe it in a [config file](config-file/), start it with the [command
 		line](cli/), and edit it with [hot reload](hot-reload/).
 	</Card>
+	<Card title="Run plugins elsewhere" icon="laptop">
+		Move one plugin into a child process, a worker or another machine with
+		[Remote](remote/overview/). The plugins that use it do not change.
+	</Card>
 	<Card title="Coming from cordis?" icon="open-book">
 		See [how cordis concepts map to Graft](cordis/).
 	</Card>
@@ -109,14 +113,15 @@ const hello = Plugin.make({
 
 ## Documentation map
 
-| Section           | Pages                                                                                                                 | Read it to…                            |
-| ----------------- | --------------------------------------------------------------------------------------------------------------------- | -------------------------------------- |
-| **Start here**    | [Quickstart](quickstart/), [Core concepts](concepts/), [Coming from cordis](cordis/)                                  | Learn the model and run something.     |
-| **Build plugins** | [Plugins](plugins/), [Services](services/), [Events](events/)                                                         | Write the code.                        |
-| **Structure**     | [Lifecycle](lifecycle/), [Realms](isolation/), [Intercepts](intercepts/), [Replace plugins](replace/)                 | Control how plugins relate and change. |
-| **Applications**  | [Config file](config-file/), [Command line](cli/), [Hot reload](hot-reload/), [Use Graft in your program](embedding/) | Run and operate an app.                |
-| **Reference**     | [Fork handle](fork-handle/), [Loader API](loader-api/), [HMR API](hmr-api/), [Errors](errors/)                        | Look up exact behavior.                |
-| **Project**       | [Releases](releases/)                                                                                                 | Check and publish Graft.               |
+| Section           | Pages                                                                                                                                | Read it to…                                            |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------ |
+| **Start here**    | [Quickstart](quickstart/), [Core concepts](concepts/), [Coming from cordis](cordis/)                                                 | Learn the model and run something.                     |
+| **Build plugins** | [Plugins](plugins/), [Services](services/), [Events](events/)                                                                        | Write the code.                                        |
+| **Structure**     | [Lifecycle](lifecycle/), [Realms](isolation/), [Intercepts](intercepts/), [Replace plugins](replace/)                                | Control how plugins relate and change.                 |
+| **Applications**  | [Config file](config-file/), [Command line](cli/), [Hot reload](hot-reload/), [Use Graft in your program](embedding/)                | Run and operate an app.                                |
+| **Remote**        | [Overview](remote/overview/), [Getting started](remote/getting-started/), [Runners](remote/runners/), [Reference](remote/reference/) | Run a plugin in another process or on another machine. |
+| **Reference**     | [Fork handle](fork-handle/), [Loader API](loader-api/), [HMR API](hmr-api/), [Errors](errors/)                                       | Look up exact behavior.                                |
+| **Project**       | [Releases](releases/)                                                                                                                | Check and publish Graft.                               |
 
 ## Packages
 
@@ -128,6 +133,7 @@ const hello = Plugin.make({
 | `@graftland/cli`             | The `graft` command: `start`, `create`, `add` and `remove`.                                                             |
 | `@graftland/create`          | Makes a new Graft project. `graft create` uses it.                                                                      |
 | `@graftland/package-manager` | Installs dependencies with npm, pnpm or Yarn. A failed install is undone by [snapshot rollback](cli/#package-managers). |
+| `@graftland/plugin-remote`   | Runs a plugin in a child process, a worker or on another machine. See [Remote](remote/overview/).                       |
 
 All packages share one version number and are released together. They need
 `effect` 4.1.x.
@@ -136,6 +142,3 @@ The garden is only on this page. In the rest of the documentation and in the
 code, a `Scope` is still a `Scope`. Graft draws its plugin model from
 [cordis](https://github.com/cordiverse/cordis). Where cordis composes across
 space and time, Graft keeps to the garden.
-
-Run a plugin in another process or on another machine with
-[Remote](remote/overview/).

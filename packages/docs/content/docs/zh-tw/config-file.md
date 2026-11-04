@@ -38,7 +38,9 @@ description: 用 graft.yml 描述應用程式，並在執行期間修改設定�
 | 儲存檔案時會發生什麼       | [執行期間的變更](#執行期間的變更) |
 | 從外掛或程式碼編輯設定項目 | [Loader API](../loader-api/)      |
 
-要讓設定項目在子行程或另一台機器上執行，可將它指向[遠端外掛入口](../remote/getting-started/)；儲存的項目 id 也可以作為 runner 實例名稱。
+設定項目也可以讓它的外掛在子行程、worker 或另一台機器上執行：寫上
+`name: remote`，再把外掛的設定包一層，見
+[Remote 快速上手](../remote/getting-started/#4-用-name-remote-載入)。它仍然是一般的設定項目，同樣有 id、`disabled`、`inject`、`isolate`，也能在執行期間編輯。儲存的項目 id 同時也是 runner 上的實例名稱。
 
 從項目載入的外掛可從 `@graftland/loader` 匯入 `Entry`，讀取
 `yield* Entry.CurrentId`。它是
@@ -124,7 +126,8 @@ description: 用 graft.yml 描述應用程式，並在執行期間修改設定�
 | 以 `@` 開頭，或包含 `:` | 原樣使用。                                                                    |
 | 其他（例如 `review`）   | 先照原樣嘗試，再試 `@graftland/plugin-<name>`，最後試 `graft-plugin-<name>`。 |
 
-套件從應用程式目錄解析。
+套件從應用程式目錄解析。例如，`name: remote` 會找到
+`@graftland/plugin-remote`，`name: remote/runner` 會找到它的 `runner` 匯出。
 
 ### 模組無法載入時
 

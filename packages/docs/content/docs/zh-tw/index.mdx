@@ -97,6 +97,10 @@ const hello = Plugin.make({
 	<Card title="執行應用程式" icon="setting">
 		用[設定檔](config-file/)描述它，用[命令列](cli/)啟動它，並以[熱重載](hot-reload/)修改它。
 	</Card>
+	<Card title="在別處執行外掛" icon="laptop">
+		用 [Remote](remote/overview/) 把某個外掛放到子行程、worker
+		或另一台機器上執行，使用它的外掛不必修改。
+	</Card>
 	<Card title="從 cordis 遷移？" icon="open-book">
 		了解 [cordis 的概念在 Graft 中如何對應](cordis/)。
 	</Card>
@@ -104,14 +108,15 @@ const hello = Plugin.make({
 
 ## 文件地圖
 
-| 區段           | 頁面                                                                                                  | 閱讀目的                   |
-| -------------- | ----------------------------------------------------------------------------------------------------- | -------------------------- |
-| **從這裡開始** | [快速開始](quickstart/)、[核心概念](concepts/)、[從 cordis 遷移](cordis/)                             | 了解模型並執行點什麼。     |
-| **建構外掛**   | [外掛](plugins/)、[服務](services/)、[事件](events/)                                                  | 撰寫程式碼。               |
-| **結構**       | [生命週期](lifecycle/)、[領域](isolation/)、[Intercept](intercepts/)、[取代外掛](replace/)            | 控制外掛之間的關係與變化。 |
-| **應用程式**   | [設定檔](config-file/)、[命令列](cli/)、[熱重載](hot-reload/)、[在自己的程式中使用 Graft](embedding/) | 執行並維運應用程式。       |
-| **參考**       | [Fork 控制代碼](fork-handle/)、[Loader API](loader-api/)、[HMR API](hmr-api/)、[錯誤](errors/)        | 查閱確切行為。             |
-| **專案**       | [發佈](releases/)                                                                                     | 檢查並發佈 Graft。         |
+| 區段           | 頁面                                                                                                                                | 閱讀目的                               |
+| -------------- | ----------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------- |
+| **從這裡開始** | [快速開始](quickstart/)、[核心概念](concepts/)、[從 cordis 遷移](cordis/)                                                           | 了解模型並執行點什麼。                 |
+| **建構外掛**   | [外掛](plugins/)、[服務](services/)、[事件](events/)                                                                                | 撰寫程式碼。                           |
+| **結構**       | [生命週期](lifecycle/)、[領域](isolation/)、[Intercept](intercepts/)、[取代外掛](replace/)                                          | 控制外掛之間的關係與變化。             |
+| **應用程式**   | [設定檔](config-file/)、[命令列](cli/)、[熱重載](hot-reload/)、[在自己的程式中使用 Graft](embedding/)                               | 執行並維運應用程式。                   |
+| **Remote**     | [概覽](remote/overview/)、[快速上手](remote/getting-started/)、[在另一台機器上執行外掛](remote/runners/)、[參考](remote/reference/) | 讓外掛在另一個行程或另一台機器上執行。 |
+| **參考**       | [Fork 控制代碼](fork-handle/)、[Loader API](loader-api/)、[HMR API](hmr-api/)、[錯誤](errors/)                                      | 查閱確切行為。                         |
+| **專案**       | [發佈](releases/)                                                                                                                   | 檢查並發佈 Graft。                     |
 
 ## 套件
 
@@ -123,11 +128,10 @@ const hello = Plugin.make({
 | `@graftland/cli`             | 提供 `graft` 命令：`start`、`create`、`add` 和 `remove`。                              |
 | `@graftland/create`          | 建立新的 Graft 專案，由 `graft create` 呼叫。                                          |
 | `@graftland/package-manager` | 使用 npm、pnpm 或 Yarn 安裝相依套件。安裝失敗時，透過[快照還原](cli/#套件管理器)復原。 |
+| `@graftland/plugin-remote`   | 讓外掛在子行程、worker 或另一台機器上執行。見 [Remote](remote/overview/)。             |
 
 所有套件共用同一個版本號，一同發布，並需要 `effect` 4.1.x。
 
 園藝只出現在這一頁。在其餘文件和程式碼裡，`Scope` 仍然叫
 `Scope`。Graft的外掛模型借鑑自
 [cordis](https://github.com/cordiverse/cordis)。cordis 在時空中組合，Graft 只照料自己的園子。
-
-要讓插件在另一個進程或另一台機器上執行，請看 [Remote](remote/overview/)。

@@ -13,6 +13,11 @@ Node 适配器的要求一致。
 | `graft add <package...>`    | 添加依赖并安装。           | [graft add](#graft-add)       |
 | `graft remove <package...>` | 移除依赖。                 | [graft remove](#graft-remove) |
 
+`graft start` 无需额外设置就能运行
+[`remote` 条目](../remote/getting-started/)。要在另一台机器上运行这些条目的插件，`@graftland/plugin-remote`
+还提供第二个命令
+[`graft-remote serve --config runner.yml`](../remote/reference/#graft-remote-serve)，用来在那台机器上启动 runner。
+
 ## graft start
 
 ```sh

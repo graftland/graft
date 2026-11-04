@@ -8,7 +8,8 @@ description: 为插件树的某个分支提供独立的服务和事件。
 
 `Graft.plugin` 的 `isolate` 选项对该 fork 及其所有后代生效。
 
-要让插件在另一个进程或另一台机器上运行，请看 [Remote](../remote/overview/)。
+领域是一个进程内的**可见性**边界：它决定 fork 能看到什么，而不决定代码在哪里运行。要把插件的代码移到子进程、worker 或另一台机器上，请使用
+[Remote](../remote/overview/)，它划出的是**执行**边界。两者都不限制插件代码能做什么；如需权限边界，请把 Remote 的 runner 放进容器或虚拟机。
 
 ## 领域
 

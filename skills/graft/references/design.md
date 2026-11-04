@@ -18,6 +18,7 @@ Take the feature list and ask of each part, in order:
 | Does it vary per tenant or instance, side by side?                    | A **realm**: the same plugins under a group with `isolate` |
 | Does a shared service need a per-caller setting?                      | An **intercept** on a `Context.Reference`                  |
 | Does it live as long as the process and nobody configures it?         | An **environment** service in the host's layer             |
+| Must it crash alone, use its own thread or run on another machine?    | Still a **plugin**; its entry uses [Remote](remote.md)     |
 | Is it a value the operator chooses?                                   | A field in the plugin's config **schema**                  |
 
 Then put **state where its owner lives**. State belongs to the fork that creates

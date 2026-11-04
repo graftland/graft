@@ -181,6 +181,9 @@ const server = Plugin.make({
 The update function is a closure, so it can use anything `apply` created, such
 as `banner` here.
 
+A plugin run through [Remote](../remote/overview/) never updates in place: a new
+configuration restarts its plugin process.
+
 :::note
 
 Updates keep only the latest requested configuration; they are not queued for

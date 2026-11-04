@@ -3,7 +3,7 @@
 [English](README.md) | [简体中文](README.zh-CN.md) | 繁體中文
 
 把 Graft 外掛放到別處執行：子行程、Node
-worker，或透過 runner 放到另一台機器上。使用它的外掛照常注入它的服務，需要改的只有它的設定項目。
+worker，或透過 runner 放到另一台機器上。使用它的外掛照常注入它的[服務](https://graftland.github.io/graft/zh-tw/services/)，需要改的只有它的[設定項目](https://graftland.github.io/graft/zh-tw/config-file/)。
 
 ```yaml
 - id: greeter
@@ -31,8 +31,6 @@ Remote 隔離的是執行，不是權限。需要權限邊界時，請把 runner
 
 - [06 · 遠端外掛](../../samples/06-remote/README.zh-TW.md)
 - [聊天機器人](../../samples/chat-bot/README.zh-TW.md)
-
-本工作區套件仍為 private。
 
 Part of [Graft](https://github.com/graftland/graft). Licensed under
 [Apache 2.0](https://github.com/graftland/graft/blob/main/LICENSE).

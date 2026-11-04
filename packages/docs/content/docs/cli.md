@@ -13,6 +13,12 @@ The `@graftland/cli` package provides the `graft` command. It needs Node.js
 | `graft add <package...>`    | Adds dependencies and installs them.          | [graft add](#graft-add)       |
 | `graft remove <package...>` | Removes dependencies.                         | [graft remove](#graft-remove) |
 
+`graft start` also runs [`remote` entries](../remote/getting-started/) with no
+extra setup. To run plugins for those entries on another machine,
+`@graftland/plugin-remote` installs a second command,
+[`graft-remote serve --config runner.yml`](../remote/reference/#graft-remote-serve),
+which starts a runner there.
+
 ## graft start
 
 ```sh

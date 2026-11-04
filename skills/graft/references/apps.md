@@ -69,7 +69,10 @@ manager and rolls back on failure; then add an entry for it.
 
 Hot reload needs side-effect-free ECMAScript modules; CommonJS, native
 dependencies and `createRequire` make it report `Restart required`. Packages in
-`node_modules` are not reloaded, except the module a plugin is loaded from.
+`node_modules` are not reloaded, except the module a plugin is loaded from. A
+[`name: remote`](remote.md) entry is an entry like any other, but its contract
+and implementation are not hot-replaced, and a `config` edit always restarts its
+plugin process.
 
 ## Edit entries from a plugin
 

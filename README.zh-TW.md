@@ -48,6 +48,10 @@ const hello = Plugin.make({
 - **高接換種。** 不砍樹，只換品種。`graft start --watch`
   只重新匯入受變更影響的部分，並在一次交易中取代相關外掛。新程式碼失敗時，舊外掛繼續執行。
 
+某根枝條需要單獨栽種時，[Remote](https://graftland.github.io/graft/zh-tw/remote/overview/)
+可以讓這個外掛在子行程、Node
+worker 或另一台機器上執行，使用它服務的外掛不必修改。
+
 在 Node.js 上執行 Graft 需要 22.19 或更新版本。開發本工作區需要 Node.js
 22.22 或更新版本，其中包括用 Astro 建置文件。
 
@@ -69,12 +73,12 @@ Graft 的外掛模型借鑑自
 ## 範例
 
 [`samples/`](samples)
-以五個簡短的編號範例開頭。每個範例講一個概念，從第一個外掛到透過 `graft.yml`
-執行。
+以六個簡短的編號範例開頭。每個範例講一個概念，從第一個外掛到透過 `graft.yml`
+執行，再到把外掛移到另一個行程。
 
 之後是更大的應用程式，展示 Graft 的用途：
 
-- 由外掛組成的聊天機器人
+- 由外掛組成的聊天機器人，天氣整合在子行程中執行
 - 在負載下替換定價引擎和資料庫的結帳服務
 - 由 `graft.yml` 驅動的 HTTP 閘道
 - 多租戶服務
@@ -82,14 +86,15 @@ Graft 的外掛模型借鑑自
 
 ## 套件
 
-| 套件                                                     | 作用                                                           |
-| -------------------------------------------------------- | -------------------------------------------------------------- |
-| [`@graftland/graft`](packages/core)                      | 以 Effect 打造的外掛框架：外掛、fork、服務、隔離、事件和日誌。 |
-| [`@graftland/loader`](packages/loader)                   | 從條目清單或 YAML 設定檔載入外掛。                             |
-| [`@graftland/hmr`](packages/hmr)                         | 在 Node.js 上重載外掛模組，不需重新啟動行程。                  |
-| [`@graftland/cli`](packages/cli)                         | `graft` 命令：`start`、`create`、`add` 和 `remove`。           |
-| [`@graftland/create`](packages/create)                   | 產生新的 Graft 專案。`graft create` 使用它。                   |
-| [`@graftland/package-manager`](packages/package-manager) | 用 npm、pnpm 或 Yarn 安裝相依套件，失敗時還原。                |
+| 套件                                                     | 作用                                                                   |
+| -------------------------------------------------------- | ---------------------------------------------------------------------- |
+| [`@graftland/graft`](packages/core)                      | 以 Effect 打造的外掛框架：外掛、fork、服務、隔離、事件和日誌。         |
+| [`@graftland/loader`](packages/loader)                   | 從條目清單或 YAML 設定檔載入外掛。                                     |
+| [`@graftland/hmr`](packages/hmr)                         | 在 Node.js 上重載外掛模組，不需重新啟動行程。                          |
+| [`@graftland/cli`](packages/cli)                         | `graft` 命令：`start`、`create`、`add` 和 `remove`。                   |
+| [`@graftland/create`](packages/create)                   | 產生新的 Graft 專案。`graft create` 使用它。                           |
+| [`@graftland/package-manager`](packages/package-manager) | 用 npm、pnpm 或 Yarn 安裝相依套件，失敗時還原。                        |
+| [`@graftland/plugin-remote`](packages/remote)            | 讓外掛在子行程、worker 或另一台機器上執行；提供 `graft-remote serve`。 |
 
 所有套件以相同版本一起發布。它們都需要 `effect` 4.1.x。
 

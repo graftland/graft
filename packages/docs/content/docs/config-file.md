@@ -38,9 +38,11 @@ entries, and each entry loads one plugin:
 | What happens when you save the file       | [Changes while running](#changes-while-running) |
 | Editing entries from plugins or code      | [Loader API](../loader-api/)                    |
 
-To run an entry in a child process or on another machine, point it at a
-[remote plugin entry](../remote/getting-started/). Its saved id can also name
-the runner instance.
+An entry can also run its plugin in a child process, a worker or on another
+machine: give it `name: remote` and wrap the plugin's config, as in
+[Getting started with Remote](../remote/getting-started/#4-load-it-with-name-remote).
+It is still an ordinary entry, with an id, `disabled`, `inject`, `isolate` and
+edits while running. Its saved id also names the runner instance.
 
 Plugins loaded from an entry can read `yield* Entry.CurrentId`, importing
 `Entry` from `@graftland/loader`. This `Context.Reference<Option<string>>` holds
@@ -134,7 +136,9 @@ How `name` is resolved:
 | Starts with `@`, or contains `:` | Used as it is.                                                                       |
 | Anything else (such as `review`) | Tried as written, then as `@graftland/plugin-<name>`, then as `graft-plugin-<name>`. |
 
-Packages are resolved from the application directory.
+Packages are resolved from the application directory. For example,
+`name: remote` finds `@graftland/plugin-remote`, and `name: remote/runner` finds
+its `runner` export.
 
 ### When a module cannot be loaded
 

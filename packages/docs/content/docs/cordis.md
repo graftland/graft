@@ -49,6 +49,9 @@ only what Effect does not have.
   realm and intercepts of its own plugin.
 - **Atomic replacement.** `Graft.replace` changes every plugin in one
   transaction.
+- **Plugins in other processes.** [Remote](../remote/overview/) runs one plugin
+  in a child process, a worker or on another machine. The plugins that use its
+  services do not change.
 
 ## What Graft leaves out
 

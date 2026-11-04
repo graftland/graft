@@ -10,8 +10,11 @@ change a setting instead, see [Intercepts](../intercepts/).
 The `isolate` option of `Graft.plugin` applies to the fork and everything below
 it.
 
-Run a plugin in another process or on another machine with
-[Remote](../remote/overview/).
+Realms are a **visibility** boundary inside one process: they decide what a fork
+can see, not where its code runs. To move a plugin's code into a child process,
+a worker or another machine, use [Remote](../remote/overview/), which draws an
+**execution** boundary instead. Neither limits what the plugin's code may do;
+for that, run a Remote runner in a container or a VM.
 
 ## Realms
 

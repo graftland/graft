@@ -13,6 +13,11 @@ description: graft 命令及其子命令。
 | `graft add <package...>`    | 新增相依套件並安裝。         | [graft add](#graft-add)       |
 | `graft remove <package...>` | 移除相依套件。               | [graft remove](#graft-remove) |
 
+`graft start` 不需額外設定就能執行
+[`remote` 設定項目](../remote/getting-started/)。要在另一台機器上執行這些項目的外掛，`@graftland/plugin-remote`
+還提供第二個命令
+[`graft-remote serve --config runner.yml`](../remote/reference/#graft-remote-serve)，用來在那台機器上啟動 runner。
+
 ## graft start
 
 ```sh

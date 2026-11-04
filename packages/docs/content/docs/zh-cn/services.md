@@ -59,6 +59,11 @@ const uptime = Plugin.make({
 上面的终结器在插件停止时调用
 `clock`。这样做是安全的：在所有注入该服务的插件停止之前，服务始终可用。
 
+发布方不一定运行在你的进程里。用 [Remote](../remote/overview/)
+移到子进程、worker 或另一台机器上的插件，仍然在这里发布它的服务，`uptime`
+也照样注入
+`Clock`。只是调用会经过一条连接，失败时调用方看到的是[远程错误](../remote/getting-started/#调用方看到的错误)。
+
 ## 服务撤回流程
 
 发布服务的 fork 停止时，Graft 依次执行以下步骤：

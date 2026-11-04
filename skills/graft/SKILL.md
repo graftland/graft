@@ -2,10 +2,11 @@
 name: graft
 description:
   Use when designing, writing, testing, running or debugging code built on
-  Graft (`@graftland/graft`, `@graftland/loader`, `@graftland/cli`): splitting
-  an app into plugins, services and events, background tasks, realms and
-  intercepts, `graft.yml` and `graft start`, embedding the runtime, or a fork
-  stuck `Pending` or `Failed`.
+  Graft (`@graftland/graft`, `@graftland/loader`, `@graftland/cli`,
+  `@graftland/plugin-remote`): splitting an app into plugins, services and
+  events, background tasks, realms and intercepts, `graft.yml` and
+  `graft start`, embedding the runtime, running a plugin in another process or
+  on another machine, or a fork stuck `Pending` or `Failed`.
 ---
 
 # Build with Graft
@@ -22,9 +23,10 @@ lifetimes and owners first, and the code becomes short.
 
 ## Version gate
 
-`@graftland/graft`, `@graftland/loader` and `@graftland/cli` of one release,
-`effect` 4.1.x, Node.js 22.19 or later. Check the project's `package.json`; if
-Effect is 3.x, stop and tell the user Graft needs Effect 4.
+`@graftland/graft`, `@graftland/loader` and `@graftland/cli` (and
+`@graftland/plugin-remote`, if used) of one release, `effect` 4.1.x, Node.js
+22.19 or later. Check the project's `package.json`; if Effect is 3.x, stop and
+tell the user Graft needs Effect 4.
 
 ## Think in plugins
 
@@ -42,6 +44,10 @@ Effect is 3.x, stop and tell the user Graft needs Effect 4.
 - **Variation has a home.** Per instance: a realm. Per caller: an intercept.
   Chosen by the operator: a config field. Fixed for the process: the
   environment.
+- **Where code runs is a deployment choice.** A plugin that must survive
+  another's crash, use its own thread or sit on another machine still provides
+  the same service; move its entry with [Remote](references/remote.md) and leave
+  its consumers alone.
 
 ## Think in Effects
 
@@ -99,7 +105,9 @@ updating, the failures it handles) has a test.
 ### 5. Run
 
 Add entries to `graft.yml` and run `graft start --watch`, or load the plugins
-from code. Done when each fork reaches `Active` and the logs show the work.
+from code. Done when each fork reaches `Active` and the logs show the work. If
+the design puts a plugin in another process, switch its entry to `name: remote`
+only after it works in process; see [remote](references/remote.md).
 
 ## References
 
@@ -113,8 +121,9 @@ from code. Done when each fork reaches `Active` and the logs show the work.
 | Side-by-side instances and per-subtree settings        | [realms](references/realms.md)                   |
 | Tests with `@effect/vitest`                            | [testing](references/testing.md)                 |
 | `graft.yml`, the CLI, hot reload, embedding            | [apps](references/apps.md)                       |
+| A plugin in a child process, a worker or a runner      | [remote](references/remote.md)                   |
 | A fork `Pending` or `Failed`, an error name            | [troubleshooting](references/troubleshooting.md) |
 
 `https://graftland.github.io/graft/` is the source of truth for exact behavior.
 The repository's `samples/` folder holds runnable programs with tests, from
-`01-hello` to multi-tenant apps.
+`01-hello` to `06-remote` and multi-tenant apps.
