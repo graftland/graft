@@ -112,7 +112,7 @@ const publishWith = (
 			`#!/bin/sh
 if [ "$1" = "view" ] && [ "$3" = "dist-tags" ]; then
   case "$TEST_MODE" in
-    tags-empty) exit 0;;
+    tags-empty|prerelease-only|prerelease-only-unlisted) exit 0;;
     tags-invalid) echo '[]'; exit 0;;
     package-missing|package-missing) echo '{"error":{"code":"E404"}}'; exit 1;;
   esac
@@ -121,9 +121,15 @@ if [ "$1" = "view" ] && [ "$3" = "dist-tags" ]; then
   else echo '{}'; fi
   exit 0
 fi
+if [ "$1" = "dist-tag" ] && [ "$2" = "ls" ]; then
+  case "$TEST_MODE" in
+    prerelease-only) echo "beta: 1.2.2-beta.0"; exit 0;;
+    prerelease-only-unlisted) exit 0;;
+  esac
+fi
 if [ "$1" = "view" ]; then
   case "$TEST_MODE" in
-    missing|package-missing) echo '{"error":{"code":"E404"}}'; exit 1;;
+    missing|package-missing|prerelease-only) echo '{"error":{"code":"E404"}}'; exit 1;;
     same) echo '"sha512-test"'; exit 0;;
     changed) echo '"sha512-other"'; exit 0;;
     denied) echo '{"error":{"code":"E403","summary":"No access"}}'; exit 1;;
@@ -571,6 +577,19 @@ for (const [scenario, tags, expected] of [
 		}
 	})
 }
+
+test("a first stable release of a package with only prereleases publishes under latest", () => {
+	const first = publishWith("github", "latest", "prerelease-only")
+	assert.equal(first.status, 0, first.stderr)
+	assert.deepEqual(
+		first.calls.map((call) => call.split(" ")[0]),
+		["publish"],
+	)
+	assert.match(first.calls[0], /--tag latest/)
+	const unlisted = publishWith("github", "latest", "prerelease-only-unlisted")
+	assert.notEqual(unlisted.status, 0)
+	assert.deepEqual(unlisted.calls, [])
+})
 
 test("empty or malformed tag responses fail closed while a missing package can publish", () => {
 	for (const mode of ["tags-empty", "tags-invalid"]) {

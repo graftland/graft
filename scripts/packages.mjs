@@ -184,9 +184,36 @@ function viewRegistry(spec, field, registry, env) {
 	return field === "dist-tags" ? {} : undefined
 }
 
+/** Lists a package's tags; an existing package always has at least one. */
+function listDistTags(name, registry, env) {
+	const result = spawnSync(
+		"npm",
+		["dist-tag", "ls", name, "--registry", registry],
+		{
+			encoding: "utf8",
+			env,
+		},
+	)
+	if (result.error) throw result.error
+	if (result.status !== 0) throw new Error(result.stderr)
+	const lines = result.stdout.split("\n").filter((line) => line.trim() !== "")
+	if (lines.length === 0) return undefined
+	return Object.fromEntries(
+		lines.map((line) => {
+			const match = /^([^:\s]+): (\S+)$/.exec(line.trim())
+			if (!match) throw new Error(`Invalid dist-tag line for ${name}: ${line}`)
+			return [match[1], match[2]]
+		}),
+	)
+}
+
 /** Read packument tags without npm's implicit latest-version selection. */
 export function readDistTags(name, channel, registry, env) {
-	const tags = viewRegistry(`${name}@${channel}`, "dist-tags", registry, env)
+	// npm resolves a missing latest tag to the highest stable version, so a package with
+	// only prereleases answers `@latest` with nothing instead of E404; list its tags instead.
+	const tags =
+		viewRegistry(`${name}@${channel}`, "dist-tags", registry, env) ??
+		(channel === "latest" ? listDistTags(name, registry, env) : undefined)
 	if (tags === undefined)
 		throw new Error(`No dist-tags object returned for ${name}`)
 	if (

@@ -138,7 +138,9 @@ move back to an older version.
   metadata does not affect precedence.
 - The script reads the complete `dist-tags` object with an explicit `@<channel>`
   selector, so packages that have only prereleases do not need a `latest` tag.
-- A missing channel (E404) can be set up. A successful response that is empty or
+- A missing channel (E404) can be set up. A package that has only prereleases
+  has no `latest` yet; its tags are listed with `npm dist-tag ls`, so its first
+  stable release sets `latest` up too. A successful response that is empty or
   malformed stops publishing.
 - Running the version already on a channel again leaves the tag unchanged.
 
