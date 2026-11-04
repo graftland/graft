@@ -86,11 +86,10 @@ export const run = <A, E>(
 	>,
 ) => effect.pipe(Effect.scoped, Effect.provide(NodeServices.layer))
 
-export const closeProcessWithTestClock = (
+export const closeProcessWithTestClock = Effect.fnUntraced(function* (
 	...args: Parameters<typeof closeProcess>
-) =>
-	Effect.gen(function* () {
-		const fiber = yield* closeProcess(...args).pipe(Effect.forkScoped)
-		yield* TestClock.adjust("2 seconds")
-		return yield* Fiber.join(fiber)
-	}).pipe(Effect.scoped)
+) {
+	const fiber = yield* closeProcess(...args).pipe(Effect.forkScoped)
+	yield* TestClock.adjust("2 seconds")
+	return yield* Fiber.join(fiber)
+}, Effect.scoped)

@@ -97,8 +97,9 @@ export const inspectManagedFiles = Effect.fnUntraced(function* (
 	directory: string,
 	names: ReadonlyArray<string>,
 ) {
-	return yield* Effect.forEach(names, (name) =>
-		Effect.gen(function* () {
+	return yield* Effect.forEach(
+		names,
+		Effect.fnUntraced(function* (name) {
 			const file = path.join(directory, name)
 			const metadata = yield* fs.lstat(file).pipe(
 				Effect.flatMap((info) =>
@@ -165,8 +166,9 @@ export const writeSnapshot = Effect.fnUntraced(function* (
 	agent: string,
 	backups: ReadonlyArray<Backup>,
 ) {
-	const files = yield* Effect.forEach(backups, (entry, index) =>
-		Effect.gen(function* () {
+	const files = yield* Effect.forEach(
+		backups,
+		Effect.fnUntraced(function* (entry, index) {
 			if (Option.isNone(entry.contents))
 				return {
 					name: entry.name,
@@ -231,24 +233,22 @@ const restoreFile = Effect.fnUntraced(function* (
 				fs
 					.open(temporary, { flag: "wx", mode: 0o600 })
 					.pipe(Effect.provideService(Scope.Scope, scope)),
-				(file) =>
-					Effect.gen(function* () {
-						yield* file.writeAll(contents.bytes)
-						const current = yield* file.stat
-						const { uid, gid } = contents
-						if (
-							Option.isSome(uid) &&
-							Option.isSome(gid) &&
-							(!Equal.equals(uid, current.uid) ||
-								!Equal.equals(gid, current.gid))
-						) {
-							yield* fs.chown(temporary, uid.value, gid.value)
-						}
-						yield* fs.chmod(temporary, contents.mode)
-						yield* file.sync
-						yield* Scope.close(scope, Exit.void)
-						yield* fs.rename(temporary, target)
-					}),
+				Effect.fnUntraced(function* (file) {
+					yield* file.writeAll(contents.bytes)
+					const current = yield* file.stat
+					const { uid, gid } = contents
+					if (
+						Option.isSome(uid) &&
+						Option.isSome(gid) &&
+						(!Equal.equals(uid, current.uid) || !Equal.equals(gid, current.gid))
+					) {
+						yield* fs.chown(temporary, uid.value, gid.value)
+					}
+					yield* fs.chmod(temporary, contents.mode)
+					yield* file.sync
+					yield* Scope.close(scope, Exit.void)
+					yield* fs.rename(temporary, target)
+				}),
 				(_, exit) =>
 					Exit.isSuccess(exit)
 						? Effect.void

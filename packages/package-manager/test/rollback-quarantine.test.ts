@@ -56,20 +56,16 @@ for (const { failure, restoreFailure, recoveryCode } of [
 						}),
 					{
 						...fs,
-						rename: (from, file) =>
-							Effect.gen(function* () {
-								if (file === path.join(directory, "package.json")) {
-									const restore = yield* Ref.updateAndGet(
-										restores,
-										(n) => n + 1,
-									)
-									if ((yield* Ref.get(broken)) && restore === restoreFailure) {
-										yield* pause
-										return yield* denied
-									}
+						rename: Effect.fnUntraced(function* (from, file) {
+							if (file === path.join(directory, "package.json")) {
+								const restore = yield* Ref.updateAndGet(restores, (n) => n + 1)
+								if ((yield* Ref.get(broken)) && restore === restoreFailure) {
+									yield* pause
+									return yield* denied
 								}
-								yield* fs.rename(from, file)
-							}),
+							}
+							yield* fs.rename(from, file)
+						}),
 					},
 				)
 				const first = yield* pm.install({ failed: "1" }).pipe(Effect.forkScoped)

@@ -111,8 +111,8 @@ for (const operation of ["install", "recover"] as const) {
 				const running =
 					yield* Deferred.make<ChildProcessSpawner.ChildProcessHandle>()
 				const pm = yield* managerWithSpawner(
-					ChildProcessSpawner.make((command) =>
-						Effect.gen(function* () {
+					ChildProcessSpawner.make(
+						Effect.fnUntraced(function* (command) {
 							if (command._tag !== "StandardCommand")
 								return yield* Effect.die("Unexpected pipeline")
 							if (

@@ -182,14 +182,13 @@ it.effect(
 				() => Effect.succeed(ChildProcessSpawner.ExitCode(7)),
 				{
 					...fs,
-					open: (file, options) =>
-						Effect.gen(function* () {
-							assert.strictEqual(options?.flag, "wx")
-							assert.strictEqual(options?.mode, 0o600)
-							yield* fs.writeFileString(file, "owned by someone else")
-							yield* Ref.set(collision, Option.some(file))
-							return yield* fs.open(file, options)
-						}),
+					open: Effect.fnUntraced(function* (file, options) {
+						assert.strictEqual(options?.flag, "wx")
+						assert.strictEqual(options?.mode, 0o600)
+						yield* fs.writeFileString(file, "owned by someone else")
+						yield* Ref.set(collision, Option.some(file))
+						return yield* fs.open(file, options)
+					}),
 				},
 			)
 			const result = yield* Effect.exit(pm.install({ added: "1" }))

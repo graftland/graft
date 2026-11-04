@@ -197,7 +197,7 @@ const readSource = Effect.fnUntraced(function* (
 
 const Executable = PackageManagerName
 const Digits = Schema.String.check(Schema.isPattern(/^\d+$/))
-const decodePackageManager = Schema.decodeUnknownOption(
+const decodePackageManager = Schema.decodeUnknownEffect(
 	PackageManagerDeclaration,
 )
 /** `name/version ...`, as package managers set `npm_config_user_agent`. */
@@ -218,15 +218,18 @@ export const detectAgent = Effect.fnUntraced(function* (options: Options) {
 		path.join(options.directory, "package.json"),
 	).pipe(Effect.flatMap(decodeManifest))
 	if (manifest.packageManager !== undefined) {
-		return yield* Option.match(decodePackageManager(manifest.packageManager), {
-			onNone: () =>
+		const [name, , version] = yield* decodePackageManager(
+			manifest.packageManager,
+		).pipe(
+			// Keep the schema issue: it names the constraint the declaration failed.
+			Effect.mapError((error) =>
 				PackageManagerError.make({
 					operation: "detect",
-					message: `Unsupported packageManager: ${manifest.packageManager}`,
+					message: `Unsupported packageManager: ${manifest.packageManager}\n${error.message}`,
 				}),
-			onSome: ([name, , version]) =>
-				Effect.succeed(agentOf(name, `${version.major}`)),
-		})
+			),
+		)
+		return agentOf(name, `${version.major}`)
 	}
 	const found = yield* Effect.filter(lockfiles, (file) =>
 		fs.exists(path.join(options.directory, file)),
@@ -360,322 +363,295 @@ export interface PackageManager {
  * Committed installs report snapshot deletion failures in snapshotCleanupFailure
  * rather than failing or rolling back. No crash recovery is promised.
  */
-export const make = (
+export const make = Effect.fnUntraced(function* (
 	options: Options,
-): Effect.Effect<
+): Effect.fn.Return<
 	PackageManager,
 	Error,
 	FileSystem.FileSystem | Path.Path | ChildProcessSpawner.ChildProcessSpawner
-> =>
-	Effect.gen(function* () {
-		const fs = yield* FileSystem.FileSystem
-		const path = yield* Path.Path
-		const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
-		const directory = path.resolve(options.directory)
-		yield* inspectManagedFiles(fs, path, directory, backupFiles)
-		const agent = yield* detectAgent({ ...options, directory })
-		const lock = yield* Semaphore.make(1)
-		const transaction = yield* Ref.make<ManagerState>(ManagerState.Ready())
-		const manifestFile = path.join(directory, "package.json")
-		const readManifest = readSource(fs, manifestFile).pipe(
-			Effect.flatMap(decodeManifest),
+> {
+	const fs = yield* FileSystem.FileSystem
+	const path = yield* Path.Path
+	const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+	const directory = path.resolve(options.directory)
+	yield* inspectManagedFiles(fs, path, directory, backupFiles)
+	const agent = yield* detectAgent({ ...options, directory })
+	const lock = yield* Semaphore.make(1)
+	const transaction = yield* Ref.make<ManagerState>(ManagerState.Ready())
+	const manifestFile = path.join(directory, "package.json")
+	const readManifest = readSource(fs, manifestFile).pipe(
+		Effect.flatMap(decodeManifest),
+	)
+	const installed = Schema.decodeUnknownEffect(
+		Schema.fromJsonString(
+			Schema.Struct({ version: Schema.optionalKey(Schema.String) }),
+		),
+	)
+	const stateOf = Effect.fnUntraced(function* (manifest: Manifest) {
+		if (yield* fs.exists(path.join(directory, ".pnp.cjs")))
+			return yield* PackageManagerError.make({
+				operation: "state",
+				message:
+					"Plug'n'Play is not supported; configure Yarn with nodeLinker: node-modules",
+			})
+		const deps = Array.reduce(
+			fields,
+			{} as Readonly<Record<string, string>>,
+			(all, field) => ({ ...all, ...manifest[field] }),
 		)
-		const installed = Schema.decodeUnknownEffect(
-			Schema.fromJsonString(
-				Schema.Struct({ version: Schema.optionalKey(Schema.String) }),
-			),
-		)
-		const stateOf = Effect.fnUntraced(function* (manifest: Manifest) {
-			if (yield* fs.exists(path.join(directory, ".pnp.cjs")))
-				return yield* PackageManagerError.make({
-					operation: "state",
-					message:
-						"Plug'n'Play is not supported; configure Yarn with nodeLinker: node-modules",
-				})
-			const deps = Array.reduce(
-				fields,
-				{} as Readonly<Record<string, string>>,
-				(all, field) => ({ ...all, ...manifest[field] }),
-			)
-			const entries = yield* Effect.forEach(
-				Record.toEntries(deps),
-				([name, spec]) =>
-					Effect.gen(function* () {
-						const file = path.join(
-							directory,
-							"node_modules",
-							name,
-							"package.json",
-						)
-						const source = yield* fs.readFileString(file).pipe(
-							Effect.asSome,
-							Effect.catchCauseIf(
-								(cause) =>
-									Array.every(
-										cause.reasons,
-										(reason) =>
-											Cause.isFailReason(reason) &&
-											reason.error.reason.module === "FileSystem" &&
-											reason.error.reason._tag === "NotFound",
-									),
-								() => Effect.succeedNone,
+		const entries = yield* Effect.forEach(
+			Record.toEntries(deps),
+			Effect.fnUntraced(function* ([name, spec]) {
+				const file = path.join(directory, "node_modules", name, "package.json")
+				const source = yield* fs.readFileString(file).pipe(
+					Effect.asSome,
+					Effect.catchCauseIf(
+						(cause) =>
+							Array.every(
+								cause.reasons,
+								(reason) =>
+									Cause.isFailReason(reason) &&
+									reason.error.reason.module === "FileSystem" &&
+									reason.error.reason._tag === "NotFound",
 							),
-						)
-						if (Option.isNone(source))
-							return [
-								name,
-								{ spec, version: undefined, path: undefined },
-							] as const
-						const pkg = yield* installed(source.value)
-						return [
-							name,
-							{
-								spec,
-								version: pkg.version,
-								path: yield* fs.realPath(path.dirname(file)),
-							},
-						] as const
+						() => Effect.succeedNone,
+					),
+				)
+				if (Option.isNone(source))
+					return [name, { spec, version: undefined, path: undefined }] as const
+				const pkg = yield* installed(source.value)
+				return [
+					name,
+					{
+						spec,
+						version: pkg.version,
+						path: yield* fs.realPath(path.dirname(file)),
+					},
+				] as const
+			}),
+			{ concurrency: 16 },
+		)
+		return HashMap.fromIterable<string, PackageState>(entries)
+	})
+	const readState = Effect.flatMap(readManifest, stateOf)
+	const termination: ChildProcess.KillOptions = {
+		forceKillAfter: "5 seconds",
+	}
+	const run = Effect.fnUntraced(function* (operation: "install" | "recover") {
+		const command = strategy(agent, operation)
+		// Acquire and install the release handler atomically, then wait interruptibly.
+		return yield* Effect.acquireUseRelease(
+			spawner
+				.spawn(
+					ChildProcess.make(command.executable, command.args, {
+						cwd: directory,
+						extendEnv: true,
+						stdin: "ignore",
+						stdout: "inherit",
+						stderr: "inherit",
+						detached: true,
+						...termination,
+						env: command.env,
 					}),
-				{ concurrency: 16 },
-			)
-			return HashMap.fromIterable<string, PackageState>(entries)
-		})
-		const readState = Effect.flatMap(readManifest, stateOf)
-		const termination: ChildProcess.KillOptions = {
-			forceKillAfter: "5 seconds",
-		}
-		const run = Effect.fnUntraced(function* (operation: "install" | "recover") {
-			const command = strategy(agent, operation)
-			// Acquire and install the release handler atomically, then wait interruptibly.
-			return yield* Effect.acquireUseRelease(
-				spawner
-					.spawn(
-						ChildProcess.make(command.executable, command.args, {
-							cwd: directory,
-							extendEnv: true,
-							stdin: "ignore",
-							stdout: "inherit",
-							stderr: "inherit",
-							detached: true,
-							...termination,
-							env: command.env,
-						}),
-					)
-					.pipe(
-						Effect.tap(() =>
-							Ref.set(
-								transaction,
-								ManagerState.Active({ writer: WriterState.Running() }),
-							),
+				)
+				.pipe(
+					Effect.tap(() =>
+						Ref.set(
+							transaction,
+							ManagerState.Active({ writer: WriterState.Running() }),
 						),
 					),
-				(process) =>
-					Effect.gen(function* () {
-						const code = yield* process.exitCode.pipe(
-							Effect.timeoutOrElse({
-								duration: "10 minutes",
-								orElse: () =>
-									PackageManagerError.make({
-										operation,
-										message: `${command.executable} ${operation} timed out`,
-									}),
-							}),
-						)
-						if (code !== 0)
-							return yield* PackageManagerError.make({
+				),
+			Effect.fnUntraced(function* (process) {
+				const code = yield* process.exitCode.pipe(
+					Effect.timeoutOrElse({
+						duration: "10 minutes",
+						orElse: () =>
+							PackageManagerError.make({
 								operation,
-								exitCode: code,
-								message: `${command.executable} ${operation} exited with code ${code}`,
-							})
-					}),
-				// The command owns its group; a stopped leader may leave live descendants.
-				// Observe kill failures here rather than relying on best-effort scope cleanup.
-				(process) =>
-					Effect.gen(function* () {
-						const result = yield* terminateProcess(process, termination)
-						yield* Ref.set(
-							transaction,
-							ManagerState.Active({
-								writer:
-									result._tag === "OriginalGroupStopped"
-										? WriterState.ManagedWritersIdle()
-										: WriterState.Unconfirmed({
-												operation,
-												processId: process.pid,
-												cause: result.cause,
-											}),
+								message: `${command.executable} ${operation} timed out`,
 							}),
-						)
-						if (result._tag === "Unconfirmed")
-							return yield* Effect.failCause(result.cause)
 					}),
-			)
-		}, Effect.scoped)
-		// AbortSignal does not join accepted OS writes. Keep the writer owned until completion.
-		const withFileWriter = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
-			Effect.acquireUseRelease(
+				)
+				if (code !== 0)
+					return yield* PackageManagerError.make({
+						operation,
+						exitCode: code,
+						message: `${command.executable} ${operation} exited with code ${code}`,
+					})
+			}),
+			// The command owns its group; a stopped leader may leave live descendants.
+			// Observe kill failures here rather than relying on best-effort scope cleanup.
+			Effect.fnUntraced(function* (process) {
+				const result = yield* terminateProcess(process, termination)
+				yield* Ref.set(
+					transaction,
+					ManagerState.Active({
+						writer:
+							result._tag === "OriginalGroupStopped"
+								? WriterState.ManagedWritersIdle()
+								: WriterState.Unconfirmed({
+										operation,
+										processId: process.pid,
+										cause: result.cause,
+									}),
+					}),
+				)
+				if (result._tag === "Unconfirmed")
+					return yield* Effect.failCause(result.cause)
+			}),
+		)
+	}, Effect.scoped)
+	// AbortSignal does not join accepted OS writes. Keep the writer owned until completion.
+	const withFileWriter = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+		Effect.acquireUseRelease(
+			Ref.set(
+				transaction,
+				ManagerState.Active({ writer: WriterState.FileWrite() }),
+			),
+			() => effect,
+			() =>
 				Ref.set(
 					transaction,
-					ManagerState.Active({ writer: WriterState.FileWrite() }),
+					ManagerState.Active({ writer: WriterState.ManagedWritersIdle() }),
 				),
-				() => effect,
-				() =>
+		).pipe(Effect.uninterruptible)
+
+	const install = Effect.fnUntraced(function* (changes: Changes) {
+		const state = yield* Ref.get(transaction)
+		if (state._tag === "RecoveryRequired") return yield* state.error
+		const validated = yield* Schema.decodeEffect(Changes)(changes)
+		const inspected = yield* inspectManagedFiles(
+			fs,
+			path,
+			directory,
+			backupFiles,
+		)
+		const backups = yield* Effect.forEach(
+			inspected,
+			Effect.fnUntraced(function* ({ name, file, metadata }) {
+				const contents = yield* Option.match(metadata, {
+					onNone: () => Effect.succeedNone,
+					onSome: (info) =>
+						fs
+							.readFile(file)
+							.pipe(
+								Effect.map((bytes) =>
+									Option.some<Contents>({ ...info, bytes }),
+								),
+							),
+				})
+				return { name, file, contents }
+			}),
+		)
+		const original = yield* readSource(fs, manifestFile)
+		const manifest = yield* decodeManifest(original)
+		const before = yield* stateOf(manifest)
+		const text = yield* encodeManifest(
+			applyChanges(manifest, validated),
+			original,
+		)
+
+		const agentLocks = strategy(agent, "install").lockfiles
+		const hasLock = Array.some(
+			backups,
+			({ name, contents }) =>
+				Array.contains(agentLocks, name) && Option.isSome(contents),
+		)
+		const completed = yield* withSnapshot(
+			fs,
+			Ref.get(transaction).pipe(Effect.map((state) => state._tag === "Ready")),
+			Effect.fnUntraced(function* (snapshotDirectory) {
+				const snapshot = yield* writeSnapshot(
+					fs,
+					path,
+					snapshotDirectory,
+					directory,
+					agent,
+					backups,
+				)
+				const restore = Effect.flatMap(Ref.get(transaction), (state) =>
+					state._tag === "Active" && state.writer._tag === "ManagedWritersIdle"
+						? withFileWriter(snapshot.restore(state.writer))
+						: Effect.void,
+				)
+				return yield* Effect.acquireUseRelease(
 					Ref.set(
 						transaction,
-						ManagerState.Active({ writer: WriterState.ManagedWritersIdle() }),
+						ManagerState.Active({
+							writer: WriterState.ManagedWritersIdle(),
+						}),
 					),
-			).pipe(Effect.uninterruptible)
-
-		const install = (changes: Changes) =>
-			lock.withPermits(1)(
-				Effect.gen(function* () {
-					const state = yield* Ref.get(transaction)
-					if (state._tag === "RecoveryRequired") return yield* state.error
-					const validated = yield* Schema.decodeEffect(Changes)(changes)
-					const inspected = yield* inspectManagedFiles(
-						fs,
-						path,
-						directory,
-						backupFiles,
-					)
-					const backups = yield* Effect.forEach(
-						inspected,
-						({ name, file, metadata }) =>
-							Effect.gen(function* () {
-								const contents = yield* Option.match(metadata, {
-									onNone: () => Effect.succeedNone,
-									onSome: (info) =>
-										fs
-											.readFile(file)
-											.pipe(
-												Effect.map((bytes) =>
-													Option.some<Contents>({ ...info, bytes }),
-												),
-											),
-								})
-								return { name, file, contents }
-							}),
-					)
-					const original = yield* readSource(fs, manifestFile)
-					const manifest = yield* decodeManifest(original)
-					const before = yield* stateOf(manifest)
-					const text = yield* encodeManifest(
-						applyChanges(manifest, validated),
-						original,
-					)
-
-					const agentLocks = strategy(agent, "install").lockfiles
-					const hasLock = Array.some(
-						backups,
-						({ name, contents }) =>
-							Array.contains(agentLocks, name) && Option.isSome(contents),
-					)
-					const completed = yield* withSnapshot(
-						fs,
-						Ref.get(transaction).pipe(
-							Effect.map((state) => state._tag === "Ready"),
-						),
-						(snapshotDirectory) =>
-							Effect.gen(function* () {
-								const snapshot = yield* writeSnapshot(
-									fs,
-									path,
-									snapshotDirectory,
-									directory,
-									agent,
-									backups,
+					Effect.fnUntraced(function* () {
+						yield* withFileWriter(fs.writeFileString(manifestFile, text))
+						yield* run("install")
+						const after = yield* readState
+						return { agent, ...diffState(before, after) }
+					}),
+					Effect.fnUntraced(function* (_, exit) {
+						if (Exit.isFailure(exit)) {
+							const state = yield* Ref.get(transaction)
+							if (
+								state._tag !== "Active" ||
+								state.writer._tag !== "ManagedWritersIdle"
+							)
+								return
+							yield* withFileWriter(snapshot.restore(state.writer))
+							if (hasLock)
+								yield* run("recover").pipe(
+									// Even a failed recovery must restore files, once its writer has stopped.
+									Effect.onExit(() => restore),
 								)
-								const restore = Effect.flatMap(Ref.get(transaction), (state) =>
-									state._tag === "Active" &&
-									state.writer._tag === "ManagedWritersIdle"
-										? withFileWriter(snapshot.restore(state.writer))
-										: Effect.void,
-								)
-								return yield* Effect.acquireUseRelease(
-									Ref.set(
-										transaction,
-										ManagerState.Active({
-											writer: WriterState.ManagedWritersIdle(),
-										}),
-									),
-									() =>
-										Effect.gen(function* () {
-											yield* withFileWriter(
-												fs.writeFileString(manifestFile, text),
-											)
-											yield* run("install")
-											const after = yield* readState
-											return { agent, ...diffState(before, after) }
-										}),
-									(_, exit) =>
-										Effect.gen(function* () {
-											if (Exit.isFailure(exit)) {
-												const state = yield* Ref.get(transaction)
-												if (
-													state._tag !== "Active" ||
-													state.writer._tag !== "ManagedWritersIdle"
-												)
-													return
-												yield* withFileWriter(snapshot.restore(state.writer))
-												if (hasLock)
-													yield* run("recover").pipe(
-														// Even a failed recovery must restore files, once its writer has stopped.
-														Effect.onExit(() => restore),
-													)
-											}
-											// Idle managed writers alone do not prove that the transaction completed.
-											yield* Ref.set(transaction, ManagerState.Ready())
-										}),
-								).pipe(
-									Effect.onExit((exit) =>
-										Effect.gen(function* () {
-											const state = yield* Ref.get(transaction)
-											if (Exit.isSuccess(exit) || state._tag !== "Active")
-												return
-											const writer = state.writer
-											const error = RecoveryRequiredError.make({
-												directory,
-												snapshotDirectory,
-												operation:
-													writer._tag === "Unconfirmed"
-														? writer.operation
-														: "rollback",
-												...(writer._tag === "Unconfirmed"
-													? {
-															processId: writer.processId,
-															terminationCause: writer.cause,
-														}
-													: {}),
-												message: `Manual recovery is required. Stop all writers before restoring the snapshot at ${snapshotDirectory}`,
-												recoveryCause: exit.cause,
-											})
-											yield* Ref.set(
-												transaction,
-												ManagerState.RecoveryRequired({ error }),
-											)
-											return yield* error
-										}),
-									),
-								)
-							}),
-					)
-					return {
-						...completed.value,
-						snapshotCleanupFailure: completed.snapshotCleanupFailure,
-					}
-				}),
-			)
+						}
+						// Idle managed writers alone do not prove that the transaction completed.
+						yield* Ref.set(transaction, ManagerState.Ready())
+					}),
+				).pipe(
+					Effect.onExit(
+						Effect.fnUntraced(function* (exit) {
+							const state = yield* Ref.get(transaction)
+							if (Exit.isSuccess(exit) || state._tag !== "Active") return
+							const writer = state.writer
+							const error = RecoveryRequiredError.make({
+								directory,
+								snapshotDirectory,
+								operation:
+									writer._tag === "Unconfirmed" ? writer.operation : "rollback",
+								...(writer._tag === "Unconfirmed"
+									? {
+											processId: writer.processId,
+											terminationCause: writer.cause,
+										}
+									: {}),
+								message: `Manual recovery is required. Stop all writers before restoring the snapshot at ${snapshotDirectory}`,
+								recoveryCause: exit.cause,
+							})
+							yield* Ref.set(
+								transaction,
+								ManagerState.RecoveryRequired({ error }),
+							)
+							return yield* error
+						}),
+					),
+				)
+			}),
+		)
 		return {
-			directory,
-			agent,
-			recoveryRequired: Ref.get(transaction).pipe(
-				Effect.map((state) =>
-					state._tag === "RecoveryRequired"
-						? Option.some(state.error)
-						: Option.none(),
-				),
-			),
-			readState: lock.withPermits(1)(readState),
-			install,
+			...completed.value,
+			snapshotCleanupFailure: completed.snapshotCleanupFailure,
 		}
-	})
+	}, lock.withPermits(1))
+	return {
+		directory,
+		agent,
+		recoveryRequired: Ref.get(transaction).pipe(
+			Effect.map((state) =>
+				state._tag === "RecoveryRequired"
+					? Option.some(state.error)
+					: Option.none(),
+			),
+		),
+		readState: lock.withPermits(1)(readState),
+		install,
+	}
+})
