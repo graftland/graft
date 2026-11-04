@@ -1,9 +1,20 @@
 {
 	"name": "@graftland/plugin-remote",
 	"version": "0.0.0",
-	"private": true,
 	"type": "module",
 	"description": "Local and authenticated network execution for Graft plugins",
+	"license": "Apache-2.0",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/graftland/graft.git",
+		"directory": "packages/remote"
+	},
+	"files": [
+		"dist",
+		"src",
+		"README.zh-CN.md",
+		"README.zh-TW.md"
+	],
 	"sideEffects": false,
 	"exports": {
 		".": {
