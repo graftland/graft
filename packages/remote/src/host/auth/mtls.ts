@@ -1,6 +1,8 @@
-import { Plugin, type Graft } from "@graftland/graft"
-import { Effect } from "effect"
-import { MtlsCredentials } from "../../Auth"
+import { Plugin, Graft } from "@graftland/graft"
+import { Cause, Effect, FileSystem, Path, Redacted, Schema } from "effect"
+import { CredentialsError } from "../../Errors"
+import { Directory } from "../../internal/config"
+import { Credentials, MtlsCredentials, type Prepared } from "../../Auth"
 
 const plugin: Plugin.Plugin<void, void, Graft.ServiceConflict> = Plugin.service(
 	MtlsCredentials,
@@ -11,3 +13,36 @@ const plugin: Plugin.Plugin<void, void, Graft.ServiceConflict> = Plugin.service(
 )
 
 export default plugin
+
+export const Config = Schema.Struct({ cert: Schema.String, key: Schema.String })
+export const capability = Plugin.make({
+	name: "remote-certificate-credentials",
+	config: Config,
+	inject: [FileSystem.FileSystem, Path.Path],
+	apply: Effect.fnUntraced(function* (config) {
+		const fs = yield* FileSystem.FileSystem
+		const path = yield* Path.Path
+		const directory = yield* Directory
+		yield* Graft.provide(Credentials, {
+			kind: "Certificate",
+			// File credentials are read for each connection, not cached on activation.
+			read: Effect.all({
+				cert: fs.readFileString(path.resolve(directory, config.cert)),
+				key: fs
+					.readFileString(path.resolve(directory, config.key))
+					.pipe(Effect.map(Redacted.make)),
+			}).pipe(
+				Effect.mapBoth({
+					onSuccess: (
+						value,
+					): Extract<Prepared, { readonly _tag: "Certificate" }> => ({
+						_tag: "Certificate",
+						value,
+					}),
+					onFailure: (error) =>
+						CredentialsError.make({ cause: Cause.fail(error) }),
+				}),
+			),
+		})
+	}),
+})

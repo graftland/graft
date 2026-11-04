@@ -5,7 +5,9 @@ import { Array, Effect, String } from "effect"
 import { PeerAuthenticationError } from "../runner/model"
 
 /** The dedicated CA supplies one graft URI and ordinary, unquoted SAN fields. */
-export const identityFromSubjectAltName = (san: string | undefined) => {
+export const identityFromSubjectAltName = (
+	san: string | undefined,
+): Effect.Effect<string, PeerAuthenticationError> => {
 	const uris = Array.filter(
 		String.split(san ?? "", ", "),
 		String.startsWith("URI:graft://"),

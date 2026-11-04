@@ -1,9 +1,10 @@
 import { Graft, Plugin } from "@graftland/graft"
 import { Console, Context, Effect, Schema, type Scope } from "effect"
 import type { NetAddress } from "effect/net"
-import type { Authenticator } from "../Auth"
+import type { LegacyAuthenticator } from "../Auth"
 import { Supervisor } from "../Supervisor"
 import * as Auth from "./auth/listener"
+import { follow } from "./follow"
 import * as Channel from "./socketChannel"
 import * as Server from "./websocketServer"
 
@@ -41,10 +42,10 @@ export const start = <
 	readonly protocol: "ws" | "wss" | "unix"
 	readonly inject: D
 	readonly bind: (
-		auth: Authenticator,
+		auth: LegacyAuthenticator,
 	) => Effect.Effect<Binding, E, Plugin.Required<D> | Scope.Scope>
 }) => {
-	class Selected extends Context.Service<Selected, Authenticator>()(
+	class Selected extends Context.Service<Selected, LegacyAuthenticator>()(
 		options.auth,
 	) {}
 	return Graft.plugin(
@@ -78,5 +79,7 @@ export const start = <
 				yield* Console.log(message)
 			}),
 		}),
-	).pipe(Effect.flatMap(Auth.follow))
+	).pipe(
+		Effect.flatMap((fork) => follow(fork, (cause) => Effect.failCause(cause))),
+	)
 }

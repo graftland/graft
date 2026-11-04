@@ -1,3 +1,5 @@
+export type { Channel } from "../Transport"
+import type { Channel } from "../Transport"
 import {
 	Array,
 	Cause,
@@ -13,7 +15,6 @@ import {
 	Result,
 	Schema,
 	type Scope,
-	Sink,
 	Stream,
 	TxQueue,
 	TxRef,
@@ -34,10 +35,6 @@ export const Priority = Context.Reference<Priority>(
 	"@graftland/remote/internal/port/Priority",
 	{ defaultValue: () => "data" },
 )
-export interface Channel {
-	readonly input: Stream.Stream<Uint8Array, TransportError>
-	readonly output: Sink.Sink<unknown, Uint8Array, unknown, TransportError>
-}
 type Endpoint = Pick<RpcGroup.RpcGroup<Rpc.Any>, "requests">
 
 export interface Options {

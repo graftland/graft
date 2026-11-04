@@ -27,18 +27,7 @@ export class PackageError extends Schema.TaggedError<
 		return this.detail
 	}
 }
-export class PeerAuthenticationError extends Schema.TaggedError<
-	PeerAuthenticationError,
-	{ readonly brand: unique symbol }
->()("PeerAuthenticationError", {
-	detail: Schema.String,
-	challenge: Schema.optionalKey(Schema.Literals(["missing", "invalid_token"])),
-	cause: Schema.optionalKey(diagnosticCause),
-}) {
-	override get message() {
-		return this.detail
-	}
-}
+export { PeerAuthenticationError } from "../../Errors"
 export class SessionAccessDenied extends Schema.TaggedError<
 	SessionAccessDenied,
 	{ readonly brand: unique symbol }

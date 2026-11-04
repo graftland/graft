@@ -1,0 +1,604 @@
+import { assert, describe, it } from "@effect/vitest"
+import {
+	NodeServices,
+	NodeSocketServer,
+	NodeSocket,
+} from "@effect/platform-node"
+import { Graft, Plugin, type Fork } from "@graftland/graft"
+import {
+	Array,
+	Cause,
+	Context,
+	Deferred,
+	Effect,
+	FileSystem,
+	Layer,
+	Option,
+	Queue,
+	Stream,
+} from "effect"
+import { inject } from "vitest"
+import { SecureRandom } from "effect/crypto"
+import { Connector, Listener, type Channel } from "../src/Transport"
+import { Credentials, Peer } from "../src/Auth"
+import { TransportError } from "../src/Errors"
+import { Supervisor } from "../src/Supervisor"
+import { capability as websocket } from "../src/host/websocket"
+import { capability as listener } from "../src/runner/websocket"
+import { capability as credentials } from "../src/host/auth/mtls"
+import { capability as authenticator } from "../src/runner/auth/mtls"
+import * as Assembly from "../src/internal/assembly"
+import * as Certificates from "../src/internal/Certificates"
+import * as Conformance from "./conformance"
+
+const runtime = Graft.layer.pipe(
+	Layer.provideMerge(
+		Layer.merge(NodeServices.layer, SecureRandom.layerWebCrypto),
+	),
+)
+class Business extends Context.Service<Business, string>()(
+	"@graftland/remote/test/capabilities.test/Business",
+) {}
+const find = (
+	trees: ReadonlyArray<Fork.ForkTree>,
+	id: number,
+): Option.Option<Fork.ForkTree> =>
+	Array.findFirst(trees, (tree) =>
+		tree.id === id ? Option.some(tree) : find(tree.children, id),
+	)
+const active = (tree: Fork.ForkTree): boolean =>
+	tree.state._tag === "Active" && Array.every(tree.children, active)
+const check = (
+	tree: Fork.ForkTree,
+): Effect.Effect<void, Assembly.CapabilityFailed> =>
+	tree.state._tag === "Failed"
+		? Effect.fail(Assembly.CapabilityFailed.make({ cause: tree.state.cause }))
+		: Effect.forEach(tree.children, check, { discard: true })
+const ready = (fork: Fork.Fork) =>
+	Graft.forks.pipe(
+		Stream.map((trees) => find(trees, fork.id)),
+		Stream.filter(Option.isSome),
+		Stream.map((tree) => tree.value),
+		Stream.tap(check),
+		Stream.filter(active),
+		Stream.runHead,
+	)
+const failed = (fork: Fork.Fork) =>
+	fork.state.pipe(
+		Stream.filter((state) => state._tag === "Failed"),
+		Stream.runHead,
+		Effect.flatMap(Effect.fromOption),
+	)
+const port = NodeSocketServer.make({ host: "127.0.0.1", port: 0 }).pipe(
+	Effect.map((server) =>
+		server.address._tag === "UnixPathAddress" ? 0 : server.address.port,
+	),
+	Effect.scoped,
+)
+const implementations = {
+	connector: websocket,
+	listener,
+	credentials,
+	authenticator,
+}
+const pair = Effect.fnUntraced(function* (
+	identity: string,
+	plugins: Conformance.Capabilities = implementations,
+) {
+	const fs = yield* FileSystem.FileSystem
+	const directory = yield* fs.makeTempDirectoryScoped()
+	yield* Certificates.generate({
+		out: directory,
+		server: ["127.0.0.1"],
+		identity: [identity],
+		days: 2,
+		force: false,
+	})
+	const address = yield* port
+	return {
+		directory,
+		address,
+		server: {
+			transport: {
+				plugin: plugins.listener,
+				config: {
+					url: `wss://127.0.0.1:${address}`,
+					cert: directory + "/server.crt",
+					key: directory + "/server.key",
+				},
+			},
+			auth: {
+				plugin: plugins.authenticator,
+				config: { ca: directory + "/ca.crt" },
+			},
+		},
+		host: {
+			transport: {
+				plugin: plugins.connector,
+				config: {
+					url: `wss://127.0.0.1:${address}`,
+					ca: directory + "/ca.crt",
+				},
+			},
+			auth: {
+				plugin: plugins.credentials,
+				config: {
+					cert: directory + "/client-" + identity + ".crt",
+					key: directory + "/client-" + identity + ".key",
+				},
+			},
+		},
+	}
+})
+
+const echo = Effect.gen(function* () {
+	const closed = yield* Deferred.make<void>()
+	const peers = yield* Deferred.make<{
+		readonly identity: string
+		readonly business: string
+	}>()
+	const business = yield* Business
+	yield* Graft.provide(Supervisor, {
+		accept: (channel) =>
+			Peer.pipe(
+				Effect.flatMap((identity) =>
+					Deferred.succeed(peers, { identity, business }).pipe(
+						Effect.andThen(Stream.run(channel.input, channel.output)),
+						Effect.ensuring(Deferred.succeed(closed, undefined)),
+						Effect.asVoid,
+					),
+				),
+			),
+	})
+	return { closed, peers }
+})
+const supervisor = Plugin.make({
+	name: "fake-supervisor",
+	inject: [Business],
+	apply: () => echo.pipe(Effect.asVoid),
+})
+const host = Effect.fnUntraced(function* (
+	input: Omit<Assembly.Input, "consumer">,
+) {
+	const found = yield* Deferred.make<Channel>()
+	const business = yield* Deferred.make<string>()
+	const fork = yield* Assembly.host({
+		...input,
+		consumer: Plugin.make({
+			name: "test-connection",
+			inject: [Connector, Credentials, Business],
+			apply: () =>
+				Effect.gen(function* () {
+					const value = yield* Business
+					yield* Deferred.succeed(business, value)
+					const channel = yield* Assembly.connect
+					yield* Deferred.succeed(found, channel)
+				}),
+		}),
+	})
+	yield* ready(fork)
+	const value = yield* Deferred.await(business)
+	assert.equal(value, "inherited")
+	return yield* Deferred.await(found)
+})
+const connection = (plugins: Conformance.Capabilities) =>
+	Effect.gen(function* () {
+		yield* Graft.provide(Business, "inherited")
+		const provider = yield* Graft.plugin(supervisor)
+		yield* provider.await
+		const config = yield* pair("echo", plugins)
+		const server = yield* Assembly.runner(config.server)
+		yield* ready(server)
+		return yield* host(config.host)
+	})
+const checks = Conformance.transport(implementations, connection)
+
+describe("capability conformance: websocket and mTLS", () => {
+	it.live("preserves byte order across split and coalesced frames", () =>
+		checks.chunks.pipe(Effect.scoped, Effect.provide(runtime)),
+	)
+	it.live("exposes clean close as EOF, not TransportError", () =>
+		checks.eof.pipe(Effect.scoped, Effect.provide(runtime)),
+	)
+	it.live(
+		"isolates two configured assemblies while inheriting business services",
+		() =>
+			Effect.gen(function* () {
+				yield* Graft.provide(Business, "inherited")
+				const observed = yield* Queue.unbounded<{
+					readonly identity: string
+					readonly business: string
+				}>()
+				const provider = yield* Graft.plugin(
+					Plugin.make({
+						name: "observed-supervisor",
+						inject: [Business],
+						apply: Effect.fnUntraced(function* () {
+							const business = yield* Business
+							yield* Graft.provide(Supervisor, {
+								accept: (channel) =>
+									Peer.pipe(
+										Effect.flatMap((identity) =>
+											Queue.offer(observed, { identity, business }).pipe(
+												Effect.andThen(
+													Stream.run(channel.input, channel.output),
+												),
+												Effect.asVoid,
+											),
+										),
+									),
+							})
+						}),
+					}),
+				)
+				yield* provider.await
+				const left = yield* pair("left")
+				const right = yield* pair("right")
+				const servers = yield* Effect.forEach([left, right], (config) =>
+					Assembly.runner(config.server),
+				)
+				yield* Effect.forEach(servers, ready)
+				const clients = yield* Effect.forEach([left, right], (config) =>
+					host(config.host),
+				)
+				// Both remain alive in the same user realm, without a service-key collision.
+				yield* Effect.forEach(
+					clients,
+					(channel) =>
+						Conformance.transport(implementations, () =>
+							Effect.succeed(channel),
+						).chunks,
+				)
+				const peers = yield* Effect.all([
+					Queue.take(observed),
+					Queue.take(observed),
+				])
+				assert.sameMembers(
+					Array.map(peers, (peer) => peer.identity),
+					["graft://left", "graft://right"],
+				)
+				assert.deepEqual(
+					Array.map(peers, (peer) => peer.business),
+					["inherited", "inherited"],
+				)
+				// Swapping only the server CA cannot connect to the other assembly.
+				const wrong = yield* Assembly.host({
+					...left.host,
+					transport: {
+						...left.host.transport,
+						config: {
+							url: `wss://127.0.0.1:${right.address}`,
+							ca: left.directory + "/ca.crt",
+						},
+					},
+					consumer: Plugin.make({
+						name: "wrong-ca",
+						inject: [Connector, Credentials],
+						apply: () => Assembly.connect.pipe(Effect.asVoid),
+					}),
+				})
+				const failure = yield* failed(wrong)
+				if (failure._tag === "Failed")
+					assert.include(Cause.pretty(failure.cause), "TransportError")
+			}).pipe(Effect.scoped, Effect.provide(runtime)),
+	)
+	it.live("waits for a nested provider after its parent becomes active", () =>
+		Effect.gen(function* () {
+			const publish = yield* Deferred.make<void>()
+			const child = Plugin.service(
+				Connector,
+				Deferred.await(publish).pipe(
+					Effect.as({
+						properties: {
+							protocol: "test",
+							encrypted: false,
+							network: false,
+							carries: [],
+						},
+						connect: () => Effect.never,
+					}),
+				),
+				{ name: "delayed-connector" },
+			)
+			const assembly = yield* Assembly.host({
+				transport: {
+					plugin: Plugin.make({
+						name: "active-parent",
+						apply: () => Graft.plugin(child).pipe(Effect.asVoid),
+					}),
+					config: undefined,
+				},
+				auth: {
+					plugin: Plugin.service(
+						Credentials,
+						Effect.succeed({
+							kind: "None",
+							read: Effect.succeed({ _tag: "None" }),
+						}),
+						{ name: "none" },
+					),
+					config: undefined,
+				},
+				consumer: Plugin.make({
+					name: "waiting-connector",
+					inject: [Connector, Credentials],
+					apply: () => Effect.void,
+				}),
+			})
+			const tree = yield* Graft.forks.pipe(
+				Stream.map((trees) => find(trees, assembly.id)),
+				Stream.filter(Option.isSome),
+				Stream.map((tree) => tree.value),
+				Stream.tap(check),
+				Stream.filter(
+					(tree) =>
+						Array.some(
+							tree.children,
+							(child) =>
+								child.name === "active-parent" && child.state._tag === "Active",
+						) &&
+						Array.some(
+							tree.children,
+							(child) => child.name === "none" && child.state._tag === "Active",
+						) &&
+						Array.some(
+							tree.children,
+							(child) =>
+								child.name === "waiting-connector" &&
+								child.state._tag === "Pending",
+						),
+				),
+				Stream.runHead,
+				Effect.flatMap(Effect.fromOption),
+			)
+			const parent = yield* Effect.fromOption(
+				Array.findFirst(
+					tree.children,
+					(child) => child.name === "active-parent",
+				),
+			)
+			assert.equal(parent.state._tag, "Active")
+			assert.equal(parent.children[0]?.state._tag, "Loading")
+			const consumer = yield* Effect.fromOption(
+				Array.findFirst(
+					tree.children,
+					(child) => child.name === "waiting-connector",
+				),
+			)
+			assert.equal(consumer.state._tag, "Pending")
+			// Credentials may still appear here until the consumer resolves its dependencies again.
+			if (consumer.state._tag === "Pending")
+				assert.include(consumer.state.missing, Connector.key)
+			yield* Deferred.succeed(publish, undefined)
+			yield* ready(assembly)
+		}).pipe(Effect.scoped, Effect.provide(runtime)),
+	)
+
+	it.live(
+		"reports an active capability subtree that never publishes its key",
+		() =>
+			Effect.gen(function* () {
+				const empty = Plugin.make({
+					name: "empty-provider",
+					apply: () => Effect.void,
+				})
+				const nested = Plugin.make({
+					name: "nested-provider",
+					apply: () => Graft.plugin(empty).pipe(Effect.asVoid),
+				})
+				const fork = yield* Assembly.host({
+					transport: { plugin: nested, config: undefined },
+					auth: {
+						plugin: Plugin.service(
+							Credentials,
+							Effect.succeed({
+								kind: "None",
+								read: Effect.succeed({ _tag: "None" }),
+							}),
+							{ name: "none" },
+						),
+						config: undefined,
+					},
+					consumer: Plugin.make({
+						name: "waiting",
+						inject: [Connector, Credentials],
+						apply: () => Effect.void,
+					}),
+				})
+				const result = yield* failed(fork)
+				if (result._tag === "Failed") {
+					assert.include(Cause.pretty(result.cause), "CapabilityContractError")
+					assert.include(Cause.pretty(result.cause), Connector.key)
+				}
+			}).pipe(Effect.scoped, Effect.provide(runtime)),
+	)
+	it.live(
+		"closes the accepted session when the client assembly scope is cancelled",
+		() =>
+			Effect.gen(function* () {
+				yield* Graft.provide(Business, "inherited")
+				const ended = yield* Deferred.make<void>()
+				yield* Graft.provide(Supervisor, {
+					accept: (channel) =>
+						Stream.run(channel.input, channel.output).pipe(
+							Effect.ensuring(Deferred.succeed(ended, undefined)),
+							Effect.asVoid,
+						),
+				})
+				const config = yield* pair("cancel")
+				const server = yield* Assembly.runner(config.server)
+				yield* ready(server)
+				yield* host(config.host).pipe(Effect.scoped)
+				yield* Deferred.await(ended)
+			}).pipe(Effect.scoped, Effect.provide(runtime)),
+	)
+
+	it.live(
+		"rejects a trusted certificate with no identity before upgrading",
+		() =>
+			Effect.gen(function* () {
+				yield* Graft.provide(Supervisor, { accept: () => Effect.never })
+				const directory = inject("remoteTls")
+				const address = yield* port
+				const server = yield* Assembly.runner({
+					transport: {
+						plugin: listener,
+						config: {
+							url: `wss://127.0.0.1:${address}`,
+							cert: directory + "/server.crt",
+							key: directory + "/server.key",
+						},
+					},
+					auth: {
+						plugin: authenticator,
+						config: { ca: directory + "/ca.crt" },
+					},
+				})
+				yield* ready(server)
+				const fs = yield* FileSystem.FileSystem
+				const ca = yield* fs.readFileString(directory + "/ca.crt")
+				const cert = yield* fs.readFileString(directory + "/missing.crt")
+				const key = yield* fs.readFileString(directory + "/missing.key")
+				const response = Effect.gen(function* () {
+					const socket = yield* NodeSocket.makeTls({
+						host: "127.0.0.1",
+						port: address,
+						servername: "localhost",
+						ca,
+						cert,
+						key,
+						rejectUnauthorized: true,
+					})
+					const reader = yield* socket.reader
+					const writer = yield* socket.writer
+					yield* writer.write(
+						"GET /graft HTTP/1.1\r\nHost: localhost\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Protocol: graft-remote.v1\r\n\r\n",
+					)
+					const received = yield* reader.pull
+					return Array.join(
+						Array.map(received, (value) =>
+							typeof value === "string"
+								? value
+								: new TextDecoder().decode(value),
+						),
+						"",
+					)
+				}).pipe(Effect.scoped)
+				yield* Conformance.rejection(response)
+			}).pipe(Effect.scoped, Effect.provide(runtime)),
+	)
+
+	it.live(
+		"reads file credentials for each connection and preserves the source failure",
+		() =>
+			Effect.gen(function* () {
+				const config = yield* pair("rotate")
+				const found = yield* Deferred.make<typeof Credentials.Service>()
+				const assembly = yield* Assembly.host({
+					...config.host,
+					consumer: Plugin.make({
+						name: "credentials-consumer",
+						inject: [Credentials, Connector],
+						apply: () =>
+							Credentials.pipe(
+								Effect.flatMap((api) => Deferred.succeed(found, api)),
+								Effect.asVoid,
+							),
+					}),
+				})
+				yield* ready(assembly)
+				const api = yield* Deferred.await(found)
+				assert.equal(api.kind, "Certificate")
+				if (api.kind !== "Certificate") return
+				const prepared = yield* api.read
+				assert.equal(prepared._tag, "Certificate")
+				const fs = yield* FileSystem.FileSystem
+				yield* fs.remove(config.directory + "/client-rotate.key")
+				const result = yield* Effect.exit(api.read)
+				assert.equal(result._tag, "Failure")
+				if (result._tag === "Failure") {
+					assert.include(Cause.pretty(result.cause), "CredentialsError")
+					assert.include(Cause.pretty(result.cause), "client-rotate.key")
+				}
+			}).pipe(Effect.scoped, Effect.provide(runtime)),
+	)
+	it.live(
+		"reports serve failure before ready and passes TLS policy to bind",
+		() =>
+			Effect.gen(function* () {
+				yield* Graft.provide(Supervisor, { accept: () => Effect.never })
+				const bound = yield* Deferred.make<boolean>()
+				const config = yield* pair("readiness")
+				const broken = Plugin.service(
+					Listener,
+					Effect.succeed({
+						properties: {
+							protocol: "wss",
+							encrypted: true,
+							network: true,
+							carries: ["certificate"],
+						},
+						bind: (tls) =>
+							Deferred.succeed(
+								bound,
+								Option.isSome(tls) &&
+									tls.value.minVersion === "TLSv1.3" &&
+									tls.value.requestCert &&
+									tls.value.rejectUnauthorized,
+							).pipe(
+								Effect.as({
+									ready: Effect.never,
+									serve: () =>
+										Effect.fail(
+											TransportError.make({
+												cause: Cause.die(new Error("accept loop failed")),
+											}),
+										),
+								}),
+							),
+					}),
+					{ name: "failing-listener" },
+				)
+				const assembly = yield* Assembly.runner({
+					transport: { plugin: broken, config: undefined },
+					auth: config.server.auth,
+				})
+				const failure = yield* failed(assembly)
+				const policy = yield* Deferred.await(bound)
+				assert.isTrue(policy)
+				if (failure._tag === "Failed")
+					assert.include(Cause.pretty(failure.cause), "accept loop failed")
+			}).pipe(Effect.scoped, Effect.provide(runtime)),
+	)
+
+	it.live("keeps a genuinely missing business dependency Pending", () =>
+		Effect.gen(function* () {
+			const config = yield* pair("pending")
+			const assembly = yield* Assembly.host({
+				...config.host,
+				consumer: Plugin.make({
+					name: "waiting-business",
+					inject: [Connector, Credentials, Business],
+					apply: () => Effect.void,
+				}),
+			})
+			yield* assembly.await
+			const tree = yield* Graft.forks.pipe(
+				Stream.map((trees) => find(trees, assembly.id)),
+				Stream.filter(Option.isSome),
+				Stream.map((tree) => tree.value),
+				Stream.filter((tree) =>
+					Array.some(
+						tree.children,
+						(child) =>
+							child.name === "waiting-business" &&
+							child.state._tag === "Pending",
+					),
+				),
+				Stream.runHead,
+			)
+			assert.isTrue(Option.isSome(tree))
+			if (Option.isSome(tree)) assert.equal(tree.value.state._tag, "Active")
+		}).pipe(Effect.scoped, Effect.provide(runtime)),
+	)
+})

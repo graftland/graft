@@ -15,6 +15,10 @@
 			"default": "./dist/Auth.js"
 		},
 		"./bin": "./dist/bin.js",
+		"./Errors": {
+			"source": "./src/Errors.ts",
+			"default": "./dist/Errors.js"
+		},
 		"./host/auth/bearer": {
 			"source": "./src/host/auth/bearer.ts",
 			"default": "./dist/host/auth/bearer.js"
@@ -125,6 +129,7 @@
 			".": "./dist/index.js",
 			"./Auth": "./dist/Auth.js",
 			"./bin": "./dist/bin.js",
+			"./Errors": "./dist/Errors.js",
 			"./host/auth/bearer": "./dist/host/auth/bearer.js",
 			"./host/auth/jwt": "./dist/host/auth/jwt.js",
 			"./host/auth/mtls": "./dist/host/auth/mtls.js",

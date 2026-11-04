@@ -1,24 +1,74 @@
-import { NodeHttpServer } from "@effect/platform-node"
-import { Array, Effect, Scope, String } from "effect"
+import { NodeHttpServer, NodeHttpServerRequest } from "@effect/platform-node"
+import {
+	Array,
+	Cause,
+	Deferred,
+	Effect,
+	Option,
+	Redacted,
+	Scope,
+	String,
+} from "effect"
 import { HttpServerRequest, HttpServerResponse } from "effect/http"
 import type { Socket } from "effect/socket"
+import { TLSSocket } from "node:tls"
 import { Peer } from "../Auth"
-import type { PeerAuthenticationError } from "./runner/model"
+import {
+	AuthenticationFailed,
+	TransportError,
+	type PeerAuthenticationError,
+} from "../Errors"
+import type { Accept, Handshake, Serving } from "../Transport"
 import { connectionEnded } from "./runner/connectionEnded"
+import * as Channel from "./socketChannel"
 import { path, protocol, payloadLimit } from "./websocket"
 
-/** Authentication and HTTP rejection finish before request.upgrade acquires a WebSocket. */
-export const listen = Effect.fnUntraced(function* (
+const rejection = (error: AuthenticationFailed) =>
+	Effect.logWarning("Remote host authentication failed", {
+		reason: error.reason,
+	}).pipe(
+		Effect.as(
+			HttpServerResponse.empty({
+				status: 401,
+				headers:
+					error.challenge === undefined
+						? {}
+						: { "www-authenticate": error.challenge },
+			}),
+		),
+	)
+
+const handshake: Effect.Effect<
+	Handshake,
+	never,
+	HttpServerRequest.HttpServerRequest
+> = Effect.gen(function* () {
+	const request = yield* HttpServerRequest.HttpServerRequest
+	const { socket } = NodeHttpServerRequest.toIncomingMessage(request)
+	// Only a TLS-verified peer is certificate evidence; forwarded headers are not.
+	const peer =
+		socket instanceof TLSSocket && socket.authorized
+			? Option.some(socket.getPeerCertificate())
+			: Option.none()
+	return {
+		authorization: Option.map(
+			Option.fromUndefinedOr(request.headers["authorization"]),
+			Redacted.make,
+		),
+		certificate: Option.map(peer, (certificate) => ({
+			der: certificate.raw,
+			subjectAltName: Option.fromUndefinedOr(certificate.subjectaltname),
+		})),
+	}
+})
+
+const open = Effect.fnUntraced(function* (
 	createServer: Parameters<typeof NodeHttpServer.make>[0],
 	options: Pick<NodeHttpServer.Options, "host" | "port" | "path">,
-	authenticate: Effect.Effect<
-		string,
-		PeerAuthenticationError,
-		HttpServerRequest.HttpServerRequest
-	>,
 ) {
 	// The lazily created ws server belongs here, so serving scopes close before ws.close waits.
 	const resources = yield* Effect.acquireRelease(Scope.make(), Scope.close)
+	const ready = yield* Deferred.make<void>()
 	const server = yield* NodeHttpServer.make(createServer, {
 		...options,
 		disablePreemptiveShutdown: true,
@@ -31,7 +81,14 @@ export const listen = Effect.fnUntraced(function* (
 	}).pipe(Scope.provide(resources))
 	return {
 		address: server.address,
-		run: <A, E, R>(handle: (socket: Socket.Socket) => Effect.Effect<A, E, R>) =>
+		ready: Deferred.await(ready),
+		run: <A, E, R>(
+			accept: Effect.Effect<
+				(socket: Socket.Socket) => Effect.Effect<A, E, R>,
+				AuthenticationFailed,
+				HttpServerRequest.HttpServerRequest
+			>,
+		) =>
 			server
 				.serve(
 					Effect.gen(function* () {
@@ -50,39 +107,89 @@ export const listen = Effect.fnUntraced(function* (
 							)
 						)
 							return HttpServerResponse.empty({ status: 400 })
-						const identity = yield* authenticate
+						const session = yield* Effect.result(accept)
+						if (session._tag === "Failure")
+							return yield* rejection(session.failure)
+						// Authentication finishes before upgrade; session work is owned by the request scope.
 						yield* request.upgrade.pipe(
-							// HTTP handlers start uninterruptible; connection work must stop with the listener.
-							Effect.flatMap(handle),
+							Effect.flatMap(session.success),
 							Effect.interruptible,
-							Effect.catchCause(connectionEnded),
-							Effect.provideService(Peer, identity),
+							Effect.scoped,
 						)
 						return HttpServerResponse.empty()
-					}).pipe(
-						// Token decoding causes may contain credentials; report the rejection through HTTP and log only its reason.
-						Effect.catchTag("PeerAuthenticationError", (error) =>
-							Effect.logWarning("Remote host authentication failed", {
-								reason: error.detail,
-							}).pipe(
-								Effect.as(
-									HttpServerResponse.empty({
-										status: 401,
-										headers:
-											error.challenge === undefined
-												? {}
-												: {
-														"www-authenticate":
-															error.challenge === "missing"
-																? "Bearer"
-																: 'Bearer error="invalid_token"',
-													},
-									}),
-								),
-							),
+					}),
+				)
+				.pipe(
+					Effect.andThen(Deferred.succeed(ready, undefined)),
+					Effect.andThen(Effect.never),
+				),
+	}
+})
+
+export const bind = Effect.fnUntraced(function* (
+	createServer: Parameters<typeof NodeHttpServer.make>[0],
+	options: Pick<NodeHttpServer.Options, "host" | "port" | "path">,
+) {
+	const server = yield* open(createServer, options)
+	return {
+		address: server.address,
+		ready: server.ready,
+		serve: (accept: Accept) =>
+			server
+				.run(
+					handshake.pipe(
+						Effect.flatMap(accept),
+						Effect.map(
+							(session) => (socket: Socket.Socket) =>
+								Channel.fromSocket(socket).pipe(Effect.flatMap(session)),
 						),
 					),
 				)
-				.pipe(Effect.andThen(Effect.never)),
+				.pipe(
+					Effect.mapError((error) =>
+						TransportError.make({ cause: Cause.fail(error) }),
+					),
+				),
+	} satisfies Serving & { readonly address: typeof server.address }
+})
+
+/** Transitional socket entry for the existing listener and protocol tests. */
+export const listen = Effect.fnUntraced(function* (
+	createServer: Parameters<typeof NodeHttpServer.make>[0],
+	options: Pick<NodeHttpServer.Options, "host" | "port" | "path">,
+	authenticate: Effect.Effect<
+		string,
+		PeerAuthenticationError,
+		HttpServerRequest.HttpServerRequest
+	>,
+) {
+	const server = yield* open(createServer, options)
+	return {
+		address: server.address,
+		run: <A, E, R>(handle: (socket: Socket.Socket) => Effect.Effect<A, E, R>) =>
+			server.run(
+				authenticate.pipe(
+					Effect.mapBoth({
+						onFailure: (error) =>
+							AuthenticationFailed.make({
+								reason: error.challenge === "missing" ? "missing" : "invalid",
+								...(error.challenge === undefined
+									? {}
+									: {
+											challenge:
+												error.challenge === "missing"
+													? "Bearer"
+													: 'Bearer error="invalid_token"',
+										}),
+								cause: Cause.fail(error),
+							}),
+						onSuccess: (identity) => (socket: Socket.Socket) =>
+							handle(socket).pipe(
+								Effect.catchCause(connectionEnded),
+								Effect.provideService(Peer, identity),
+							),
+					}),
+				),
+			),
 	}
 })

@@ -1,26 +1,9 @@
-import { Plugin, type Fork, type Graft } from "@graftland/graft"
-import { Effect, Option, Redacted, Stream, Schema } from "effect"
+import { Effect, Option, Redacted } from "effect"
 import { HttpServerRequest } from "effect/http"
-import type { Authenticator } from "../../Auth"
+import type { LegacyAuthenticator } from "../../Auth"
 import { authenticate as mtls } from "./mtls"
 
-export const follow = Effect.fnUntraced(function* <E>(
-	fork: Fork.Fork<void, E>,
-): Effect.fn.Return<
-	void,
-	E | Schema.SchemaError,
-	Graft.Graft | Plugin.Tasks<E | Schema.SchemaError>
-> {
-	yield* fork.await
-	yield* Plugin.fork(
-		fork.state.pipe(
-			Stream.runForEach((state) =>
-				state._tag === "Failed" ? Effect.failCause(state.cause) : Effect.void,
-			),
-		),
-	)
-})
-export const authenticate = (auth: Authenticator, network: boolean) => {
+export const authenticate = (auth: LegacyAuthenticator, network: boolean) => {
 	switch (auth._tag) {
 		case "Mtls":
 			return mtls(auth.authenticate)
@@ -45,7 +28,7 @@ export const authenticate = (auth: Authenticator, network: boolean) => {
 			)
 	}
 }
-export const warn = (auth: Authenticator, insecure: boolean) =>
+export const warn = (auth: LegacyAuthenticator, insecure: boolean) =>
 	Effect.all(
 		[
 			insecure

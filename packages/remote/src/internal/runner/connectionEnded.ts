@@ -1,6 +1,7 @@
 import { Array, Cause, Effect, Schema } from "effect"
 import { Socket } from "effect/socket"
 import { TransportError } from "../../Errors"
+import { EndOfStream } from "./Framing"
 import { Peer } from "../../Auth"
 
 // Multiplex preserves the socket reason inside TransportError; only an entirely normal close is silent.
@@ -12,9 +13,10 @@ const closedNormally = (cause: Cause.Cause<unknown>): boolean =>
 			reason._tag === "Fail" &&
 			(Schema.is(TransportError)(reason.error)
 				? closedNormally(reason.error.cause)
-				: Socket.isSocketError(reason.error) &&
-					reason.error.reason._tag === "SocketCloseError" &&
-					reason.error.reason.code === 1000),
+				: Schema.is(EndOfStream)(reason.error) ||
+					(Socket.isSocketError(reason.error) &&
+						reason.error.reason._tag === "SocketCloseError" &&
+						reason.error.reason.code === 1000)),
 	)
 export const connectionEnded = (cause: Cause.Cause<unknown>) =>
 	Cause.hasInterruptsOnly(cause) || closedNormally(cause)

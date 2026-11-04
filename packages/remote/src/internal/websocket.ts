@@ -2,7 +2,7 @@ import { Array, Effect, Layer, Redacted, Schema } from "effect"
 import { Socket } from "effect/socket"
 import WS from "ws"
 import type { PreparedCredentials } from "../Auth"
-import type { WebsocketOptions } from "../Transport"
+import type { WebsocketOptions, Properties } from "../Transport"
 import { headerSize, maxPayload } from "./runner/Framing"
 
 export const protocol = "graft-remote.v1"
@@ -47,7 +47,7 @@ export const constructor = (
 		})
 	})
 
-export const connect = Effect.fnUntraced(function* (
+export const open = Effect.fnUntraced(function* (
 	options: WebsocketOptions,
 	credentials: PreparedCredentials = {},
 ) {
@@ -60,16 +60,33 @@ export const connect = Effect.fnUntraced(function* (
 				}),
 			),
 		)(options.url)
-	if (url.protocol === "ws:")
-		yield* Effect.logWarning(
-			credentials.authorization === undefined
-				? "Remote ws:// connection is unencrypted"
-				: "Remote ws:// connection is unencrypted; credentials are transmitted in plaintext",
-		)
 	const address = url.pathname === "/" ? new URL(path, url).href : url.href
 	const services = yield* Layer.build(constructor(options.tls, credentials))
 	return yield* Socket.makeWebSocket(address, {
 		protocols: protocol,
 		openTimeout: options.openTimeout ?? "10 seconds",
 	}).pipe(Effect.provideContext(services))
+})
+
+export const properties = (url: URL): Properties => ({
+	protocol: url.protocol === "wss:" ? "wss" : "ws",
+	encrypted: url.protocol === "wss:",
+	network: true,
+	carries: url.protocol === "wss:" ? ["header", "certificate"] : ["header"],
+})
+
+/** Transitional connection entry; assemblies own warnings for the new contract. */
+export const connect = Effect.fnUntraced(function* (
+	options: WebsocketOptions,
+	credentials: PreparedCredentials = {},
+) {
+	const url = yield* Schema.decodeEffect(Url)(options.url)
+	if (url.protocol === "ws:")
+		yield* Effect.logWarning(
+			credentials.authorization === undefined
+				? "Remote ws:// connection is unencrypted"
+				: "Remote ws:// connection is unencrypted; credentials are transmitted in plaintext",
+		)
+
+	return yield* open(options, credentials)
 })

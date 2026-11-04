@@ -63,3 +63,33 @@ export class LocalTerminationTimeout extends Schema.TaggedError<
 			: `Remote process ${this.pid} did not exit within one second after Dispose; terminating it`
 	}
 }
+
+export class PeerAuthenticationError extends Schema.TaggedError<
+	PeerAuthenticationError,
+	{ readonly brand: unique symbol }
+>()("PeerAuthenticationError", {
+	detail: Schema.String,
+	challenge: Schema.optionalKey(Schema.Literals(["missing", "invalid_token"])),
+	cause: Schema.optionalKey(Schema.Cause(Schema.Unknown, Schema.Unknown)),
+}) {
+	override get message() {
+		return this.detail
+	}
+}
+
+/** A credential source failed; the original failure remains available. */
+export class CredentialsError extends Schema.TaggedError<
+	CredentialsError,
+	{ readonly brand: unique symbol }
+>()("CredentialsError", {
+	cause: Schema.Cause(Schema.Unknown, Schema.Unknown),
+}) {}
+
+export class AuthenticationFailed extends Schema.TaggedError<
+	AuthenticationFailed,
+	{ readonly brand: unique symbol }
+>()("AuthenticationFailed", {
+	reason: Schema.Literals(["missing", "invalid"]),
+	challenge: Schema.optionalKey(Schema.String),
+	cause: Schema.optionalKey(Schema.Cause(Schema.Unknown, Schema.Unknown)),
+}) {}

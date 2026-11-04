@@ -21,6 +21,7 @@ export default defineConfig({
 		"src/host/worker.ts",
 		"src/Transport.ts",
 		"src/Auth.ts",
+		"src/Errors.ts",
 		"src/Supervisor.ts",
 		"src/host/local.ts",
 		"src/host/websocket.ts",
