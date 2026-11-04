@@ -6,13 +6,12 @@
 		"tsBuildInfoFile": ".cache/.tsbuildinfo",
 
 		"module": "esnext",
+		// Workspace packages see each other as installed packages, through their built declarations.
 		"moduleResolution": "bundler",
-		// Workspace packages resolve to each other's sources through the "source" export condition.
-		"customConditions": ["source"],
 		"target": "esnext",
 		"types": ["node"],
 
-		// Only declarations are emitted (into each package's .cache), so project references can share types.
+		// Only declarations are emitted, into each package's .cache; published ones come from tsdown.
 		"emitDeclarationOnly": true,
 		"sourceMap": true,
 		"declaration": true,

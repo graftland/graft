@@ -5,13 +5,5 @@
 		"outDir": ".cache/types",
 		"tsBuildInfoFile": ".cache/src.tsbuildinfo"
 	},
-	"include": ["src"],
-	"references": [
-		{
-			"path": "../core"
-		},
-		{
-			"path": "../loader"
-		}
-	]
+	"include": ["src"]
 }

@@ -27,7 +27,7 @@
 		"./package.json": "./package.json"
 	},
 	"scripts": {
-		"build": "tsdown",
+		"build": "tsc -b && tsdown",
 		"test": "vitest run"
 	},
 	"peerDependencies": {

@@ -258,7 +258,7 @@ export function forgottenExports(config, entries) {
 	}
 }
 
-/** Published entry points with their source and emitted declaration locations. */
+/** Published entry points with their source and published declaration locations. */
 export function publicEntries(root) {
 	return publicPackages(root).flatMap(({ directory, manifest }) =>
 		Object.entries(manifest.publishConfig?.exports ?? manifest.exports).flatMap(
@@ -283,11 +283,8 @@ export function publicEntries(root) {
 							output
 								.replace("./dist/", "./src/")
 								.replace(/\.([cm]?)js$/, ".$1ts"),
-						root: join(directory, ".cache/types"),
-						file: resolve(
-							directory,
-							declarationPath(output.replace("./dist/", "./.cache/types/")),
-						),
+						root: join(directory, "dist"),
+						file: resolve(directory, declarationPath(output)),
 					},
 				]
 			},

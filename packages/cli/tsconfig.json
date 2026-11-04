@@ -5,22 +5,5 @@
 		"outDir": ".cache/types",
 		"tsBuildInfoFile": ".cache/src.tsbuildinfo"
 	},
-	"include": ["src", "package.json"],
-	"references": [
-		{
-			"path": "../core"
-		},
-		{
-			"path": "../loader"
-		},
-		{
-			"path": "../hmr"
-		},
-		{
-			"path": "../create"
-		},
-		{
-			"path": "../package-manager"
-		}
-	]
+	"include": ["src", "package.json"]
 }
