@@ -15,6 +15,8 @@ import {
 	Fiber,
 	Option,
 	Path,
+	Logger,
+	MutableList,
 	Predicate,
 	Queue,
 	Ref,
@@ -143,6 +145,46 @@ const watchEvents = Effect.fnUntraced(function* (
 })
 
 describe("native HMR", () => {
+	it.live("reports pure interruption from a native watcher finalizer", () =>
+		Effect.gen(function* () {
+			const { fs, directory, hmr, write, entry, load } = yield* setup
+			yield* write("dependency.mjs", "export const value = 1")
+			yield* write("a.mjs", entry("a"))
+			yield* load("./a.mjs")
+			const ready = yield* Deferred.make<void>()
+			const logs = MutableList.make<Logger.Options<unknown>>()
+			const watching = yield* hmr.watch([directory]).pipe(
+				Stream.runDrain,
+				Effect.provideService(FileSystem.FileSystem, {
+					...fs,
+					watch: (_, options) =>
+						Stream.unwrap(
+							Effect.addFinalizer(() => Effect.interrupt).pipe(
+								Effect.andThen(Effect.sync(() => options?.onReady?.())),
+								Effect.andThen(Deferred.succeed(ready, undefined)),
+								Effect.as(Stream.never),
+							),
+						),
+				}),
+				Effect.provide(
+					Logger.layer([
+						Logger.make((log) => {
+							MutableList.append(logs, log)
+						}),
+					]),
+				),
+				Effect.forkScoped,
+			)
+			yield* Deferred.await(ready)
+			yield* Fiber.interrupt(watching)
+			assert.isTrue(
+				Array.some(MutableList.toArray(logs), (log) =>
+					Cause.hasInterruptsOnly(log.cause),
+				),
+			)
+		}).pipe(run),
+	)
+
 	it.live(
 		"replaces a restored entry while its original lease is still alive",
 		() =>

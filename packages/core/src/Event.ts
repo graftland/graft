@@ -248,10 +248,8 @@ const invoke = <Args extends ReadonlyArray<unknown>, Out, E>(
 						Effect.gen(function* () {
 							yield* Fiber.interrupt(fiber)
 							const stopped = yield* Fiber.await(fiber)
-							if (
-								Exit.isFailure(stopped) &&
-								!Cause.hasInterruptsOnly(stopped.cause)
-							)
+							// The invocation Exit includes cleanup interrupts as well as our cancellation.
+							if (Exit.isFailure(stopped))
 								return yield* Effect.failCause(stopped.cause)
 						}),
 				)

@@ -9,6 +9,7 @@ import {
 	Cause,
 	Exit,
 	Effect,
+	Fiber,
 	FileSystem,
 	HashMap,
 	HashSet,
@@ -29,20 +30,46 @@ export type WithFiles = <A, E, R>(
 const observeSource = <A, E, R>(source: Stream.Stream<A, E, R>) =>
 	Stream.callback<A, E, R>(
 		(queue) =>
-			source.pipe(
-				Stream.runForEachArray((values) => Queue.offerAll(queue, values)),
-				Effect.scoped,
-				Effect.onExit((exit) =>
-					Exit.isFailure(exit) &&
-					Cause.hasInterrupts(exit.cause) &&
-					!Cause.hasInterruptsOnly(exit.cause)
-						? Effect.logError(
+			Effect.scoped(
+				Effect.uninterruptibleMask((restore) =>
+					Effect.gen(function* () {
+						const id = yield* Effect.withFiber((self) =>
+							Effect.succeed(self.id),
+						)
+						const producer = yield* Effect.forkScoped(
+							restore(
+								source.pipe(
+									Stream.runForEachArray((values) =>
+										Queue.offerAll(queue, values),
+									),
+									Effect.scoped,
+								),
+							),
+						)
+						const waiting = yield* Effect.exit(restore(Fiber.await(producer)))
+						if (Exit.isFailure(waiting)) yield* Fiber.interrupt(producer)
+						const exit = yield* Fiber.await(producer)
+						// Only our own cancellation is expected; nested finalizers may contribute other interrupts.
+						if (
+							Exit.isFailure(exit) &&
+							Cause.hasInterrupts(exit.cause) &&
+							!(
+								Exit.isFailure(waiting) &&
+								Array.every(
+									exit.cause.reasons,
+									(reason) =>
+										reason._tag === "Interrupt" && reason.fiberId === id,
+								)
+							)
+						)
+							yield* Effect.logError(
 								"Native watcher failed during cancellation",
 								exit.cause,
 							)
-						: Effect.void,
+						yield* exit
+						yield* Queue.end(queue)
+					}),
 				),
-				Effect.andThen(Queue.end(queue)),
 			),
 		{ bufferSize: 16 },
 	)

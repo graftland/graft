@@ -278,8 +278,9 @@ export const make = <E>(
 			candidate: { readonly target: string },
 			observationScope: Scope.Scope,
 		) {
+			const context = yield* Effect.context<never>()
 			return yield* Effect.tryPromise({
-				try: () => {
+				try: (signal) => {
 					// Start Promise importers inside the registration step, so even
 					// immediate cancellation leaves their rejection observed.
 					const imported = options.importer(candidate.target, {
@@ -287,7 +288,16 @@ export const make = <E>(
 					})
 					return Effect.isEffect(imported)
 						? Promise.resolve(imported)
-						: imported.then(Effect.succeed)
+						: imported.then(Effect.succeed, (cause) => {
+								if (signal.aborted)
+									Effect.runSyncWith(context)(
+										Effect.logError(
+											"Module import failed after cancellation",
+											Cause.die(cause),
+										).pipe(Effect.annotateLogs({ specifier })),
+									)
+								throw cause
+							})
 				},
 				catch: (cause) => ModuleInvalid.make({ specifier, cause }),
 			}).pipe(

@@ -193,3 +193,37 @@ it.effect("logs the full native failure once and reinstalls its source", () =>
 		assert.strictEqual(remaining, 0)
 	}).pipe(Effect.scoped),
 )
+
+it.effect(
+	"logs interruption from the native environment watcher finalizer",
+	() =>
+		Effect.gen(function* () {
+			const { logged, layer } = yield* logging
+			const ready = yield* Deferred.make<void>()
+			const source = Stream.unwrap(
+				Effect.addFinalizer(() => Effect.interrupt).pipe(
+					Effect.andThen(Deferred.succeed(ready, undefined)),
+					Effect.as(Stream.never),
+				),
+			)
+			yield* Effect.scoped(
+				Effect.gen(function* () {
+					yield* watchEnvFile(
+						"/app/.env",
+						Effect.succeed(false),
+						Effect.void,
+					).pipe(Effect.forkScoped)
+					yield* Deferred.await(ready)
+				}),
+			).pipe(
+				Effect.provide([
+					layer,
+					FileSystem.layerNoop({ watch: () => source }),
+					Path.layer,
+				]),
+			)
+			const logs = yield* Queue.takeAll(logged)
+			assert.strictEqual(logs.length, 1)
+			assert.isTrue(Cause.hasInterruptsOnly(logs[0]?.cause ?? Cause.empty))
+		}),
+)

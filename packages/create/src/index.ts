@@ -141,7 +141,9 @@ export const create = (
 					effect: options.versions?.effect ?? "4.1.2",
 				},
 			})
-			yield* fs.makeDirectory(path.dirname(directory), { recursive: true })
+			yield* fs
+				.makeDirectory(path.dirname(directory), { recursive: true })
+				.pipe(Effect.uninterruptible)
 			const staging = yield* fs.makeTempDirectoryScoped({
 				directory: path.dirname(directory),
 				prefix: ".graft-create-",

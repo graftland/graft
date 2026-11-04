@@ -1,7 +1,15 @@
 import { assert, it } from "@effect/vitest"
 // @effect-diagnostics-next-line nodeBuiltinImport:off -- native unhandledRejection is delivered on a host event-loop turn, independent of TestClock
 import { setImmediate } from "node:timers/promises"
-import { Deferred, Effect, Fiber, Path } from "effect"
+import {
+	Array,
+	Deferred,
+	Effect,
+	Fiber,
+	Logger,
+	MutableList,
+	Path,
+} from "effect"
 import { ModuleResolver } from "../src/index.ts"
 
 it.effect(
@@ -9,9 +17,11 @@ it.effect(
 	() =>
 		Effect.gen(function* () {
 			// Observe the native Promise boundary, including failures outside Effect.
-			const unhandled: unknown[] = []
+			const unhandled = MutableList.make<unknown>()
+			const logs = MutableList.make<Logger.Options<unknown>>()
+			const marker = new Error("Late import failure")
 			const onUnhandled = (cause: unknown) => {
-				unhandled.push(cause)
+				MutableList.append(unhandled, cause)
 			}
 			yield* Effect.acquireRelease(
 				Effect.sync(() => process.on("unhandledRejection", onUnhandled)),
@@ -26,11 +36,30 @@ it.effect(
 					return imported.promise
 				},
 			})
-			const resolving = yield* resolver.resolve("slow").pipe(Effect.forkScoped)
+			const resolving = yield* resolver.resolve("slow").pipe(
+				Effect.provide(
+					Logger.layer([
+						Logger.make((entry) => {
+							MutableList.append(logs, entry)
+						}),
+					]),
+				),
+				Effect.forkScoped,
+			)
 			yield* Deferred.await(entered)
 			yield* Fiber.interrupt(resolving)
-			imported.reject(new Error("Late import failure"))
+			imported.reject(marker)
 			yield* Effect.promise(() => setImmediate())
-			assert.deepStrictEqual(unhandled, [])
+			assert.deepStrictEqual(MutableList.toArray(unhandled), [])
+			assert.isTrue(
+				Array.some(MutableList.toArray(logs), (log) =>
+					Array.some(
+						log.cause.reasons,
+						(reason) =>
+							(reason._tag === "Die" && reason.defect === marker) ||
+							(reason._tag === "Fail" && reason.error === marker),
+					),
+				),
+			)
 		}).pipe(Effect.scoped, Effect.provide(Path.layer)),
 )

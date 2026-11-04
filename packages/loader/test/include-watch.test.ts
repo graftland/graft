@@ -10,6 +10,7 @@ import {
 	FileSystem,
 	Option,
 	Logger,
+	MutableList,
 	Path,
 	Queue,
 	Ref,
@@ -360,7 +361,7 @@ it.effect(
 				yield* fs.writeFileString(file, "[]")
 				const ready = yield* Deferred.make<void>()
 				const marker = new Error("watcher cleanup failed")
-				const logs: Array<Logger.Options<unknown>> = []
+				const logs = MutableList.make<Logger.Options<unknown>>()
 				yield* Graft.provide(FileSystem.FileSystem, {
 					...fs,
 					watch: (_, options) =>
@@ -385,13 +386,13 @@ it.effect(
 					Effect.provide(
 						Logger.layer([
 							Logger.make((entry) => {
-								logs.push(entry)
+								MutableList.append(logs, entry)
 							}),
 						]),
 					),
 				)
 				assert.isTrue(
-					Array.some(logs, (log) =>
+					Array.some(MutableList.toArray(logs), (log) =>
 						Array.some(
 							log.cause.reasons,
 							(reason) => reason._tag === "Die" && reason.defect === marker,
@@ -400,4 +401,52 @@ it.effect(
 				)
 			}),
 		),
+)
+
+it.effect("logs pure interruption from a native watcher finalizer", () =>
+	run(() => ({}))(() =>
+		Effect.gen(function* () {
+			const fs = yield* FileSystem.FileSystem
+			const directory = yield* fs.makeTempDirectoryScoped()
+			const file = `${directory}/graft.yml`
+			yield* fs.writeFileString(file, "[]")
+			const ready = yield* Deferred.make<void>()
+
+			const logs = MutableList.make<Logger.Options<unknown>>()
+			yield* Graft.provide(FileSystem.FileSystem, {
+				...fs,
+				watch: (_, options) =>
+					Stream.unwrap(
+						Effect.gen(function* () {
+							yield* Effect.addFinalizer(() => Effect.interrupt)
+							options?.onReady?.()
+							yield* Deferred.succeed(ready, undefined)
+							return Stream.never
+						}),
+					),
+			})
+			yield* Effect.gen(function* () {
+				const fork = yield* Graft.plugin(Include.Include, {
+					path: file,
+					watch: true,
+				})
+				yield* fork.await
+				yield* Deferred.await(ready)
+				yield* fork.dispose
+			}).pipe(
+				Effect.provide(
+					Logger.layer([
+						Logger.make((entry) => {
+							MutableList.append(logs, entry)
+						}),
+					]),
+				),
+			)
+			assert.isTrue(
+				Array.some(MutableList.toArray(logs), (log) =>
+					Cause.hasInterruptsOnly(log.cause),
+				),
+			)
+		}),
+	),
 )

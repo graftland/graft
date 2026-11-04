@@ -1,5 +1,7 @@
 import {
+	Array,
 	Cause,
+	Fiber,
 	Data,
 	Deferred,
 	Effect,
@@ -9,7 +11,6 @@ import {
 	Scope,
 	TxRef,
 } from "effect"
-import type { Fiber } from "effect"
 
 type State<E> = Data.TaggedEnum<{
 	Open: {}
@@ -65,12 +66,29 @@ export const make = <E>(): Effect.Effect<FailureGroup<E>, never, Scope.Scope> =>
 			Effect.uninterruptibleMask((restore) =>
 				Effect.gen(function* () {
 					const scope = yield* Scope.make()
-					const body = yield* Effect.exit(restore(Scope.provide(scope)(effect)))
+					// The owned child makes cancellation explicit, even when a stream closes an internal scope.
+					const ownerId = yield* Effect.withFiber((self) =>
+						Effect.succeed(self.id),
+					)
+					const worker = yield* Effect.forkIn(
+						restore(Scope.provide(scope)(effect)),
+						scope,
+					)
+					const waiting = yield* Effect.exit(restore(Fiber.await(worker)))
+					if (Exit.isFailure(waiting)) yield* Fiber.interrupt(worker)
+					const body = yield* Fiber.await(worker)
 					const closed = yield* Effect.exit(Scope.close(scope, body))
+					// Forwarding this exact cancellation from a finalizer is indistinguishable from acknowledging it.
+					const expected =
+						Exit.isFailure(waiting) &&
+						Exit.isFailure(body) &&
+						Array.every(
+							body.cause.reasons,
+							(reason) =>
+								reason._tag === "Interrupt" && reason.fiberId === ownerId,
+						)
 					const bodyCause =
-						Exit.isFailure(body) && !Cause.hasInterruptsOnly(body.cause)
-							? body.cause
-							: Cause.empty
+						Exit.isFailure(body) && !expected ? body.cause : Cause.empty
 					const releaseCause = Exit.isFailure(closed)
 						? closed.cause
 						: Cause.empty
@@ -94,6 +112,8 @@ export const make = <E>(): Effect.Effect<FailureGroup<E>, never, Scope.Scope> =>
 								? Cause.combine(body.cause, closed.cause)
 								: closed.cause,
 						)
+					if (Exit.isFailure(waiting) && Exit.isSuccess(body))
+						return yield* Effect.failCause(waiting.cause)
 					return yield* body
 				}),
 			)
@@ -108,11 +128,8 @@ export const make = <E>(): Effect.Effect<FailureGroup<E>, never, Scope.Scope> =>
 		)
 		const failure = Effect.tx(check.pipe(Effect.andThen(Effect.txRetry)))
 		const failCause = (cause: Cause.Cause<E>) =>
-			Cause.hasInterruptsOnly(cause)
-				? Effect.void
-				: FiberSet.run(fibers, observe(Effect.failCause(cause))).pipe(
-						Effect.asVoid,
-					)
+			// This is an explicit failure report, not cancellation of an owned worker.
+			FiberSet.run(fibers, observe(Effect.failCause(cause))).pipe(Effect.asVoid)
 		const close = TxRef.update(state, (s) =>
 			s._tag === "Open" ? State.Closed() : s,
 		).pipe(
@@ -133,11 +150,11 @@ export const make = <E>(): Effect.Effect<FailureGroup<E>, never, Scope.Scope> =>
 				FiberSet.runtime(fibers)<R>().pipe(
 					Effect.map(
 						(run) => (effect: Effect.Effect<unknown, E, R>) =>
-							run(observe(check.pipe(Effect.andThen(effect)))),
+							run(check.pipe(Effect.andThen(observe(effect)))),
 					),
 				),
 			run: (effect) =>
-				FiberSet.run(fibers, observe(check.pipe(Effect.andThen(effect)))),
+				FiberSet.run(fibers, check.pipe(Effect.andThen(observe(effect)))),
 			fail: (error) => failCause(Cause.fail(error)),
 			failCause,
 			race: (effect) =>

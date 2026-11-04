@@ -1,8 +1,5 @@
-import {
-	AlreadyLoaded,
-	ModuleImportFailed,
-	ActivationFailed,
-} from "./childErrors"
+import { loadModule } from "./loadModule"
+import { AlreadyLoaded, ActivationFailed } from "./childErrors"
 import { Graft, Plugin, type Fork } from "@graftland/graft"
 import {
 	Array,
@@ -212,11 +209,7 @@ export const lifecycle = (
 							}),
 						),
 					)
-				const module = yield* Effect.tryPromise({
-					try: () => import(contract.module),
-					catch: (cause) =>
-						ModuleImportFailed.make({ module: contract.module, cause }),
-				})
+				const module = yield* loadModule(contract.module)
 				const plugin = Plugin.fromModule(module)
 				if (Option.isNone(plugin))
 					return yield* ActivationFailed.make({

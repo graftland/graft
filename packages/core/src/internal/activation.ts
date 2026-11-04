@@ -59,6 +59,13 @@ import {
 	type Spec,
 } from "./runtime"
 
+// A finalizer forwarding exactly the requested interrupt is indistinguishable from acknowledging cancellation.
+const interruptedBy = <E>(cause: Cause.Cause<E>, id: number) =>
+	Array.every(
+		cause.reasons,
+		(reason) => reason._tag === "Interrupt" && reason.fiberId === id,
+	)
+
 /** Observe cancellation without losing the child's final Exit at an interruption boundary. */
 const cancelOnChange = <A, E, R, B, E2, R2>(
 	operation: Effect.Effect<A, E, R>,
@@ -67,12 +74,14 @@ const cancelOnChange = <A, E, R, B, E2, R2>(
 		result: Exit.Exit<A, E>,
 		settled: Exit.Exit<boolean>,
 		restore: typeof Effect.interruptible,
+		expectedCancellation: (cause: Cause.Cause<E>) => boolean,
 	) => Effect.Effect<B, E2, R2>,
 	observe: (result: Exit.Exit<A, E>) => Effect.Effect<void> = () => Effect.void,
 ) =>
 	Effect.scoped(
 		Effect.uninterruptibleMask((restore) =>
 			Effect.gen(function* () {
+				const id = yield* Effect.withFiber((self) => Effect.succeed(self.id))
 				const worker = yield* Effect.forkScoped(restore(operation))
 				const raced = yield* Effect.exit(
 					restore(
@@ -87,7 +96,9 @@ const cancelOnChange = <A, E, R, B, E2, R2>(
 				yield* observe(result)
 				// A stop can arrive during masked cleanup or observation. Handoff stays masked.
 				const settled = yield* Effect.exit(restore(raced))
-				return yield* handoff(result, settled, restore)
+				return yield* handoff(result, settled, restore, (cause) =>
+					interruptedBy(cause, id),
+				)
 			}),
 		),
 	)
@@ -487,19 +498,19 @@ export const supervise = Effect.fnUntraced(function* (
 			const handled = yield* cancelOnChange(
 				operation,
 				waitChange({ ...resolution, spec: candidate }),
-				(result, settled) =>
+				(result, settled, _restore, expectedCancellation) =>
 					Effect.gen(function* () {
 						if (Exit.isFailure(result)) {
 							// Teardown owns failures during cancellation; ordinary update failures are logged before restarting.
 							if (
-								!Cause.hasInterruptsOnly(result.cause) &&
+								!expectedCancellation(result.cause) &&
 								(Exit.isFailure(settled) || Cause.hasInterrupts(result.cause))
 							)
 								yield* Ref.update(running.updateCleanup, (cause) =>
 									Cause.combine(cause, result.cause),
 								)
 							if (
-								!Cause.hasInterruptsOnly(result.cause) ||
+								!expectedCancellation(result.cause) ||
 								(Exit.isSuccess(settled) && !settled.value)
 							)
 								yield* Effect.logWarning(
@@ -526,6 +537,7 @@ export const supervise = Effect.fnUntraced(function* (
 	/** Every phase finishes before the immutable result is handed to state or disposal. */
 	const teardown = (running: Running, exit: Exit.Exit<unknown, unknown>) =>
 		Effect.gen(function* () {
+			const closer = yield* Effect.withFiber((self) => Effect.succeed(self.id))
 			yield* Fiber.interrupt(running.fiber)
 			const stopped = yield* Fiber.await(running.fiber)
 			const withdrawn = yield* Effect.exit(
@@ -552,7 +564,7 @@ export const supervise = Effect.fnUntraced(function* (
 			const updates = yield* Ref.get(running.updateCleanup)
 			// Only stopping apply is expected to interrupt. Resource release must finish.
 			const stoppedCause =
-				Exit.isFailure(stopped) && !Cause.hasInterruptsOnly(stopped.cause)
+				Exit.isFailure(stopped) && !interruptedBy(stopped.cause, closer)
 					? stopped.cause
 					: Cause.empty
 			const cause = Array.reduce(
@@ -658,20 +670,17 @@ export const supervise = Effect.fnUntraced(function* (
 		return yield* cancelOnChange(
 			operation,
 			changed,
-			(result, settled, restore) =>
+			(result, settled, restore, expectedCancellation) =>
 				Effect.gen(function* () {
 					if (Exit.isFailure(settled)) {
 						// Disposal owns failures produced while cancelling the retry, not the already published startup failure.
-						if (
-							Exit.isFailure(result) &&
-							!Cause.hasInterruptsOnly(result.cause)
-						)
+						if (Exit.isFailure(result) && !expectedCancellation(result.cause))
 							yield* Ref.set(cleanup, result)
 						return yield* Effect.failCause(settled.cause)
 					}
 					if (
 						Exit.isFailure(result) &&
-						(!settled.value || !Cause.hasInterruptsOnly(result.cause))
+						(!settled.value || !expectedCancellation(result.cause))
 					) {
 						yield* setState(
 							runtime,

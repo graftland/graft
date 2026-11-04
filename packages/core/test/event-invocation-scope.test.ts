@@ -1,5 +1,14 @@
 import { assert, describe, it } from "@effect/vitest"
-import { Cause, Deferred, Effect, Exit, Fiber, Ref } from "effect"
+import {
+	Array,
+	Option,
+	Cause,
+	Deferred,
+	Effect,
+	Exit,
+	Fiber,
+	Ref,
+} from "effect"
 import { Event, Graft, Plugin } from "../src/index.ts"
 import { makeJournal, run } from "./utils.ts"
 
@@ -233,3 +242,47 @@ describe("event invocation scopes", () => {
 		)
 	}
 })
+
+for (const mode of ["emit", "parallel", "bail", "waterfall"]) {
+	it.effect(
+		`preserves handler cleanup interruption when cancelling ${mode}`,
+		() =>
+			Effect.gen(function* () {
+				const entered = yield* Deferred.make<number>()
+				const completed = yield* Ref.make(false)
+				const handler = Effect.addFinalizer(() =>
+					Effect.interrupt.pipe(Effect.andThen(Ref.set(completed, true))),
+				).pipe(
+					Effect.andThen(
+						Effect.withFiber((self) => Deferred.succeed(entered, self.id)),
+					),
+					Effect.andThen(Effect.never),
+				)
+				const event = Event.make<[], Option.Option<void>>("cancelled-handler")
+				const middleware = Event.middleware<void, void>("cancelled-middleware")
+				yield* Event.on(event, () => handler)
+				yield* Event.on(middleware, () => handler)
+				const dispatch = yield* Effect.forkScoped(
+					mode === "waterfall"
+						? Event.waterfall(middleware, undefined, () => Effect.void)
+						: mode === "emit"
+							? Event.emit(event)
+							: mode === "parallel"
+								? Event.parallel(event)
+								: Event.bail(event),
+				)
+				const id = yield* Deferred.await(entered)
+				yield* Fiber.interrupt(dispatch)
+				const exit = yield* Fiber.await(dispatch)
+				assert(Exit.isFailure(exit))
+				assert.isTrue(
+					Array.some(
+						exit.cause.reasons,
+						(reason) => reason._tag === "Interrupt" && reason.fiberId === id,
+					),
+				)
+				const released = yield* Ref.get(completed)
+				assert.isFalse(released)
+			}).pipe(run),
+	)
+}

@@ -26,7 +26,7 @@ export const run = <A, E, R>(group: Group, effect: Effect.Effect<A, E, R>) =>
 				const scope = yield* Scope.make()
 				const body = yield* Effect.exit(restore(Scope.provide(scope)(effect)))
 				const closed = yield* Effect.exit(Scope.close(scope, body))
-				// Cancellation of the body is expected; interruption during resource release is not.
+				// Bare worker interruption is supported; nested scopes inside the body must report their own release failures, unlike the separately observed task scope.
 				const failure = Cause.combine(
 					Exit.isFailure(body) && !Cause.hasInterruptsOnly(body.cause)
 						? body.cause

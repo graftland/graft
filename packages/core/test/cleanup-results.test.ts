@@ -335,3 +335,32 @@ describe("activation cleanup results", () => {
 			}).pipe(run),
 	)
 })
+
+it.effect("retains interruption from an intercept finalizer on dispose", () =>
+	Effect.gen(function* () {
+		const fork = yield* Graft.plugin(
+			Plugin.make({
+				name: "interrupted intercept cleanup",
+				apply: () => Effect.void,
+			}),
+			undefined,
+			{
+				intercept: [
+					{ apply: (effect) => effect.pipe(Effect.ensuring(Effect.interrupt)) },
+				],
+			},
+		)
+		yield* fork.await
+		const exit = yield* Effect.exit(fork.dispose)
+		assert(Exit.isFailure(exit))
+		assert.isTrue(
+			Array.some(
+				exit.cause.reasons,
+				(reason) =>
+					reason._tag === "Fail" &&
+					Schema.is(Fork.CleanupError)(reason.error) &&
+					Cause.hasInterruptsOnly(reason.error.cause),
+			),
+		)
+	}).pipe(run),
+)

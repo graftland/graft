@@ -6,8 +6,12 @@ export const acquire = (directory: string) =>
 	Effect.gen(function* () {
 		const fs = yield* FileSystem.FileSystem
 		const path = yield* Path.Path
-		yield* fs.makeDirectory(directory, { recursive: true })
-		const { DatabaseSync } = yield* Effect.promise(() => import("node:sqlite"))
+		yield* fs
+			.makeDirectory(directory, { recursive: true })
+			.pipe(Effect.uninterruptible)
+		const { DatabaseSync } = yield* Effect.promise(
+			() => import("node:sqlite"),
+		).pipe(Effect.uninterruptible)
 		const locked = (cause: unknown) =>
 			StateDirectoryLocked.make({
 				detail:

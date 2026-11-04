@@ -117,12 +117,15 @@ export const connect = (
 			session: record.handle.token,
 			limits: record.limits,
 		}).pipe(Scope.provide(resources))
+		// RPC forwarding cancellation is expected; resource cleanup is collected by Connection's scopes.
 		const report = (cause: Cause.Cause<unknown>) =>
-			failures.failCause(
-				Cause.map(cause, (error) =>
-					TransportError.make({ cause: Cause.fail(error) }),
-				),
-			)
+			Cause.hasInterruptsOnly(cause)
+				? Effect.void
+				: failures.failCause(
+						Cause.map(cause, (error) =>
+							TransportError.make({ cause: Cause.fail(error) }),
+						),
+					)
 		yield* failures.await.pipe(
 			Effect.catchCause((cause) =>
 				Cause.hasInterruptsOnly(cause)

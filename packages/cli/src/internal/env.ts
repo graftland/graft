@@ -2,6 +2,7 @@
  * Where `!env` values come from: the process environment, then an optional
  * `.env` file that watch mode reads again when it changes.
  */
+import { observeShutdown } from "./observeShutdown"
 import type { PlatformError } from "effect"
 import {
 	Cause,
@@ -120,6 +121,11 @@ export const watchEnvFile = <E, R>(
 						),
 						Stream.runForEachArray((events) => Queue.offerAll(queue, events)),
 						Effect.scoped,
+						(effect) =>
+							observeShutdown(
+								effect,
+								`Watching ${file} stopped with interrupted cleanup`,
+							),
 						Effect.onExit(logStopped(file)),
 						Effect.catchCauseIf(
 							(cause) => !Cause.hasInterrupts(cause),

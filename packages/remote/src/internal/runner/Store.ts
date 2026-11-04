@@ -57,7 +57,9 @@ export const directory = (root: string) =>
 							}),
 				),
 			)
-		yield* storage(fs.makeDirectory(root, { recursive: true }))
+		yield* storage(
+			fs.makeDirectory(root, { recursive: true }).pipe(Effect.uninterruptible),
+		)
 		const mutex = yield* Semaphore.make(1)
 		const read = Effect.gen(function* () {
 			const files = yield* fs.readDirectory(root)
@@ -84,12 +86,13 @@ export const directory = (root: string) =>
 				)
 				yield* Effect.forEach(
 					obsolete,
-					(row) => fs.remove(path.join(root, row.file)),
+					(row) =>
+						fs.remove(path.join(root, row.file)).pipe(Effect.uninterruptible),
 					{ discard: true },
 				)
 				if (obsolete.length > 0) {
 					const directory = yield* fs.open(root, { flag: "r" })
-					yield* directory.sync
+					yield* directory.sync.pipe(Effect.uninterruptible)
 				}
 			}),
 		)
@@ -129,7 +132,10 @@ export const directory = (root: string) =>
 									Effect.flatMap((file) =>
 										file
 											.writeAll(new TextEncoder().encode(encoded))
-											.pipe(Effect.andThen(file.sync)),
+											.pipe(
+												Effect.uninterruptible,
+												Effect.andThen(file.sync.pipe(Effect.uninterruptible)),
+											),
 									),
 								)
 								// Keep rename and directory synchronization together if the caller is canceled.
@@ -137,7 +143,7 @@ export const directory = (root: string) =>
 									Effect.gen(function* () {
 										yield* fs.rename(temporary, destination)
 										const directory = yield* fs.open(root, { flag: "r" })
-										yield* directory.sync
+										yield* directory.sync.pipe(Effect.uninterruptible)
 									}),
 								)
 								// The new high-water file is durable before any old record is removed.

@@ -89,3 +89,47 @@ it.effect("hands off worker cleanup failure on active close", () =>
 		assert.include(Cause.pretty(result.cause), "cleanup marker")
 	}),
 )
+
+for (const cancelled of [false, true]) {
+	it.effect(
+		`retains nested scope cleanup interruption with cancellation ${cancelled}`,
+		() =>
+			Effect.gen(function* () {
+				const exit = yield* Effect.gen(function* () {
+					const group = yield* FailureGroup.make<never>()
+					const ready = yield* Deferred.make<void>()
+					const worker = yield* group.run(
+						Effect.scoped(
+							Effect.addFinalizer(() => Effect.interrupt).pipe(
+								Effect.andThen(Deferred.succeed(ready, undefined)),
+								Effect.andThen(cancelled ? Effect.never : Effect.void),
+							),
+						),
+					)
+					yield* Deferred.await(ready)
+					if (!cancelled) yield* Fiber.await(worker)
+					const closed = yield* Effect.exit(group.close)
+					assert(Exit.isFailure(closed))
+					assert.isTrue(Cause.hasInterruptsOnly(closed.cause))
+				}).pipe(Effect.scoped, Effect.exit)
+				assert(Exit.isFailure(exit))
+				assert.isTrue(Cause.hasInterruptsOnly(exit.cause))
+			}),
+	)
+}
+
+it.effect("retains explicitly reported interruption as a failure", () =>
+	Effect.gen(function* () {
+		const exit = yield* Effect.gen(function* () {
+			const group = yield* FailureGroup.make<never>()
+			yield* group.failCause(Cause.interrupt(123))
+			const failure = yield* Effect.exit(
+				group.await.pipe(Effect.timeout("1 second")),
+			)
+			assert(Exit.isFailure(failure))
+			assert.isTrue(Cause.hasInterruptsOnly(failure.cause))
+		}).pipe(Effect.scoped, Effect.exit)
+		assert(Exit.isFailure(exit))
+		assert.isTrue(Cause.hasInterruptsOnly(exit.cause))
+	}),
+)

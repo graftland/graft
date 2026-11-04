@@ -3,6 +3,9 @@ import { NodeServices } from "@effect/platform-node"
 import {
 	Array,
 	Cause,
+	Deferred,
+	Fiber,
+	String,
 	Effect,
 	Exit,
 	FileSystem,
@@ -11,6 +14,8 @@ import {
 	Schema,
 } from "effect"
 import { Digest, SecureRandom } from "effect/crypto"
+import * as Supervisor from "../src/internal/runner/Supervisor"
+import { Execution, Store } from "../src/internal/runner/model"
 import * as Stores from "../src/internal/runner/Store"
 import {
 	defaults,
@@ -239,3 +244,74 @@ describe("runner state directory", () => {
 		60_000,
 	)
 })
+
+for (const stage of ["write", "sync"]) {
+	it.effect(
+		`waits for native ${stage} when cancelling supervisor recovery`,
+		() =>
+			Effect.gen(function* () {
+				const fs = yield* FileSystem.FileSystem
+				const directory = yield* fs.makeTempDirectoryScoped()
+				const store = yield* Stores.directory(directory)
+				yield* store.save(record)
+				const entered = yield* Deferred.make<void>()
+				const pending = Promise.withResolvers<void>()
+				const marker = new Error("late recovery failure")
+				const native = Deferred.succeed(entered, undefined).pipe(
+					Effect.andThen(Effect.promise(() => pending.promise)),
+				)
+				const wrapped: FileSystem.FileSystem = {
+					...fs,
+					open: (path: string, options) =>
+						fs.open(path, options).pipe(
+							Effect.map((file) => ({
+								...file,
+								stat: file.stat,
+								writeAll: (bytes: Uint8Array) =>
+									stage === "write" && String.endsWith(".tmp")(path)
+										? native.pipe(Effect.andThen(file.writeAll(bytes)))
+										: file.writeAll(bytes),
+								sync:
+									stage === "sync" && String.endsWith(".tmp")(path)
+										? native
+										: file.sync,
+							})),
+						),
+				}
+				const recovering = yield* Effect.gen(function* () {
+					const recoveringStore = yield* Stores.directory(directory)
+					yield* Supervisor.make().pipe(
+						Effect.provideService(Store, recoveringStore),
+						Effect.provideService(Execution, {
+							spawn: () => Effect.die("Unexpected spawn"),
+							recover: () =>
+								Effect.succeed({
+									kind: "Exited",
+									exit: { code: 0, signal: null },
+									cause: Cause.empty,
+								}),
+						}),
+					)
+				}).pipe(
+					Effect.provideService(FileSystem.FileSystem, wrapped),
+					Effect.scoped,
+					Effect.forkScoped,
+				)
+				yield* Deferred.await(entered)
+				const cancelling = yield* Effect.forkScoped(Fiber.interrupt(recovering))
+				yield* Effect.yieldNow
+				const files = yield* fs.readDirectory(directory)
+				pending.reject(marker)
+				yield* Fiber.join(cancelling)
+				const result = yield* Fiber.await(recovering)
+				assert.isTrue(Array.some(files, String.endsWith(".tmp")))
+				assert(Exit.isFailure(result))
+				assert.isTrue(
+					Array.some(
+						result.cause.reasons,
+						(reason) => reason._tag === "Die" && reason.defect === marker,
+					),
+				)
+			}).pipe(Effect.scoped, Effect.provide(runtime)),
+	)
+}

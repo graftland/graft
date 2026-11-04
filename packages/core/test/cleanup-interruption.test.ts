@@ -7,6 +7,7 @@ import {
 	Fiber,
 	Option,
 	Ref,
+	Schedule,
 	Schema,
 	Stream,
 } from "effect"
@@ -148,3 +149,40 @@ it.effect("reports worker scope interruption on automatic disposal", () =>
 		assert.isTrue(Cause.hasInterruptsOnly(error.cause))
 	}),
 )
+
+for (const phase of ["apply", "update", "retry initialization", "retry step"]) {
+	it.effect(`retains pure cleanup interruption while cancelling ${phase}`, () =>
+		Effect.gen(function* () {
+			const entered = yield* Deferred.make<void>()
+			const pending = Deferred.succeed(entered, undefined).pipe(
+				Effect.andThen(Effect.never),
+				Effect.ensuring(Effect.interrupt),
+			)
+			const fork = yield* Graft.plugin(
+				Plugin.make({
+					name: "interrupted operation cleanup",
+					...(phase === "retry initialization"
+						? { retry: Schedule.fromStep(pending) }
+						: phase === "retry step"
+							? { retry: Schedule.fromStep(Effect.succeed(() => pending)) }
+							: {}),
+					apply: () =>
+						phase === "apply"
+							? pending
+							: phase === "update"
+								? Effect.succeed(() => pending)
+								: Effect.fail("startup failed"),
+				}),
+			)
+			if (phase === "update") {
+				yield* fork.await
+				yield* fork.update(undefined).pipe(Effect.forkScoped)
+			}
+			yield* Deferred.await(entered)
+			const result = yield* Effect.result(fork.dispose)
+			assert(result._tag === "Failure")
+			assert.strictEqual(result.failure._tag, "CleanupError")
+			assert.isTrue(Cause.hasInterruptsOnly(result.failure.cause))
+		}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
+	)
+}

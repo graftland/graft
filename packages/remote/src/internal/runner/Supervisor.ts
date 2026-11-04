@@ -735,6 +735,20 @@ const protocol = (runtime: Runtime, actions: Operations) =>
 									if (Option.isSome(entry))
 										yield* stop(entry.value, { _tag: "Superseded" }).pipe(
 											Effect.flatMap(Deferred.await),
+											Effect.tap((result) =>
+												result.cause.reasons.length === 0
+													? Effect.void
+													: Effect.logWarning(
+															"Superseded remote execution cleanup failed",
+															result.cause,
+														).pipe(
+															Effect.annotateLogs({
+																"remote.identity": record.handle.key.identity,
+																"remote.instance": record.handle.key.instance,
+																"remote.generation": record.handle.generation,
+															}),
+														),
+											),
 										)
 								}
 								yield* healthy

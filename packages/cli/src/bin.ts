@@ -28,6 +28,7 @@ const start = Command.make(
 	},
 	(options) =>
 		Effect.promise(() => import("./Start")).pipe(
+			Effect.uninterruptible,
 			Effect.flatMap((Start) =>
 				Start.run({
 					...options,
@@ -56,6 +57,7 @@ const create = Command.make(
 	},
 	(options) =>
 		Effect.promise(() => import("./Manage")).pipe(
+			Effect.uninterruptible,
 			Effect.flatMap((Manage) => Manage.create(options)),
 		),
 ).pipe(Command.withDescription("Create a new Graft project"))
@@ -65,6 +67,7 @@ const add = Command.make(
 	{ packages: Argument.variadic(Argument.String("package")) },
 	({ packages }) =>
 		Effect.promise(() => import("./Manage")).pipe(
+			Effect.uninterruptible,
 			Effect.flatMap((Manage) => Manage.add(packages)),
 		),
 ).pipe(
@@ -78,6 +81,7 @@ const remove = Command.make(
 	{ packages: Argument.variadic(Argument.String("package")) },
 	({ packages }) =>
 		Effect.promise(() => import("./Manage")).pipe(
+			Effect.uninterruptible,
 			Effect.flatMap((Manage) => Manage.remove(packages)),
 		),
 ).pipe(

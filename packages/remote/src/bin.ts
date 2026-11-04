@@ -2,16 +2,7 @@
 /** Runs local children and WebSocket supervisors, and issues their deployment certificates. */
 import { Graft } from "@graftland/graft"
 import { NodeRuntime } from "@effect/platform-node"
-import {
-	Console,
-	Cause,
-	Array,
-	Effect,
-	Layer,
-	Logger,
-	Option,
-	Schema,
-} from "effect"
+import { Console, Array, Effect, Layer, Logger, Option, Schema } from "effect"
 import { Argument, CliError, Command, Flag } from "effect/cli"
 import process from "node:process"
 import { pathToFileURL } from "node:url"
@@ -127,15 +118,26 @@ NodeRuntime.runMain(
 			)
 		}),
 	).pipe(
-		Effect.tapCause((cause) =>
-			Cause.hasInterruptsOnly(cause) ||
-			Array.every(
-				cause.reasons,
-				(reason) => reason._tag === "Fail" && CliError.isCliError(reason.error),
-			)
-				? Effect.void
-				: Effect.logError(cause),
-		),
+		(effect) =>
+			Effect.withFiber((main) =>
+				effect.pipe(
+					Effect.tapCause((cause) =>
+						// NodeRuntime uses this fiber's id; a self-interrupt here is indistinguishable, but worker cleanup is not.
+						Array.every(
+							cause.reasons,
+							(reason) =>
+								reason._tag === "Interrupt" && reason.fiberId === main.id,
+						) ||
+						Array.every(
+							cause.reasons,
+							(reason) =>
+								reason._tag === "Fail" && CliError.isCliError(reason.error),
+						)
+							? Effect.void
+							: Effect.logError(cause),
+					),
+				),
+			),
 		Effect.provideService(Logger.LogToStderr, true),
 	),
 	// Report inside the stderr context, including failures from resource cleanup.

@@ -9,6 +9,8 @@ import {
 	Fiber,
 	Queue,
 	Option,
+	Logger,
+	MutableList,
 	Ref,
 	Schema,
 } from "effect"
@@ -143,6 +145,63 @@ const orphan: SessionRecord = {
 }
 
 layer(SecureRandom.layerWebCrypto)("runner session supervisor", (it) => {
+	it.effect(
+		"reports superseded unit cleanup before retention removes its record",
+		() =>
+			Effect.gen(function* () {
+				const logs = MutableList.make<Logger.Options<unknown>>()
+				const marker = new Error("replacement-cleanup-marker")
+				yield* Effect.gen(function* () {
+					const { driver } = yield* fake()
+					const store = yield* Stores.memory
+					const supervisor = yield* Supervisor.make().pipe(
+						Effect.provideService(Store, store),
+						Effect.provideService(Execution, {
+							...driver,
+							spawn: (...args) =>
+								driver
+									.spawn(...args)
+									.pipe(
+										Effect.tap(() =>
+											Effect.addFinalizer(() => Effect.die(marker)),
+										),
+									),
+						}),
+					)
+					const first = yield* supervisor.open({ key, requestId: "first" })
+					yield* supervisor.load(first.handle, { specifier: "fixture" })
+					const next = yield* supervisor.open({
+						key,
+						requestId: "second",
+						expectedGeneration: 1,
+					})
+					assert.strictEqual(next.handle.generation, 2)
+					const retained = yield* store.list
+					assert.deepStrictEqual(
+						Array.map(retained, (row) => row.handle.generation),
+						[2],
+					)
+				}).pipe(
+					Effect.scoped,
+					Effect.provide(
+						Logger.layer([
+							Logger.make((log) => {
+								MutableList.append(logs, log)
+							}),
+						]),
+					),
+				)
+				assert.isTrue(
+					Array.some(MutableList.toArray(logs), (log) =>
+						Array.some(
+							log.cause.reasons,
+							(reason) => reason._tag === "Die" && reason.defect === marker,
+						),
+					),
+				)
+			}),
+	)
+
 	it.effect(
 		"fences competing and forgotten Open requests before disturbing the current child",
 		() =>

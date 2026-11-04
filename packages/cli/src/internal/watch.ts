@@ -1,3 +1,4 @@
+import { observeShutdown } from "./observeShutdown"
 import type * as Hmr from "@graftland/hmr"
 import { Array, Cause, Effect, Exit, Stream, String } from "effect"
 
@@ -47,6 +48,11 @@ export const watchModules = <E, R>(
 		// leaving the application running without a watcher.
 		Effect.andThen(Effect.sleep("1 second")),
 		Effect.forever,
+		(effect) =>
+			observeShutdown(
+				effect,
+				"Module watcher stopped with interrupted cleanup",
+			),
 		// onExit runs uninterruptibly, after stream cleanup. Observe the entire
 		// worker before forkScoped owns it, including mixed interruption causes.
 		Effect.onExit((exit) =>

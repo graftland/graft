@@ -6,6 +6,7 @@ import {
 	Effect,
 	FileSystem,
 	Logger,
+	MutableList,
 	Option,
 	Path,
 	PlatformError,
@@ -27,7 +28,7 @@ it.effect(
 				module: "FileSystem",
 				method: "remove",
 			})
-			const logs: Array<Logger.Options<unknown>> = []
+			const logs = MutableList.make<Logger.Options<unknown>>()
 			const handle = ChildProcessSpawner.makeHandle({
 				pid: ChildProcessSpawner.ProcessId(2147483647),
 				exitCode: Effect.succeed(ChildProcessSpawner.ExitCode(0)),
@@ -62,12 +63,12 @@ it.effect(
 				Effect.provide(
 					Logger.layer([
 						Logger.make((entry) => {
-							logs.push(entry)
+							MutableList.append(logs, entry)
 						}),
 					]),
 				),
 			)
-			const warning = Array.findFirst(logs, (log) =>
+			const warning = Array.findFirst(MutableList.toArray(logs), (log) =>
 				Array.some(
 					log.cause.reasons,
 					(reason) => reason._tag === "Fail" && reason.error === marker,
@@ -79,7 +80,7 @@ it.effect(
 			assert.strictEqual(retained.length, 1)
 			for (const snapshot of retained)
 				assert.isTrue(
-					Array.some(logs, (log) =>
+					Array.some(MutableList.toArray(logs), (log) =>
 						Array.some(
 							Array.ensure(log.message),
 							(message) =>

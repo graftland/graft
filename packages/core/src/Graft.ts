@@ -8,6 +8,7 @@ import {
 	Cause,
 	Effect,
 	Exit,
+	Fiber,
 	HashMap,
 	HashSet,
 	Layer,
@@ -468,28 +469,40 @@ export const plugin: <P extends Plugin>(
 							),
 						)
 					}),
-				).pipe(
-					Effect.onExit((exit) =>
-						Exit.isFailure(exit) && !Cause.hasInterruptsOnly(exit.cause)
-							? Ref.update(termination, (cleanup) =>
-									Exit.failCause(
-										Exit.isFailure(cleanup)
-											? Cause.combine(cleanup.cause, exit.cause)
-											: exit.cause,
-									),
-								).pipe(
-									Effect.andThen(
-										Effect.logError(
-											"Stopping the plugin supervisor failed",
-											exit.cause,
-										).pipe(Effect.annotateLogs({ "graft.fork": id })),
-									),
-								)
-							: Effect.void,
-					),
-					Effect.updateContext<never, never>(() => context),
-				)
-				yield* Effect.forkIn(supervisor, forkScope)
+				).pipe(Effect.updateContext<never, never>(() => context))
+				yield* Effect.acquireRelease(
+					Effect.forkIn(supervisor, forkScope),
+					(fiber) =>
+						Effect.gen(function* () {
+							const closer = yield* Effect.withFiber((self) =>
+								Effect.succeed(self.id),
+							)
+							yield* Fiber.interrupt(fiber)
+							const exit = yield* Fiber.await(fiber)
+							// Only our cancellation is expected; an interceptor finalizer can interrupt itself.
+							return yield* Exit.isFailure(exit) &&
+							!Array.every(
+								exit.cause.reasons,
+								(reason) =>
+									reason._tag === "Interrupt" && reason.fiberId === closer,
+							)
+								? Ref.update(termination, (cleanup) =>
+										Exit.failCause(
+											Exit.isFailure(cleanup)
+												? Cause.combine(cleanup.cause, exit.cause)
+												: exit.cause,
+										),
+									).pipe(
+										Effect.andThen(
+											Effect.logError(
+												"Stopping the plugin supervisor failed",
+												exit.cause,
+											).pipe(Effect.annotateLogs({ "graft.fork": id })),
+										),
+									)
+								: Effect.void
+						}),
+				).pipe(Scope.provide(forkScope))
 				return makeFork<InputOf<P>, ErrorOf<P>>(
 					status,
 					id,

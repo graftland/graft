@@ -241,15 +241,19 @@ export const write = Effect.fn("Certificates.write")(function* (
 	force: boolean = false,
 ) {
 	const fs = yield* FileSystem.FileSystem
-	yield* fs.writeFileString(base + ".key", Redacted.value(pair.privateKey), {
-		flag: force ? "w" : "wx",
-		mode: 0o600,
-	})
+	yield* fs
+		.writeFileString(base + ".key", Redacted.value(pair.privateKey), {
+			flag: force ? "w" : "wx",
+			mode: 0o600,
+		})
+		.pipe(Effect.uninterruptible)
 	// Opening an existing file does not change its permissions when renewing it.
-	yield* fs.chmod(base + ".key", 0o600)
-	yield* fs.writeFileString(base + ".crt", pair.certificate, {
-		flag: force ? "w" : "wx",
-	})
+	yield* fs.chmod(base + ".key", 0o600).pipe(Effect.uninterruptible)
+	yield* fs
+		.writeFileString(base + ".crt", pair.certificate, {
+			flag: force ? "w" : "wx",
+		})
+		.pipe(Effect.uninterruptible)
 })
 
 export interface Options {
@@ -281,7 +285,9 @@ export const generate = Effect.fn("Certificates.generate")(function* (
 		if (Array.isReadonlyArrayNonEmpty(taken))
 			return yield* CertificateExists.make({ file: taken[0] })
 	}
-	yield* fs.makeDirectory(options.out, { recursive: true })
+	yield* fs
+		.makeDirectory(options.out, { recursive: true })
+		.pipe(Effect.uninterruptible)
 	const ca = path.join(options.out, "ca")
 	const existing =
 		(yield* fs.exists(ca + ".crt")) || (yield* fs.exists(ca + ".key"))

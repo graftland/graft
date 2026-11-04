@@ -1,4 +1,5 @@
-import { ModuleImportFailed, ContractNotFound } from "./childErrors"
+import { loadModule } from "./loadModule"
+import { ContractNotFound } from "./childErrors"
 import type { Graft } from "@graftland/graft"
 import { Effect, Logger, Option } from "effect"
 import { RpcServer } from "effect/rpc"
@@ -16,10 +17,7 @@ import { endpoint } from "./control"
 /** Import a contract in the runner installation; importing this module performs no I/O. */
 export const load = (specifier: string) =>
 	Effect.gen(function* () {
-		const module = yield* Effect.tryPromise({
-			try: () => import(specifier),
-			catch: (cause) => ModuleImportFailed.make({ module: specifier, cause }),
-		})
+		const module = yield* loadModule(specifier)
 		const contract = fromModule(module)
 		if (Option.isNone(contract))
 			return yield* ContractNotFound.make({ module: specifier })
