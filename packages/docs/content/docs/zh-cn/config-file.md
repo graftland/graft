@@ -38,7 +38,7 @@ description: 用 graft.yml 描述应用，并在运行期间修改配置。
 | 保存文件时会发生什么     | [在运行期间修改配置](#在运行期间修改配置) |
 | 从插件或代码中编辑配置项 | [Loader API](../loader-api/)              |
 
-要让配置项在子进程或另一台机器上运行，可将它指向[远程插件入口](../remote/host/)；保存的条目 id 也可以作为 runner 实例名。
+要让配置项在子进程或另一台机器上运行，可将它指向[远程插件入口](../remote/getting-started/)；保存的条目 id 也可以作为 runner 实例名。
 
 从条目加载的插件可从 `@graftland/loader` 导入 `Entry`，读取
 `yield* Entry.CurrentId`。它是

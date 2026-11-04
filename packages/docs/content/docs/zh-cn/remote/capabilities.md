@@ -1,14 +1,27 @@
 ---
-title: 编写能力插件
-description: 实现第三方传输或认证插件时看这一页。
+title: 编写自己的传输或认证
+description: 编写插件，以内置选项之外的方式连接、监听、提供凭证或认证，并用共享检查测试它。
 ---
 
-实现第三方传输或认证插件时看这一页。下面的接口和共享测试是 Connector、Listener、Credentials、Authenticator 的公开契约。
+本页面向需要 Remote 未内置的连接或认证方式的插件作者，例如另一种网络协议，或来自公司身份服务的凭证。这里先讲思路，再给出能运行的最小示例和测试方法。确切的签名见 API 参考中的
+[`Transport`](../../reference/plugin-remote/transport/readme/) 和
+[`Auth`](../../reference/plugin-remote/auth/readme/)。
 
-能力就是带 default 导出的普通 Graft 插件，在 `apply`
-中发布约定的服务键。Remote 通过应用的模块解析器读取
-`{ name, config }`，在私有 assembly 里启动提供者；父 realm 的业务服务仍然可见。不需要自定义服务键，也不用在 remote
-entry 旁边另装能力提供者。
+## 思路
+
+每个内置选项，比如 `url`、`unix`、`bearer` 或
+`mtls`，都是某个普通 Graft 插件的简写。Remote 把这些插件称为**能力**。每个能力恰好发布以下四种服务之一：
+
+| 服务            | 所在侧 | 职责                                                     | 模块                                 |
+| --------------- | ------ | -------------------------------------------------------- | ------------------------------------ |
+| `Connector`     | 宿主   | 打开一条通往 runner 的字节通道。                         | `@graftland/plugin-remote/Transport` |
+| `Credentials`   | 宿主   | 读取宿主要出示的内容：什么都没有、一个头部值或一张证书。 | `@graftland/plugin-remote/Auth`      |
+| `Listener`      | runner | 接受来自宿主的字节通道。                                 | `@graftland/plugin-remote/Transport` |
+| `Authenticator` | runner | 把宿主出示的内容转换为身份。                             | `@graftland/plugin-remote/Auth`      |
+
+这些模块只包含服务定义，不含 Node 实现。
+
+要使用自己的能力，用它的模块名代替简写。在宿主上：
 
 ```yaml
 connect:
@@ -20,123 +33,71 @@ connect:
     config: { account: billing }
 ```
 
-runner 的 `listen`
-元素也使用这样的引用，只是选择 Listener 和 Authenticator 插件。相对文件路径应基于 loader 的
-`ConfigDirectory`。配置用插件的 Schema 解码；I/O 在激活时执行，不能在模块导入时执行。
+在 runner 上，同样的 `transport` 与 `auth` 写在 `listen`
+元素中，指向 listener 和 authenticator。名字的解析方式与其他[插件名称](../../config-file/#插件名称)相同。
 
-## 四个契约
+你不需要自己加载能力，也从不需要挑选服务键。Remote 会为引用某个能力的条目单独启动它。两个条目可以用不同配置使用同一个能力而互不干扰，你的能力也仍然可以注入应用的普通服务。
 
-`@graftland/plugin-remote/Auth` 导出
-`Credentials`、`Authenticator`；`/Transport` 导出
-`Connector`、`Listener`。这些模块只有契约，不含 Node
-listener 实现。下面只省略了服务键声明和导入限定名：
+## 每个能力都要遵守的规则
 
-```ts
-interface ClientCertificate {
-	cert: string
-	key: Redacted<string>
-}
-interface VerifiedCertificate {
-	der: Uint8Array
-	subjectAltName: Option<string>
-}
-interface TlsPolicy {
-	ca: ReadonlyArray<string>
-	minVersion: "TLSv1.3"
-	requestCert: true
-	rejectUnauthorized: true
-}
-type Prepared =
-	| { _tag: "None" }
-	| { _tag: "Authorization"; value: Redacted<string> }
-	| { _tag: "Certificate"; value: ClientCertificate }
-type CredentialsApi = {
-	[K in Prepared["_tag"]]: {
-		kind: K
-		read: Effect<Extract<Prepared, { _tag: K }>, CredentialsError, Scope>
-	}
-}[Prepared["_tag"]]
-type AuthenticatorApi =
-	| { _tag: "None"; identity: string }
-	| {
-			_tag: "Header"
-			issuer?: string
-			authenticate: (
-				header: Option<Redacted<string>>,
-			) => Effect<string, AuthenticationFailed>
-	  }
-	| {
-			_tag: "Mtls"
-			tls: TlsPolicy
-			authenticate: (
-				certificate: VerifiedCertificate,
-			) => Effect<string, AuthenticationFailed>
-	  }
+- **默认导出。** 模块以默认导出的形式导出插件。
+- **用 schema 解析配置。** 用插件的 `config` schema 解码 `config`。
+- **激活时做 I/O。** 工作放在 `apply` 里，绝不在导入模块时进行。
+- **相对路径。** 像内置能力一样，相对于 loader 的 `ConfigDirectory`
+  解析配置中的文件路径，让它们相对于配置文件。
+- **发布服务。** 能力进入激活状态却没有发布服务，会以 `CapabilityContractError`
+  失败。等待缺失的应用服务的能力只会停留在 `Pending`。
+- **保留 cause。** 传输失败报告为 `TransportError`，凭证失败报告为
+  `CredentialsError`，原始失败放在 `cause` 中。
+- **绝不记录密钥。** 不要把 Authorization 的值写进日志。
 
-interface Properties {
-	protocol: string
-	encrypted: boolean
-	network: boolean
-	carries: ReadonlyArray<"header" | "certificate">
-}
-interface Channel {
-	input: Stream<Uint8Array, TransportError>
-	output: Sink<unknown, Uint8Array, unknown, TransportError>
-}
-interface Handshake {
-	authorization: Option<Redacted<string>>
-	certificate: Option<VerifiedCertificate>
-}
-type Session = (channel: Channel) => Effect<void, TransportError, Scope>
-type Accept = (handshake: Handshake) => Effect<Session, AuthenticationFailed>
-interface Serving {
-	ready: Effect<void>
-	serve: (accept: Accept) => Effect<void, TransportError, Scope>
-}
-interface ConnectorApi {
-	properties: Properties
-	connect: (credentials: Prepared) => Effect<Channel, TransportError, Scope>
-}
-interface ListenerApi {
-	properties: Properties
-	bind: (tls: Option<TlsPolicy>) => Effect<Serving, TransportError, Scope>
-}
-```
+能力代码和其他插件一样被信任，包括它对自身的声明。
 
-`read` 每次连接执行一次，返回声明的 kind；读取失败保存在
-`CredentialsError.cause`。`authenticate`
-返回稳定身份，不是会话 id。只有基于签发者的认证声明 `issuer`；bearer
-token 文件没有签发者。一个 runner 不允许多个不同 issuer。第三方能力代码及其属性声明和其他插件一样，是受信任的。
+## 描述传输
 
-`AuthenticationFailed` 有 `reason: "missing" | "invalid"`，以及可选的
-`challenge` 和 `cause`。HTTP listener 在 upgrade 前映射为 401，把 challenge 写入
-`WWW-Authenticate`。Bearer 缺失时为 `Bearer`，无效时为
-`Bearer error="invalid_token"`。不要记录 Authorization 内容。传输失败用
-`TransportError`，保留原始 cause。
+connector 和 listener 声明四个**属性**。Remote 用它们拒绝不安全的组合，并决定记录哪些警告：
 
-## 属性与生命周期
+| 属性        | 含义                                                 | Remote 如何使用                                                                                    |
+| ----------- | ---------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| `protocol`  | 一个简短的名字，如 `wss` 或 `unix`。                 | mTLS 要求 `wss`。`stdio` 必须是 runner 唯一的 listener。`stdio` 和 `command` 拒绝任何显式 `auth`。 |
+| `encrypted` | 传输是否保证流量机密。                               | mTLS 要求为 `true`。不加密的网络传输会记录警告。                                                   |
+| `network`   | 是否通过网络可达，而非仅限本地。                     | 不加密或无认证的网络传输会记录[选择传输与认证](../transport-auth/#警告的含义)中列出的警告。        |
+| `carries`   | 握手能携带哪些凭据：`header`、`certificate` 或两者。 | 基于头部的认证（bearer、JWT）要求 `header`；mTLS 要求 `certificate`。                              |
 
-- `protocol` 描述传输。`stdio` 独占；`stdio` 和 `command`
-  不接受显式 auth；mTLS 要求 `wss`。
-- `encrypted` 描述是否加密，mTLS 要求 true。
-- `network`
-  区分网络暴露和本地通道。不加密的网络传输在 runner 启动、宿主连接时 WARN；header 凭证会明确提示明文传输。网络 listener 用 none 时，启动和每次连接都 WARN。unix 不 WARN。
-- `carries` 描述握手证据。header 认证要求 `header`，mTLS 要求
-  `certificate`。它是声明，不是安全证明。
+这些是声明，不是证明：Remote 照单全收。
 
-Remote 从认证器提取 TLS 策略，调用 `bind(tls)`，启动 `serve(accept)`，再等待
-`ready`，同时与 serve 失败竞争。ready 表示接纳循环已注册，不只是端口绑定成功。runner 的所有必需 listener 就绪才算启动成功，运行期的失败只影响本 assembly。
+**通道**双向承载有序、可靠的字节。块的边界没有意义，通道结束也不能证明插件进程已经退出。
 
-Listener 必须在**接纳 HTTP upgrade 之前**调用
-`accept(handshake)`。TLS 验证和客户端证书请求采用 bind 收到的策略，不能等 WebSocket 建立后再认证。成功后将通道交给返回的
-`Session`，Remote 在内部把认证身份传给 supervisor。会话 fiber 与资源都要有 scope 归属。stdio 的 serve 在 EOF 时结束，网络 listener 持续监听直到中断。
+## listener 如何运行
 
-Channel 是有序可靠字节流，chunk 边界没有含义；EOF 不是进程退出确认。WebSocket
-adapter 必须拒绝文本、限制大小，每条二进制消息恰好承载一个完整帧，并重组拆开的输出 chunk。内置 adapter 已实现这些规则。
+Remote 按固定顺序驱动 listener：
 
-## 最小提供者
+1. 从 authenticator 取得 TLS 策略（只有 mTLS 有），然后调用
+   `bind`。TLS设置，包括请求客户端证书，都来自这份策略，而不是连接打开后的某个步骤。
+2. 用一个 `accept` 函数调用 `serve`，在等待 `ready` 的同时留意 `serve`
+   是否失败。`ready`
+   表示接受循环已经在运行，而不仅仅是地址已经绑定。runner 要等所有 listener 都就绪才会启动；之后失败的 listener 只影响它自己。
+3. 对每个传入连接，listener 在接受 HTTP upgrade **之前**，用宿主出示的内容调用
+   `accept`。如果 `accept` 以 `AuthenticationFailed` 失败，HTTP
+   listener 回复 401，并把错误的 `challenge` 作为 `WWW-Authenticate`
+   发送。如果成功，listener 用这条通道运行返回的会话。经过认证的身份由 Remote 自己附加。
 
-本地可信通道的认证器可以直接指定配置的身份。这个例子刻意不验证凭证，边界与 none 一样：
+每个会话 fiber 及其资源都要归属于某个 scope。`stdio`
+这类 listener 在输入结束时完成
+`serve`；网络 listener 会一直接受连接，直到被中断。
+
+`AuthenticationFailed` 的 `reason` 为 `"missing"` 或
+`"invalid"`。内置的 bearer 和 JWT authenticator 使用的 challenge 分别是
+`Bearer`（缺失）和
+`Bearer error="invalid_token"`（无效）。authenticator 返回的是稳定的身份，而不是会话 id。只有基于签发方的 authenticator 才声明
+`issuer`，runner 会拒绝签发方不同的多个 listener。
+
+WebSocket 适配器还有额外的责任：拒绝文本消息、限制帧大小、每条二进制消息恰好接受一个完整的协议帧，并重新拼接分成多块的输出。内置适配器已经做到这些。
+
+## 最小示例
+
+一个用于受信任本地通道的 authenticator，可以直接给出一个配置好的身份。和 `none`
+一样，它什么都不检查：
 
 ```ts title="authenticator.ts"
 import { Graft, Plugin } from "@graftland/graft"
@@ -151,8 +112,8 @@ export default Plugin.make({
 })
 ```
 
-Connector 可以适配现有的作用域通道服务。下面把 I/O 交给应用的 `Link`，由
-`Link.open` 在连接 scope 中管理资源：
+connector 可以适配应用已有的通道。这里由应用服务 `Link`
+打开通道，它的资源归属于连接的 scope：
 
 ```ts title="connector.ts"
 import { Graft, Plugin } from "@graftland/graft"
@@ -185,20 +146,25 @@ export default Plugin.make({
 })
 ```
 
-它只支持 none：Remote 在调用前拒绝 header 和证书凭证。能力子树全部 Active 却不提供约定的键，会报能力契约错误；缺少业务服务仍是 Pending。
+由于 `carries` 为空，这个 connector 只支持 `none`。Remote 在调用 `connect`
+之前就会拒绝头部和证书凭证。
 
-## 运行共享测试
+凭证在每次连接时读取一次，并带有声明的种类：`None`、`Authorization`（头部值）或
+`Certificate`。
 
-导入
-`@graftland/plugin-remote/Testing`，它不依赖测试框架。`transport(plugins, fixture)`
-返回 `chunks` 和 `eof` 两个 Effect。plugins 包含
-`connector`、`listener`、`credentials`、`authenticator`
-插件定义。fixture 接收它们，在 Graft 中激活真实提供者和静态 inject 的消费者，返回连接到 echo 会话的 Channel。配置、地址和平台 Layer 由 fixture 提供，不必启动完整 runner。
+## 用共享检查测试
+
+`@graftland/plugin-remote/Testing`
+包含内置能力都要通过的检查。它不依赖任何测试框架，也不需要完整的 runner。
+
+`Testing.transport(plugins, fixture)`
+接收你的四个能力插件（`connector`、`listener`、`credentials`、`authenticator`）和一个 fixture。fixture 在 Graft 中真实启动它们以及一个消费者，并返回一条连到 echo 会话的通道。配置、地址和平台 layer 都放在 fixture 里。你会得到两项检查：
 
 ```ts
 import * as Testing from "@graftland/plugin-remote/Testing"
 
 const checks = Testing.transport(plugins, openEchoSession)
+
 it.live("preserves bytes", () =>
 	checks.chunks.pipe(Effect.scoped, Effect.provide(runtime)),
 )
@@ -207,25 +173,29 @@ it.live("closes cleanly", () =>
 )
 ```
 
-chunks 会拆开帧头，再把余下部分和下一帧合并；eof 检查正常结束。`rejection(httpResponse, challenge?)`
-检查 401、没有 upgrade、challenge 正确；失败表现为
-`ConformanceError`。还应测试错误凭证、cause 保留、scope 取消、TLS 在 bind 前传入、ready 前 serve 失败，以及两个不同配置的 assembly 共存。[内置测试](https://github.com/graftland/graft/blob/main/packages/remote/test/capabilities.test.ts)展示了 websocket/mTLS 和其他内置组合的用法。
+- `chunks`
+  把一个帧头拆到两块中，再把剩余部分与下一帧合在一块，然后检查字节按顺序返回。
+- `eof` 检查关闭通道会干净地结束它。
+- `Testing.rejection(httpResponse, challenge?)`
+  检查被拒绝的凭证收到 401、没有 WebSocket upgrade，并带有预期的 challenge。
 
-## 公开模块
+检查失败时以 `ConformanceError`
+失败。共享检查覆盖不到的也要测：错误的凭证、cause 是否保留、scope 取消、在
+`bind` 时应用 TLS 设置、`serve` 在 `ready`
+之前失败，以及两份配置不同的能力副本同时运行。[内置测试 fixture](https://github.com/graftland/graft/blob/main/packages/remote/test/capabilities.test.ts)
+展示了 WebSocket 加 mTLS 以及其他所有内置组合的这些测试。
 
-包根导出宿主 default、`plugin`、`Contract`、`Instance`、公开错误及其类型。`/runner`
-是 runner default。`/Auth`、`/Transport`、`/Errors`、`/Contract` 和 `/Testing`
-是可复用 API。
+## 内置能力模块
 
-`@graftland/plugin-remote/` 下的能力路径：
+简写会展开为 `@graftland/plugin-remote/` 下的这些模块。两个执行模块支撑 `local`
+和 `worker`，其余都是普通的能力。
 
-| 角色        | 路径                                                                            |
-| ----------- | ------------------------------------------------------------------------------- |
-| 宿主执行    | `host/local`、`host/worker`                                                     |
-| 宿主连接    | `host/websocket`、`host/unix`、`host/command`                                   |
-| 宿主凭证    | `host/auth/mtls`、`host/auth/bearer`、`host/auth/jwt`、`host/auth/none`         |
-| runner 监听 | `runner/websocket`、`runner/unix`、`runner/stdio`                               |
-| runner 认证 | `runner/auth/mtls`、`runner/auth/bearer`、`runner/auth/jwt`、`runner/auth/none` |
+| 角色                 | 模块                                                                            |
+| -------------------- | ------------------------------------------------------------------------------- |
+| 宿主执行             | `host/local`、`host/worker`                                                     |
+| 宿主 connector       | `host/websocket`、`host/unix`、`host/command`                                   |
+| 宿主 credentials     | `host/auth/mtls`、`host/auth/bearer`、`host/auth/jwt`、`host/auth/none`         |
+| runner listener      | `runner/websocket`、`runner/unix`、`runner/stdio`                               |
+| runner authenticator | `runner/auth/mtls`、`runner/auth/bearer`、`runner/auth/jwt`、`runner/auth/none` |
 
-`/internal/bin`、`/internal/worker`、`/internal/watchdog`
-只供运行时定位可执行文件，**不是公开 API**。Supervisor 和子进程运行时也在内部。应用请使用[remote 指南](../overview/)中的两个入口。
+[参考](../reference/#已发布模块)列出了所有已发布的模块。

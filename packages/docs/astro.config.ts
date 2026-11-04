@@ -1,6 +1,8 @@
 import starlight from "@astrojs/starlight"
 import { defineConfig } from "astro/config"
 import starlightLlmsTxt from "starlight-llms-txt"
+import { reference } from "./reference.mjs"
+import { referenceLinkCheck } from "./check-links.mjs"
 
 // DOCS_URL is the public address of the site, such as
 // https://graftland.github.io/graft/. Its path becomes the base of every page.
@@ -11,6 +13,7 @@ export default defineConfig({
 	base: url.pathname,
 	trailingSlash: "always",
 	integrations: [
+		referenceLinkCheck(url),
 		starlight({
 			title: "Graft",
 			description:
@@ -61,7 +64,7 @@ export default defineConfig({
 			editLink: {
 				baseUrl: "https://github.com/graftland/graft/edit/main/packages/docs/",
 			},
-			plugins: [starlightLlmsTxt({ projectName: "Graft" })],
+			plugins: [reference(), starlightLlmsTxt({ projectName: "Graft" })],
 			sidebar: [
 				{
 					label: "Start here",
@@ -86,18 +89,28 @@ export default defineConfig({
 				{
 					label: "Reference",
 					translations: { "zh-CN": "参考", "zh-TW": "參考" },
-					items: ["fork-handle", "loader-api", "hmr-api", "errors"],
+					items: [
+						{
+							label: "API guides",
+							translations: {
+								"zh-CN": "API 使用说明",
+								"zh-TW": "API 使用說明",
+							},
+							items: ["fork-handle", "loader-api", "hmr-api", "errors"],
+						},
+					],
 				},
 				{
 					label: "Remote",
 					translations: { "zh-CN": "Remote", "zh-TW": "Remote" },
 					items: [
 						"remote/overview",
-						"remote/host",
-						"remote/runner",
+						"remote/getting-started",
+						"remote/runners",
 						"remote/transport-auth",
-						"remote/lifecycle",
+						"remote/restarts",
 						"remote/capabilities",
+						"remote/reference",
 					],
 				},
 				{

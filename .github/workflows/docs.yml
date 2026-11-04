@@ -39,7 +39,10 @@ jobs:
           restore-keys: pnpm-${{ runner.os }}-
       - name: Install dependencies
         run:
-          devenv shell -- pnpm install --frozen-lockfile --store-dir .cache/pnpm
+          devenv shell -- env CI=true pnpm install --frozen-lockfile
+          --config.confirmModulesPurge=false --store-dir .cache/pnpm
+      - name: Test docs tooling
+        run: devenv shell -- pnpm --filter @graftland/docs test
       - name: Build
         run: devenv shell -- pnpm --filter @graftland/docs build
         env:

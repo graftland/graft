@@ -1,19 +1,34 @@
 ---
-title: Write capability plugins
+title: Write your own transport or authentication
 description:
-  Use this page to implement a connector, listener, credentials provider, or
-  authenticator.
+  Build a plugin that connects, listens, supplies credentials or authenticates
+  in a way the built-in options do not cover, and test it with the shared
+  checks.
 ---
 
-Use this page to implement a connector, listener, credentials provider, or
-authenticator. The signatures and shared checks below are the public contract
-for third-party plugins.
+This page is for plugin authors who need a connection or authentication method
+that Remote does not ship, such as a different network protocol or credentials
+from a company identity service. It explains the idea, shows minimal working
+examples and how to test them. Exact signatures are in the API reference for
+[`Transport`](../../reference/plugin-remote/transport/readme/) and
+[`Auth`](../../reference/plugin-remote/auth/readme/).
 
-A capability is an ordinary Graft plugin with a default export. Its `apply`
-publishes one agreed service key. Remote resolves `{ name, config }` through the
-application's module resolver and starts the provider in a private assembly.
-Business services remain visible from the parent realm. You do not choose custom
-service keys or install providers beside each remote entry.
+## The idea
+
+Every built-in option, such as `url`, `unix`, `bearer` or `mtls`, is a shorthand
+for an ordinary Graft plugin. Remote calls these plugins **capabilities**. Each
+capability publishes exactly one of four services:
+
+| Service         | Side   | Job                                                                      | Module                               |
+| --------------- | ------ | ------------------------------------------------------------------------ | ------------------------------------ |
+| `Connector`     | Host   | Opens a byte channel to a runner.                                        | `@graftland/plugin-remote/Transport` |
+| `Credentials`   | Host   | Reads what the host presents: nothing, a header value, or a certificate. | `@graftland/plugin-remote/Auth`      |
+| `Listener`      | Runner | Accepts byte channels from hosts.                                        | `@graftland/plugin-remote/Transport` |
+| `Authenticator` | Runner | Turns what a host presented into an identity.                            | `@graftland/plugin-remote/Auth`      |
+
+These modules contain only the service definitions, no Node implementations.
+
+To use your own capability, name its module instead of a shorthand. On the host:
 
 ```yaml
 connect:
@@ -25,140 +40,90 @@ connect:
     config: { account: billing }
 ```
 
-Use the same references in a runner's `listen` elements, selecting listener and
-authenticator plugins instead. Relative file paths should resolve against the
-loader's `ConfigDirectory`. Decode configuration with the plugin's Schema;
-perform I/O during activation, not module import.
+On the runner, the same `transport` and `auth` keys go in a `listen` element and
+name a listener and an authenticator. Names are resolved like any other
+[plugin name](../../config-file/#plugin-names).
 
-## Four contracts
+You do not load capabilities yourself, and you never pick service keys. Remote
+starts each capability privately for the entry that names it. Two entries can
+use the same capability with different configuration without colliding, and your
+capability can still inject the application's ordinary services.
 
-`@graftland/plugin-remote/Auth` exports `Credentials` and `Authenticator`.
-`@graftland/plugin-remote/Transport` exports `Connector` and `Listener`. These
-modules contain only contracts, with no Node listener implementations. The
-following signatures omit only service-key declarations and import qualifiers:
+## Rules every capability follows
 
-```ts
-interface ClientCertificate {
-	cert: string
-	key: Redacted<string>
-}
-interface VerifiedCertificate {
-	der: Uint8Array
-	subjectAltName: Option<string>
-}
-interface TlsPolicy {
-	ca: ReadonlyArray<string>
-	minVersion: "TLSv1.3"
-	requestCert: true
-	rejectUnauthorized: true
-}
-type Prepared =
-	| { _tag: "None" }
-	| { _tag: "Authorization"; value: Redacted<string> }
-	| { _tag: "Certificate"; value: ClientCertificate }
-type CredentialsApi = {
-	[K in Prepared["_tag"]]: {
-		kind: K
-		read: Effect<Extract<Prepared, { _tag: K }>, CredentialsError, Scope>
-	}
-}[Prepared["_tag"]]
-type AuthenticatorApi =
-	| { _tag: "None"; identity: string }
-	| {
-			_tag: "Header"
-			issuer?: string
-			authenticate: (
-				header: Option<Redacted<string>>,
-			) => Effect<string, AuthenticationFailed>
-	  }
-	| {
-			_tag: "Mtls"
-			tls: TlsPolicy
-			authenticate: (
-				certificate: VerifiedCertificate,
-			) => Effect<string, AuthenticationFailed>
-	  }
+- **Default export.** The module exports the plugin as its default export.
+- **Config through a schema.** Decode `config` with the plugin's `config`
+  schema.
+- **I/O on activation.** Do the work in `apply`, never when the module is
+  imported.
+- **Relative paths.** Resolve file paths in your config against the loader's
+  `ConfigDirectory`, like the built-in capabilities, so they are relative to the
+  config file.
+- **Publish the service.** A capability that becomes active without publishing
+  its service fails with `CapabilityContractError`. One that waits for a missing
+  application service simply stays `Pending`.
+- **Keep causes.** Report transport failures as `TransportError` and credential
+  failures as `CredentialsError`, with the original failure in `cause`.
+- **Never log secrets.** Do not log Authorization values.
 
-interface Properties {
-	protocol: string
-	encrypted: boolean
-	network: boolean
-	carries: ReadonlyArray<"header" | "certificate">
-}
-interface Channel {
-	input: Stream<Uint8Array, TransportError>
-	output: Sink<unknown, Uint8Array, unknown, TransportError>
-}
-interface Handshake {
-	authorization: Option<Redacted<string>>
-	certificate: Option<VerifiedCertificate>
-}
-type Session = (channel: Channel) => Effect<void, TransportError, Scope>
-type Accept = (handshake: Handshake) => Effect<Session, AuthenticationFailed>
-interface Serving {
-	ready: Effect<void>
-	serve: (accept: Accept) => Effect<void, TransportError, Scope>
-}
-interface ConnectorApi {
-	properties: Properties
-	connect: (credentials: Prepared) => Effect<Channel, TransportError, Scope>
-}
-interface ListenerApi {
-	properties: Properties
-	bind: (tls: Option<TlsPolicy>) => Effect<Serving, TransportError, Scope>
-}
-```
+Capability code is trusted like any other plugin, including what it declares
+about itself.
 
-`read` runs once per connection. Return the declared kind and retain source
-failures in `CredentialsError.cause`. `Authenticator.authenticate` returns a
-stable identity, not a session id. Only issuer-based authentication declares
-`issuer`; bearer token files have no issuer. A runner rejects multiple distinct
-declared issuers. Third-party capability code and its property declarations are
-trusted, just like other plugins.
+## Describing a transport
 
-`AuthenticationFailed` has `reason: "missing" | "invalid"`, optional `challenge`
-and optional `cause`. An HTTP listener maps this to 401 before upgrade and
-passes `challenge` as `WWW-Authenticate`. Bearer challenges are `Bearer` for
-missing credentials and `Bearer error="invalid_token"` for invalid credentials.
-Do not log Authorization values. Transport failures use `TransportError` and
-preserve the underlying cause.
+Connectors and listeners declare four **properties**. Remote uses them to reject
+unsafe combinations and to decide which warnings to log:
 
-## Properties and lifecycle
+| Property    | Meaning                                                                   | What Remote does with it                                                                                                                                |
+| ----------- | ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `protocol`  | A short name, such as `wss` or `unix`.                                    | mTLS requires `wss`. `stdio` must be a runner's only listener. `stdio` and `command` reject any explicit `auth`.                                        |
+| `encrypted` | Whether the transport keeps traffic confidential.                         | mTLS requires `true`. Unencrypted network transports log warnings.                                                                                      |
+| `network`   | Whether it is reachable over a network rather than locally.               | Unencrypted or unauthenticated network transports log the warnings in [Choose transport and authentication](../transport-auth/#what-the-warnings-mean). |
+| `carries`   | Which evidence the handshake can carry: `header`, `certificate`, or both. | Header-based auth (bearer, JWT) requires `header`. mTLS requires `certificate`.                                                                         |
 
-- `protocol` describes the transport. `stdio` is exclusive; `stdio` and
-  `command` reject explicit auth. mTLS requires `wss`.
-- `encrypted` describes confidentiality. mTLS also requires it to be true.
-- `network` distinguishes network exposure from local channels. Unencrypted
-  network transports warn on runner startup and host connection; header
-  credentials add a plaintext warning. Network listeners with none warn at
-  startup and each connection. Unix does not warn.
-- `carries` declares available handshake evidence. Header auth requires
-  `header`; mTLS requires `certificate`. This is a declaration, not a security
-  proof.
+These are declarations, not proofs: Remote believes them.
 
-Remote extracts TLS policy from the authenticator, calls `bind(tls)`, starts
-`serve(accept)`, and waits for `ready` while racing serve failure. `ready` means
-the accept loop is registered, not merely that an address was bound. All
-required listeners must become ready before runner startup succeeds. Later
-failures are contained to that assembly.
+A **channel** carries ordered, reliable bytes in both directions. Chunk
+boundaries have no meaning, and the end of a channel does not prove that the
+plugin process exited.
 
-A listener calls `accept(handshake)` **before** accepting an HTTP upgrade. TLS
-validation and client-certificate requests use the policy supplied to `bind`,
-not an authentication step after WebSocket opens. On success, call the returned
-`Session` with the channel; remote supplies its authenticated identity
-internally to the supervisor. Own each session fiber and all resources in a
-scope. Stdio `serve` completes at EOF; network listeners keep accepting until
+## How a listener runs
+
+Remote drives a listener in a fixed order:
+
+1. It takes the TLS policy from the authenticator (only mTLS has one) and calls
+   `bind`. TLS settings, including requesting client certificates, come from
+   this policy, not from a step after the connection opens.
+2. It calls `serve` with an `accept` function, and waits for `ready` while
+   watching for `serve` to fail. `ready` means the accept loop is running, not
+   just that an address is bound. A runner starts only when all its listeners
+   are ready. A listener that fails later affects only itself.
+3. For each incoming connection, the listener calls `accept` with what the host
+   presented, **before** it accepts an HTTP upgrade. If `accept` fails with
+   `AuthenticationFailed`, an HTTP listener answers 401 and sends the error's
+   `challenge` as `WWW-Authenticate`. If it succeeds, the listener runs the
+   returned session with the channel. Remote attaches the authenticated identity
+   itself.
+
+Own every session fiber and its resources in a scope. A `stdio`-style listener
+finishes `serve` at end of input; a network listener keeps accepting until it is
 interrupted.
 
-Channels carry ordered reliable bytes. Chunk boundaries have no meaning. EOF is
-not process-exit confirmation. WebSocket adapters must reject text, enforce the
-frame-size limit, accept exactly one complete framing frame per binary message,
-and reassemble split output chunks. The built-in adapters implement this policy.
+`AuthenticationFailed` has a `reason` of `"missing"` or `"invalid"`. The
+built-in bearer and JWT authenticators use the challenges `Bearer` (missing) and
+`Bearer error="invalid_token"` (invalid). An authenticator returns a stable
+identity, not a session id. Only issuer-based authenticators declare an
+`issuer`, and a runner rejects listeners with different issuers.
 
-## Minimal providers
+WebSocket adapters have extra duties: reject text messages, enforce the frame
+size limit, accept exactly one complete protocol frame per binary message, and
+reassemble output that arrives in several chunks. The built-in adapters already
+do this.
 
-An authenticator for a local trusted channel can assign one configured identity.
-This deliberately does no credential validation; it has the same limits as none:
+## Minimal examples
+
+An authenticator for a trusted local channel can hand out one configured
+identity. Like `none`, it checks nothing:
 
 ```ts title="authenticator.ts"
 import { Graft, Plugin } from "@graftland/graft"
@@ -173,9 +138,9 @@ export default Plugin.make({
 })
 ```
 
-A connector can adapt an existing scoped channel service. This example delegates
-I/O to an application's `Link`; `Link.open` owns resources in the connection
-scope:
+A connector can adapt a channel your application already has. Here an
+application service `Link` opens the channel, and its resources belong to the
+connection's scope:
 
 ```ts title="connector.ts"
 import { Graft, Plugin } from "@graftland/graft"
@@ -208,24 +173,29 @@ export default Plugin.make({
 })
 ```
 
-It supports none only: remote rejects header and certificate credentials before
-calling it. A capability subtree that becomes Active without providing its key
-fails with a capability-contract error. A missing business service stays
-Pending.
+Because `carries` is empty, this connector supports only `none`. Remote rejects
+header and certificate credentials before it ever calls `connect`.
 
-## Run shared checks
+Credentials are read once per connection, with the declared kind: `None`,
+`Authorization` (a header value) or `Certificate`.
 
-Import `@graftland/plugin-remote/Testing`; it has no test-runner dependency.
-`transport(plugins, fixture)` returns `chunks` and `eof` Effects. `plugins` has
-`connector`, `listener`, `credentials`, and `authenticator` plugin definitions.
-The fixture receives them, activates real providers and a static-inject consumer
-in Graft, and returns a connected channel to an echo session. Supply
-configuration, addresses and platform layers there. No full runner is needed.
+## Test it with the shared checks
+
+`@graftland/plugin-remote/Testing` contains the checks the built-in capabilities
+pass. It does not depend on any test runner, and it does not need a full runner
+either.
+
+`Testing.transport(plugins, fixture)` takes your four capability plugins
+(`connector`, `listener`, `credentials`, `authenticator`) and a fixture. The
+fixture starts them for real in Graft, together with a consumer, and returns a
+channel connected to an echo session. Configuration, addresses and platform
+layers belong in the fixture. You get two checks back:
 
 ```ts
 import * as Testing from "@graftland/plugin-remote/Testing"
 
 const checks = Testing.transport(plugins, openEchoSession)
+
 it.live("preserves bytes", () =>
 	checks.chunks.pipe(Effect.scoped, Effect.provide(runtime)),
 )
@@ -234,24 +204,26 @@ it.live("closes cleanly", () =>
 )
 ```
 
-`chunks` splits a frame header and coalesces the remainder with another frame;
-`eof` verifies clean completion. `rejection(httpResponse, challenge?)` checks
-401, no WebSocket upgrade, and the challenge. Failures are `ConformanceError`
-Effects. Also test wrong credentials, preserved causes, scope cancellation,
-TLS-before-bind, serve failure before ready, and two differently configured
-assemblies together. The
+- `chunks` splits a frame header across chunks and merges the rest with the next
+  frame, then checks that the bytes come back in order.
+- `eof` checks that closing the channel ends it cleanly.
+- `Testing.rejection(httpResponse, challenge?)` checks that rejected credentials
+  get a 401, no WebSocket upgrade, and the expected challenge.
+
+Failed checks fail with `ConformanceError`. Also test what the shared checks do
+not cover: wrong credentials, preserved causes, scope cancellation, TLS settings
+applied at `bind`, `serve` failing before `ready`, and two differently
+configured copies of your capability running at once. The
 [built-in test fixtures](https://github.com/graftland/graft/blob/main/packages/remote/test/capabilities.test.ts)
-show these checks for websocket/mTLS and every other built-in combination.
+show all of this for WebSocket with mTLS and every other built-in combination.
 
-## Published modules
+## Built-in capability modules
 
-The package root exports the host default, `plugin`, `Contract`, `Instance`,
-public errors and their types. `/runner` is the runner default. `/Auth`,
-`/Transport`, `/Errors`, `/Contract`, and `/Testing` are reusable APIs.
+The shorthands expand to these modules under `@graftland/plugin-remote/`. The
+two execution modules back `local` and `worker`; the others are ordinary
+capabilities.
 
-Capability paths under `@graftland/plugin-remote/` are:
-
-| Role                  | Paths                                                                           |
+| Role                  | Modules                                                                         |
 | --------------------- | ------------------------------------------------------------------------------- |
 | Host execution        | `host/local`, `host/worker`                                                     |
 | Host connectors       | `host/websocket`, `host/unix`, `host/command`                                   |
@@ -259,7 +231,4 @@ Capability paths under `@graftland/plugin-remote/` are:
 | Runner listeners      | `runner/websocket`, `runner/unix`, `runner/stdio`                               |
 | Runner authenticators | `runner/auth/mtls`, `runner/auth/bearer`, `runner/auth/jwt`, `runner/auth/none` |
 
-`/internal/bin`, `/internal/worker`, and `/internal/watchdog` are executable
-resolution paths, **not public APIs**. Supervisor and the child runtime are
-internal. Applications should use the two entries described in the
-[remote guide](../overview/).
+The [reference](../reference/#published-modules) lists every published module.

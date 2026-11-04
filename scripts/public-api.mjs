@@ -258,9 +258,9 @@ export function forgottenExports(config, entries) {
 	}
 }
 
-export function declarationProject(root) {
-	const packages = publicPackages(root)
-	const entries = packages.flatMap(({ directory, manifest }) =>
+/** Published entry points with their source and emitted declaration locations. */
+export function publicEntries(root) {
+	return publicPackages(root).flatMap(({ directory, manifest }) =>
 		Object.entries(manifest.publishConfig?.exports ?? manifest.exports).flatMap(
 			([path, entry]) => {
 				if (entry === null || path === "./package.json") return []
@@ -274,6 +274,15 @@ export function declarationProject(root) {
 				return [
 					{
 						name: manifest.name + (path === "." ? "" : path.slice(1)),
+						packageName: manifest.name,
+						directory,
+						source:
+							leaves(manifest.exports[path]).find((file) =>
+								/(?<!\.d)\.[cm]?tsx?$/.test(file),
+							) ??
+							output
+								.replace("./dist/", "./src/")
+								.replace(/\.([cm]?)js$/, ".$1ts"),
 						root: join(directory, ".cache/types"),
 						file: resolve(
 							directory,
@@ -284,6 +293,11 @@ export function declarationProject(root) {
 			},
 		),
 	)
+}
+
+export function declarationProject(root) {
+	const packages = publicPackages(root)
+	const entries = publicEntries(root)
 	const directory = join(root, ".cache/public-api")
 	mkdirSync(directory, { recursive: true })
 	const config = join(directory, "tsconfig.json")
