@@ -60,9 +60,16 @@ export const transport = <E, R>(
 			const reply = yield* channel.input.pipe(
 				Stream.mapEffect((chunk) => Effect.fromResult(frames.decode(chunk))),
 				Stream.flattenIterable,
-				Stream.take(2),
+				Stream.zipWithIndex,
+				Stream.tap(([, index]) =>
+					index === 1 ? Deferred.succeed(done, undefined) : Effect.void,
+				),
+				Stream.map(([frame]) => frame),
 				Stream.runCollect,
 			)
+			yield* frames.finish
+			yield* Deferred.succeed(done, undefined)
+			yield* Fiber.join(sending)
 			yield* check(
 				Array.makeEquivalence(
 					Equivalence.Struct({
@@ -81,8 +88,6 @@ export const transport = <E, R>(
 				),
 				"The channel changed byte order across split or coalesced chunks",
 			)
-			yield* Deferred.succeed(done, undefined)
-			yield* Fiber.join(sending)
 		}),
 		eof: Effect.gen(function* () {
 			const channel = yield* connect

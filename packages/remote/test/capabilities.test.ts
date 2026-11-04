@@ -788,3 +788,51 @@ it.effect("rejects a transport that changes a frame channel", () =>
 		assert.isTrue(Schema.is(Conformance.ConformanceError)(result.failure))
 	}).pipe(Effect.scoped),
 )
+
+for (const coalesced of [true, false]) {
+	it.effect(
+		`rejects an extra trailing frame in ${coalesced ? "the same" : "a later"} chunk`,
+		() =>
+			Effect.gen(function* () {
+				const first = yield* Framing.encode({
+					channel: 0,
+					payload: new Uint8Array([1, 2, 3]),
+				})
+				const second = yield* Framing.encode({
+					channel: 1,
+					payload: new Uint8Array([4, 5]),
+				})
+				const combined = new Uint8Array(first.length + second.length * 2)
+				combined.set(first)
+				combined.set(second, first.length)
+				combined.set(second, first.length + second.length)
+				const result = yield* Conformance.transport(implementations, () =>
+					Effect.succeed({
+						input: coalesced
+							? Stream.make(combined)
+							: Stream.make(first, second, second),
+						output: Sink.drain,
+					}),
+				).chunks.pipe(Effect.result)
+				assert(result._tag === "Failure")
+				assert.isTrue(Schema.is(Conformance.ConformanceError)(result.failure))
+			}).pipe(Effect.scoped),
+	)
+}
+
+it.effect("rejects EOF before the complete reply sequence", () =>
+	Effect.gen(function* () {
+		const first = yield* Framing.encode({
+			channel: 0,
+			payload: new Uint8Array([1, 2, 3]),
+		})
+		const result = yield* Conformance.transport(implementations, () =>
+			Effect.succeed({
+				input: Stream.make(first),
+				output: Sink.drain,
+			}),
+		).chunks.pipe(Effect.result)
+		assert(result._tag === "Failure")
+		assert.isTrue(Schema.is(Conformance.ConformanceError)(result.failure))
+	}).pipe(Effect.scoped),
+)

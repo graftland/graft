@@ -122,9 +122,9 @@ export interface Handler<
 	readonly fibers: FiberSet.FiberSet<Out, E>
 	/** Detaches from its owner after a claimed once invocation finishes, including cancellation cleanup. */
 	readonly scope: Scope.Closeable
-	/** Identifies the fiber that closes the handler group and interrupts its invocations. */
+	/** Identifies the owner closer so normal dispatch can distinguish withdrawal from self-interruption. */
 	readonly closing: Deferred.Deferred<number>
-	readonly run: (args: Args) => Effect.Effect<Out, E>
+	readonly run: (args: Args, scope: Scope.Scope) => Effect.Effect<Out, E>
 }
 
 export interface Runtime {

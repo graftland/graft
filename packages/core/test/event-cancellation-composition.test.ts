@@ -1,5 +1,14 @@
-import { it } from "@effect/vitest"
-import { Deferred, Effect, Exit, Fiber, Option, Schedule, Scope } from "effect"
+import { assert, it } from "@effect/vitest"
+import {
+	Deferred,
+	Effect,
+	Exit,
+	Fiber,
+	Option,
+	Ref,
+	Schedule,
+	Scope,
+} from "effect"
 import { Event, Graft, Plugin } from "../src/index.ts"
 import { run } from "./utils.ts"
 
@@ -7,12 +16,13 @@ const register = (
 	mode: string,
 	name: string,
 	handler: Effect.Effect<void, never, Graft.Graft>,
+	registration: "on" | "once" = "on",
 ) =>
 	Effect.gen(function* () {
 		const graft = yield* Graft.Graft
 		if (mode === "waterfall") {
 			const event = Event.middleware<void, void>(name)
-			yield* Event.on(event, () => handler)
+			yield* Event[registration](event, () => handler)
 			return {
 				dispatch: Event.waterfall(event, undefined, () => Effect.void).pipe(
 					Effect.provideService(Graft.Graft, graft),
@@ -20,7 +30,9 @@ const register = (
 			}
 		}
 		const event = Event.make<[], Option.Option<void>>(name)
-		yield* Event.on(event, () => handler.pipe(Effect.as(Option.none<void>())))
+		yield* Event[registration](event, () =>
+			handler.pipe(Effect.as(Option.none<void>())),
+		)
 		return {
 			dispatch: (mode === "emit"
 				? Event.emit(event)
@@ -128,4 +140,65 @@ for (const mode of ["emit", "parallel", "bail", "waterfall"]) {
 			yield* Fiber.join(dispatch)
 		}).pipe(run),
 	)
+}
+
+const registrations: ReadonlyArray<"on" | "once"> = ["on", "once"]
+for (const mode of ["emit", "parallel", "bail", "waterfall"]) {
+	for (const registration of registrations) {
+		for (const first of ["owner", "dispatcher"]) {
+			it.effect(
+				`completes ${registration} ${mode} cleanup when ${first} closes first`,
+				() =>
+					Effect.gen(function* () {
+						const entered = yield* Deferred.make<void>()
+						const cleaning = yield* Deferred.make<void>()
+						const release = yield* Deferred.make<void>()
+						const released = yield* Ref.make(false)
+						const owner = yield* Effect.acquireRelease(
+							Scope.make(),
+							Scope.close,
+						)
+						const { dispatch } = yield* register(
+							mode,
+							"concurrent cancellation",
+							Deferred.succeed(entered, undefined).pipe(
+								Effect.andThen(Effect.never),
+								Effect.ensuring(
+									Deferred.succeed(cleaning, undefined).pipe(
+										Effect.andThen(Deferred.await(release)),
+										Effect.andThen(Ref.set(released, true)),
+									),
+								),
+							),
+							registration,
+						).pipe(Scope.provide(owner))
+						const caller = yield* Graft.plugin(
+							Plugin.make({
+								name: "concurrently cancelled dispatcher",
+								apply: () => dispatch,
+							}),
+						)
+						yield* Deferred.await(entered)
+						const closeOwner = Scope.close(owner, Exit.void)
+						const closeCaller = caller.dispose
+						const initial = yield* Effect.forkScoped(
+							Effect.exit(first === "owner" ? closeOwner : closeCaller),
+						)
+						yield* Deferred.await(cleaning)
+						const concurrent = yield* Effect.forkScoped(
+							Effect.exit(first === "owner" ? closeCaller : closeOwner),
+						)
+						yield* Effect.yieldNow
+						yield* Effect.yieldNow
+						yield* Deferred.succeed(release, undefined)
+						const initialExit = yield* Fiber.join(initial)
+						const concurrentExit = yield* Fiber.join(concurrent)
+						assert.deepStrictEqual(initialExit, Exit.void)
+						assert.deepStrictEqual(concurrentExit, Exit.void)
+						const completed = yield* Ref.get(released)
+						assert.isTrue(completed)
+					}).pipe(run),
+			)
+		}
+	}
 }
