@@ -35,36 +35,32 @@ export const make = Effect.fnUntraced(function* (
 	return status
 })
 
-export const setState = (
+export const setState = Effect.fnUntraced(function* (
 	runtime: Runtime,
 	id: number,
 	status: ForkStatus,
 	state: ForkState,
 	spec: Spec,
-) =>
-	Effect.tx(
-		Effect.gen(function* () {
-			const current = yield* TxSubscriptionRef.get(status.snapshot)
-			if (current.disposed) return
-			const next: LocalSnapshot = {
-				state,
-				accepted: spec,
-				name: spec.plugin.name,
-				input: spec.input,
-				disposed: false,
-			}
-			yield* adjustLoading(
-				status,
-				Number(state._tag === "Loading") -
-					Number(current.state._tag === "Loading"),
-			)
-			yield* TxSubscriptionRef.set(status.snapshot, next)
-			// Display snapshots contain values, so previously emitted trees never change.
-			yield* TxSubscriptionRef.update(runtime.forks, (forks) =>
-				HashMap.modify(forks, id, (entry) => ({ ...entry, ...next })),
-			)
-		}),
+) {
+	const current = yield* TxSubscriptionRef.get(status.snapshot)
+	if (current.disposed) return
+	const next: LocalSnapshot = {
+		state,
+		accepted: spec,
+		name: spec.plugin.name,
+		input: spec.input,
+		disposed: false,
+	}
+	yield* adjustLoading(
+		status,
+		Number(state._tag === "Loading") - Number(current.state._tag === "Loading"),
 	)
+	yield* TxSubscriptionRef.set(status.snapshot, next)
+	// Display snapshots contain values, so previously emitted trees never change.
+	yield* TxSubscriptionRef.update(runtime.forks, (forks) =>
+		HashMap.modify(forks, id, (entry) => ({ ...entry, ...next })),
+	)
+}, Effect.tx)
 
 /** Called inside the removal transaction, after supervisor cleanup. */
 export const dispose = Effect.fnUntraced(function* (
@@ -86,9 +82,7 @@ export const dispose = Effect.fnUntraced(function* (
 })
 
 /** Only the subtree's own counter belongs to this waiting transaction's read set. */
-export const stable = (status: ForkStatus): Effect.Effect<void> =>
-	Effect.tx(
-		Effect.gen(function* () {
-			if ((yield* TxRef.get(status.loading)) > 0) return yield* Effect.txRetry
-		}),
-	)
+export const stable: (status: ForkStatus) => Effect.Effect<void> =
+	Effect.fnUntraced(function* (status: ForkStatus) {
+		if ((yield* TxRef.get(status.loading)) > 0) return yield* Effect.txRetry
+	}, Effect.tx)

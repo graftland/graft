@@ -13,36 +13,35 @@ import {
 import { Event, Graft, Plugin } from "../src/index.ts"
 import { run } from "./utils.ts"
 
-const register = (
+const register = Effect.fn("register")(function* (
 	mode: string,
 	name: string,
 	handler: Effect.Effect<void, never, Graft.Graft>,
 	registration: "on" | "once" = "on",
-) =>
-	Effect.gen(function* () {
-		const graft = yield* RuntimeContext
-		if (mode === "waterfall") {
-			const event = Event.middleware<void, void>(name)
-			yield* Event[registration](event, () => handler)
-			return {
-				dispatch: Event.waterfall(event, undefined, () => Effect.void).pipe(
-					Effect.provideService(Graft.Graft, graft),
-				),
-			}
-		}
-		const event = Event.make<[], Option.Option<void>>(name)
-		yield* Event[registration](event, () =>
-			handler.pipe(Effect.as(Option.none<void>())),
-		)
+) {
+	const graft = yield* RuntimeContext
+	if (mode === "waterfall") {
+		const event = Event.middleware<void, void>(name)
+		yield* Event[registration](event, () => handler)
 		return {
-			dispatch: (mode === "emit"
-				? Event.emit(event)
-				: mode === "parallel"
-					? Event.parallel(event)
-					: Event.bail(event)
-			).pipe(Effect.asVoid, Effect.provideService(Graft.Graft, graft)),
+			dispatch: Event.waterfall(event, undefined, () => Effect.void).pipe(
+				Effect.provideService(Graft.Graft, graft),
+			),
 		}
-	})
+	}
+	const event = Event.make<[], Option.Option<void>>(name)
+	yield* Event[registration](event, () =>
+		handler.pipe(Effect.as(Option.none<void>())),
+	)
+	return {
+		dispatch: (mode === "emit"
+			? Event.emit(event)
+			: mode === "parallel"
+				? Event.parallel(event)
+				: Event.bail(event)
+		).pipe(Effect.asVoid, Effect.provideService(Graft.Graft, graft)),
+	}
+})
 
 for (const mode of ["emit", "parallel", "bail", "waterfall"]) {
 	for (const phase of [

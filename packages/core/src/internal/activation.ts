@@ -220,15 +220,14 @@ const resolve = Effect.fnUntraced(function* (
 
 export { setState } from "./forkState"
 
-const waitDrained = (published: ReadonlyArray<Provision>) =>
-	Effect.tx(
-		Effect.gen(function* () {
-			for (const provision of published) {
-				const consumers = yield* TxRef.get(provision.consumers)
-				if (HashSet.size(consumers) > 0) return yield* Effect.txRetry
-			}
-		}),
-	)
+const waitDrained = Effect.fnUntraced(function* (
+	published: ReadonlyArray<Provision>,
+) {
+	for (const provision of published) {
+		const consumers = yield* TxRef.get(provision.consumers)
+		if (HashSet.size(consumers) > 0) return yield* Effect.txRetry
+	}
+}, Effect.tx)
 
 /**
  * Withdraws what an activation published, closes it to further publishing,
@@ -342,21 +341,18 @@ export const supervise = Effect.fnUntraced(function* (
 		Effect.flatMap(TxRef.get(specRef), (spec) => resolve(spec, prepared))
 
 	/** Resolves to the new spec if the spec changed, or `None` if a dependency changed. */
-	const waitChange = (resolution: Resolution) =>
-		Effect.tx(
-			Effect.gen(function* () {
-				const current = yield* TxRef.get(specRef)
-				if (current !== resolution.spec) return Option.some(current)
-				if (
-					resolution.provisions.length === 0 &&
-					resolution.unprovided.length === 0
-				)
-					return yield* Effect.txRetry
-				return (yield* resolutionChanged(resolution))
-					? Option.none<Spec>()
-					: yield* Effect.txRetry
-			}),
+	const waitChange = Effect.fnUntraced(function* (resolution: Resolution) {
+		const current = yield* TxRef.get(specRef)
+		if (current !== resolution.spec) return Option.some(current)
+		if (
+			resolution.provisions.length === 0 &&
+			resolution.unprovided.length === 0
 		)
+			return yield* Effect.txRetry
+		return (yield* resolutionChanged(resolution))
+			? Option.none<Spec>()
+			: yield* Effect.txRetry
+	}, Effect.tx)
 
 	const acquire = Effect.gen(function* () {
 		const resolution = yield* Effect.tx(
@@ -536,8 +532,8 @@ export const supervise = Effect.fnUntraced(function* (
 	})
 
 	/** Every phase finishes before the immutable result is handed to state or disposal. */
-	const teardown = (running: Running, exit: Exit.Exit<unknown, unknown>) =>
-		Effect.gen(function* () {
+	const teardown = Effect.fnUntraced(
+		function* (running: Running, exit: Exit.Exit<unknown, unknown>) {
 			const closer = yield* Effect.withFiber((self) => Effect.succeed(self.id))
 			yield* Fiber.interrupt(running.fiber)
 			const stopped = yield* Fiber.await(running.fiber)
@@ -589,12 +585,13 @@ export const supervise = Effect.fnUntraced(function* (
 				stopped,
 			)
 			return cause.reasons.length === 0 ? Exit.void : Exit.failCause(cause)
-		}).pipe(
-			Effect.annotateLogs({
+		},
+		(effect, running) =>
+			Effect.annotateLogs(effect, {
 				"graft.fork": id,
 				"graft.plugin": running.resolution.spec.plugin.name,
 			}),
-		)
+	)
 
 	const waitRetry = Effect.fnUntraced(function* (
 		outcome: Data.TaggedEnum.Value<Outcome, "Failed">,

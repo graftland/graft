@@ -52,41 +52,35 @@ export const reach = (fork: Fork.Fork, tag: Fork.ForkState["_tag"]) =>
 	)
 
 /** Materializes the internal slot directory only for lifecycle assertions. */
-export const registrySnapshot = (
+export const registrySnapshot = Effect.fn("registrySnapshot")(function* (
 	runtime: import("../src/internal/runtime.ts").Runtime,
-) =>
-	Effect.tx(
-		Effect.gen(function* () {
-			const slots = yield* TxRef.get(runtime.slots)
-			let provisions = HashMap.empty<
-				import("../src/internal/runtime.ts").ServiceKey,
-				import("../src/internal/runtime.ts").Provision
-			>()
-			for (const [key, slot] of slots) {
-				const value = yield* TxRef.get(slot.provision)
-				if (Option.isSome(value))
-					provisions = HashMap.set(provisions, key, value.value)
-			}
-			return provisions
-		}),
-	)
+) {
+	const slots = yield* TxRef.get(runtime.slots)
+	let provisions = HashMap.empty<
+		import("../src/internal/runtime.ts").ServiceKey,
+		import("../src/internal/runtime.ts").Provision
+	>()
+	for (const [key, slot] of slots) {
+		const value = yield* TxRef.get(slot.provision)
+		if (Option.isSome(value))
+			provisions = HashMap.set(provisions, key, value.value)
+	}
+	return provisions
+}, Effect.tx)
 
 /** Display entries contain graph handles, but graph waits never read the display table. */
-export const activeSnapshot = (
+export const activeSnapshot = Effect.fn("activeSnapshot")(function* (
 	runtime: import("../src/internal/runtime.ts").Runtime,
-) =>
-	Effect.tx(
-		Effect.gen(function* () {
-			const forks = yield* TxSubscriptionRef.get(runtime.forks)
-			let active = HashMap.empty<
-				number,
-				import("../src/internal/runtime.ts").ActiveResolution
-			>()
-			for (const [id, entry] of forks) {
-				const state = yield* TxRef.get(entry.node.state)
-				if (state.resolution !== undefined)
-					active = HashMap.set(active, id, state.resolution)
-			}
-			return active
-		}),
-	)
+) {
+	const forks = yield* TxSubscriptionRef.get(runtime.forks)
+	let active = HashMap.empty<
+		number,
+		import("../src/internal/runtime.ts").ActiveResolution
+	>()
+	for (const [id, entry] of forks) {
+		const state = yield* TxRef.get(entry.node.state)
+		if (state.resolution !== undefined)
+			active = HashMap.set(active, id, state.resolution)
+	}
+	return active
+}, Effect.tx)

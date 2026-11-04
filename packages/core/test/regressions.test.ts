@@ -29,9 +29,6 @@ class Service extends Context.Service<Service, string>()(
 class Other extends Context.Service<Other, string>()(
 	"@graftland/graft/test/regressions.test/Other",
 ) {}
-const settle = Effect.forEach(Array.range(1, 50), () => Effect.yieldNow, {
-	discard: true,
-})
 
 describe("regressions", () => {
 	it.effect(
@@ -138,12 +135,10 @@ describe("regressions", () => {
 							return yield* Effect.txRetry
 					}),
 				)
-				yield* settle
-				const finished = disposing.pollUnsafe() !== undefined
-				yield* Deferred.succeed(release, undefined)
+				// Disposal must finish while the update is still blocked; a regression hangs here.
 				yield* Fiber.join(disposing)
+				yield* Deferred.succeed(release, undefined)
 				yield* reach(consumer, "Pending")
-				assert.isTrue(finished)
 			}).pipe(run),
 	)
 
@@ -201,8 +196,12 @@ describe("regressions", () => {
 				)
 				yield* reach(fork, "Pending")
 				yield* Graft.provide(Service, "ready")
-				yield* settle
-				const snapshot = yield* Stream.runHead(fork.state)
+				const snapshot = yield* fork.state.pipe(
+					Stream.filter(
+						(state) => state._tag === "Pending" && state.missing.length === 1,
+					),
+					Stream.runHead,
+				)
 				const state = Option.getOrThrow(snapshot)
 				assert.deepStrictEqual(state._tag === "Pending" && state.missing, [
 					Other.key,
@@ -234,10 +233,7 @@ describe("regressions", () => {
 			yield* Graft.replace([[oldProvider, newProvider]])
 			yield* reach(provider, "Loading")
 			yield* reach(provider, "Active")
-			yield* settle
-			const snapshot = yield* Stream.runHead(fork.state)
-			const state = Option.getOrThrow(snapshot)
-			assert.strictEqual(state._tag, "Active")
+			yield* reach(fork, "Active")
 		}).pipe(run),
 	)
 

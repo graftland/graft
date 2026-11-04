@@ -42,18 +42,17 @@ const ambient = <A, E>(
 			),
 		),
 	)
-const expectCycle = (fork: Fork.Fork) =>
-	Effect.gen(function* () {
-		yield* reach(fork, "Failed")
-		const snapshot = yield* Stream.runHead(fork.state)
-		const state = Option.getOrThrow(snapshot)
-		assert.strictEqual(state._tag, "Failed")
-		if (state._tag !== "Failed") return
-		const error = Option.getOrThrow(Cause.findErrorOption(state.cause))
-		assert.isTrue(Schema.is(Graft.ServiceConflict)(error))
-		if (Schema.is(Graft.ServiceConflict)(error))
-			assert.strictEqual(error.reason, "DependencyCycle")
-	})
+const expectCycle = Effect.fn("expectCycle")(function* (fork: Fork.Fork) {
+	yield* reach(fork, "Failed")
+	const snapshot = yield* Stream.runHead(fork.state)
+	const state = Option.getOrThrow(snapshot)
+	assert.strictEqual(state._tag, "Failed")
+	if (state._tag !== "Failed") return
+	const error = Option.getOrThrow(Cause.findErrorOption(state.cause))
+	assert.isTrue(Schema.is(Graft.ServiceConflict)(error))
+	if (Schema.is(Graft.ServiceConflict)(error))
+		assert.strictEqual(error.reason, "DependencyCycle")
+})
 
 describe("publication dependency graph", () => {
 	it.effect(
