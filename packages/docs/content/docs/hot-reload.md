@@ -149,9 +149,10 @@ Watcher failures:
 - The CLI logs watcher I/O failures and installs the watcher again after one
   second.
 - Native watcher producers observe their complete `Exit` after source cleanup
-  and before entering background stream merging. Mixed interruption failures are
-  logged there with the full `Cause`; pure interruption is silent. Ordinary
-  backend failures still propagate to the consumer without duplicate logging.
+  and before entering background stream merging. Only cancellation requested by
+  the observer with a matching cause is silent. Resource cleanup interruption
+  and mixed failures are logged with their full `Cause`. Ordinary backend
+  failures still propagate to the consumer without duplicate logging.
 - Failures that finish during cancellation are handed over as complete `Exit`s
   before interruption is restored. HMR records an original failure that the
   cancellation would otherwise hide, including its full `Cause`.

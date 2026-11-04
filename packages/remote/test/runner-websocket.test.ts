@@ -1,3 +1,5 @@
+import { SecureRandom } from "effect/crypto"
+import * as Certificates from "../src/internal/Certificates"
 import { Peer } from "../src/internal/Peer"
 import { identityFromSubjectAltName } from "../src/internal/auth/mtls"
 import { assert, describe, it } from "@effect/vitest"
@@ -207,6 +209,7 @@ describe("runner WebSocket mutual TLS", () => {
 				undefined,
 				"DNS:localhost",
 				"URI:graft://one, URI:graft://two",
+				'URI:"graft://billing,staging", URI:graft://two',
 			]) {
 				const result = yield* Effect.exit(identityFromSubjectAltName(san))
 				assert.isTrue(Exit.isFailure(result), String(san))
@@ -405,3 +408,42 @@ describe("runner WebSocket mutual TLS", () => {
 		30_000,
 	)
 })
+
+it.live("authenticates a signed identity quoted by Node's SAN formatter", () =>
+	Effect.gen(function* () {
+		const issuer = yield* Certificates.read(inject("remoteTls") + "/ca")
+		const client = yield* Certificates.issue({
+			name: "billing client",
+			days: 2,
+			usage: "client",
+			identities: ["billing,staging"],
+			issuer,
+		})
+		const { listener, port } = yield* server
+		yield* listener
+			.run((channel) =>
+				Effect.gen(function* () {
+					const identity = yield* Peer
+					const peer = yield* Websocket.multiplex(channel)
+					yield* peer.send(0, bytes(identity))
+					return yield* Effect.never
+				}),
+			)
+			.pipe(Effect.forkScoped)
+		const channel = yield* Websocket.connect({
+			port,
+			servername: "localhost",
+			tls: {
+				ca: issuer.certificate,
+				cert: client.certificate,
+				key: client.privateKey,
+			},
+		})
+		const peer = yield* Websocket.multiplex(channel)
+		const identity = yield* peer.take(0)
+		assert.equal(text(identity), "graft://billing,staging")
+	}).pipe(
+		Effect.scoped,
+		Effect.provide([NodeServices.layer, SecureRandom.layerWebCrypto]),
+	),
+)

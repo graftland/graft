@@ -189,6 +189,13 @@ const handlersFor = <Args extends ReadonlyArray<unknown>, Out, E>(
 		)
 	})
 
+// A boundary must not append its own cancellation to the caller's cause.
+const interruptedBy = <E>(cause: Cause.Cause<E>, id: number) =>
+	Array.every(
+		cause.reasons,
+		(reason) => reason._tag === "Interrupt" && reason.fiberId === id,
+	)
+
 /**
  * Runs one handler in its owner's fiber set. Resolves to `None` if the
  * handler was unregistered before it could run, or its owner was torn down
@@ -246,10 +253,16 @@ const invoke = <Args extends ReadonlyArray<unknown>, Out, E>(
 					restore(Fiber.await(fiber)),
 					() =>
 						Effect.gen(function* () {
+							const closer = yield* Effect.withFiber((self) =>
+								Effect.succeed(self.id),
+							)
 							yield* Fiber.interrupt(fiber)
 							const stopped = yield* Fiber.await(fiber)
-							// The invocation Exit includes cleanup interrupts as well as our cancellation.
-							if (Exit.isFailure(stopped))
+							// Preserve independent interruption and cleanup failure, not the cancellation we just requested.
+							if (
+								Exit.isFailure(stopped) &&
+								!interruptedBy(stopped.cause, closer)
+							)
 								return yield* Effect.failCause(stopped.cause)
 						}),
 				)
@@ -262,15 +275,7 @@ const invoke = <Args extends ReadonlyArray<unknown>, Out, E>(
 					const ran = yield* Deferred.isDone(started)
 					// A closed FiberSet can refuse to start the invocation. Once started,
 					// only interruption by the group's closer counts as owner cancellation.
-					if (
-						!ran ||
-						Array.every(
-							exit.cause.reasons,
-							(reason) =>
-								reason._tag === "Interrupt" && reason.fiberId === closer,
-						)
-					)
-						return Option.none()
+					if (!ran || interruptedBy(exit.cause, closer)) return Option.none()
 				}
 				return yield* Effect.failCause(exit.cause)
 			}).pipe(
@@ -317,11 +322,16 @@ export const parallel = <Args extends ReadonlyArray<unknown>, Out, E>(
 			(fibers) =>
 				Effect.gen(function* () {
 					// Every invocation stays observable until cancellation cleanup has finished.
+					const closer = yield* Effect.withFiber((self) =>
+						Effect.succeed(self.id),
+					)
 					yield* Fiber.interruptAll(fibers)
 					const exits = yield* Effect.forEach(fibers, Fiber.await)
 					const empty: Cause.Cause<E> = Cause.empty
 					const cause = Array.reduce(exits, empty, (cause, exit) =>
-						Exit.isFailure(exit) ? Cause.combine(cause, exit.cause) : cause,
+						Exit.isFailure(exit) && !interruptedBy(exit.cause, closer)
+							? Cause.combine(cause, exit.cause)
+							: cause,
 					)
 					if (cause.reasons.length > 0) return yield* Effect.failCause(cause)
 				}),

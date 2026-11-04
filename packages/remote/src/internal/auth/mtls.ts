@@ -1,23 +1,40 @@
-import { Array, Cause, Effect, String } from "effect"
+import { Array, Cause, Effect, Schema, String } from "effect"
 import { AuthenticationFailed } from "../../Errors"
 
-/** The dedicated CA supplies one graft URI and ordinary, unquoted SAN fields. */
+// Node JSON-quotes SAN values containing separators, escaping commas inside the value.
+const uriValue = (field: string) => {
+	const value = String.slice(4)(field)
+	return String.startsWith('"')(value)
+		? Schema.decodeEffect(Schema.fromJsonString(Schema.String))(value).pipe(
+				Effect.mapError((error) =>
+					AuthenticationFailed.make({
+						reason: "invalid",
+						cause: Cause.fail(error),
+					}),
+				),
+			)
+		: Effect.succeed(value)
+}
+
+/** Read exactly one graft URI from Node's plain or JSON-quoted SAN representation. */
 export const identityFromSubjectAltName = (
 	san: string | undefined,
-): Effect.Effect<string, AuthenticationFailed> => {
-	const uris = Array.filter(
-		String.split(san ?? "", ", "),
-		String.startsWith("URI:graft://"),
-	)
-	const [uri] = uris
-	return uris.length === 1 && uri !== undefined
-		? Effect.succeed(String.slice(4)(uri))
-		: Effect.fail(
-				AuthenticationFailed.make({
-					reason: "invalid",
-					cause: Cause.fail(
-						"The peer certificate must contain exactly one graft SAN URI",
-					),
-				}),
-			)
-}
+): Effect.Effect<string, AuthenticationFailed> =>
+	Effect.gen(function* () {
+		const values = yield* Effect.forEach(
+			Array.filter(String.split(san ?? "", ", "), String.startsWith("URI:")),
+			uriValue,
+		)
+		const uris = Array.filter(values, String.startsWith("graft://"))
+		const [uri] = uris
+		return yield* uris.length === 1 && uri !== undefined
+			? Effect.succeed(uri)
+			: Effect.fail(
+					AuthenticationFailed.make({
+						reason: "invalid",
+						cause: Cause.fail(
+							"The peer certificate must contain exactly one graft SAN URI",
+						),
+					}),
+				)
+	})

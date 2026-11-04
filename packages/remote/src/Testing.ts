@@ -1,5 +1,14 @@
 import type { Plugin } from "@graftland/graft"
-import { Array, Deferred, Effect, Fiber, Stream, String, Schema } from "effect"
+import {
+	Array,
+	Equivalence,
+	Deferred,
+	Effect,
+	Fiber,
+	Stream,
+	String,
+	Schema,
+} from "effect"
 import type { Channel } from "./Transport"
 import * as Framing from "./internal/runner/Framing"
 
@@ -56,12 +65,18 @@ export const transport = <E, R>(
 			)
 			yield* check(
 				Array.makeEquivalence(
-					Array.makeEquivalence((a: number, b: number) => a === b),
+					Equivalence.Struct({
+						channel: Equivalence.Number,
+						payload: Array.makeEquivalence(Equivalence.Number),
+					}),
 				)(
-					Array.map(reply, (frame) => Array.fromIterable(frame.payload)),
+					Array.map(reply, (frame) => ({
+						channel: frame.channel,
+						payload: Array.fromIterable(frame.payload),
+					})),
 					[
-						[1, 2, 3],
-						[4, 5],
+						{ channel: 0, payload: [1, 2, 3] },
+						{ channel: 1, payload: [4, 5] },
 					],
 				),
 				"The channel changed byte order across split or coalesced chunks",

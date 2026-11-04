@@ -180,9 +180,10 @@ a mapping that can be represented. Validation and alias publication share the
 core replacement transaction.
 
 Native watcher producers observe their complete Exit after source cleanup and
-before entering background stream merging. Mixed interruption failures are
-logged there with the full Cause; pure interruption is silent. Ordinary backend
-failures still propagate to the consumer without duplicate logging.
+before entering background stream merging. Only cancellation requested by the
+observer with a matching cause is silent. Resource cleanup interruption and
+mixed failures are logged with their full Cause. Ordinary backend failures still
+propagate to the consumer without duplicate logging.
 
 ## Long development sessions
 

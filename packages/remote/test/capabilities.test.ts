@@ -18,6 +18,7 @@ import {
 	Clock,
 	Schema,
 	Redacted,
+	Sink,
 	Stream,
 } from "effect"
 import { inject } from "vitest"
@@ -46,6 +47,7 @@ import { FetchHttpClient } from "effect/http"
 import process from "node:process"
 import * as Assembly from "../src/internal/assembly"
 import * as Certificates from "../src/internal/Certificates"
+import * as Framing from "../src/internal/runner/Framing"
 import * as Conformance from "../src/Testing"
 
 const runtime = Graft.layer.pipe(
@@ -768,3 +770,21 @@ for (const implementation of remaining) {
 		)
 	})
 }
+
+it.effect("rejects a transport that changes a frame channel", () =>
+	Effect.gen(function* () {
+		const first = yield* Framing.encode({
+			channel: 0,
+			payload: new Uint8Array([1, 2, 3]),
+		})
+		const second = yield* Framing.encode({
+			channel: 0,
+			payload: new Uint8Array([4, 5]),
+		})
+		const result = yield* Conformance.transport(implementations, () =>
+			Effect.succeed({ input: Stream.make(first, second), output: Sink.drain }),
+		).chunks.pipe(Effect.result)
+		assert(result._tag === "Failure")
+		assert.isTrue(Schema.is(Conformance.ConformanceError)(result.failure))
+	}).pipe(Effect.scoped),
+)
