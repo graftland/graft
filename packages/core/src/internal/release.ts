@@ -1,4 +1,4 @@
-import { Cause, Effect, Exit, Schema, Scope } from "effect"
+import { Array, Cause, Effect, Exit, Result, Schema, Scope } from "effect"
 
 /** Resource release was interrupted, rather than successfully cancelled. */
 export class ReleaseInterrupted extends Schema.TaggedError<
@@ -17,12 +17,39 @@ export const close = (
 	scope: Scope.Closeable,
 	exit: Exit.Exit<unknown, unknown>,
 ) =>
-	Scope.close(scope, exit).pipe(
-		Effect.catchCause((cause) =>
-			Effect.failCause(
-				Cause.hasInterruptsOnly(cause)
-					? Cause.die(ReleaseInterrupted.make({ cause }))
-					: cause,
+	Effect.uninterruptible(
+		Scope.close(scope, exit).pipe(
+			Effect.catchCauseIf(Cause.hasInterruptsOnly, (cause) =>
+				Effect.gen(function* () {
+					// Re-entering interruptibility observes pending external cancellation without producing a self-interrupt.
+					// Read it after release so cancellation arriving during a finalizer is included too.
+					const pending = yield* Effect.exit(Effect.interruptible(Effect.void))
+					const [cancelled, interrupted] = Array.partition(
+						cause.reasons,
+						(reason) =>
+							Exit.isFailure(pending) &&
+							Array.some(
+								pending.cause.reasons,
+								(external) =>
+									reason._tag === "Interrupt" &&
+									external._tag === "Interrupt" &&
+									reason.fiberId === external.fiberId,
+							)
+								? Result.succeed(reason)
+								: Result.fail(reason),
+					)
+					if (interrupted.length === 0) return yield* Effect.failCause(cause)
+					return yield* Effect.failCause(
+						Cause.combine(
+							Cause.fromReasons(cancelled),
+							Cause.die(
+								ReleaseInterrupted.make({
+									cause: Cause.fromReasons(interrupted),
+								}),
+							),
+						),
+					)
+				}),
 			),
 		),
 	)

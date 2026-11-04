@@ -32,7 +32,10 @@ export const run = <A, E, R>(group: Group, effect: Effect.Effect<A, E, R>) =>
 					Exit.isFailure(body) && !Cause.hasInterruptsOnly(body.cause)
 						? body.cause
 						: Cause.empty,
-					Exit.isFailure(closed) ? closed.cause : Cause.empty,
+					// Release.close marks independent interruptions; an unmarked one is pending cancellation.
+					Exit.isFailure(closed) && !Cause.hasInterruptsOnly(closed.cause)
+						? closed.cause
+						: Cause.empty,
 				)
 				if (failure.reasons.length > 0) {
 					yield* Ref.update(group.failures, (cause) =>

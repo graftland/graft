@@ -12,6 +12,7 @@ import {
 } from "effect"
 import { Listener, type Accept } from "../Transport"
 import { TransportError } from "../Errors"
+import * as Release from "../internal/release"
 
 export const Config = Schema.Struct({ auth: Schema.optionalKey(Schema.Never) })
 export default Plugin.make({
@@ -64,7 +65,7 @@ export default Plugin.make({
 									Effect.andThen(session(channel)),
 								),
 							),
-							Effect.scoped,
+							Release.scoped,
 							// Successful session completion alone is not EOF.
 							Effect.andThen(Deferred.await(eof)),
 						),
