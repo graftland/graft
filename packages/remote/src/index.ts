@@ -15,6 +15,7 @@ import type { Config, Duration, PlatformError, Schedule } from "effect"
 import { SecureRandom } from "effect/crypto"
 import {
 	local,
+	worker,
 	runner,
 	websocket,
 	mtls,
@@ -28,7 +29,18 @@ import {
 	type Target,
 	type Runner,
 } from "./Targets"
-export { local, runner, websocket, mtls, unix, command, none, bearer, jwt }
+export {
+	local,
+	worker,
+	runner,
+	websocket,
+	mtls,
+	unix,
+	command,
+	none,
+	bearer,
+	jwt,
+}
 import * as Connection from "./internal/runner/Connection"
 import * as Services from "./internal/services"
 import { Instance } from "./Instance"
@@ -152,7 +164,7 @@ const resolveTarget = <D extends ReadonlyArray<Plugin.Dependency>>(
 	target: Target<D>,
 ): Effect.Effect<Connection.Target<D>, MissingInstance> =>
 	Effect.gen(function* () {
-		if (target._tag === "Local") return target
+		if (target._tag !== "Runner") return target
 		const instance =
 			target.instance === undefined
 				? yield* Entry.CurrentId

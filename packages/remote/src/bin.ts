@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /** Runs local children and WebSocket supervisors, and issues their deployment certificates. */
 import { Graft } from "@graftland/graft"
-import { NodeRuntime, NodeServices } from "@effect/platform-node"
+import { NodeRuntime } from "@effect/platform-node"
 import {
 	Console,
 	Cause,
@@ -14,11 +14,11 @@ import {
 	Schema,
 	String,
 } from "effect"
-import { FetchHttpClient } from "effect/http"
 import { Argument, CliError, Command, Flag } from "effect/cli"
-import { Digest, SecureRandom, Signature } from "effect/crypto"
 import process from "node:process"
 import { pathToFileURL } from "node:url"
+import { platform } from "./internal/platform"
+import { bytes } from "./internal/stdioChannel"
 import { load, run } from "./Runner"
 import { Bootstrap } from "./internal/runner/Bootstrap"
 import * as Watchdog from "./internal/runner/Watchdog"
@@ -261,7 +261,8 @@ const child = Command.make(
 			)
 			if (!begin) return
 			const definition = yield* load(pathToFileURL(contract).href)
-			return yield* run(definition, session, bootstrap, watchdog.stop)
+			const channel = yield* bytes
+			return yield* run(definition, channel, session, bootstrap, watchdog.stop)
 		}),
 )
 const cli = Command.make(
@@ -279,7 +280,8 @@ const cli = Command.make(
 						"A contract module or the child/serve/certificates subcommand is required",
 				})
 			const definition = yield* load(contract.value)
-			return yield* run(definition, session)
+			const channel = yield* bytes
+			return yield* run(definition, channel, session)
 		}),
 ).pipe(Command.withSubcommands([child, serve, certificates]))
 
@@ -287,18 +289,7 @@ NodeRuntime.runMain(
 	Effect.scoped(
 		Effect.gen(function* () {
 			const context = yield* Layer.build(
-				Layer.provideMerge(
-					Graft.layer,
-					Layer.mergeAll(
-						NodeServices.layer,
-						FetchHttpClient.layer,
-						Digest.layerWebCrypto,
-						SecureRandom.layerWebCrypto,
-						Signature.layerWebCrypto.pipe(
-							Layer.provide(SecureRandom.layerWebCrypto),
-						),
-					),
-				),
+				Layer.provideMerge(Graft.layer, platform),
 			)
 			return yield* Command.run(cli, { version: "0.0.0" }).pipe(
 				Effect.provideContext(context),

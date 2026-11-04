@@ -1,12 +1,8 @@
 import { ModuleImportFailed, ContractNotFound } from "./internal/childErrors"
 import type { Graft } from "@graftland/graft"
-import { NodeSink } from "@effect/platform-node"
-import { Cause, Effect, Logger, Option, Stdio, Stream } from "effect"
+import { Effect, Logger, Option } from "effect"
 import { RpcServer } from "effect/rpc"
-// @effect-diagnostics-next-line nodeBuiltinImport:off -- Node's extra inherited descriptor is the dedicated protocol output, separate from console output.
-import { createWriteStream } from "node:fs"
 import { fromModule, type RunnerContract } from "./Contract"
-import { TransportError } from "./Errors"
 import * as Port from "./internal/port"
 import * as Services from "./internal/services"
 import * as Child from "./internal/child"
@@ -29,31 +25,13 @@ export const load = (specifier: string) =>
 		return contract.value
 	})
 
-const bytes = Effect.gen(function* () {
-	const stdio = yield* Stdio.Stdio
-	const output = yield* Effect.sync(() =>
-		createWriteStream("", { fd: 3, autoClose: false }),
-	)
-	return {
-		input: stdio.stdin.pipe(
-			Stream.mapError((error) =>
-				TransportError.make({ cause: Cause.fail(error) }),
-			),
-		),
-		output: NodeSink.fromWritable({
-			evaluate: () => output,
-			onError: (cause) => TransportError.make({ cause: Cause.die(cause) }),
-			endOnDone: false,
-		}),
-	} satisfies Port.Channel
-})
 const connect = (
 	contract: RunnerContract,
+	channel: Port.Channel,
 	session: string,
 	bootstrap: Bootstrap | undefined,
 ) =>
 	Effect.gen(function* () {
-		const channel = yield* bytes
 		const mux =
 			bootstrap === undefined ? undefined : yield* Multiplex.make(channel)
 		return yield* Port.make(
@@ -73,16 +51,17 @@ const connect = (
 /** One execution unit; the executable supplies the platform and Graft services. */
 export const run = (
 	contract: RunnerContract,
+	channel: Port.Channel,
 	session = "local",
 	bootstrap?: Bootstrap,
 	stop: Effect.Effect<unknown, ExecutionError> = Effect.never,
-): Effect.Effect<void, ExecutionError, Graft.Graft | Stdio.Stdio> =>
+): Effect.Effect<void, ExecutionError, Graft.Graft> =>
 	Effect.scoped(
 		Effect.gen(function* () {
 			const telemetry = yield* Child.telemetry(contract)
 			const loggers = yield* Logger.CurrentLoggers
 			yield* Effect.gen(function* () {
-				const peer = yield* connect(contract, session, bootstrap)
+				const peer = yield* connect(contract, channel, session, bootstrap)
 				const instance = yield* Child.lifecycle(
 					contract,
 					peer,

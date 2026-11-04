@@ -9,7 +9,7 @@ import {
 import * as Port from "../port"
 import { stdinExitTimeout } from "./ProcessObservation"
 
-/** Process observers stay alive until exit, including forced cleanup. */
+/** Direct execution observers stay alive until exit, including forced cleanup. */
 export const connect = Effect.fnUntraced(function* (
 	execution: Execution,
 	options: Port.Options,
@@ -33,7 +33,10 @@ export const connect = Effect.fnUntraced(function* (
 
 	return {
 		...peer,
-		pid: Option.some(execution.pid),
+		pid: execution.pid,
+		...(execution.threadId === undefined
+			? {}
+			: { threadId: execution.threadId }),
 		exited,
 		resources: yield* Effect.scope,
 		transport: { ...peer, failure: failures.await, report },
@@ -43,13 +46,24 @@ export const connect = Effect.fnUntraced(function* (
 				// Stop observation before intentionally ending stdin or killing the process.
 				yield* failures.close
 				if (!graceful) return
-				// If this fails, the enclosing process scope signals, escalates, and waits for exit.
+				// If this fails, the execution scope forces termination and waits for exit.
 				const status = yield* peer.end.pipe(
+					// Peer EOF can interrupt the writer as its output ends. Still confirm the unit's exit.
+					Effect.catchCauseIf(Cause.hasInterruptsOnly, () => Effect.void),
 					Effect.andThen(Fiber.join(exited)),
 					Effect.interruptible,
 					Effect.timeoutOrElse({
 						duration: stdinExitTimeout,
-						orElse: () => LocalTerminationTimeout.make({ pid: execution.pid }),
+						orElse: () =>
+							LocalTerminationTimeout.make({
+								...Option.match(execution.pid, {
+									onNone: () => ({}),
+									onSome: (pid) => ({ pid }),
+								}),
+								...(execution.threadId === undefined
+									? {}
+									: { threadId: execution.threadId }),
+							}),
 					}),
 				)
 				if (status.exitCode !== 0 || status.statusCause.reasons.length > 0)

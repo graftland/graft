@@ -9,6 +9,7 @@ export default defineConfig({
 		customExports: {
 			"./bin": "./dist/bin.js",
 			"./watchdog": "./dist/watchdog.js",
+			"./worker": "./dist/worker.js",
 		},
 	},
 	entry: [
@@ -16,6 +17,8 @@ export default defineConfig({
 		"src/Runner.ts",
 		"src/bin.ts",
 		"src/watchdog.ts",
+		"src/worker.ts",
+		"src/host/worker.ts",
 		"src/Transport.ts",
 		"src/Auth.ts",
 		"src/Supervisor.ts",

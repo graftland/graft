@@ -1,6 +1,6 @@
 /** Execution and byte-channel capabilities; implementations live in host plugins. */
 import { Context } from "effect"
-import type { Duration, Effect, PlatformError, Scope } from "effect"
+import type { Duration, Effect, Option, PlatformError, Scope } from "effect"
 import type { ProcessExited, TransportError } from "./Errors"
 import type { PreparedCredentials } from "./Auth"
 export type { Channel } from "./internal/port"
@@ -13,7 +13,8 @@ export interface LocalOptions {
 }
 export interface Execution {
 	readonly channel: Channel
-	readonly pid: number
+	readonly pid: Option.Option<number>
+	readonly threadId?: number
 	readonly exited: Effect.Effect<ProcessExited, TransportError>
 	readonly failure: Effect.Effect<never, TransportError>
 }
@@ -25,6 +26,20 @@ export class LocalTransport extends Context.Service<
 		) => Effect.Effect<Execution, PlatformError.PlatformError, Scope.Scope>
 	}
 >()("@graftland/remote/Transport/LocalTransport") {}
+
+export interface WorkerOptions {
+	readonly execArgv?: ReadonlyArray<string>
+	readonly contractModule: string
+	readonly session: string
+}
+export class WorkerTransport extends Context.Service<
+	WorkerTransport,
+	{
+		readonly start: (
+			options: WorkerOptions,
+		) => Effect.Effect<Execution, TransportError, Scope.Scope>
+	}
+>()("@graftland/remote/Transport/WorkerTransport") {}
 
 export interface WebsocketOptions {
 	readonly url: string

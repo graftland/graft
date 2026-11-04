@@ -13,7 +13,7 @@ import type { PlatformError } from "effect"
 import type { ChildProcessSpawner } from "effect/process"
 import * as FailureGroup from "../FailureGroup"
 
-/** Time allowed for a launcher to exit after its stdin has been closed. */
+/** Time allowed for a direct execution unit or launcher to exit after input EOF. */
 export const stdinExitTimeout = "1 second"
 
 /** Readers outlive the failure monitor so forced termination still captures its diagnostic tail. */

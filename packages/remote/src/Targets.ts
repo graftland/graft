@@ -10,6 +10,7 @@ import {
 } from "./Auth"
 import {
 	LocalTransport,
+	WorkerTransport,
 	UnixTransport,
 	CommandTransport,
 	type UnixOptions,
@@ -124,6 +125,15 @@ export interface Local {
 	readonly command?: readonly [string, ...string[]]
 	readonly auth?: never
 }
+export interface Worker {
+	readonly _tag: "Worker"
+	readonly execArgv?: ReadonlyArray<string>
+	readonly auth?: never
+}
+export const worker = (options: Omit<Worker, "_tag"> = {}): Worker => ({
+	_tag: "Worker",
+	...options,
+})
 export interface None {
 	readonly _tag: "None"
 }
@@ -180,7 +190,7 @@ export const runner = <
 		),
 ): Runner<D> => ({ _tag: "Runner", ...options })
 export type Target<D extends ReadonlyArray<Plugin.Dependency> = readonly []> =
-	Local | Runner<D>
+	Local | Worker | Runner<D>
 /** Credential construction checks requirements; Graft consumes the resulting runtime keys. */
 export const dependencies = <D extends ReadonlyArray<Plugin.Dependency>>(
 	target: Target<D>,
@@ -188,6 +198,7 @@ export const dependencies = <D extends ReadonlyArray<Plugin.Dependency>>(
 	Context.Key<unknown, unknown> | Plugin.Optional<Context.Key<unknown, unknown>>
 > => {
 	if (target._tag === "Local") return [LocalTransport]
+	if (target._tag === "Worker") return [WorkerTransport]
 	if (target.transport._tag === "Command") return [CommandTransport]
 	const transport =
 		target.transport._tag === "Unix" ? UnixTransport : WebsocketTransport
@@ -217,7 +228,7 @@ export class InvalidTarget extends Schema.TaggedError<
 export const validate = <D extends ReadonlyArray<Plugin.Dependency>>(
 	target: Target<D>,
 ): Effect.Effect<void, InvalidTarget> => {
-	if (target._tag === "Local") return Effect.void
+	if (target._tag !== "Runner") return Effect.void
 	if (
 		target.transport._tag === "Command" &&
 		("auth" in target || "auth" in target.transport)

@@ -19,6 +19,8 @@ export default async function setup(project) {
 		entry: [
 			"bin",
 			"watchdog",
+			"worker",
+			"host/worker",
 			"host/local",
 			"host/websocket",
 			"host/auth/mtls",

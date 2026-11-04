@@ -5,12 +5,15 @@ export class ProcessExited extends Schema.TaggedError<
 	{ readonly brand: unique symbol }
 >()("ProcessExited", {
 	pid: Schema.Option(Schema.Int),
+	threadId: Schema.optionalKey(Schema.Int),
 	exitCode: Schema.NullOr(Schema.Int),
 	stderr: Schema.String,
 	statusCause: Schema.Cause(Schema.Unknown, Schema.Unknown),
 }) {
 	override get message() {
-		return `Remote process${Option.isSome(this.pid) ? ` ${this.pid.value}` : ""} exited unexpectedly (${this.exitCode ?? "signal"})`
+		return this.threadId !== undefined
+			? `Remote worker ${this.threadId} exited unexpectedly (${this.exitCode})`
+			: `Remote process${Option.isSome(this.pid) ? ` ${this.pid.value}` : ""} exited unexpectedly (${this.exitCode ?? "signal"})`
 	}
 }
 export class TransportError extends Schema.TaggedError<
@@ -50,8 +53,13 @@ export class MissingInstance extends Schema.TaggedError<
 export class LocalTerminationTimeout extends Schema.TaggedError<
 	LocalTerminationTimeout,
 	{ readonly brand: unique symbol }
->()("LocalTerminationTimeout", { pid: Schema.Int }) {
+>()("LocalTerminationTimeout", {
+	pid: Schema.optionalKey(Schema.Int),
+	threadId: Schema.optionalKey(Schema.Int),
+}) {
 	override get message() {
-		return `Remote process ${this.pid} did not exit within one second after Dispose; terminating it`
+		return this.threadId !== undefined
+			? `Remote worker ${this.threadId} did not exit within one second after Dispose; terminating it`
+			: `Remote process ${this.pid} did not exit within one second after Dispose; terminating it`
 	}
 }

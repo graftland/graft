@@ -1,5 +1,9 @@
 import type { Plugin } from "@graftland/graft"
-import { LocalTransport } from "../../Transport"
+import {
+	LocalTransport,
+	WorkerTransport,
+	type Execution,
+} from "../../Transport"
 import * as RunnerConnection from "../host/runner"
 import {
 	Array,
@@ -12,10 +16,11 @@ import {
 	Scope,
 } from "effect"
 import type { RpcClientError } from "effect/rpc"
-import type { Schema } from "effect"
+import type { Schema, PlatformError } from "effect"
 import type { RemoteTerminationUnconfirmed } from "./model"
 import type {
 	Local as LocalTarget,
+	Worker as WorkerTarget,
 	Runner as RunnerOptions,
 } from "../../Targets"
 import {
@@ -31,12 +36,13 @@ import * as Wire from "./Wire"
 type RunnerTarget<D extends ReadonlyArray<Plugin.Dependency>> =
 	RunnerOptions<D> & { readonly instance: string }
 export type Target<D extends ReadonlyArray<Plugin.Dependency> = readonly []> =
-	LocalTarget | RunnerTarget<D>
+	LocalTarget | WorkerTarget | RunnerTarget<D>
 
 type Peer = Port.Port
 export interface Connected {
 	readonly resources: Scope.Scope
 	readonly pid: Option.Option<number>
+	readonly threadId?: number
 	readonly diagnostics: Effect.Effect<Cause.Cause<unknown>>
 	readonly terminate: (
 		graceful: boolean,
@@ -63,20 +69,21 @@ export class Connection extends Context.Service<Connection, Connected>()(
 const connected = Connection.of
 
 const Local = Effect.fnUntraced(function* (
-	target: LocalTarget,
+	target: LocalTarget | WorkerTarget,
 	contractModule: string,
 	options: Port.Options,
 	resources: Scope.Scope,
 	processScope: Scope.Scope,
 ) {
-	const transport = yield* LocalTransport
-	const execution = yield* transport
-		.start({
-			...target,
-			contractModule,
-			session: options.session,
-		})
-		.pipe(Scope.provide(processScope))
+	const transport = yield* target._tag === "Local"
+		? LocalTransport
+		: WorkerTransport
+	const started: Effect.Effect<
+		Execution,
+		PlatformError.PlatformError | TransportError,
+		Scope.Scope
+	> = transport.start({ ...target, contractModule, session: options.session })
+	const execution = yield* started.pipe(Scope.provide(processScope))
 	return yield* LocalProcess.connect(execution, options).pipe(
 		Scope.provide(resources),
 	)
@@ -122,7 +129,7 @@ export const acquire = <
 		const owned = yield* scopes
 		const connection = yield* Effect.acquireRelease(
 			Effect.gen(function* () {
-				return target._tag === "Local"
+				return target._tag !== "Runner"
 					? yield* Local(
 							target,
 							contractModule,

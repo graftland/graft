@@ -47,6 +47,10 @@
 			"source": "./src/host/websocket.ts",
 			"default": "./dist/host/websocket.js"
 		},
+		"./host/worker": {
+			"source": "./src/host/worker.ts",
+			"default": "./dist/host/worker.js"
+		},
 		"./Runner": {
 			"source": "./src/Runner.ts",
 			"default": "./dist/Runner.js"
@@ -92,6 +96,7 @@
 			"default": "./dist/Transport.js"
 		},
 		"./watchdog": "./dist/watchdog.js",
+		"./worker": "./dist/worker.js",
 		"./package.json": "./package.json"
 	},
 	"scripts": {
@@ -128,6 +133,7 @@
 			"./host/local": "./dist/host/local.js",
 			"./host/unix": "./dist/host/unix.js",
 			"./host/websocket": "./dist/host/websocket.js",
+			"./host/worker": "./dist/host/worker.js",
 			"./Runner": "./dist/Runner.js",
 			"./runner/auth/bearer": "./dist/runner/auth/bearer.js",
 			"./runner/auth/jwt": "./dist/runner/auth/jwt.js",
@@ -140,6 +146,7 @@
 			"./Supervisor": "./dist/Supervisor.js",
 			"./Transport": "./dist/Transport.js",
 			"./watchdog": "./dist/watchdog.js",
+			"./worker": "./dist/worker.js",
 			"./package.json": "./package.json"
 		}
 	},

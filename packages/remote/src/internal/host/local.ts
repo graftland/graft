@@ -21,7 +21,7 @@ export const observe = Effect.fnUntraced(function* (
 		Effect.forkScoped,
 	)
 	return {
-		pid: child.pid,
+		pid: Option.some(child.pid),
 		exited: Fiber.join(exited),
 		failure: observation.failure.pipe(
 			Effect.mapError((error) =>

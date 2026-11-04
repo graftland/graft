@@ -126,6 +126,9 @@ const forwardLogs = <E extends ErrorSchema>(
 								...(Option.isSome(connection.pid)
 									? { "remote.pid": connection.pid.value }
 									: {}),
+								...(connection.threadId === undefined
+									? {}
+									: { "remote.threadId": connection.threadId }),
 								"remote.annotations": entry.annotations,
 							}),
 						)
