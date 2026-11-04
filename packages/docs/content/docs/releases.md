@@ -163,8 +163,10 @@ cannot make registry reads and writes atomic.
 ## Release a version
 
 1. Make sure `main` passes CI.
-2. Tag the commit and push the tag, such as `v1.2.3` for a stable release or
-   `v1.2.3-beta.0` for a prerelease:
+2. Tag the commit and push the tag, such as `v1.2.3`. While Graft is on 0.x,
+   release plain versions such as `v0.3.0`: a 0.x version already says the API
+   may change, so it needs no `-beta` suffix. Prerelease tags such as
+   `v1.2.3-beta.0` remain available:
 
    ```sh
    git tag v1.2.3
