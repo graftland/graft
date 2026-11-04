@@ -1293,6 +1293,7 @@ export default Plugin.make({ name: 'required', apply: () => Effect.sync(() => re
 				const results =
 					yield* Queue.unbounded<import("../src/index").WatchResult>()
 				const reads = yield* Ref.make(0)
+				const stats = yield* Ref.make(0)
 				const contents: HashMap.HashMap<string, Uint8Array> =
 					yield* Effect.forEach(["a.mjs", "dependency.mjs"], (name) =>
 						fs
@@ -1306,6 +1307,16 @@ export default Plugin.make({ name: 'required', apply: () => Effect.sync(() => re
 					Effect.provideService(FileSystem.FileSystem, {
 						...fs,
 						realPath: Effect.succeed,
+						stat: (path) =>
+							fs
+								.stat(path)
+								.pipe(
+									Effect.tap(() =>
+										HashMap.has(contents, path)
+											? Ref.update(stats, (n) => n + 1)
+											: Effect.void,
+									),
+								),
 						watch: () =>
 							Stream.unwrap(
 								Deferred.succeed(ready, undefined).pipe(
@@ -1321,7 +1332,13 @@ export default Plugin.make({ name: 'required', apply: () => Effect.sync(() => re
 					Effect.forkScoped,
 				)
 				yield* Deferred.await(ready)
-				yield* TestClock.adjust("3 seconds")
+				// The poller may start its first sleep after `ready`. Advance until a
+				// second scan has stat'ed both files: scans run one after another, so
+				// the first scan's result, if any, is already in the queue.
+				yield* TestClock.adjust("1 second").pipe(
+					Effect.andThen(Ref.get(stats)),
+					Effect.repeat({ until: (n) => n >= 4 }),
+				)
 				const readCount = yield* Ref.get(reads)
 				const count = yield* Queue.size(results)
 				assert.isAbove(readCount, 0)

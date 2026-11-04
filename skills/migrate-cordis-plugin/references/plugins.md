@@ -52,7 +52,7 @@ export default Plugin.make({
 | Sync validation only                          | Decoding may be async and may use services listed in `inject`  |
 | `ValidationError` thrown, fiber failed        | `Schema.SchemaError`; the fork is `Failed` until input changes |
 | `Plugin.Transform` (`Config(s) => t`)         | `Schema.decodeTo` from the input schema to the config schema   |
-| Defaults inside the schema                    | `Schema.withDecodingDefault` or optional keys                  |
+| Defaults inside the schema                    | `Schema.withDecodingDefaultKey` or optional keys               |
 | Secrets as plain strings                      | `Schema.RedactedFromValue(Schema.String)`                      |
 
 `apply` receives the decoded config. The input type (what `Graft.plugin` and

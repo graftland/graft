@@ -10,7 +10,8 @@ description:
 
 Graft keeps cordis's model (a tree of plugins that publish and use services
 while it runs) and expresses it with Effect. A port is a rewrite into Effect,
-not a rename: there is no context object to carry over.
+not a rename: there is no context object to carry over. For Graft design and
+idioms beyond this mapping, use the [`graft`](../graft/SKILL.md) skill.
 
 ## Version gate
 

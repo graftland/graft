@@ -39,7 +39,7 @@ never run code. Translate by what the expression computes:
 
 | Expression computes                       | Graft                                                                                                      |
 | ----------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| An environment variable (`process.env.X`) | `!env X`. Numbers and booleans: the plugin's schema decodes the string (`Schema.NumberFromString`).        |
+| An environment variable (`process.env.X`) | `!env X`. Numbers and booleans: the plugin's schema decodes the string (`Schema.FiniteFromString`).        |
 | A secret                                  | `!env X`, with `Schema.RedactedFromValue(Schema.String)` in the plugin's schema.                           |
 | A default when a variable is missing      | A schema default in the plugin, or `Config.withDefault` read inside `apply`.                               |
 | `disabled` from an environment check      | Separate config files per environment, or an `!env` value the plugin itself reads to decide. Ask the user. |

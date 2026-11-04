@@ -59,7 +59,8 @@ cd my-app
 npx graft start --watch
 ```
 
-阅读[文档](https://graftland.github.io/graft/zh-cn/)。
+阅读[文档](https://graftland.github.io/graft/zh-cn/)。和编程智能体一起开发？[`graft` skill](skills/graft)
+教它用插件化、Effect 化的方式拆解应用，再编写、测试和运行：`npx skills add graftland/graft`。
 
 Graft 的插件模型借鉴自
 [cordis](https://github.com/cordiverse/cordis)。cordis 在时空中组合，Graft 只照料自己的园子。请看

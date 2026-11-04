@@ -59,11 +59,12 @@ only what Effect does not have.
 
 ## Migrate with a coding agent
 
-The repository ships two
+The repository ships
 [agent skills](https://github.com/graftland/graft/tree/main/skills) that walk an
 agent through a port. `migrate-cordis-plugin` rewrites plugins, services and
 their tests. `migrate-cordis-app` moves `cordis.yml`, the plugin list and the
-host. Install both with:
+host. The `graft` skill covers everything after the port: designing new plugins,
+testing and running them. Install them all with:
 
 ```sh
 npx skills add graftland/graft
