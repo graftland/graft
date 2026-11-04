@@ -28,6 +28,7 @@
 | [saas-tenants](saas-tenants)         | 同一组插件为多个租户提供服务。                     | 每个租户各自的 `isolate` 与 `intercept`、带有租户专属设置的共享服务、租户的接入与退出。 |
 | [market-feed](market-feed)           | 一个建立在不稳定交易所之上的行情数据管道。         | 受监督的后台任务、重试计划、`Pending` 与 `Failed` 状态、可选依赖。                      |
 | [remote-worker](remote-worker)       | 宿主调用本机子进程中的服务。                       | 共享契约、跨进程服务、关闭时确认进程退出。                                              |
+| [remote-runner](remote-runner)       | 通过双向 TLS 在另一台机器上运行的发票导出器。      | runner 与 `graft.yml` 条目、双向调用、用 generation 拒绝过期写入。                      |
 
 ## 运行示例
 

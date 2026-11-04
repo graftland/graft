@@ -10,7 +10,9 @@ description: 把插件放进子进程，或交给另一台机器运行。
 进程分开不代表权限隔离。插件仍能访问所在机器的文件和网络；需要限制权限时，请在部署中使用容器或虚拟机。同一进程内的服务可见性则由[隔离](../isolation/)控制。
 
 [remote-worker 示例](https://github.com/graftland/graft/tree/main/samples/remote-worker)
-包含完整的服务、宿主、子进程和测试，不需要网络或证书。
+包含完整的服务、宿主、子进程和测试，不需要网络或证书。[remote-runner 示例](https://github.com/graftland/graft/tree/main/samples/remote-runner)
+通过双向 TLS 在真实 runner 上运行 `graft.yml`
+条目，并演示 generation 如何拒绝过期写入。
 
 ## 分开契约和实现
 

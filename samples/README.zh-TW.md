@@ -28,6 +28,7 @@
 | [saas-tenants](saas-tenants)         | 同一組外掛為多個租戶提供服務。                     | 每個租戶各自的 `isolate` 與 `intercept`、帶有租戶專屬設定的共用服務、租戶的加入與退出。 |
 | [market-feed](market-feed)           | 一個建立在不穩定交易所之上的行情資料管線。         | 受監督的背景任務、重試排程、`Pending` 與 `Failed` 狀態、可選的相依。                    |
 | [remote-worker](remote-worker)       | 宿主呼叫本機子行程中的服務。                       | 共用契約、跨行程服務、關閉時確認行程退出。                                              |
+| [remote-runner](remote-runner)       | 透過雙向 TLS 在另一台機器上執行的發票匯出器。      | runner 與 `graft.yml` 條目、雙向呼叫、用 generation 拒絕過期寫入。                      |
 
 ## 執行範例
 

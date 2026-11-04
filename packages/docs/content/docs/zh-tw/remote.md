@@ -10,7 +10,9 @@ description: 讓外掛在子行程或另一台機器上執行。
 行程分開不代表權限隔離。外掛仍能存取所在機器的檔案和網路；需要限制權限時，請在部署時使用容器或虛擬機。同一行程內的服務可見性則由[隔離](../isolation/)控制。
 
 [remote-worker 範例](https://github.com/graftland/graft/tree/main/samples/remote-worker)
-包含完整的服務、宿主、子行程和測試，不需要網路或憑證。
+包含完整的服務、宿主、子行程和測試，不需要網路或憑證。[remote-runner 範例](https://github.com/graftland/graft/tree/main/samples/remote-runner)
+透過雙向 TLS 在真實 runner 上執行 `graft.yml`
+條目，並示範 generation 如何拒絕過期寫入。
 
 ## 分開契約與實作
 

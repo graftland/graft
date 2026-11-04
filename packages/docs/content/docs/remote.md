@@ -15,7 +15,10 @@ For service visibility within one process, use [isolation](../isolation/).
 The
 [remote-worker sample](https://github.com/graftland/graft/tree/main/samples/remote-worker)
 includes a working service, host, child, and test. It needs no network or
-certificates.
+certificates. The
+[remote-runner sample](https://github.com/graftland/graft/tree/main/samples/remote-runner)
+runs a `graft.yml` entry on a real runner over mutual TLS and shows generations
+fencing out a stale write.
 
 ## Separate the contract from the implementation
 

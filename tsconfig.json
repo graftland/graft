@@ -75,6 +75,9 @@
 		},
 		{
 			"path": "./samples/remote-worker"
+		},
+		{
+			"path": "./samples/remote-runner"
 		}
 	]
 }

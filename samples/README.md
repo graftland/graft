@@ -31,6 +31,7 @@ about it.
 | [saas-tenants](saas-tenants)         | One set of plugins serving several tenants.                            | `isolate` and `intercept` per tenant, a shared service with per-tenant settings, onboarding and offboarding. |
 | [market-feed](market-feed)           | A market data pipeline behind an unreliable exchange.                  | Supervised background tasks, retry schedules, `Pending` and `Failed` states, optional dependencies.          |
 | [remote-worker](remote-worker)       | A host calls a service in a local child process.                       | Shared contracts, cross-process services, and confirmed exit on shutdown.                                    |
+| [remote-runner](remote-runner)       | An invoice exporter on another machine, behind mutual TLS.             | A runner and a `graft.yml` entry, calls in both directions, generations that fence out stale writes.         |
 
 ## Run a sample
 

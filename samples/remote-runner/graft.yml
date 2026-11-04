@@ -1,0 +1,10 @@
+# yaml-language-server: $schema=../../packages/cli/schema.json
+# The ledger runs on the host. The exporter runs on the runner; its instance
+# name on the runner is its entry id.
+- id: ledger
+  name: ./src/ledger.ts
+
+- id: exporter
+  name: ./src/exporter.ts
+  config:
+    destination: accounting

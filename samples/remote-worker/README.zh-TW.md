@@ -33,43 +33,9 @@ devenv shell -- pnpm --filter @graftland/sample-remote-worker test
 
 ## 放到另一台機器執行
 
-在 runner 機器上建置並安裝本範例及其執行依賴。安裝目錄下必須有
-`node_modules/@graftland/sample-remote-worker/package.json` 和建置後的 `dist`
-檔案。套件匯出了 `@graftland/sample-remote-worker/contract`。同時安裝
-`@graftland/remote`。這些都是工作區套件，不以已發布到 registry 為前提。宿主和 runner 使用相符的契約版本。
-
-準備專用 CA 簽發的伺服器和用戶端憑證。伺服器憑證必須符合主機名稱，用戶端憑證恰好包含一個
-`graft://` SAN URI，例如 `graft://demo`。接著執行已安裝的執行檔：
-
-```sh
-graft-remote serve --host 0.0.0.0 --port 7443 \
-  --root /srv/graft/install --state /var/lib/graft \
-  --cert /run/secrets/server.crt --key /run/secrets/server.key \
-  --ca /run/secrets/clients-ca.crt --lease "15 seconds" --grace "5 seconds"
-```
-
-等待
-`Listening`。建議交給外部行程管理器執行，停止時涵蓋整個行程群組或容器。重新啟動時保留狀態目錄，執行期間不要修改已安裝的套件。
-
-把 `src/main.ts` 中本機的 `formatInChild(...)` 呼叫換成：
-
-```ts
-formatInChild({
-	contractModule: "@graftland/sample-remote-worker/contract",
-	target: Remote.runner({
-		instance: "formatter-demo",
-		host: "runner.example",
-		port: 7443,
-		tls: { servername: "runner.example", ca, cert, key: Redacted.make(key) },
-	}),
-})
-```
-
-從 `@graftland/remote` 匯入 `Remote`，從 `effect` 匯入 `Redacted`。這裡的
-`ca`、`cert` 和 `key` 是啟用時從宿主檔案讀取的 PEM 內容；將 `runner.example`
-換成伺服器主機名稱。[遠端外掛指南](https://graftland.github.io/graft/zh-tw/remote/)
-提供完整的 Effect Config 入口，用環境變數設定這些路徑。重新建置，再執行
-`start`；這時傳回的 PID 屬於 runner 機器。
-
-直接呼叫時要提供 `instance`。透過 `graft.yml`
-載入則可以省略，使用儲存的項目 id。替換網路實例會先等待舊行程退出，再增加 generation。租約、停止結果及保證的邊界見指南。本範例測試只執行本機 target。
+[remote-runner](../remote-runner)
+範例透過雙向 TLS 在真實 runner 上執行外掛，並從 `graft.yml`
+載入。它的 README 說明了憑證、在 runner 上安裝套件以及啟動
+`graft-remote serve`。要讓本範例連線runner，在 `src/main.ts` 裡把 `target` 換成
+`Remote.runner(...)`，並設定
+`contractModule: "@graftland/sample-remote-worker/contract"`。本範例的測試只執行本機 target。
