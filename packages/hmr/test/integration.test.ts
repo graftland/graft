@@ -1954,3 +1954,37 @@ export default Plugin.make({ name: 'lazy', apply: () =>
 		}).pipe(run),
 	)
 })
+
+it.live(
+	"observes raw contract dependencies through a fixed symlink entry",
+	() =>
+		Effect.gen(function* () {
+			const { fs, directory, base, hmr, write } = yield* setup
+			yield* write("helper.mjs", "export const value = 'before'")
+			yield* write("contract.mjs", "export { value } from './helper.mjs'")
+			yield* fs.symlink("contract.mjs", `${directory}/link.mjs`)
+			const url = new URL("./link.mjs", base).href
+			yield* hmr.importModuleScoped(url)
+			const ready = yield* Deferred.make<void>()
+			const watcher = yield* hmr.observe([url]).pipe(
+				Stream.runHead,
+				Effect.provideService(FileSystem.FileSystem, {
+					...fs,
+					watch: () =>
+						Stream.fromEffect(Deferred.succeed(ready, undefined)).pipe(
+							Stream.drain,
+							Stream.concat(Stream.never),
+						),
+				}),
+				Effect.forkScoped,
+			)
+			yield* Deferred.await(ready)
+			yield* write("helper.mjs", "export const value = 'after'")
+			const changed = yield* Fiber.join(watcher).pipe(
+				Effect.timeout("5 seconds"),
+			)
+			assert.isTrue(Option.isSome(changed))
+			const next = yield* hmr.importModuleScoped(url)
+			assert.propertyVal(next, "value", "after")
+		}).pipe(run),
+)

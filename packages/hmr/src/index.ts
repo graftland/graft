@@ -86,9 +86,10 @@ export interface Hmr {
 	readonly importer: (specifier: string) => Promise<unknown>
 	/** Uses the application context and Node cache, without watching or replacing the module. */
 	readonly importModule: (specifier: string) => Effect.Effect<unknown, HmrError>
-	/** Imports a fresh non-plugin module graph and retains it for the caller's scope. */
+	/** Imports a fresh non-plugin graph in the caller's scope; failed observations survive in observationScope when supplied. */
 	readonly importModuleScoped: (
 		specifier: string,
+		options?: ImportOptions,
 	) => Effect.Effect<unknown, HmrError, Scope.Scope>
 	/** Observes file URLs and dependencies of leased modules without importing the other files. */
 	readonly observe: (
@@ -441,45 +442,65 @@ export const make = (
 				),
 			)
 
-		const importModuleScoped: Hmr["importModuleScoped"] = (specifier) =>
-			Effect.acquireRelease(
-				serial(
-					Effect.gen(function* () {
-						yield* checkOpen
-						const generation = hooks.prepare()
-						hooks.start(generation)
-						const token: symbol = Symbol()
-						const exit = yield* Effect.exit(
-							Effect.tryPromise({
-								try: () => import(/* @vite-ignore */ hooks.request(specifier)),
-								catch: (cause) =>
-									HmrError.make({ stage: "import", specifier, cause }),
-							}),
-						)
-						const attempt = Option.map(hooks.resolved(), (url) => ({
-							url,
-							generation,
-						}))
-						yield* Ref.update(
-							owners,
-							HashMap.set(token, {
-								active: Exit.isSuccess(exit) ? attempt : Option.none(),
-								pending: Exit.isFailure(exit) ? attempt : Option.none(),
-							}),
-						)
-						return { token, exit }
-					}).pipe(Effect.ensuring(Effect.sync(hooks.discard))),
-				),
-				({ token }) =>
-					serial(
-						Ref.update(owners, HashMap.remove(token)).pipe(
-							Effect.ensuring(collect),
+		const importModuleScoped: Hmr["importModuleScoped"] = (
+			specifier,
+			options,
+		) =>
+			Effect.uninterruptibleMask((restore) =>
+				Effect.gen(function* () {
+					const caller = yield* Effect.scope
+					const { token, exit } = yield* serial(
+						Effect.gen(function* () {
+							yield* checkOpen
+							const generation = hooks.prepare()
+							hooks.start(generation)
+							const token: symbol = Symbol()
+							const exit = yield* Effect.exit(
+								Effect.tryPromise({
+									try: () =>
+										import(/* @vite-ignore */ hooks.request(specifier)),
+									catch: (cause) =>
+										HmrError.make({ stage: "import", specifier, cause }),
+								}),
+							)
+							const root = Option.orElse(hooks.resolved(), () =>
+								String.startsWith("file:")(specifier)
+									? Option.some(specifier)
+									: Option.none(),
+							)
+							const attempt = Option.map(root, (url) => ({
+								url,
+								generation,
+								...Option.match(hooks.fileRequest(specifier), {
+									onNone: () => ({}),
+									onSome: (request) => ({ request }),
+								}),
+							}))
+							yield* Ref.update(
+								owners,
+								HashMap.set(token, {
+									active: Exit.isSuccess(exit) ? attempt : Option.none(),
+									pending: Exit.isFailure(exit) ? attempt : Option.none(),
+								}),
+							)
+							return { token, exit }
+						}).pipe(Effect.ensuring(Effect.sync(hooks.discard))),
+					)
+					// Failed candidates close immediately; their observations belong to the entry's retry generation.
+					// Successful raw graphs stay with the caller, so local restarts do not retain old graphs.
+					yield* Scope.addFinalizer(
+						Exit.isFailure(exit)
+							? (options?.observationScope ?? caller)
+							: caller,
+						serial(
+							Ref.update(owners, HashMap.remove(token)).pipe(
+								Effect.ensuring(collect),
+							),
 						),
-					),
-			).pipe(
-				Effect.flatMap(({ exit }) => exit),
-				preserveExit,
-			)
+					)
+					return yield* restore(exit)
+				}),
+			).pipe(preserveExit)
 
 		const observe: Hmr["observe"] = (files) =>
 			Stream.unwrap(
@@ -501,8 +522,12 @@ export const make = (
 							HashMap.union(
 								baseline,
 								hooks.files(
-									Array.filter(attempts, (attempt) =>
-										Array.contains(files, attempt.url),
+									Array.filter(
+										attempts,
+										(attempt) =>
+											Array.contains(files, attempt.url) ||
+											(attempt.request !== undefined &&
+												Array.contains(files, attempt.request)),
 									),
 								),
 							),

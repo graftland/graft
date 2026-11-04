@@ -1,3 +1,4 @@
+import { reserve } from "./protocolOutput"
 import { Graft, Plugin, type Fork } from "@graftland/graft"
 import {
 	Array,
@@ -174,7 +175,6 @@ export const output = <A, E, R>(
 	Effect.gen(function* () {
 		const tokens = Array.takeWhile(args, (arg) => arg !== "--")
 		const stdio = tokens.includes("--stdio")
-		const console = yield* Console.Console
 		const program = Effect.gen(function* () {
 			if (
 				stdio &&
@@ -204,12 +204,7 @@ export const output = <A, E, R>(
 		}).pipe(Effect.provideService(ProtocolOutput, stdio))
 		return yield* stdio
 			? program.pipe(
-					Effect.provideService(Console.Console, {
-						...console,
-						log: console.error,
-						info: console.error,
-						debug: console.error,
-					}),
+					reserve,
 					Effect.provideService(
 						CliOutput.Formatter,
 						CliOutput.defaultFormatter({ colors: false }),

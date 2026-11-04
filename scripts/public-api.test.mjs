@@ -170,3 +170,23 @@ for (const published of [false, true]) {
 			},
 		))
 }
+
+it("skips artifact directories without hiding invalid package manifests", () => {
+	const cache = join(root, ".cache/public-api-cases")
+	mkdirSync(cache, { recursive: true })
+	const directory = mkdtempSync(join(cache, "workspace-"))
+	try {
+		mkdirSync(join(directory, "packages/old/dist"), { recursive: true })
+		mkdirSync(join(directory, "packages/current"), { recursive: true })
+		const manifest = join(directory, "packages/current/package.json")
+		writeFileSync(manifest, '{"name":"current"}')
+		assert.deepEqual(
+			publicPackages(directory).map(({ manifest }) => manifest.name),
+			["current"],
+		)
+		writeFileSync(manifest, "invalid")
+		assert.throws(() => publicPackages(directory), SyntaxError)
+	} finally {
+		rmSync(directory, { recursive: true, force: true })
+	}
+})

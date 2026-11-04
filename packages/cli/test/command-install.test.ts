@@ -9,6 +9,7 @@ import {
 	Schema,
 	Sink,
 	Stream,
+	String,
 } from "effect"
 import { ChildProcessSpawner } from "effect/process"
 import { parse } from "yaml"
@@ -35,9 +36,9 @@ const manager = (code: number, calls: MutableList.MutableList<string>) =>
 	)
 
 for (const global of [false, true]) {
-	it.live(
-		`installs and enables a ${global ? "user" : "project"} command plugin once`,
-		() =>
+	it.live.each(["", "# Empty configuration\n", "null\n"])(
+		`installs and enables a ${global ? "user" : "project"} command plugin in an empty document (%j) once`,
+		(text) =>
 			Effect.gen(function* () {
 				const fs = yield* FileSystem.FileSystem
 				const path = yield* Path.Path
@@ -47,6 +48,7 @@ for (const global of [false, true]) {
 						directory + "/package.json",
 						'{"name":"example","private":true}',
 					)
+				yield* fs.writeFileString(directory + "/graft.yml", text)
 				const calls = MutableList.make<string>()
 				yield* Manage.addPlugin("remote", global).pipe(
 					Effect.andThen(Manage.addPlugin("remote", global)),
@@ -81,12 +83,14 @@ for (const global of [false, true]) {
 					manifest.dependencies["@graftland/plugin-remote"],
 					"latest",
 				)
-				const text = yield* fs.readFileString(directory + "/graft.yml")
+				const saved = yield* fs.readFileString(directory + "/graft.yml")
+				if (String.startsWith("#")(text))
+					assert.include(saved, "# Empty configuration")
 				const entries = yield* Schema.decodeUnknownEffect(
 					Schema.Array(
 						Schema.Struct({ name: Schema.String, cli: Schema.Boolean }),
 					),
-				)(parse(text))
+				)(parse(saved))
 				assert.deepEqual(entries, [
 					{ name: "@graftland/plugin-remote/cli", cli: true },
 				])

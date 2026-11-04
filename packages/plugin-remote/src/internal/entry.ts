@@ -192,12 +192,16 @@ const directTarget = Effect.fnUntraced(function* <
 		)
 		yield* changed.pipe(
 			Effect.andThen(fork.restart),
-			Effect.forever,
 			// Release.scoped distinguishes interrupted finalizers from cancellation of this watcher.
 			Effect.catchCauseIf(
 				(cause) => !Cause.hasInterruptsOnly(cause),
-				(cause) => Effect.logError("Remote source watcher stopped", cause),
+				(cause) =>
+					Effect.logError(
+						"Remote source observation failed; retrying",
+						cause,
+					).pipe(Effect.andThen(Effect.sleep("1 second"))),
 			),
+			Effect.forever,
 			Effect.forkScoped,
 		)
 	}

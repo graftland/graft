@@ -49,7 +49,7 @@ graft start [config] [--watch] [--env-file <path>] [--stdio]
 ### 協定輸出
 
 只有一個 stdio listener 的 runner 使用
-`graft start runner.yml --stdio`。載入外掛、處理說明與版本參數之前，stdout 就已保留給協定位元組。日誌、說明、版本與錯誤都寫入 stderr；此模式不提供互動精靈與補全輸出。runner 會拒絕不相符的 listener 設定。stdin
+`graft start runner.yml --stdio`。載入外掛、處理說明與版本參數之前，stdout 就已保留給協定位元組。日誌、Console 輸出（包括 worker 輸出）、說明、版本與錯誤都寫入 stderr；此模式不提供互動精靈與補全輸出。runner 會拒絕不相符的 listener 設定。stdin
 EOF 後，runner 停止執行單元，確認結束後退出行程；啟動或清理失敗時回傳非零結束碼。
 
 ### 選項

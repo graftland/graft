@@ -75,8 +75,9 @@ npm install @graftland/graft effect
 
 需要讓 finalizer 自身的中斷在外層取消後仍可見時，使用
 `Release.scoped`。既有 Scope 可用 `Release.close`
-關閉。釋放過程自行產生的中斷會成為帶有原始 cause 的 `ReleaseInterrupted`
-defect；預期的外部取消仍是 Interrupt。
+關閉。只有釋放 cause 全部由中斷組成時，釋放過程自行產生的中斷才會成為帶有原始 cause 的
+`ReleaseInterrupted`
+defect；預期的外部取消仍是 Interrupt。含有其他失敗的 cause 原樣保留。
 
 ## 文件
 

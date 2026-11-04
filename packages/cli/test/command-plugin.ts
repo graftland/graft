@@ -43,3 +43,24 @@ export const consumer = Plugin.make({
 		)
 	}),
 })
+
+export const diagnostics = Plugin.make({
+	name: "diagnostic-commands",
+	inject: [Commands],
+	apply: Effect.fnUntraced(function* () {
+		yield* Console.table([{ message: "DIAGNOSTIC_TABLE" }])
+		yield* Console.dir({ message: "DIAGNOSTIC_DIR" })
+		yield* Console.dirxml({ message: "DIAGNOSTIC_DIRXML" })
+		yield* Console.group({ label: "DIAGNOSTIC_GROUP" })
+		yield* Console.count("DIAGNOSTIC_COUNT")
+		yield* Console.time("DIAGNOSTIC_TIME")
+		yield* Console.timeLog("DIAGNOSTIC_TIME")
+		yield* Effect.sync(() => {
+			process.stdout.write("DIAGNOSTIC_RAW\n")
+		})
+		const commands = yield* Commands
+		yield* commands.register(
+			Command.make("diagnostic", {}, () => Effect.logInfo("DIAGNOSTIC_LOG")),
+		)
+	}),
+})

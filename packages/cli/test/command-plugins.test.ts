@@ -199,3 +199,41 @@ it.live("activates command providers before waiting for their consumers", () =>
 		assert.include(result.stdout, "Shared greeting")
 	}).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 )
+
+it.live(
+	"reserves stdout before command plugins emit any kind of diagnostic",
+	() =>
+		Effect.gen(function* () {
+			const fs = yield* FileSystem.FileSystem
+			const directory = yield* fs.makeTempDirectoryScoped()
+			const fixture = yield* json(
+				new URL("../.cache/integration/command-plugin.mjs", import.meta.url)
+					.href,
+			)
+			yield* fs.writeFileString(
+				directory + "/diagnostics.mjs",
+				`export { diagnostics as default } from ${fixture};`,
+			)
+			yield* fs.writeFileString(
+				directory + "/graft.yml",
+				"- name: ./diagnostics.mjs\n  cli: true\n",
+			)
+			const result = yield* run(directory, directory + "/home", [
+				"--stdio",
+				"diagnostic",
+			])
+			assert.equal(result.code, 0, result.stderr)
+			assert.equal(result.stdout, "")
+			for (const marker of [
+				"TABLE",
+				"DIR",
+				"DIRXML",
+				"GROUP",
+				"COUNT",
+				"TIME",
+				"RAW",
+				"LOG",
+			])
+				assert.include(result.stderr, "DIAGNOSTIC_" + marker)
+		}).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+)

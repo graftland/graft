@@ -1,5 +1,6 @@
+import { ProtocolStdio } from "./internal/protocolOutput"
 import { NodeServices } from "@effect/platform-node"
-import { Context, Effect, Exit, Layer, Schema } from "effect"
+import { Context, Effect, Exit, Layer, Option, Schema, Stdio } from "effect"
 import { Digest, SecureRandom, Signature } from "effect/crypto"
 import { FetchHttpClient } from "effect/http"
 
@@ -28,7 +29,13 @@ export class Application extends Context.Service<
 
 /** Node capabilities shared by application and command hosts. */
 export const platform = Layer.mergeAll(
-	NodeServices.layer,
+	Layer.effect(
+		Stdio.Stdio,
+		Effect.gen(function* () {
+			const reserved = yield* ProtocolStdio
+			return Option.isSome(reserved) ? reserved.value : yield* Stdio.Stdio
+		}),
+	).pipe(Layer.provideMerge(NodeServices.layer)),
 	FetchHttpClient.layer,
 	Digest.layerWebCrypto,
 	SecureRandom.layerWebCrypto,

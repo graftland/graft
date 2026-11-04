@@ -1,3 +1,4 @@
+import { packageManifests } from "./workspace.mjs"
 import { API, SymbolFlags } from "typescript/unstable/sync"
 import { SyntaxKind } from "typescript/unstable/ast"
 import {
@@ -64,12 +65,8 @@ function isPublicFile({ directory, manifest }, file) {
 
 /** Use the same package selection as the release script. */
 export function publicPackages(root) {
-	return readdirSync(join(root, "packages"), { withFileTypes: true })
-		.filter((entry) => entry.isDirectory())
-		.map((entry) => ({
-			directory: join(root, "packages", entry.name),
-			manifest: json(join(root, "packages", entry.name, "package.json")),
-		}))
+	return packageManifests(root)
+		.map((file) => ({ directory: dirname(file), manifest: json(file) }))
 		.filter(({ manifest }) => !manifest.private)
 }
 

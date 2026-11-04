@@ -1,4 +1,4 @@
-/** Scoped resource release that preserves interrupted finalizers as defects. */
+/** Scoped resource release that distinguishes pure release interruption from cancellation. */
 import { Array, Cause, Effect, Exit, Result, Schema, Scope } from "effect"
 
 /** Resource release was interrupted, rather than successfully cancelled. */
@@ -15,9 +15,9 @@ export class ReleaseInterrupted extends Schema.TaggedError<
 
 /**
  * Closes a scope without losing interrupted finalizers through enclosing cancellation.
- * Pending external cancellation remains an Interrupt. Interrupts produced by release
- * itself become a ReleaseInterrupted defect carrying the original cause.
- * Other failures are preserved unchanged.
+ * When the release cause contains only interrupts, pending external cancellation
+ * remains an Interrupt; release itself becomes a ReleaseInterrupted defect carrying
+ * the original cause. Causes containing other failures remain unchanged.
  */
 export const close = (
 	scope: Scope.Closeable,

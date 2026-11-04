@@ -50,8 +50,8 @@ connector 與 listener 會宣告屬性。Remote 相信這些宣告，用它們�
 ## listener 如何執行
 
 1. **繫結**：使用 authenticator 提供的 TLS 政策（只有 mTLS 有）。TLS 設定，包括要求用戶端憑證，都來自這個政策。
-2. **服務**：帶著 `accept` 函式呼叫 `graft start`。Remote 等待
-   `ready`（表示接受迴圈已在執行），同時監看 `graft start`
+2. **服務**：呼叫 `serve(accept)`。Remote 等待
+   `ready`（表示接受迴圈已在執行），同時監看 `serve`
    是否失敗。所有 listener 都就緒後 runner 才啟動；之後的失敗只影響那個 listener。
 3. **接受**：每條連線在任何 HTTP 升級之前，以宿主出示的內容呼叫 `accept`。遇到
    `AuthenticationFailed` 時，HTTP listener 回應 401，並把錯誤的 `challenge`
@@ -103,7 +103,7 @@ it.live("preserves bytes", () =>
 
 失敗時拋出
 `ConformanceError`。另外也要測試錯誤的憑證、cause 是否保留、scope 取消、在
-`bind` 時套用 TLS、`graft start` 在 `ready`
+`bind` 時套用 TLS、`serve` 在 `ready`
 之前失敗，以及兩份設定不同的副本同時執行，做法可參考
 [內建測試 fixture](https://github.com/graftland/graft/blob/main/packages/plugin-remote/test/capabilities.test.ts)。
 

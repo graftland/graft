@@ -53,10 +53,11 @@ order.
 
 Use `graft start runner.yml --stdio` for a runner with one stdio listener. The
 flag reserves stdout for protocol bytes before loading plugins or parsing help
-and version flags. Logs, help, version and errors go to stderr; interactive
-wizard and completion output are unavailable in this mode. The runner rejects a
-mismatched listener configuration. At stdin EOF it stops its execution units,
-confirms termination and exits; startup or cleanup failure gives a nonzero exit.
+and version flags. Logs, Console output (including worker output), help, version
+and errors go to stderr; interactive wizard and completion output are
+unavailable in this mode. The runner rejects a mismatched listener
+configuration. At stdin EOF it stops its execution units, confirms termination
+and exits; startup or cleanup failure gives a nonzero exit.
 
 ### Options
 

@@ -1,6 +1,7 @@
 /**
  * Turns the `name` of an entry into a plugin.
  */
+import { ObservationScope } from "./internal/observation"
 import { ConfigDirectory } from "./ConfigDirectory"
 import { isOnlyFailure } from "./internal/recovery"
 import { Plugin } from "@graftland/graft"
@@ -340,11 +341,13 @@ export const make = <E>(
 				options?: ImportOptions,
 			) {
 				const caller = yield* Effect.scope
+				const observation = yield* ObservationScope
 				const candidate = yield* normalize(specifier)
 				return yield* load(
 					specifier,
 					candidate,
-					options?.observationScope ?? caller,
+					options?.observationScope ??
+						Option.getOrElse(observation, () => caller),
 				).pipe(inCandidateScope)
 			}),
 			resolve: Effect.fnUntraced(function* (

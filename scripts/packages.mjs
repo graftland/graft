@@ -1,3 +1,4 @@
+import { packageManifests } from "./workspace.mjs"
 // Packs every public workspace package with one shared version, and publishes
 // the packed files to GitHub Packages or to npm. See the "Releases" page in
 // the docs for how CI uses this script.
@@ -123,9 +124,7 @@ export function releaseManifest(manifest, version, names) {
 
 function pack(root, output, ref, sha) {
 	const release = releaseVersion(ref, sha)
-	const packages = readdirSync(join(root, "packages"), { withFileTypes: true })
-		.filter((entry) => entry.isDirectory())
-		.map((entry) => join(root, "packages", entry.name, "package.json"))
+	const packages = packageManifests(root)
 		.map((file) => ({ file, original: readFileSync(file, "utf8") }))
 		.map((entry) => ({ ...entry, manifest: JSON.parse(entry.original) }))
 		.filter((entry) => !entry.manifest.private)

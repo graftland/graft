@@ -110,9 +110,11 @@ aliases. Dynamically loaded `Plugin<any>` values explicitly erase it.
 ## Resource release
 
 Use `Release.scoped` when interrupted finalizers must remain visible through
-enclosing cancellation. `Release.close` does the same for an existing scope. A
-finalizer’s own interruption becomes a `ReleaseInterrupted` defect carrying the
-original cause; expected external cancellation remains an Interrupt.
+enclosing cancellation. `Release.close` does the same for an existing scope.
+When the release cause contains only interrupts, a finalizer’s own interruption
+becomes a `ReleaseInterrupted` defect carrying the original cause; expected
+external cancellation remains an Interrupt. Causes containing other failures
+stay unchanged.
 
 ## Documentation
 

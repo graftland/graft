@@ -3,6 +3,7 @@
  * changes: untouched entries keep running, configuration changes are applied
  * through `Fork.update`, and anything else is unloaded and loaded again.
  */
+import { ObservationScope } from "./internal/observation"
 import { Select } from "./Entry"
 
 import { Graft, Plugin, Fork } from "@graftland/graft"
@@ -353,6 +354,9 @@ const definition = Plugin.make({
 								intercept: [
 									...intercept,
 									Graft.intercept(CurrentId, () => Option.some(entry.id)),
+									Graft.intercept(ObservationScope, () =>
+										Option.some(observationScope),
+									),
 								],
 							})
 							yield* Ref.set(targetFork, Option.some(fork))

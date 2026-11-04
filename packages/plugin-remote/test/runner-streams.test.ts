@@ -7,12 +7,14 @@ import {
 	Cause,
 	Deferred,
 	Effect,
+	Exit,
 	Fiber,
 	FileSystem,
 	Layer,
 	Option,
 	String,
 	Schedule,
+	Schema,
 	Sink,
 	Stream,
 } from "effect"
@@ -73,10 +75,50 @@ const gone = (pid: number) =>
 		Effect.timeout("10 seconds"),
 	)
 
-const session = Effect.fnUntraced(function* (state: string) {
+const session = Effect.fnUntraced(function* (
+	state: string,
+	extra?: {
+		readonly target: "local" | "worker"
+		readonly mode: "normal" | "fail" | "cleanup-fail"
+		readonly directory: string
+	},
+) {
 	const argv = yield* args(state)
+	if (extra !== undefined) {
+		const fs = yield* FileSystem.FileSystem
+		const file = yield* Effect.fromNullishOr(argv[1])
+		const entries = yield* fs
+			.readFileString(file)
+			.pipe(
+				Effect.flatMap(
+					Schema.decodeEffect(Schema.fromJsonString(Schema.Array(Schema.Json))),
+				),
+			)
+		const contents = yield* Schema.encodeEffect(
+			Schema.fromJsonString(Schema.Json),
+		)([
+			...entries,
+			{
+				id: "diagnostic",
+				name: "remote",
+				config: {
+					contract: new URL(
+						"../.cache/integration/contract.js",
+						import.meta.url,
+					).href,
+					connect:
+						extra.target === "worker"
+							? { worker: { execArgv: [] } }
+							: { local: {} },
+					config: { directory: extra.directory, mode: extra.mode, value: 1 },
+				},
+			},
+		])
+		yield* fs.writeFileString(file, contents)
+	}
 	const { child, stderr } = yield* spawn(argv)
 	const decoder = Framing.decoder()
+	const validated = yield* Deferred.make<void, TransportError>()
 	const channel = {
 		input: child.stdout.pipe(
 			Stream.tap((bytes) => Effect.fromResult(decoder.decode(bytes))),
@@ -84,6 +126,7 @@ const session = Effect.fnUntraced(function* (state: string) {
 			Stream.mapError((error) =>
 				TransportError.make({ cause: Cause.fail(error) }),
 			),
+			Stream.onExit((exit) => Deferred.done(validated, Exit.asVoid(exit))),
 		),
 		output: child.stdin.pipe(
 			Sink.mapError((error) =>
@@ -110,7 +153,7 @@ const session = Effect.fnUntraced(function* (state: string) {
 	yield* client.Load({ handle: record.handle, specifier: "remote-fixture" })
 	const loaded = yield* client.Status(record.handle)
 	const unit = yield* Effect.fromOption(childOf(loaded))
-	return { child, stderr, record, unit }
+	return { child, stderr, record, unit, validated: Deferred.await(validated) }
 })
 
 const proxy = Effect.fnUntraced(function* (
@@ -317,3 +360,55 @@ describe("runner stream transports", () => {
 			}).pipe(Effect.scoped, Effect.provide(runtime)),
 	)
 })
+
+for (const target of ["local", "worker"] satisfies ReadonlyArray<
+	"local" | "worker"
+>) {
+	for (const mode of ["normal", "fail", "cleanup-fail"] satisfies ReadonlyArray<
+		"normal" | "fail" | "cleanup-fail"
+	>) {
+		it.live(
+			`keeps ${target} diagnostics off the stdio session during ${mode}`,
+			() =>
+				Effect.gen(function* () {
+					const fs = yield* FileSystem.FileSystem
+					const directory = yield* fs.makeTempDirectoryScoped()
+					yield* fs.writeFileString(directory + "/release", "ready")
+					const running = yield* session(directory + "/state", {
+						target,
+						mode,
+						directory,
+					})
+					yield* fs.readDirectory(directory).pipe(
+						Effect.repeat({
+							schedule: Schedule.spaced("20 millis"),
+							until: (files) =>
+								Array.some(
+									files,
+									String.startsWith(
+										mode === "fail" ? "finalized-" : "started-",
+									),
+								),
+						}),
+						Effect.timeout("10 seconds"),
+					)
+					yield* Stream.empty.pipe(Stream.run(running.child.stdin))
+					const code = yield* running.child.exitCode
+					yield* running.validated
+					assert.equal(code, mode === "cleanup-fail" ? 1 : 0)
+					yield* gone(running.unit.pid)
+					const stderr = yield* Fiber.join(running.stderr)
+					assert.include(stderr, "Remote fixture started")
+					if (target === "worker")
+						assert.include(
+							stderr,
+							"Console output must not corrupt the control channel",
+						)
+					if (mode === "fail") assert.include(stderr, "Remote apply defect")
+					if (mode === "cleanup-fail")
+						assert.include(stderr, "Remote finalizer failed")
+				}).pipe(Effect.scoped, Effect.provide(platform)),
+			30_000,
+		)
+	}
+}

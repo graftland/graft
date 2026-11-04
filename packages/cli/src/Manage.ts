@@ -1,7 +1,7 @@
 /**
  * Creating projects and changing their dependencies.
  */
-import { parseDocument } from "yaml"
+import { parseDocument, type Document } from "yaml"
 import { home } from "./internal/commandConfig"
 import { CommandConfigError } from "./Commands"
 
@@ -113,10 +113,10 @@ const enabledConfig = Effect.fnUntraced(function* (
 		: "[]\n"
 	const document = yield* Effect.try({
 		try: () => {
-			const document = parseDocument(text)
+			const document: Document = parseDocument(text)
 			const error = document.errors[0]
 			if (error !== undefined) throw error
-			if (document.contents === null) document.setIn([], [])
+			if (document.toJS() === null) document.contents = document.createNode([])
 			return document
 		},
 		catch: (cause) => CommandConfigError.make({ file, cause }),

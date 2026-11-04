@@ -465,9 +465,14 @@ syncBuiltinESMExports();
 	}).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 )
 
-it.live.each(["local", "worker"])(
-	"reloads contract and implementation files for remote %s entries",
-	(target) =>
+it.live.each([
+	{ target: "local", initiallyBroken: false },
+	{ target: "worker", initiallyBroken: false },
+	{ target: "local", initiallyBroken: true },
+	{ target: "worker", initiallyBroken: true },
+])(
+	"reloads remote $target files after an initial contract failure: $initiallyBroken",
+	({ target, initiallyBroken }) =>
 		Effect.gen(function* () {
 			const fs = yield* FileSystem.FileSystem
 			const directory = yield* fs.makeTempDirectoryScoped()
@@ -510,6 +515,14 @@ export const contract = make({ name: 'cli-remote', config: Schema.String,
 module: new URL('./implementation.mjs', import.meta.url).href });
 `,
 			)
+			const validContract = yield* fs.readFileString(
+				`${directory}/contract.mjs`,
+			)
+			if (initiallyBroken)
+				yield* fs.writeFileString(
+					`${directory}/contract.mjs`,
+					"export const contract = ;",
+				)
 			const implementation = (marker: string) => `
 import { Plugin } from ${plugin};
 import { Effect, Schema } from ${effect};
@@ -564,6 +577,14 @@ Start.run({ config: ${config}, watch: true }).pipe(NodeRuntime.runMain);`,
 				),
 				Effect.forkChild,
 			)
+			if (initiallyBroken) {
+				yield* Queue.take(messages).pipe(
+					Effect.repeat({
+						until: (line) => String.includes("could not be loaded")(line),
+					}),
+				)
+				yield* fs.writeFileString(`${directory}/contract.mjs`, validContract)
+			}
 			yield* Deferred.await(started).pipe(
 				Effect.raceFirst(
 					Fiber.join(output).pipe(
