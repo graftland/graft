@@ -66,8 +66,8 @@ capability modules under `host/*` and `runner/*`. The executable paths
 `/internal/bin`, `/internal/worker`, `/internal/watchdog` are **not public
 APIs**.
 
-- [Remote](https://graftland.github.io/graft/remote/)
-- [Capabilities](https://graftland.github.io/graft/remote-capabilities/)
+- [Remote](https://graftland.github.io/graft/remote/overview/)
+- [Capabilities](https://graftland.github.io/graft/remote/capabilities/)
 - [06 · Remote](../../samples/06-remote/)
 - [Chat bot](../../samples/chat-bot/)
 

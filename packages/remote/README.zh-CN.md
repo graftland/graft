@@ -60,8 +60,8 @@ worker 不隔离权限；unix 依赖文件权限；stdio 依赖 SSH 等外部机
 能力模块。`/internal/bin`、`/internal/worker`、`/internal/watchdog`
 只是可执行文件路径，**不是公开 API**。
 
-- [Remote](https://graftland.github.io/graft/zh-cn/remote/)
-- [Capabilities](https://graftland.github.io/graft/zh-cn/remote-capabilities/)
+- [Remote](https://graftland.github.io/graft/zh-cn/remote/overview/)
+- [Capabilities](https://graftland.github.io/graft/zh-cn/remote/capabilities/)
 - [06 · Remote](../../samples/06-remote/)
 - [Chat bot](../../samples/chat-bot/)
 

@@ -17,6 +17,9 @@
 | [05 · Config file](05-config-file)         | 用 `graft start --watch` 从 `graft.yml` 运行插件，并在运行时编辑它们。 |
 | [06 · 远程插件](06-remote/README.zh-CN.md) | 不改调用方，把服务放到子进程、worker 或 runner。                       |
 
+部署和认证方式见
+[Remote 文档](../packages/docs/content/docs/zh-cn/remote/overview.md)。
+
 ## 真实场景的应用
 
 这些示例把基础概念组合成更大的程序。每个 README 都从一个你原本需要手动解决的问题开始，然后展示 Graft 如何处理它。

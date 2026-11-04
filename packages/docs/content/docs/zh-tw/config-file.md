@@ -29,7 +29,7 @@ description: 用 graft.yml 描述應用程式，並在執行期間修改設定�
         url: !env TENANT_DATABASE_URL
 ```
 
-要讓設定項目在子行程或另一台機器上執行，可將它指向[遠端外掛入口](../remote/)；儲存的項目 id 也可以作為 runner 實例名稱。
+要讓設定項目在子行程或另一台機器上執行，可將它指向[遠端外掛入口](../remote/host/)；儲存的項目 id 也可以作為 runner 實例名稱。
 
 從項目載入的外掛可從 `@graftland/loader` 匯入 `Entry`，讀取
 `yield* Entry.CurrentId`。它是

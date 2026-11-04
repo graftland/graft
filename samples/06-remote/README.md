@@ -96,7 +96,7 @@ exit before starting a larger generation.
 You will see WARNs: `ws` is unencrypted and `none` does not authenticate
 callers. This loopback tutorial is for trying the flow; use wss and
 authentication when deploying it. See the
-[remote guide](../../packages/docs/content/docs/remote.md).
+[remote guide](../../packages/docs/content/docs/remote/transport-auth.md).
 
 Press **Ctrl+C** in the host terminal first, then the runner terminal. Edit
 business config or `connect` while running; after editing the contract, rebuild

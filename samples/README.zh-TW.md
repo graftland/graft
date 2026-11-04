@@ -17,6 +17,9 @@
 | [05 · Config file](05-config-file)         | 用 `graft start --watch` 從 `graft.yml` 執行外掛，並在執行時編輯它們。 |
 | [06 · 遠端外掛](06-remote/README.zh-TW.md) | 不改呼叫端，把服務放到子行程、worker 或 runner。                       |
 
+部署與驗證方式見
+[Remote 文件](../packages/docs/content/docs/zh-tw/remote/overview.md)。
+
 ## 真實情境的應用
 
 這些範例把基礎概念組合成更大的程式。每個 README 都從一個你原本需要手動解決的問題開始，然後展示 Graft 如何處理它。

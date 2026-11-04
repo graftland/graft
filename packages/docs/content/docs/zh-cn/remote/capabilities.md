@@ -1,7 +1,9 @@
 ---
-title: Remote 能力插件
-description: 实现和测试传输、监听或认证能力。
+title: 编写能力插件
+description: 实现第三方传输或认证插件时看这一页。
 ---
+
+实现第三方传输或认证插件时看这一页。下面的接口和共享测试是 Connector、Listener、Credentials、Authenticator 的公开契约。
 
 能力就是带 default 导出的普通 Graft 插件，在 `apply`
 中发布约定的服务键。Remote 通过应用的模块解析器读取
@@ -226,4 +228,4 @@ chunks 会拆开帧头，再把余下部分和下一帧合并；eof 检查正常
 | runner 认证 | `runner/auth/mtls`、`runner/auth/bearer`、`runner/auth/jwt`、`runner/auth/none` |
 
 `/internal/bin`、`/internal/worker`、`/internal/watchdog`
-只供运行时定位可执行文件，**不是公开 API**。Supervisor 和子进程运行时也在内部。应用请使用[remote 指南](../remote/)中的两个入口。
+只供运行时定位可执行文件，**不是公开 API**。Supervisor 和子进程运行时也在内部。应用请使用[remote 指南](../overview/)中的两个入口。

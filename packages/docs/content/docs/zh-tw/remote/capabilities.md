@@ -1,7 +1,9 @@
 ---
-title: Remote 能力外掛
-description: 實作與測試傳輸、監聽或驗證能力。
+title: 撰寫能力外掛
+description: 實作第三方傳輸或驗證外掛時看這一頁。
 ---
+
+實作第三方傳輸或驗證外掛時看這一頁。以下介面與共用測試是 Connector、Listener、Credentials、Authenticator 的公開契約。
 
 能力是帶有 default 匯出的一般 Graft 外掛，在 `apply`
 發布約定的服務鍵。Remote 透過應用程式的模組解析器讀取
@@ -228,4 +230,4 @@ chunks 會拆開影格標頭，再把餘下部分與下一個影格合併；eof 
 
 `/internal/bin`、`/internal/worker`、`/internal/watchdog`
 僅供執行階段定位執行檔，**不是公開 API**。Supervisor 與子行程執行階段也在內部。應用程式請使用
-[remote 指南](../remote/)中的兩個入口。
+[remote 指南](../overview/)中的兩個入口。

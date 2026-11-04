@@ -34,7 +34,7 @@ entries. Directly embedded `Group.Group` instances instead require uniqueness
 only among siblings; adding a surrounding group does not change that rule.
 
 To run an entry in a child process or on another machine, point it at a
-[remote plugin entry](../remote/). Its saved id can also name the runner
+[remote plugin entry](../remote/host/). Its saved id can also name the runner
 instance.
 
 Plugins loaded from an entry can read `yield* Entry.CurrentId`, importing

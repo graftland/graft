@@ -89,7 +89,7 @@ connect:
 條目 id 就是實例名稱；替換時先確認舊子行程退出，再以更大的 generation 啟動新實例。
 
 你會看到 WARN：`ws` 沒有加密，`none`
-不驗證呼叫端身分。本例只在回環位址上體驗流程；部署時請使用 wss 與驗證。詳見[遠端外掛文件](../../packages/docs/content/docs/zh-tw/remote.md)。
+不驗證呼叫端身分。本例只在回環位址上體驗流程；部署時請使用 wss 與驗證。詳見[遠端外掛文件](../../packages/docs/content/docs/zh-tw/remote/transport-auth.md)。
 
 結束時先在宿主終端機按 **Ctrl+C**，再停止 runner。執行中可以改業務設定與
 `connect`；修改契約後，需要重新建置並重新啟動宿主。

@@ -18,6 +18,9 @@ idea, prints what happens, and suggests something to try.
 | [05 · Config file](05-config-file) | Run plugins from `graft.yml` with `graft start --watch`, and edit them while they run. |
 | [06 · Remote](06-remote)           | Move a service between local, worker, and runner without changing its caller.          |
 
+For deployment and authentication, see the
+[Remote guide](../packages/docs/content/docs/remote/overview.md).
+
 ## Real-world applications
 
 These samples join the basics into larger programs. Each README starts with a

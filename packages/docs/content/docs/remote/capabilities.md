@@ -1,8 +1,13 @@
 ---
-title: Remote capability plugins
+title: Write capability plugins
 description:
-  Implement and test a remote connector, listener, or authentication plugin.
+  Use this page to implement a connector, listener, credentials provider, or
+  authenticator.
 ---
+
+Use this page to implement a connector, listener, credentials provider, or
+authenticator. The signatures and shared checks below are the public contract
+for third-party plugins.
 
 A capability is an ordinary Graft plugin with a default export. Its `apply`
 publishes one agreed service key. Remote resolves `{ name, config }` through the
@@ -257,4 +262,4 @@ Capability paths under `@graftland/plugin-remote/` are:
 `/internal/bin`, `/internal/worker`, and `/internal/watchdog` are executable
 resolution paths, **not public APIs**. Supervisor and the child runtime are
 internal. Applications should use the two entries described in the
-[remote guide](../remote/).
+[remote guide](../overview/).
