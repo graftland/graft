@@ -45,7 +45,7 @@ export class MissingInstance extends Schema.TaggedError<
 	{ readonly brand: unique symbol }
 >()("MissingInstance", {}) {
 	override get message() {
-		return "Remote.runner requires an instance or a loader entry id; set target.instance when loading without Loader."
+		return "A runner connection requires an instance or a loader entry id; set connect.instance when loading without Loader."
 	}
 }
 
@@ -61,19 +61,6 @@ export class LocalTerminationTimeout extends Schema.TaggedError<
 		return this.threadId !== undefined
 			? `Remote worker ${this.threadId} did not exit within one second after Dispose; terminating it`
 			: `Remote process ${this.pid} did not exit within one second after Dispose; terminating it`
-	}
-}
-
-export class PeerAuthenticationError extends Schema.TaggedError<
-	PeerAuthenticationError,
-	{ readonly brand: unique symbol }
->()("PeerAuthenticationError", {
-	detail: Schema.String,
-	challenge: Schema.optionalKey(Schema.Literals(["missing", "invalid_token"])),
-	cause: Schema.optionalKey(Schema.Cause(Schema.Unknown, Schema.Unknown)),
-}) {
-	override get message() {
-		return this.detail
 	}
 }
 

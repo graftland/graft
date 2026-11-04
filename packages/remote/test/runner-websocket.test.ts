@@ -1,4 +1,4 @@
-import { Peer } from "../src/Auth"
+import { Peer } from "../src/internal/Peer"
 import { identityFromSubjectAltName } from "../src/internal/auth/mtls"
 import { assert, describe, it } from "@effect/vitest"
 import { NodeServices, NodeSocket } from "@effect/platform-node"
@@ -11,10 +11,9 @@ import {
 	FileSystem,
 	Redacted,
 } from "effect"
-import { inject, expectTypeOf } from "vitest"
+import { inject } from "vitest"
 import { Socket } from "effect/socket"
 import WS from "ws"
-import * as Remote from "../src/index"
 import * as WebsocketClient from "../src/internal/websocket"
 import * as Websocket from "./websocket"
 import * as Framing from "../src/internal/runner/Framing"
@@ -84,15 +83,6 @@ const httpResponse = (
 	}).pipe(Effect.scoped)
 
 describe("runner WebSocket mutual TLS", () => {
-	it("excludes literal ws targets from the mTLS runner API", () => {
-		expectTypeOf<
-			Extract<
-				Parameters<typeof Remote.runner<"ws://localhost", readonly []>>[0],
-				{ readonly auth: { readonly _tag: "Mtls" } }
-			>["transport"]
-		>().toEqualTypeOf<never>()
-	})
-
 	it.live("rejects a plain TLS HTTP request without a WebSocket upgrade", () =>
 		Effect.gen(function* () {
 			const { listener, port } = yield* server

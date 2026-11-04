@@ -1,32 +1,30 @@
-import type { Plugin } from "@graftland/graft"
-import { Config, Effect, FileSystem, Redacted } from "effect"
+import { Graft, Plugin } from "@graftland/graft"
+import { Config, Effect } from "effect"
 import * as Remote from "../../src/index"
+import { follow } from "../../src/internal/follow"
 import { contract } from "./services-contract"
 
-// Importing the entry is pure. Configuration and certificate files are read on activation.
-const target = Effect.gen(function* () {
-	const fs = yield* FileSystem.FileSystem
-	const read = (name: string) =>
-		Config.String(name).pipe(Effect.flatMap((path) => fs.readFileString(path)))
-	return Remote.runner({
-		transport: Remote.websocket({
-			url: `wss://${yield* Config.String("RUNNER_HOST")}:${yield* Config.Port("RUNNER_PORT")}`,
-			tls: {
-				servername: yield* Config.String("RUNNER_SERVERNAME"),
-				ca: yield* read("RUNNER_CA"),
-			},
-		}),
-		auth: Remote.mtls(
-			Effect.all({
-				cert: read("RUNNER_CERT"),
-				key: read("RUNNER_KEY").pipe(Effect.map(Redacted.make)),
+export default Plugin.make({
+	name: "loader-remote-entry",
+	config: contract.config,
+	apply: Effect.fnUntraced(function* (config) {
+		const fork = yield* Graft.plugin(
+			Remote.plugin(contract, {
+				contractModule: "remote-fixture",
+				config,
+				connect: {
+					url: `wss://${yield* Config.String("RUNNER_HOST")}:${yield* Config.Port("RUNNER_PORT")}`,
+					servername: yield* Config.String("RUNNER_SERVERNAME"),
+					ca: yield* Config.String("RUNNER_CA"),
+					auth: {
+						mtls: {
+							cert: yield* Config.String("RUNNER_CERT"),
+							key: yield* Config.String("RUNNER_KEY"),
+						},
+					},
+				},
 			}),
-		),
-	})
+		)
+		yield* follow(fork, Effect.failCause)
+	}),
 })
-const entry: Plugin.Plugin = Remote.plugin(contract, {
-	target,
-	contractModule: "remote-fixture",
-})
-
-export default entry

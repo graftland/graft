@@ -14,7 +14,6 @@
 			"source": "./src/Auth.ts",
 			"default": "./dist/Auth.js"
 		},
-		"./bin": "./dist/bin.js",
 		"./Contract": {
 			"source": "./src/Contract.ts",
 			"default": "./dist/Contract.js"
@@ -63,10 +62,6 @@
 			"source": "./src/runner/index.ts",
 			"default": "./dist/runner/index.js"
 		},
-		"./Runner": {
-			"source": "./src/Runner.ts",
-			"default": "./dist/Runner.js"
-		},
 		"./runner/auth/bearer": {
 			"source": "./src/runner/auth/bearer.ts",
 			"default": "./dist/runner/auth/bearer.js"
@@ -87,10 +82,6 @@
 			"source": "./src/runner/stdio.ts",
 			"default": "./dist/runner/stdio.js"
 		},
-		"./runner/supervisor": {
-			"source": "./src/runner/supervisor.ts",
-			"default": "./dist/runner/supervisor.js"
-		},
 		"./runner/unix": {
 			"source": "./src/runner/unix.ts",
 			"default": "./dist/runner/unix.js"
@@ -99,17 +90,18 @@
 			"source": "./src/runner/websocket.ts",
 			"default": "./dist/runner/websocket.js"
 		},
-		"./Supervisor": {
-			"source": "./src/Supervisor.ts",
-			"default": "./dist/Supervisor.js"
+		"./Testing": {
+			"source": "./src/Testing.ts",
+			"default": "./dist/Testing.js"
 		},
 		"./Transport": {
 			"source": "./src/Transport.ts",
 			"default": "./dist/Transport.js"
 		},
-		"./watchdog": "./dist/watchdog.js",
-		"./worker": "./dist/worker.js",
-		"./package.json": "./package.json"
+		"./package.json": "./package.json",
+		"./internal/bin": "./dist/bin.js",
+		"./internal/watchdog": "./dist/internal/watchdogMain.js",
+		"./internal/worker": "./dist/internal/workerMain.js"
 	},
 	"scripts": {
 		"build": "tsdown",
@@ -136,7 +128,6 @@
 		"exports": {
 			".": "./dist/index.js",
 			"./Auth": "./dist/Auth.js",
-			"./bin": "./dist/bin.js",
 			"./Contract": "./dist/Contract.js",
 			"./Errors": "./dist/Errors.js",
 			"./host/auth/bearer": "./dist/host/auth/bearer.js",
@@ -149,20 +140,19 @@
 			"./host/websocket": "./dist/host/websocket.js",
 			"./host/worker": "./dist/host/worker.js",
 			"./runner": "./dist/runner/index.js",
-			"./Runner": "./dist/Runner.js",
 			"./runner/auth/bearer": "./dist/runner/auth/bearer.js",
 			"./runner/auth/jwt": "./dist/runner/auth/jwt.js",
 			"./runner/auth/mtls": "./dist/runner/auth/mtls.js",
 			"./runner/auth/none": "./dist/runner/auth/none.js",
 			"./runner/stdio": "./dist/runner/stdio.js",
-			"./runner/supervisor": "./dist/runner/supervisor.js",
 			"./runner/unix": "./dist/runner/unix.js",
 			"./runner/websocket": "./dist/runner/websocket.js",
-			"./Supervisor": "./dist/Supervisor.js",
+			"./Testing": "./dist/Testing.js",
 			"./Transport": "./dist/Transport.js",
-			"./watchdog": "./dist/watchdog.js",
-			"./worker": "./dist/worker.js",
-			"./package.json": "./package.json"
+			"./package.json": "./package.json",
+			"./internal/bin": "./dist/bin.js",
+			"./internal/watchdog": "./dist/internal/watchdogMain.js",
+			"./internal/worker": "./dist/internal/workerMain.js"
 		}
 	},
 	"bin": {

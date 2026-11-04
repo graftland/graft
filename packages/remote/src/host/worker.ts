@@ -1,7 +1,7 @@
 import { Plugin, type Graft } from "@graftland/graft"
 import { Cause, Deferred, Effect, FiberSet, Option, Schema } from "effect"
 import { Worker } from "node:worker_threads"
-import { WorkerTransport } from "../Transport"
+import { WorkerTransport } from "../internal/directTransport"
 import { ProcessExited, TransportError } from "../Errors"
 import * as Channel from "../internal/workerChannel"
 import * as FailureGroup from "../internal/FailureGroup"
@@ -26,7 +26,9 @@ const start: typeof WorkerTransport.Service.start = Effect.fnUntraced(
 			Effect.try({
 				try: () => {
 					const worker = new Worker(
-						new URL(import.meta.resolve("@graftland/plugin-remote/worker")),
+						new URL(
+							import.meta.resolve("@graftland/plugin-remote/internal/worker"),
+						),
 						{
 							workerData: data,
 							...(options.execArgv === undefined
@@ -83,6 +85,6 @@ const start: typeof WorkerTransport.Service.start = Effect.fnUntraced(
 const plugin: Plugin.Plugin<void, void, Graft.ServiceConflict> = Plugin.service(
 	WorkerTransport,
 	Effect.succeed({ start }),
-	{ name: "remote-worker-transport" },
+	{ name: "remote-thread-transport" },
 )
 export default plugin

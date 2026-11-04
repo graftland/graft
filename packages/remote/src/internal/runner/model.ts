@@ -27,7 +27,6 @@ export class PackageError extends Schema.TaggedError<
 		return this.detail
 	}
 }
-export { PeerAuthenticationError } from "../../Errors"
 export class SessionAccessDenied extends Schema.TaggedError<
 	SessionAccessDenied,
 	{ readonly brand: unique symbol }

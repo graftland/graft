@@ -1,23 +1,19 @@
 ---
 title: 远程插件
-description: 让插件在子进程、Node worker 或 runner 上运行。
+description: 在子进程、Node worker 或 runner 上运行插件。
 ---
 
-用 `@graftland/plugin-remote` 将插件放到独立执行单元中。`Remote.local()`
-启动本机 Node.js 子进程，`Remote.worker()` 启动 Node
-worker，`Remote.runner(...)`
-连接另一台机器上的 runner。宿主加载的仍是普通 Graft 插件：消费者等待服务，服务撤回时重启，并在提供者之前停止。
+用 `name: remote` 把插件放到宿主之外执行。可以选本机子进程、Node
+worker，或连接 runner。消费者仍然注入普通 Graft 服务；提供者撤回时，它们也随之停止。
 
-进程分开不代表权限隔离。插件仍能访问所在机器的文件和网络；需要限制权限时，请在部署中使用容器或虚拟机。同一进程内的服务可见性则由[隔离](../isolation/)控制。
+Remote 隔离的是执行，不是权限。需要权限边界时请用容器或虚拟机；同一进程里的服务可见性用[隔离](../isolation/)控制。
+[06 · 远程插件](https://github.com/graftland/graft/tree/main/samples/06-remote)演示 local 和 worker；[chat-bot 示例](https://github.com/graftland/graft/tree/main/samples/chat-bot)把天气集成放进子进程。
 
-[remote-worker 示例](https://github.com/graftland/graft/tree/main/samples/remote-worker)
-包含完整的服务、宿主、子进程和测试，不需要网络或证书。[remote-runner 示例](https://github.com/graftland/graft/tree/main/samples/remote-runner)
-通过 wss 和 JWT 在真实 runner 上运行 `graft.yml`
-条目，并演示 generation 如何拒绝过期写入。
+## 定义契约
 
-## 分开契约和实现
-
-宿主只导入契约。把实现放在另一个模块，避免宿主导入入口时就加载或运行它：
+宿主只导入契约。契约的 `module`
+指向另一个实现模块，它导出普通 Graft 插件。启动子进程或 worker 前，先把两者构建为 JavaScript；它们不会使用宿主的 TypeScript
+loader。
 
 ```ts title="contract.ts"
 import { Contract } from "@graftland/plugin-remote"
@@ -46,35 +42,24 @@ export default Plugin.make({
 ```
 
 契约可以导出为 `contract` 或
-`default`，实现模块导出一个插件。两边的配置 Schema 须一致，配置须能编码成 JSON。预期的插件错误写在契约的
-`error` Schema 中。契约的 codec 不能依赖外部服务。
+`default`。配置必须能编码为 JSON；契约的 codec 不能依赖外部服务。预期内的失败放在契约的
+`error` schema 里。
 
-启动子进程或 worker 前，先把这两个模块编译成 JavaScript。两者都不会使用宿主的 TypeScript
-loader。
+## 从 YAML 或 TypeScript 加载
 
-## 加载所需的能力插件
+```yaml title="graft.yml"
+- id: greeter
+  name: remote
+  config:
+    contract: ./dist/contract.js
+    connect:
+      local: {}
+    config:
+      greeting: Hello
+```
 
-remote 两端都是普通 Graft 插件。`Remote.plugin`
-根据 target 注入所需能力，不会自动安装提供者。缺少提供者时，代理保持 Pending；撤回传输或凭证提供者，也会撤回依赖它的代理。
-
-公共契约模块 `@graftland/plugin-remote/Transport`、`Auth` 和 `Supervisor`
-只定义服务键和接口，不包含实现。`Auth.Peer`
-表示认证后的身份。用 YAML 的模块名加载实现，或导入其 default export 后调用
-`Graft.plugin`：
-
-| 位置   | `@graftland/plugin-remote/` 下的插件路径                                        | 用途                                                             |
-| ------ | ------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
-| 宿主   | `host/local`、`host/worker`                                                     | 创建子进程或 Node worker，不需要认证插件。                       |
-| 宿主   | `host/websocket`、`host/unix`、`host/command`                                   | 通过所选传输连接 runner。                                        |
-| 宿主   | `host/auth/mtls`、`host/auth/bearer`、`host/auth/jwt`、`host/auth/none`         | 准备所选凭证；command 不需要这些插件。                           |
-| Runner | `runner/supervisor`                                                             | 管理执行单元、持久化 generation、租约和状态目录锁。              |
-| Runner | `runner/websocket`、`runner/unix`、`runner/stdio`                               | 接纳宿主会话；多个网络 listener 共用 supervisor 的实例命名空间。 |
-| Runner | `runner/auth/mtls`、`runner/auth/bearer`、`runner/auth/jwt`、`runner/auth/none` | 将凭证对应到稳定身份；stdio 不使用认证器。                       |
-
-同一 realm 中，一个服务键只能有一个提供者。listener 的 `auth` 填完整服务键，例如
-`@graftland/plugin-remote/Auth/JwtAuthenticator`，不是条目 id。撤回认证器会关闭相应 listener，supervisor 继续运行。
-
-## 启动本机子进程或 Node worker
+运行 `graft start`，不需要另写能力 entry 或服务键字符串。要用 Node worker，把
+`local: {}` 换成 `worker: {}`。TS 使用同样的 `connect` 数据和业务 `config`：
 
 ```ts title="entry.ts"
 import * as Remote from "@graftland/plugin-remote"
@@ -82,319 +67,259 @@ import { contract } from "./contract.js"
 
 export default Remote.plugin(contract, {
 	contractModule: new URL("./contract.js", import.meta.url).href,
-	target: Remote.local(),
+	connect: { local: {} },
+	config: { greeting: "Hello" },
 	shutdownTimeout: "5 seconds",
 })
 ```
 
-与入口一起加载 `host/local`：
+用 `Graft.plugin(entry)` 加载。`contractModule`
+告诉子进程或 runner 去哪里读契约，与契约中指向实现的 `module`
+不同。自己嵌入 Graft 时，在构建 `Graft.layer` 的环境中提供 `NodeServices.layer`
+和 `SecureRandom.layerWebCrypto`；CLI 已提供。也可以在这个环境里提供 loader 的
+`ModuleResolver` 和 `ConfigDirectory`。
 
-```yaml title="graft.yml"
-- name: "@graftland/plugin-remote/host/local"
-- name: ./entry.ts
+连接 runner 时，两边都要安装契约包：
+
+```yaml title="host.yml"
+- id: greeter
+  name: remote
   config:
-    greeting: Hello
+    contract: my-plugin/contract
+    connect:
+      url: !env RUNNER_URL
+      ca: ./certs/ca.crt
+      auth:
+        mtls:
+          cert: ./certs/client-billing.crt
+          key: ./certs/client-billing.key
+      lease: 30 seconds
+    config:
+      greeting: Hello
 ```
 
-使用 Node worker 时，将 target 改成 `Remote.worker()`，能力插件改成
-`host/worker`。它共享宿主进程和权限；转发的 Effect 日志用 `remote.threadId`
-定位，不使用独立 PID。
+把 `RUNNER_URL` 设为 `wss://runner.example:7443`，然后运行
+`graft start --config host.yml`。相对路径以配置文件所在目录为准，不是 cwd。证书、私钥、CA 的字符串都是文件路径；token 字符串是值本身，读文件要写
+`{ file: "./token.txt" }`。同一处只能选择一种传输和一种认证写法。
 
-用 `Graft.plugin(entry, { greeting: "Hello" })` 或 [graft.yml](../config-file/)
-加载入口。自行嵌入 Graft 时，在构建 `Graft.layer` 的环境中提供
-`NodeServices.layer` 和 `effect/crypto` 的
-`SecureRandom.layerWebCrypto`；CLI 已提供这两项服务。已安装或构建好的
-`@graftland/plugin-remote` 可执行文件会负责启动子进程。
+`connect` 也支持
+`unix: /run/graft.sock`、`command: [ssh, runner.example, graft-remote, serve, --config, /srv/stdio.yml]`、`local: { command: [node, /path/to/bin.js] }`
+和 `worker: { execArgv: [] }`。command 还可以写 `cwd` 和 `env`。
 
-每次激活都有新的进程，配置变化也会重启它。子进程失败会使宿主代理失败；重试策略设在代理上，每次重试重新启动进程。Effect 日志会转发到宿主，并带上
-`remote.pid`。请用 Effect 记录日志，`console.log` 不会作为结构化日志转发。
-
-## 跨进程使用服务
-
-用 `Contract.service(key, rpcGroup, mapping)` 描述服务。RPC
-group 定义请求参数、结果、错误和流；mapping 把这些调用接回平常的服务接口：
+TS 额外允许用 Effect 读取凭证，每次连接读取一次：
 
 ```ts
-const formatter = Contract.service(Formatter, api, {
-	toHandlers: (service) => ({
-		Format: ({ text }: { readonly text: string }) => service.format(text),
-	}),
-	fromClient: (client) => ({
-		format: (text) =>
-			client
-				.Format({ text })
-				.pipe(
-					Effect.catchTag("RpcClientError", (cause) =>
-						WorkerUnavailable.make({ cause }),
-					),
-				),
-	}),
-})
-```
+import { Config } from "effect"
 
-这里的 `Formatter`、`api` 和 `WorkerUnavailable` 定义在示例的
-[契约模块](https://github.com/graftland/graft/blob/main/samples/remote-worker/src/contract.ts)。适配器把连接失败转成服务错误。请明确选择错误处理方式：即使本地方法不会失败，远程调用也可能因断连失败。调用不会自动重试。
-
-在 `Contract.make` 中列出描述符：
-
-- `inject: [hostService]`：宿主提供服务，子进程注入它的 key。
-- `provides: [formatter]`：子进程发布服务，宿主插件注入它的 key。
-
-只有声明过的服务才能跨越边界。两边的 key 和 RPC
-Schema 必须匹配。契约中的服务 key 不能重复；不同服务的 RPC 方法名可以相同。
-
-正常撤回时，宿主消费者先完成清理，子进程才停止。连接健康时，消费者的 finalizer 仍可调用远程服务。宿主依赖消失会让代理停止，等待依赖恢复。子进程撤回导出的服务也会停止宿主消费者。断连可能中断调用，因此无法保证 finalizer 中的 RPC 成功。
-
-## 从 graft.yml 加载网络 worker
-
-用相对路径指向宿主入口模块。`config` 仍然只放插件的业务输入：
-
-```yaml title="graft.yml"
-- name: "@graftland/plugin-remote/host/websocket"
-- name: "@graftland/plugin-remote/host/auth/jwt"
-- id: greeter
-  name: ./greeter.ts
-  config:
-    greeting: Hello
-```
-
-入口通过 Effect Config 从环境变量读取 runner 设置：
-
-```ts title="greeter.ts"
-import * as Remote from "@graftland/plugin-remote"
-import { Config, Effect, FileSystem } from "effect"
-import { contract } from "my-plugin/contract"
-
-const target = Effect.gen(function* () {
-	const fs = yield* FileSystem.FileSystem
-	const ca = yield* Config.String("RUNNER_CA").pipe(
-		Effect.flatMap((path) => fs.readFileString(path)),
-	)
-	return Remote.runner({
-		transport: Remote.websocket({
-			url: yield* Config.String("RUNNER_URL"),
-			tls: { ca },
-		}),
-		auth: Remote.jwt(Config.Redacted("RUNNER_TOKEN")),
-	})
-})
-
-export default Remote.plugin(contract, {
-	target,
+Remote.plugin(contract, {
 	contractModule: "my-plugin/contract",
+	connect: {
+		url: "wss://runner.example:7443",
+		instance: "greeter",
+		auth: { jwt: { token: Config.Redacted("RUNNER_TOKEN") } },
+	},
+	config: { greeting: "Hello" },
 })
 ```
 
-把 `my-plugin/contract` 换成你的契约导出，宿主和 runner 安装匹配的版本。
-`expect: { version, digest }` 可在启动前强制检查任意一项或两项。 `RUNNER_URL`
-是与服务端证书匹配的 wss URL，`RUNNER_CA` 是宿主上的 CA 文件路径，
-`RUNNER_TOKEN` 是 JWT。配置和文件在激活时读取，导入模块不执行 I/O。
+凭证来自服务时，可把 Effect 换成
+`{ inject: [Vault], read: Vault.pipe(...) }`。token Effect 返回
+`Redacted<string>`；mTLS Effect 返回包含 PEM 的
+`{ cert: string, key: Redacted<string> }`。Remote 为它创建凭证子插件，显式注入这些依赖；依赖撤回会停止代理。`retry`
+写在 `Remote.plugin` 的选项里；RPC 调用不会自动重试。
 
-这些选项写在 `Remote.runner({ ... })` 中，与 `transport`、`auth` 同级：
+| `connect` 选项 | 默认值与含义                                                                                                                                 |
+| -------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `instance`     | loader 条目 id；显式值优先。两者都没有时失败为 `MissingInstance`。                                                                           |
+| `lease`        | runner 默认值，通常是 15 秒。宿主可以为这个实例覆盖它。                                                                                      |
+| `margin`       | 5 秒；在租约之外多等这么久，获取退出确认。                                                                                                   |
+| `expect`       | 默认不检查。`{ version, digest }` 可在激活前强制检查版本、摘要或两者。摘要仅在请求时计算，覆盖包自身除 `node_modules` 外的文件，不覆盖依赖。 |
 
-| 选项       | 默认值和作用                                                                                                                                            |
-| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `instance` | 默认使用 loader 条目 id，显式字符串优先。两者都没有时以 `MissingInstance` 失败。                                                                        |
-| `lease`    | 默认采用 runner 的 `--lease`，其默认值为 15 秒。宿主传入 `"30 seconds"` 等值会覆盖该实例的 runner 默认租约。                                            |
-| `margin`   | 默认 `"5 seconds"`。宿主等待终止确认时，在租约之外额外留出的时间。                                                                                      |
-| `expect`   | 默认不检查。`{ version, digest }` 可固定已安装的包，两项都可省略；只有请求 digest 时才计算摘要。摘要覆盖包自身的文件，排除 `node_modules`，不包含依赖。 |
+loader 会把生成的条目 id 写回 YAML，请跨重启保留它。子插件继承
+`Entry.CurrentId`：同一条目 fork 出两个 runner 代理时，需要不同的显式 instance，否则它们会互相替换。直接嵌入的
+`Group.Group`
+只要求兄弟 id 唯一。多个宿主共用认证身份和 instance 名时，也是在操作同一个 runner 实例。
 
-loader 会把生成的条目 id 保存到 YAML，保留它就能在宿主重启后继续对应同一个实例。
-`@graftland/loader` 的 `Entry.CurrentId` 是一个值为 `Option<string>`
-的 Reference；条目内 fork 的子插件会继承它。因此，从同一条目 fork 两个 runner 代理、又都不写
-`instance`，就会互相替换，请为它们指定不同名字。直接嵌入 `Group.Group`
-时，id 只要求在兄弟条目之间唯一，不同 group 的 id 也可能冲突。多个宿主共用同一认证身份、手写相同的实例名时，同样会指向同一个实例。
+## 跨边界使用服务
 
-## 选择传输与认证
+用 `Contract.service(key, rpcGroup, { toHandlers, fromClient })`
+描述服务，再放入 `Contract.make`：
 
-| Target                                 | 可用认证                | 保护与警告                                                                                            |
-| -------------------------------------- | ----------------------- | ----------------------------------------------------------------------------------------------------- |
-| `Remote.local()`                       | 不接受 `auth`           | 独立进程，使用正常操作系统权限；无传输 WARN。                                                         |
-| `Remote.worker({ execArgv? })`         | 不接受 `auth`           | 共享宿主进程，只隔离执行，**不隔离权限**；无传输 WARN。                                               |
-| `Remote.websocket({ url: "wss://…" })` | mtls、bearer、jwt、none | 加密并验证服务端证书；none 在 runner 启动和每次连接时 WARN。                                          |
-| `Remote.websocket({ url: "ws://…" })`  | bearer、jwt、none       | 不加密；runner 启动和宿主连接时 WARN。bearer/JWT 警告明确说明凭证明文传输；none 另在每次连接时 WARN。 |
-| `Remote.unix({ path })`                | bearer、jwt、none       | 文件权限控制访问，不读取对端凭证；无传输或认证 WARN。                                                 |
-| `Remote.command(argv, { cwd?, env? })` | 不接受 `auth`           | 启动 stdio runner；认证和加密交给命令，例如 SSH。无传输或认证 WARN。                                  |
+- `inject`：实现需要的宿主服务。
+- `provides`：实现发布给宿主消费者的服务。
 
-websocket、unix、command 放在 `Remote.runner({ transport, auth?, ... })`
-里。local 和 worker 是直连 target，不经过 supervisor。websocket/unix 省略 auth 等同于
-`Remote.none()`，仍须加载 `host/auth/none` 和
-`runner/auth/none`。它们使用 runner 配置的身份，默认
-`anonymous`；所有连接的宿主共用这个命名空间。
+只有声明过的服务会跨边界。服务键和 RPC
+schema 必须一致；一个契约内服务键不能重复，不同服务的 RPC 方法名可以重复。[示例契约](https://github.com/graftland/graft/blob/main/samples/06-remote/src/contract.ts)展示了如何在
+`fromClient` 中把 `RpcClientError` 映射成服务自己的错误。
 
-- **mTLS：** 两端加载 `auth/mtls`。runner 配置是
-  `{ ca: "clients-ca.crt" }`。宿主用
-  `Remote.mtls(Effect.succeed({ cert, key }))`，cert 是 PEM 字符串，key 是包装了 PEM 的
-  `Redacted<string>`。只支持 wss。
-- **Bearer：** runner 配置是
-  `{ tokens: "tokens.json" }`。JSON 将 SHA-256 十六进制摘要映射到身份：
-  `{ "<sha256 hex>": "billing" }`。宿主通过
-  `Remote.bearer(Config.Redacted("RUNNER_TOKEN"))` 发送原始 token。
-- **JWT：** 宿主用
-  `Remote.jwt(Config.Redacted("RUNNER_TOKEN"))`。runner 配置一个
-  `issuer`、`audience` 列表和非空的非对称 `algorithms` 白名单。密钥二选一：
-  `keys: { jwksUrl: "https://issuer.example/jwks" }` 或
-  `keys: { publicKey: "jwt-public.pem" }`（SPKI PEM）。 `identityClaim` 默认
-  `sub`，所选 claim 的值必须是非空字符串；`clockTolerance` 默认
-  `5 seconds`。`exp` 必填，`nbf` 存在时校验。
-- **None：** runner 配置是
-  `{ identity: "billing" }`，只是分配身份，不验证调用者。
+正常撤回时，先结束消费者；连接健康时，它们的 finalizer 仍可调用远程服务。宿主依赖撤回会停止代理，依赖回来后再恢复。子插件撤回导出的服务，也会停止宿主消费者。连接故障可能中断调用和 finalizer。
 
-每次连接读取一次凭证。凭证依赖服务时，可向 `Remote.jwt`、`Remote.bearer` 或
-`Remote.mtls` 传入
-`{ inject: [Credentials], read: Credentials.pipe(Effect.flatMap(...)) }`，依赖会并入代理的 inject。JWT 只在 upgrade 时验证一次，连接期间过期不会断开。bearer/JWT 缺失或无效时，在建立 WebSocket 前返回 401，带上
-`WWW-Authenticate: Bearer`。
+## 配置 runner
 
-token 被盗后，在有效期内可以重放。建议使用 wss 和较短有效期。runner 信任配置的签发者和密钥。不做 token 刷新、连接期间重新认证、吊销列表、密码认证、对称 JWT，也不信任代理转发的证书头。不提供关闭 TLS 校验的选项。只支持 Node 宿主，不支持浏览器宿主或 Web
-Worker。
-
-WebSocket 使用 `/graft`（省略时自动补上）和 `graft-remote.v1`
-子协议。没有其他 HTTP 端点，包括健康检查。
-
-## 准备 runner
-
-使用 Linux 或 macOS，以及 Node.js 22.22 或更高版本。在安装目录下预装
-`@graftland/plugin-remote`、编译后的插件包及其依赖。runner 的 `contractModule`
-从这里解析包名或子路径；宿主不会上传代码。运行期间不要修改已安装的包。
-
-`serve --config` 加载普通 Graft 条目。下面是完整的 wss +
-JWT 配置；文件里的相对路径以该配置文件所在目录为基准。
+在 Linux 或 macOS 上使用 Node.js
+22.22 或更新版本。安装 remote、构建后的插件包及其依赖。runner 在 `root`
+下解析契约包名，宿主不会上传代码；运行时不要修改安装目录。建议由外部 supervisor 管理 runner 及全部后代进程，例如 systemd 的
+`KillMode=control-group`。
 
 ```yaml title="runner.yml"
-- id: remote-supervisor
-  name: "@graftland/plugin-remote/runner/supervisor"
+- id: runner
+  name: remote/runner
   config:
-    root: /srv/graft/install
-    state: /var/lib/graft
+    root: ./installation
+    state: ./state
     lease: 15 seconds
     grace: 5 seconds
-
-- id: remote-auth
-  name: "@graftland/plugin-remote/runner/auth/jwt"
-  config:
-    issuer: https://issuer.example
-    audience: [graft]
-    algorithms: [ES256]
-    identityClaim: sub
-    clockTolerance: 5 seconds
-    keys:
-      publicKey: /run/secrets/jwt-public.pem
-
-- id: public
-  name: "@graftland/plugin-remote/runner/websocket"
-  config:
-    url: wss://0.0.0.0:7443/graft
-    cert: /run/secrets/server.crt
-    key: /run/secrets/server.key
-    auth: "@graftland/plugin-remote/Auth/JwtAuthenticator"
+    listen:
+      - url: wss://0.0.0.0:7443
+        cert: ./certs/server.crt
+        key: ./certs/server.key
+        auth:
+          mtls:
+            ca: ./certs/ca.crt
+      - unix: ./runner.sock
+        auth:
+          none:
+            identity: billing
 ```
 
 ```sh
 graft-remote serve --config runner.yml
 ```
 
-命令行简写会生成等价的 supervisor、认证器和 listener 条目，不能与 `--config`
-混用。重复 `--listen` 可启动多个共用认证方式的网络 listener：
+`serve` 只接受 `--config`。一个 runner
+entry 管理一个 supervisor 和全部 listener，它们共享实例命名空间。所有 listener 就绪才算启动成功；启动失败会关闭已打开的资源，运行期间一个 listener 失败则不会停止其他 listener 或 supervisor。一个 runner 只能配置一个 JWT 签发者；声明 issuer 的第三方认证器也受此约束。bearer 的 token 文件不算签发者。
+
+每个 entry 都有私有的能力提供者。同一种能力可以在两个 entry 中用不同配置。第三方插件写成
+`transport: { name: "my-connector", config: {...} }` 或
+`auth: { name: "my-authenticator", config: {...} }`；name 按应用的 loader 规则解析，内置简写也展开成同样的引用。
+
+wss 需要服务器证书和受信任 CA；mTLS 的客户端证书由专用 CA 签发：
 
 ```sh
-# wss + mTLS
-graft-remote serve --listen wss://0.0.0.0:7443 --auth mtls \
-  --cert server.crt --key server.key --ca clients-ca.crt \
-  --root /srv/graft/install --state /var/lib/graft
-
-# ws + JWT (unencrypted)
-graft-remote serve --listen ws://127.0.0.1:7080 --auth jwt \
-  --jwt-issuer https://issuer.example --jwt-audience graft \
-  --jwt-algorithm ES256 --jwt-public-key jwt-public.pem \
-  --root /srv/graft/install --state /var/lib/graft
-
-# Unix socket + none
-graft-remote serve --listen /run/graft/runner.sock --auth none --identity billing \
-  --root /srv/graft/install --state /var/lib/graft
-
-# One session over stdin/stdout
-graft-remote serve --stdio --identity billing \
-  --root /srv/graft/install --state /var/lib/graft
+graft-remote certificates --out certs --server runner.example --identity billing
 ```
 
-Bearer 使用 `--auth bearer --tokens tokens.json`。JWT 可用 `--jwt-jwks URL` 代替
-`--jwt-public-key FILE`，支持重复 `--jwt-audience`、`--jwt-algorithm`，以及
-`--jwt-identity-claim`、`--jwt-clock-tolerance`。认证专用参数必须与所选方式对应。ws 不接受 cert/key，wss 两项必填；ws 和 unix 均拒绝 mTLS。
+也可使用其他工具。运维保管
+`ca.key`；服务器证书和私钥部署到 runner，`client-billing.crt`/`.key`
+部署到宿主，两边都需要
+`ca.crt`。服务器证书须匹配主机名。mTLS 客户端证书须有恰好一个 `graft://` SAN
+URI，例如 `graft://billing`；允许其他 URI
+SAN 共存。轮换证书时保持身份不变，就能保留实例命名空间。
 
-stdio 独占 serve：一个进程只有一个 listener、一个会话，不接受 `auth`。身份默认
-`anonymous`，认证交给外部机制，例如 SSH `authorized_keys`
-中的强制命令。stdout 只包含协议字节，日志走 stderr。stdin 结束后，先停止执行单元并确认退出，再释放状态锁并正常退出；清理失败会保留 cause，以非零状态退出。同一状态目录上的第二个并发调用会失败。具体配置见示例的
-[SSH 说明](https://github.com/graftland/graft/blob/main/samples/remote-runner/README.zh-CN.md)。单凭 SSH 进程退出，不能认定远端执行单元已经停止。
+`state`
+必须放在本地文件系统上，同一时间只能由一个 supervisor 持有。跨重启保留它，其中记录了 generation 和未完成的执行。不要用空状态目录复用仍在运行的部署身份。
 
-wss 需要服务端证书和受信任的 CA；mTLS 还需要由**专用 CA** 签发客户端证书。可以用
-`graft-remote certificates --out certs --server runner.example --identity billing`，或任何满足这些要求的工具。`ca.key`
-由运维保管。`server.crt`/`server.key` 部署到 runner；mTLS 的
-`client-billing.crt`/`client-billing.key` 部署到宿主，两边配置相应的
-`ca.crt`。TLS 验证服务端主机名。mTLS 客户端证书必须恰好有一个 `graft://` SAN
-URI，例如 `graft://billing`；可以同时有其他 URI
-SAN。轮换凭证时保留身份，就能继续使用原来的实例命名空间。
+## 选择传输与认证
 
-`--grace` 默认五秒，是 runner 请求中断后、升级为强制终止前的等待窗口。它与宿主的
-`margin`
-不同：后者延长的是等待退出确认的时间，不会给插件 finalizer 增加清理时间。
+| `connect` / runner listener    | 认证                           | 保证与 WARN                                                                                       |
+| ------------------------------ | ------------------------------ | ------------------------------------------------------------------------------------------------- |
+| `local: {}`                    | 不可写 `auth`                  | 独立进程，普通 OS 权限；无传输 WARN。                                                             |
+| `worker: {}`                   | 不可写 `auth`                  | 与宿主同进程，只隔离执行，**不隔离权限**；无传输 WARN。                                           |
+| `url: wss://…`                 | mtls、bearer、jwt、none        | 加密，验证服务器证书。none 在 runner 启动和每次连接时 WARN。                                      |
+| `url: ws://…`                  | bearer、jwt、none              | 不加密。runner 启动、宿主连接时 WARN；使用 token 时明确提示凭证以明文传输。none 还会逐连接 WARN。 |
+| `unix: …`                      | bearer、jwt、none              | 依赖文件权限，不读取对端凭证；无传输或认证 WARN。                                                 |
+| `command: […]` / `stdio: true` | 不可显式写 `auth`，none 也不行 | 认证和加密由 SSH 等外部命令负责。                                                                 |
 
-看到 `Listening`
-日志即表示开始监听，其中带有实际端口。状态目录须位于本地文件系统，由一个 runner 独占。重启时保留它，它记录了实例代数和未结束的执行。不要给仍在使用的部署身份换一个空状态目录。
+省略 auth 就是 none，runner 默认身份为
+`anonymous`。网络 listener 会 WARN；所有调用者共享这个身份。mTLS 只支持 wss。ws 不写 cert/key，wss 必须同时写两者。WebSocket 路径为
+`/graft`，子协议为 `graft-remote.v1`；没有其他 HTTP 端点或健康检查。
 
-建议用外部进程管理器运行 runner，停止时覆盖整个进程组或容器，包括插件启动的后代进程。systemd 可设
-`KillMode=control-group`。runner 信任它的 CA、安装目录、状态目录和操作系统，不是运行不可信插件的沙箱。
+- **Bearer**：宿主 `auth: { bearer: { token: "value" } }`；runner
+  `auth: { bearer: { tokens: "./tokens.json" } }`。文件为 SHA-256 十六进制摘要到身份的映射：`{ "<sha256 hex>": "billing" }`，不保存明文 token。
+- **JWT**：宿主 `auth: { jwt: { token: { file: "./token.txt" } } }`。runner 用
+  `auth: { jwt: { issuer: "https://issuer.example", audience: [graft], algorithms: [ES256], keys: { publicKey: "./public.pem" } } }`；JWKS 则用
+  `keys: { jwksUrl: "https://issuer.example/jwks" }`。`identityClaim` 默认
+  `sub`，`clockTolerance` 默认 `5 seconds`。身份 claim 必须是非空字符串，`exp`
+  必填，存在 `nbf` 时也会验证。
+- **None**：runner 的 `auth: { none: { identity: billing } }`
+  只指定名字，不认证调用者。
 
-## 替换、租约和停止
+缺失或无效的 bearer/JWT 在 upgrade 前返回 401 和
+`WWW-Authenticate`。JWT 只在这时验证，连接期间过期不会断开。token 被盗后在有效期内可以重放；建议用 wss 和较短的有效期。
 
-对于同一认证身份下的同一实例 id，一个 runner 会**先确认旧进程已退出，再接纳新实例**。新实例获得更大的、持久化的 generation；runner 重启恢复后也遵循这个顺序。无法确认退出时，它会拒绝替换，不会假定旧进程已经结束。
+stdio 只写一个 `listen`
+元素：`{ stdio: true, identity: billing }`，不能与其他 listener 共存。stdout 只写协议字节，日志去 stderr。EOF 后先停止执行单元、确认退出、释放状态锁，再以 0 退出；清理失败保留 cause 并非零退出。同一状态目录的并发调用会失败。认证交给 SSH
+`authorized_keys` 强制命令等外部机制。SSH 退出本身不代表远端执行单元已经退出。
 
-宿主连接期间会续租。不再续租，执行会在租约到期后停止；runner 消失也会触发子进程停止。租约默认 15 秒，在正常调度下防止失联的子进程无限运行。整机暂停时，期限检查也会暂停，因此这不是严格的实时保证。检查进程退出也仍有一个很小的 PID 复用窗口。
+Remote 信任 runner 的安装、配置、OS、本机权限、专用 CA 以及配置的 JWT 签发者和密钥。不支持浏览器宿主、Web
+Worker、token 刷新、连接期间重新认证、吊销列表、密码、对称 JWT、代理转发的证书头、关闭 TLS 校验、代码分发、runner 故障切换或调用重放。
 
-插件内读取 `Remote.Instance` 可得到
-`{ id, generation }`。外部系统可以用 generation 拒绝旧实例的写入，也就是 fencing，但必须由外部系统执行检查。它不能撤销已经发生的写入，也不保证调用恰好执行一次；不同 runner 之间不协调 generation。本机子进程和 Node
-worker 每次得到新的 id 和 generation 1，不能把它当作持久化的 fencing token。
+## 通过 SSH 连接
 
-正常停止先等待插件 finalizer 和最后的日志。代理的 `shutdownTimeout`
-默认五秒，只约束这一步优雅 Dispose。之后才是进程终止：
+在 runner 上安装插件包，为这个 SSH 身份使用独立的状态目录。配置里只放一个 stdio
+listener：
 
-- 本机子进程还有一秒完成输出并自然退出。仍不退出时，清理会报告退出超时并终止它；进程启动器再等一秒后升级为 SIGKILL，并确认退出。
-- Node worker 使用同样的一秒退出窗口；超时会记录清理错误，调用
-  `worker.terminate()` 并等待实际退出。
-- 连接 runner 的宿主最多等待协商后的租约加 `margin`
-  来确认终止。runner 在强杀之前使用自己独立的 `--grace` 窗口。
+```yaml title="stdio.yml"
+- id: runner
+  name: remote/runner
+  config:
+    root: /srv/graft/installation
+    state: /srv/graft/state/billing
+    listen:
+      - stdio: true
+        identity: billing
+```
 
-runner 实例有三种可观察的停止结果：
+宿主使用 command 形式的 `connect`，YAML 也可以写同样的数组：
 
-| 结果                           | 含义                                                                                                   |
-| ------------------------------ | ------------------------------------------------------------------------------------------------------ |
-| `Exited`                       | 走正常停止流程，并已确认进程退出。                                                                     |
-| `Killed`                       | 已确认强制终止；finalizer 不一定执行完。                                                               |
-| `RemoteTerminationUnconfirmed` | 等过租约加余量后仍无法确认退出；既可能是断连，也可能是连接仍在但 runner 无法确认。超时不等于已经退出。 |
+```ts
+Remote.plugin(contract, {
+	contractModule: "my-plugin/contract",
+	connect: {
+		command: ["ssh", "-T", "billing@runner.example"],
+		instance: "greeter",
+	},
+	config: { greeting: "Hello" },
+})
+```
 
-前两种记录在宿主日志的 `remote.termination` 中，同时带有 `remote.instance` 和
-`remote.generation`；第三种出现在清理失败中，可用导出的
-`Remote.RemoteTerminationUnconfirmed`
-识别。即使最终进程停止了，清理错误仍会保留。过载时日志可能丢失，宿主会报告丢失数量。
+在 runner 账户的 `authorized_keys`
+里，把这个公钥限定为固定命令。请换成实际部署的可执行文件路径和公钥：
 
-宿主正常断开会结束会话，不记 ERROR。异常断开记 Warning，包含 cause 和对端身份，runner 继续服务。执行单元由 Dispose 和租约决定何时停止，不由连接本身决定。
+```text
+restrict,command="/usr/local/bin/graft-remote serve --config /srv/graft/stdio.yml" ssh-ed25519 AAAA... billing-host
+```
 
-## 处理失败
+不要分配终端，也不要把欢迎消息写到 stdout，它只承载协议字节。SSH 验证宿主身份，`identity`
+指定稳定的 runner 身份名。同一状态目录不允许第二个调用并发运行。SSH 退出不等于执行单元已经停止。
 
-代理除了暴露契约中声明的错误，还可能报告：
+## 替换与停止
 
-- `Remote.Contract.UndeclaredFailure`：实现抛出了契约之外的错误，`original`
-  保留诊断值。
-- `Remote.RemoteWithdrawn`：子进程撤回了导出的服务，宿主消费者需要停止。
-- `Remote.RemoteError`：启动或基础设施失败，`cause` 保留具体原因。
-- `Remote.MissingInstance`：既没有显式实例名，也没有 loader 条目 id。
+对于同一认证身份和 instance，runner
+**确认旧进程退出后**才接纳新实例。generation 持久化并递增，runner 恢复后也成立。无法确认退出就拒绝替换。插件从
+`Remote.Instance` 读取
+`{ id, generation }`；外部系统可拒绝旧 generation 的写入，即 fencing，但必须自行实施检查。它不会撤销已完成的写入，不保证调用恰好一次，也不协调不同 runner。local/worker 每次都是新 id、generation
+1。
 
-这些属于激活或后台失败。显式 dispose 则报告 `Fork.CleanupError`；在它的 `cause`
-里检查清理与终止错误，包括
-`Remote.RemoteTerminationUnconfirmed`。意外 defect 仍是 defect，超时不会把清理变成成功。
+宿主续租；停止续租后执行单元到期退出，runner 消失也会触发退出。整机暂停会暂停期限执行，所以不是硬实时保证；进程身份检查还有很窄的 PID 复用窗口。后代进程仍由外部 supervisor 负责。
+
+停止先走优雅 Dispose。`shutdownTimeout` 默认五秒，只约束这一步。之后：
+
+- 本机子进程再有一秒自然退出；超时后强制终止，spawner 再过一秒升级到 SIGKILL 并确认退出。
+- worker 同样等一秒，然后 `worker.terminate()`
+  并等待线程确实退出。即使终止成功，超时仍记入清理错误。
+- runner 连接最多等待租约加宿主 `margin`。runner 的 `grace`
+  默认五秒，是从中断到强杀的窗口；`margin` 只是宿主额外等待确认的时间。
+
+| 结果                           | 含义                                                                         |
+| ------------------------------ | ---------------------------------------------------------------------------- |
+| `Exited`                       | 正常停止，确认进程退出。                                                     |
+| `Killed`                       | 确认强制终止，finalizer 可能没完成。                                         |
+| `RemoteTerminationUnconfirmed` | 退出未确认，可能已断连，也可能连接仍在但 runner 无法确认。超时不是退出证明。 |
+
+前两种写入带 instance、generation 的 `remote.termination`
+日志，第三种是清理错误。正常断连不记 ERROR，异常连接记带 cause 和身份的 Warning。执行寿命由 Dispose 和租约决定，不仅取决于连接。负载过高可能丢日志，宿主会报告数量。
+
+TS 代理暴露声明的错误、`Contract.UndeclaredFailure`、`RemoteWithdrawn`、带 cause 的
+`RemoteError` 和 `MissingInstance`。dispose 返回
+`Fork.CleanupError`，可在其 cause 里查找
+`RemoteTerminationUnconfirmed`。defect 仍是 defect。YAML 错误还会标出 entry 与失败字段。
 
 ## 热重载
 
-宿主入口重新求值会产生新的 Plugin 对象。[HMR](../hot-reload/)
-会因此重启代理、替换执行；runner 实例在旧进程停止后获得新的 generation。runner 上安装的实现模块不在宿主 HMR 图里。要使用新实现，先部署到 runner，再重启代理。
+宿主 entry 重载会替换执行单元；runner 确认旧实例退出后才增加 generation。**修改契约后需要重启宿主**，原始契约导入不参与 HMR。runner 的实现模块不在宿主 HMR 图中；在 runner 上部署，再重启代理。
 
-这个包不负责自动分发代码、runner 故障转移或调用重放。
+## 编写能力插件
+
+[能力作者指南](../remote-capabilities/)介绍四个服务契约、握手和可复用的符合性测试。内置
+`host/*`、`runner/*` 也实现同样的契约；应用不需要把它们逐个写成 entry。

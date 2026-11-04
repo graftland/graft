@@ -20,7 +20,7 @@ import * as Packages from "../runner/Packages"
 import * as Wire from "../runner/Wire"
 import { awaitTermination, defaults, childOf } from "../runner/model"
 export const connect = (
-	target: ConfiguredRunner & { readonly instance: string },
+	target: ConfiguredRunner,
 	contractModule: string,
 	options: Port.Options,
 	resources: Scope.Scope,

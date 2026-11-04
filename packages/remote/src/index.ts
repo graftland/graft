@@ -1,70 +1,62 @@
-import { children } from "./internal/cleanup"
-import { launch } from "./internal/targetAssembly"
+import { Plugin } from "@graftland/graft"
+import { ModuleResolver } from "@graftland/loader"
+import { Array, Cause, Effect, Path, Schema } from "effect"
+import type { Duration, Schedule } from "effect"
+import { SecureRandom } from "effect/crypto"
+import { ChildProcessSpawner } from "effect/process"
+import { launch } from "./internal/entry"
 import { follow } from "./internal/follow"
 import { CapabilityFailed } from "./internal/assembly"
-import { executionPlugin, publicError } from "./internal/execution"
-import { Plugin } from "@graftland/graft"
-import {
-	Array,
-	Cause,
-	Effect,
-	FileSystem,
-	Schema,
-	References,
-	Scope,
-} from "effect"
-import type { Config, Duration, PlatformError, Schedule } from "effect"
-import {
-	local,
-	worker,
-	runner,
-	websocket,
-	mtls,
-	unix,
-	command,
-	none,
-	bearer,
-	jwt,
-	validate,
-	type Target,
-	type Runner,
-} from "./Targets"
-export {
-	local,
-	worker,
-	runner,
-	websocket,
-	mtls,
-	unix,
-	command,
-	none,
-	bearer,
-	jwt,
-}
-import { Instance } from "./Instance"
-export { Instance }
+import { publicError } from "./internal/execution"
+import * as Configuration from "./internal/entryConfig"
+import * as Credential from "./internal/credentials"
 import { RemoteWithdrawn, RemoteError, MissingInstance } from "./Errors"
 import * as Contract from "./Contract"
 export { Contract }
+export { Instance } from "./Instance"
 export { RemoteTerminationUnconfirmed } from "./internal/runner/model"
 export { RemoteError, RemoteWithdrawn, MissingInstance } from "./Errors"
+export { UndeclaredFailure, ChildFailure } from "./Contract"
+export type {
+	Connect,
+	Source as CredentialSource,
+} from "./internal/credentials"
 
 export interface Options<
 	D extends ReadonlyArray<Plugin.Dependency> = readonly [],
 > {
-	/** A configured runner is evaluated on activation, with access to certificate files. */
-	readonly target?:
-		| Target<D>
-		| Effect.Effect<
-				Runner<D>,
-				Config.ConfigError | PlatformError.PlatformError,
-				FileSystem.FileSystem
-		  >
-	/** Contract module exported as default or named `contract`, resolved in the runner installation. */
+	readonly connect: Credential.Connect<D>
+	/** Contract module resolved independently in each execution environment. */
 	readonly contractModule: string
+	readonly config?: Schema.Json
 	readonly retry?: Schedule.Schedule<unknown, unknown> | undefined
 	readonly shutdownTimeout?: Duration.Input | undefined
 }
+const publicCause = <E extends Schema.Top>(
+	declared: E,
+	cause: Cause.Cause<unknown>,
+): Cause.Cause<
+	| E["Type"]
+	| Contract.UndeclaredFailure
+	| RemoteWithdrawn
+	| RemoteError
+	| MissingInstance
+> =>
+	Cause.fromReasons(
+		Array.flatMap(cause.reasons, (reason) => {
+			if (reason._tag !== "Fail") return [reason]
+			return Schema.is(CapabilityFailed)(reason.error)
+				? Array.map(
+						publicCause(declared, reason.error.cause).reasons,
+						(inner) => inner.annotate(Cause.reasonAnnotations(reason)),
+					)
+				: [
+						Cause.makeFailReason(publicError(declared, reason.error)).annotate(
+							Cause.reasonAnnotations(reason),
+						),
+					]
+		}),
+	)
 
 export const plugin = <
 	S extends Schema.Top & {
@@ -79,72 +71,45 @@ export const plugin = <
 	const D extends ReadonlyArray<Plugin.Dependency> = readonly [],
 >(
 	contract: Contract.Contract<S, E>,
-	options: Options<D>,
+	options: Options<D> & { readonly config?: S["Encoded"] },
 ): Plugin.Plugin<
-	S["Encoded"],
-	S["Encoded"],
+	void,
+	void,
 	| E["Type"]
 	| Contract.UndeclaredFailure
 	| RemoteError
 	| RemoteWithdrawn
 	| MissingInstance
-> => {
-	const target = options.target ?? local()
-	return Plugin.make({
+> =>
+	Plugin.make({
 		name: contract.name,
-		config: Schema.toEncoded(contract.config),
-		inject: Effect.isEffect(target) ? [FileSystem.FileSystem] : [],
+		inject: [
+			Plugin.optional(ModuleResolver.ModuleResolver),
+			Path.Path,
+			SecureRandom.SecureRandom,
+			ChildProcessSpawner.ChildProcessSpawner,
+		],
 		retry: options.retry,
-		apply: (input) =>
+		apply: () =>
 			Effect.gen(function* () {
-				yield* Schema.decodeEffect(contract.config)(input).pipe(
-					Effect.mapError((error) => publicError(contract.error, error)),
+				const input = yield* Schema.decodeUnknownEffect(Configuration.Host)({
+					contract: options.contractModule,
+					connect: options.connect,
+					config: options.config ?? {},
+				})
+				yield* Schema.decodeEffect(contract.config)(input.config)
+				const child = yield* launch(
+					contract,
+					input,
+					{
+						contractModule: options.contractModule,
+						shutdownTimeout: options.shutdownTimeout,
+					},
+					Credential.invocation(options.connect),
 				)
-				const configured = yield* Effect.isEffect(target)
-					? target.pipe(
-							Effect.mapError((error) => publicError(contract.error, error)),
-						)
-					: Effect.succeed(target)
-				yield* validate(configured).pipe(
-					Effect.mapError((error) => publicError(contract.error, error)),
+				yield* follow(child, (cause) =>
+					Effect.failCause(publicCause(contract.error, cause)),
 				)
-				const annotations = yield* References.CurrentLogAnnotations
-				const scope = yield* children
-				const child = yield* launch(configured, input, (target) =>
-					executionPlugin(
-						contract,
-						{ ...options, retry: undefined },
-						target,
-						annotations,
-					),
-				).pipe(Scope.provide(scope))
-				const fail = (
-					cause: Cause.Cause<unknown>,
-				): Cause.Cause<
-					| E["Type"]
-					| Contract.UndeclaredFailure
-					| RemoteWithdrawn
-					| RemoteError
-					| MissingInstance
-				> =>
-					Cause.fromReasons(
-						Array.flatMap(cause.reasons, (reason) => {
-							if (reason._tag !== "Fail") return [reason]
-							return Schema.is(CapabilityFailed)(reason.error)
-								? Array.map(fail(reason.error.cause).reasons, (inner) =>
-										inner.annotate(Cause.reasonAnnotations(reason)),
-									)
-								: [
-										Cause.makeFailReason(
-											publicError(contract.error, reason.error),
-										).annotate(Cause.reasonAnnotations(reason)),
-									]
-						}),
-					)
-				yield* follow(child, (cause) => Effect.failCause(fail(cause)))
-				return () => Effect.succeed(false)
-			}),
+			}).pipe(Effect.mapError((error) => publicError(contract.error, error))),
 	})
-}
-
 export { host as default } from "./internal/entry"

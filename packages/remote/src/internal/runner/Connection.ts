@@ -2,7 +2,7 @@ import {
 	LocalTransport,
 	WorkerTransport,
 	type Execution,
-} from "../../Transport"
+} from "../directTransport"
 import * as RunnerConnection from "../host/runner"
 import {
 	Array,
@@ -17,11 +17,8 @@ import {
 import type { RpcClientError } from "effect/rpc"
 import type { Schema, PlatformError } from "effect"
 import type { RemoteTerminationUnconfirmed } from "./model"
-import type {
-	Local as LocalTarget,
-	Worker as WorkerTarget,
-	RunnerCommon,
-} from "../../Targets"
+import type { Expected } from "./Packages"
+
 import {
 	LocalTerminationTimeout,
 	ProcessExited,
@@ -32,14 +29,24 @@ import * as Port from "../port"
 import * as LocalProcess from "./Local"
 import * as Wire from "./Wire"
 
-export interface ConfiguredRunner extends Omit<RunnerCommon, "_tag"> {
+export interface LocalTarget {
+	readonly _tag: "Local"
+	readonly command?: readonly [string, ...string[]]
+}
+export interface WorkerTarget {
+	readonly _tag: "Worker"
+	readonly execArgv?: ReadonlyArray<string>
+}
+
+export interface ConfiguredRunner {
+	readonly instance: string
+	readonly lease?: Duration.Input
+	readonly margin?: Duration.Input
+	readonly expect?: Expected
 	readonly _tag: "Connector"
 	readonly explicitAuth?: boolean
 }
-export type Target =
-	| LocalTarget
-	| WorkerTarget
-	| (ConfiguredRunner & { readonly instance: string })
+export type Target = LocalTarget | WorkerTarget | ConfiguredRunner
 
 type Peer = Port.Port
 export interface Connected {

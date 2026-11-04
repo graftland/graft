@@ -1,0 +1,13 @@
+# yaml-language-server: $schema=../../packages/cli/schema.json
+# Change only connect to move the greeter. The welcome entry stays the same.
+- id: greeter
+  name: remote
+  config:
+    contract: "@graftland/sample-remote/contract"
+    connect:
+      local: {}
+    config:
+      greeting: Hello
+
+- id: welcome
+  name: ./src/welcome.ts

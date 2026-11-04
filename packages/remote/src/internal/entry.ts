@@ -1,16 +1,29 @@
 import { Graft, Plugin, type Fork } from "@graftland/graft"
 import { ConfigDirectory, Entry, ModuleResolver } from "@graftland/loader"
-import { Cause, Effect, Option, Path, Schema, References, Scope } from "effect"
+import {
+	Cause,
+	Effect,
+	Option,
+	Path,
+	Schema,
+	References,
+	Scope,
+	String,
+} from "effect"
 import { ChildProcessSpawner } from "effect/process"
 import * as Contract from "../Contract"
-import { LocalTransport, WorkerTransport } from "../Transport"
+import { MissingInstance } from "../Errors"
+import { LocalTransport, WorkerTransport } from "./directTransport"
 import * as Configuration from "./entryConfig"
 import * as Assembly from "./assembly"
 import { executionPlugin } from "./execution"
 import { follow } from "./follow"
 import { children } from "./cleanup"
 import { resolveEntry } from "./runner/Packages"
-import { local, worker } from "../Targets"
+import type { LocalTarget, WorkerTarget } from "./runner/Connection"
+import type { ExecutionOptions } from "./execution"
+import * as Importer from "./importer"
+import { SecureRandom } from "effect/crypto"
 
 export class EntryError extends Schema.TaggedError<
 	EntryError,
@@ -35,7 +48,24 @@ export const resolve = Effect.fnUntraced(function* (
 	reference: Configuration.Reference,
 	field: string,
 ) {
-	const resolver = yield* ModuleResolver.ModuleResolver
+	const existing = yield* Effect.serviceOption(ModuleResolver.ModuleResolver)
+	const path = yield* Path.Path
+	const source = yield* ConfigDirectory
+	const directory = path.resolve(Option.getOrElse(source, () => "."))
+	const resolver = yield* Option.match(existing, {
+		onSome: Effect.succeed,
+		onNone: () =>
+			Effect.gen(function* () {
+				const importer = yield* Importer.make(directory)
+				return yield* ModuleResolver.make({
+					base: directory,
+					importer: (specifier) =>
+						String.startsWith("@graftland/plugin-remote/")(specifier)
+							? import(specifier)
+							: importer(specifier),
+				})
+			}),
+	})
 	const fail = yield* boundary(field)
 	const plugin = yield* resolver
 		.resolve(reference.name)
@@ -84,16 +114,29 @@ export const direct = (
 	)
 
 type Annotations = Readonly<Record<string, unknown>>
-const directTarget = Effect.fnUntraced(function* (
-	contract: Contract.RunnerContract,
+const directTarget = Effect.fnUntraced(function* <
+	S extends Schema.Top & {
+		readonly Encoded: Schema.Json
+		readonly DecodingServices: never
+		readonly EncodingServices: never
+	},
+	E extends Schema.Top & {
+		readonly DecodingServices: never
+		readonly EncodingServices: never
+	},
+>(
+	contract: Contract.Contract<S, E>,
 	input: typeof Configuration.Host.Type,
-	selected: ReturnType<typeof local> | ReturnType<typeof worker>,
+	selected: LocalTarget | WorkerTarget,
 	annotations: Annotations,
+	options: ExecutionOptions,
 ) {
 	const path = yield* Path.Path
 	const source = yield* ConfigDirectory
 	const directory = path.resolve(Option.getOrElse(source, () => "."))
-	const module = yield* resolveEntry(directory, input.contract)
+	const module = String.startsWith("file:")(input.contract)
+		? input.contract
+		: yield* resolveEntry(directory, input.contract)
 	const capability = yield* resolve(
 		{
 			name:
@@ -107,7 +150,7 @@ const directTarget = Effect.fnUntraced(function* (
 		capability.plugin,
 		executionPlugin(
 			contract,
-			{ contractModule: module },
+			{ ...options, contractModule: module },
 			selected,
 			annotations,
 		),
@@ -115,30 +158,49 @@ const directTarget = Effect.fnUntraced(function* (
 		selected._tag === "Local" ? LocalTransport : WorkerTransport,
 	)
 })
-const runnerTarget = Effect.fnUntraced(function* (
-	contract: Contract.RunnerContract,
+const runnerTarget = Effect.fnUntraced(function* <
+	S extends Schema.Top & {
+		readonly Encoded: Schema.Json
+		readonly DecodingServices: never
+		readonly EncodingServices: never
+	},
+	E extends Schema.Top & {
+		readonly DecodingServices: never
+		readonly EncodingServices: never
+	},
+>(
+	contract: Contract.Contract<S, E>,
 	input: typeof Configuration.Host.Type,
 	target: Exclude<
 		Configuration.Connect,
 		{ readonly local: object } | { readonly worker: object }
 	>,
 	annotations: Annotations,
+	options: ExecutionOptions,
+	authOverride: typeof Assembly.Invocation.Type | undefined,
 ) {
+	const instance =
+		target.instance === undefined
+			? yield* Entry.CurrentId
+			: Option.some(target.instance)
+	if (Option.isNone(instance)) return yield* MissingInstance.make({})
 	const transport = yield* resolve(
 		Configuration.hostTransport(target),
 		"connect.transport",
 	)
-	const auth = yield* resolve(
-		Configuration.authentication("host", target.auth),
-		"connect.auth",
-	)
+	const auth =
+		authOverride ??
+		(yield* resolve(
+			Configuration.authentication("host", target.auth),
+			"connect.auth",
+		))
 	const consumer = executionPlugin(
 		contract,
-		{ contractModule: input.contract },
+		options,
 		{
 			_tag: "Connector",
 			explicitAuth: target.auth !== undefined,
-			...(target.instance === undefined ? {} : { instance: target.instance }),
+			instance: instance.value,
 			...(target.lease === undefined ? {} : { lease: target.lease }),
 			...(target.margin === undefined ? {} : { margin: target.margin }),
 			...(target.expect === undefined ? {} : { expect: target.expect }),
@@ -152,35 +214,72 @@ const runnerTarget = Effect.fnUntraced(function* (
 		input: input.config,
 	})
 })
+
+export const launch = Effect.fnUntraced(function* <
+	S extends Schema.Top & {
+		readonly Encoded: Schema.Json
+		readonly DecodingServices: never
+		readonly EncodingServices: never
+	},
+	E extends Schema.Top & {
+		readonly DecodingServices: never
+		readonly EncodingServices: never
+	},
+>(
+	contract: Contract.Contract<S, E>,
+	input: typeof Configuration.Host.Type,
+	options: ExecutionOptions,
+	authOverride?: typeof Assembly.Invocation.Type,
+) {
+	const annotations = yield* References.CurrentLogAnnotations
+	const connect = input.connect
+	const scope = yield* children
+	return yield* Effect.gen(function* () {
+		if (connect.local !== undefined)
+			return yield* directTarget(
+				contract,
+				input,
+				{ _tag: "Local", ...connect.local },
+				annotations,
+				options,
+			)
+		if (connect.worker !== undefined)
+			return yield* directTarget(
+				contract,
+				input,
+				{ _tag: "Worker", ...connect.worker },
+				annotations,
+				options,
+			)
+		return yield* runnerTarget(
+			contract,
+			input,
+			connect,
+			annotations,
+			options,
+			authOverride,
+		)
+	}).pipe(Scope.provide(scope))
+})
 const load = Effect.fnUntraced(function* (
 	input: typeof Configuration.Host.Type,
 ) {
-	const annotations = yield* References.CurrentLogAnnotations
 	const contract = yield* loadContract(input.contract)
 	const failConfig = yield* boundary("config")
 	yield* Schema.decodeEffect(contract.config)(input.config).pipe(
 		Effect.catchCause(failConfig),
 	)
-	const target = input.connect
 	const failConnect = yield* boundary("connect")
-	// The contract import lease outlives the execution and all capability children.
-	const scope = yield* children
-	const launch =
-		target.local !== undefined
-			? directTarget(contract, input, local(target.local), annotations)
-			: target.worker !== undefined
-				? directTarget(contract, input, worker(target.worker), annotations)
-				: runnerTarget(contract, input, target, annotations)
-	const fork = yield* launch.pipe(
-		Scope.provide(scope),
-		Effect.catchCause(failConnect),
-	)
+	const fork = yield* launch(contract, input, {
+		contractModule: input.contract,
+	}).pipe(Effect.catchCause(failConnect))
 	yield* follow(fork, failConnect)
 })
 export const host = Plugin.make({
 	name: "remote",
 	config: Configuration.Host,
 	inject: [
+		SecureRandom.SecureRandom,
 		ModuleResolver.ModuleResolver,
 		Path.Path,
 		ChildProcessSpawner.ChildProcessSpawner,

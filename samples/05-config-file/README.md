@@ -47,5 +47,4 @@ Press <kbd>Ctrl</kbd>+<kbd>C</kbd> to stop. Graft unloads every plugin.
 
 ## Next
 
-You have seen the basics. The [real-world samples](../README.md) put them
-together in larger applications.
+[06 · Remote](../06-remote) moves a plugin without changing its caller.

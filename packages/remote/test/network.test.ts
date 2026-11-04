@@ -4,7 +4,6 @@ import {
 	installModule,
 	runnerConfig,
 } from "./application"
-import { runnerRuntime } from "./capabilities"
 import { SecureRandom } from "effect/crypto"
 import { Entry, Include, Loader, ModuleResolver } from "@graftland/loader"
 import { assert, describe, it } from "@effect/vitest"
@@ -63,7 +62,7 @@ const credentials = (name: string) =>
 		}
 	})
 const runtime = Layer.provideMerge(
-	runnerRuntime,
+	Graft.layer,
 	Layer.merge(NodeServices.layer, SecureRandom.layerWebCrypto),
 )
 const startRunner = (state: string, lease = 15000, config?: string) =>
@@ -186,22 +185,23 @@ const setup = (lease = 15000, partitionable = false) =>
 		yield* provider.await
 		const proxySocket = partitionable ? yield* tcpProxy(daemon.port) : undefined
 		const certificate = yield* credentials("client")
-		const target = Remote.runner({
+		const connect = {
 			instance: "worker",
-			transport: Remote.websocket({
+			...{
 				url: `wss://127.0.0.1:${proxySocket?.port ?? daemon.port}`,
-				tls: { ca: certificate.ca, servername: certificate.servername },
-			}),
-			auth: Remote.mtls(Effect.succeed(certificate)),
-			lease,
+				ca: inject("remoteTls") + "/ca.crt",
+				servername: certificate.servername,
+			},
+			auth: { mtls: Effect.succeed(certificate) },
+			lease: `${lease} millis`,
 			margin: "1 second",
-		})
+		}
 		const proxy = yield* Graft.plugin(
 			Remote.plugin(contract, {
 				contractModule: "remote-fixture",
-				target,
+				connect,
+				config: { directory, fail: false },
 			}),
-			{ directory, fail: false },
 		)
 		yield* proxy.await.pipe(Effect.timeout("30 seconds"))
 		const service = yield* Deferred.make<ChildApi["Service"]>()
@@ -224,7 +224,7 @@ const setup = (lease = 15000, partitionable = false) =>
 			directory,
 			proxy,
 			api: yield* Deferred.await(service),
-			target,
+			connect,
 		}
 	})
 
@@ -346,7 +346,7 @@ const loadYamlHost = (directory: string, port: number) => {
 		return { reply, entry }
 	}).pipe(
 		Effect.scoped,
-		Effect.provide(Layer.provideMerge(Layer.fresh(runnerRuntime), environment)),
+		Effect.provide(Layer.provideMerge(Layer.fresh(Graft.layer), environment)),
 		Effect.timeout("30 seconds"),
 	)
 }
@@ -694,20 +694,21 @@ describe("network runner end to end", () => {
 				const proxy = yield* Graft.plugin(
 					Remote.plugin(empty, {
 						contractModule: "unused",
-						target: Remote.runner({
-							transport: Remote.websocket({
+						connect: {
+							...{
 								url: "wss://127.0.0.1:0",
-								tls: { servername: "localhost", ca: "unused" },
-							}),
-							auth: Remote.mtls(
-								Effect.succeed({
+								servername: "localhost",
+								ca: "unused",
+							},
+							auth: {
+								mtls: Effect.succeed({
 									cert: "unused",
 									key: Redacted.make("unused"),
 								}),
-							),
-						}),
+							},
+						},
+						config: {},
 					}),
-					{},
 				)
 				const exit = yield* Effect.exit(proxy.await)
 				assert.isTrue(Exit.isFailure(exit))
@@ -721,12 +722,15 @@ describe("network runner end to end", () => {
 								Schema.is(Remote.MissingInstance)(reason.error),
 						),
 					)
-					assert.include(Cause.pretty(exit.cause), "set target.instance")
+					assert.include(Cause.pretty(exit.cause), "set connect.instance")
 				}
 			}).pipe(
 				Effect.scoped,
 				Effect.provide(
-					Layer.provideMerge(runnerRuntime, SecureRandom.layerWebCrypto),
+					Layer.provideMerge(
+						Graft.layer,
+						Layer.merge(NodeServices.layer, SecureRandom.layerWebCrypto),
+					),
 				),
 			),
 	)
@@ -1067,20 +1071,18 @@ describe("network runner end to end", () => {
 					const proxy = yield* Graft.plugin(
 						Remote.plugin(contract, {
 							contractModule: "remote-fixture",
-							target: Remote.runner({
+							connect: {
 								instance: expect === undefined ? "" : "pin-" + index,
-								transport: Remote.websocket({
+								...{
 									url: `wss://127.0.0.1:${daemon.port}`,
-									tls: {
-										ca: certificate.ca,
-										servername: certificate.servername,
-									},
-								}),
-								auth: Remote.mtls(Effect.succeed(certificate)),
+									ca: inject("remoteTls") + "/ca.crt",
+									servername: certificate.servername,
+								},
+								auth: { mtls: Effect.succeed(certificate) },
 								...(expect === undefined ? {} : { expect }),
-							}),
+							},
+							config: { directory, fail: false },
 						}),
-						{ directory, fail: false },
 					)
 					const failed = yield* Effect.exit(proxy.await)
 					assert.isTrue(Exit.isFailure(failed))

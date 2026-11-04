@@ -1,4 +1,3 @@
-import { localRuntime } from "./capabilities"
 import { SecureRandom } from "effect/crypto"
 import { underlying } from "./errors"
 import { assert, describe, it } from "@effect/vitest"
@@ -35,43 +34,47 @@ const run = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
 		Effect.scoped,
 		Effect.provide(
 			Layer.provideMerge(
-				localRuntime,
+				Graft.layer,
 				Layer.merge(NodeServices.layer, SecureRandom.layerWebCrypto),
 			),
 		),
 	)
-const setup = Effect.gen(function* () {
-	const fs = yield* FileSystem.FileSystem
-	const directory = yield* fs.makeTempDirectoryScoped()
-	const provider = yield* Graft.plugin(
-		Plugin.make({
-			name: "host-provider",
-			apply: () =>
-				Graft.provide(HostApi, { double: (n) => Effect.succeed(n * 2) }),
-		}),
-	)
-	yield* provider.await
-	const proxy = yield* Graft.plugin(
-		Remote.plugin(contract, { contractModule }),
-		{ directory, fail: false },
-	)
-	yield* proxy.await
-	const service = yield* Deferred.make<ChildApi["Service"]>()
-	const consumer = yield* Graft.plugin(
-		Plugin.make({
-			name: "host-consumer",
-			inject: [ChildApi],
-			apply: () =>
-				Effect.gen(function* () {
-					const api = yield* ChildApi
-					yield* Deferred.succeed(service, api)
-				}),
-		}),
-	)
-	yield* consumer.await
-	const api = yield* Deferred.await(service)
-	return { fs, directory, provider, proxy, consumer, api }
-})
+const setup = (fail = false) =>
+	Effect.gen(function* () {
+		const fs = yield* FileSystem.FileSystem
+		const directory = yield* fs.makeTempDirectoryScoped()
+		const provider = yield* Graft.plugin(
+			Plugin.make({
+				name: "host-provider",
+				apply: () =>
+					Graft.provide(HostApi, { double: (n) => Effect.succeed(n * 2) }),
+			}),
+		)
+		yield* provider.await
+		const proxy = yield* Graft.plugin(
+			Remote.plugin(contract, {
+				contractModule,
+				connect: { local: {} },
+				config: { directory, fail },
+			}),
+		)
+		yield* proxy.await
+		const service = yield* Deferred.make<ChildApi["Service"]>()
+		const consumer = yield* Graft.plugin(
+			Plugin.make({
+				name: "host-consumer",
+				inject: [ChildApi],
+				apply: () =>
+					Effect.gen(function* () {
+						const api = yield* ChildApi
+						yield* Deferred.succeed(service, api)
+					}),
+			}),
+		)
+		yield* consumer.await
+		const api = yield* Deferred.await(service)
+		return { fs, directory, provider, proxy, consumer, api }
+	})
 const waitFile = (file: string) =>
 	Effect.gen(function* () {
 		const fs = yield* FileSystem.FileSystem
@@ -88,7 +91,7 @@ describe("cross-process services", () => {
 		"routes equal service tags independently from the control endpoint",
 		() =>
 			Effect.gen(function* () {
-				const { api } = yield* setup
+				const { api } = yield* setup()
 				const label = yield* Deferred.make<string>()
 				const consumer = yield* Graft.plugin(
 					Plugin.make({
@@ -114,7 +117,7 @@ describe("cross-process services", () => {
 		"calls the host through the child service and exposes the local instance identity",
 		() =>
 			Effect.gen(function* () {
-				const { proxy, api } = yield* setup
+				const { proxy, api } = yield* setup()
 				const result = yield* api.call(20)
 				assert.equal(result.value, 41)
 				assert.notEqual(result.pid, process.pid)
@@ -131,7 +134,7 @@ describe("cross-process services", () => {
 		"keeps the child and reverse service alive while a host consumer finalizes",
 		() =>
 			Effect.gen(function* () {
-				const { fs, directory, proxy, api } = yield* setup
+				const { fs, directory, proxy, api } = yield* setup()
 				const entered = yield* Deferred.make<void>()
 				const release = yield* Deferred.make<void>()
 				const result = yield* Ref.make(0)
@@ -175,7 +178,7 @@ describe("cross-process services", () => {
 		"withdraws a host dependency and restarts the proxy in a fresh process",
 		() =>
 			Effect.gen(function* () {
-				const { provider, proxy, api } = yield* setup
+				const { provider, proxy, api } = yield* setup()
 				const before = yield* api.call(1)
 				yield* provider.dispose
 				assert.throws(() => process.kill(before.pid, 0))
@@ -222,8 +225,11 @@ describe("cross-process services", () => {
 			)
 			yield* provider.await
 			const proxy = yield* Graft.plugin(
-				Remote.plugin(contract, { contractModule }),
-				{ directory, fail: false },
+				Remote.plugin(contract, {
+					contractModule,
+					connect: { local: {} },
+					config: { directory, fail: false },
+				}),
 			)
 			const exit = yield* Effect.exit(proxy.await)
 			assert.isTrue(Exit.isFailure(exit))
@@ -241,7 +247,7 @@ describe("cross-process services", () => {
 	)
 	it.live("streams and interrupts requests across the process boundary", () =>
 		Effect.gen(function* () {
-			const { directory, api } = yield* setup
+			const { directory, api } = yield* setup()
 			const values = yield* api.values.pipe(Stream.take(3), Stream.runCollect)
 			assert.deepEqual(values, [0, 1, 2])
 			yield* waitFile(`${directory}/stream-ended`)
@@ -267,8 +273,11 @@ describe("cross-process services", () => {
 				)
 				yield* provider.await
 				const proxy = yield* Graft.plugin(
-					Remote.plugin(contract, { contractModule }),
-					{ directory, fail: false },
+					Remote.plugin(contract, {
+						contractModule,
+						connect: { local: {} },
+						config: { directory, fail: false },
+					}),
 				)
 				const active = yield* Effect.forkScoped(proxy.await)
 				yield* waitFile(`${directory}/awaiting-export`)
@@ -297,8 +306,11 @@ describe("cross-process services", () => {
 				)
 				yield* provider.await
 				const proxy = yield* Graft.plugin(
-					Remote.plugin(contract, { contractModule }),
-					{ directory, fail: false },
+					Remote.plugin(contract, {
+						contractModule,
+						connect: { local: {} },
+						config: { directory, fail: false },
+					}),
 				)
 				const exit = yield* Effect.exit(
 					proxy.await.pipe(Effect.timeout("3 seconds")),
@@ -324,8 +336,7 @@ describe("cross-process services", () => {
 		"drains exported services when the remote worker fails without a lease deadlock",
 		() =>
 			Effect.gen(function* () {
-				const { directory, fs, proxy } = yield* setup
-				yield* proxy.update({ directory, fail: true })
+				const { directory, fs, proxy } = yield* setup(true)
 				yield* proxy.await
 				yield* fs.writeFileString(`${directory}/fail`, "fail")
 				const state = yield* proxy.state.pipe(

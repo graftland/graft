@@ -1,17 +1,25 @@
-import { Entry } from "@graftland/loader"
 import { Plugin } from "@graftland/graft"
-import { Array, Cause, Effect, Fiber, Option, Schema, Scope } from "effect"
+import { Array, Cause, Effect, Fiber, Schema, Scope } from "effect"
 import { SecureRandom } from "effect/crypto"
-import { type Local, type Worker } from "../Targets"
-import { Connector, LocalTransport, WorkerTransport } from "../Transport"
+import type {
+	LocalTarget as Local,
+	WorkerTarget as Worker,
+} from "./runner/Connection"
+import { Connector } from "../Transport"
+import { LocalTransport, WorkerTransport } from "./directTransport"
 import { Credentials } from "../Auth"
-import type { Options } from "../index"
+import type { Duration } from "effect"
 import * as Connection from "./runner/Connection"
 import * as Services from "./services"
 import * as Host from "./host"
 import { RemoteWithdrawn, RemoteError, MissingInstance } from "../Errors"
 import * as Contract from "../Contract"
 import * as Control from "./control"
+
+export interface ExecutionOptions {
+	readonly contractModule: string
+	readonly shutdownTimeout?: Duration.Input | undefined
+}
 
 const dependencies = (
 	target: Local | Worker | Connection.ConfiguredRunner,
@@ -33,10 +41,9 @@ export const executionPlugin = <
 		readonly DecodingServices: never
 		readonly EncodingServices: never
 	},
-	D extends ReadonlyArray<Plugin.Dependency>,
 >(
 	contract: Contract.Contract<S, E>,
-	options: Options<D>,
+	options: ExecutionOptions,
 	configured: Local | Worker | Connection.ConfiguredRunner,
 	annotations: Readonly<Record<string, unknown>> = {},
 ): Plugin.Plugin<
@@ -56,14 +63,12 @@ export const executionPlugin = <
 			...Array.map(contract.inject, (service) => service.key),
 		],
 		config: Schema.toEncoded(contract.config),
-		retry: options.retry,
 		apply: (input) =>
 			Effect.gen(function* () {
 				const random = yield* SecureRandom.SecureRandom
 				const session = yield* random.uuidV4()
-				const target = yield* resolveTarget(configured)
 				const active = yield* Connection.acquire(
-					target,
+					configured,
 					options.contractModule,
 					{
 						session,
@@ -110,19 +115,7 @@ export const publicError = <E extends Schema.Top>(
 		? error
 		: Schema.is(Contract.UndeclaredFailure)(error) ||
 			  Schema.is(RemoteWithdrawn)(error) ||
+			  Schema.is(RemoteError)(error) ||
 			  Schema.is(MissingInstance)(error)
 			? error
 			: RemoteError.make({ cause: Cause.fail(error) })
-
-const resolveTarget = (
-	target: Local | Worker | Connection.ConfiguredRunner,
-): Effect.Effect<Connection.Target, MissingInstance> =>
-	Effect.gen(function* () {
-		if (target._tag !== "Connector") return target
-		const instance =
-			target.instance === undefined
-				? yield* Entry.CurrentId
-				: Option.some(target.instance)
-		if (Option.isNone(instance)) return yield* MissingInstance.make({})
-		return { ...target, instance: instance.value }
-	})

@@ -63,3 +63,16 @@ devenv shell -- pnpm --filter @graftland/sample-chat-bot start
 | `src/plugins/moderation.ts` | 移除含有違禁詞的訊息的中介層。                      |
 | `src/main.ts`               | 腳本化的對話。                                      |
 | `test/chat-bot.test.ts`     | 上述行為的測試。                                    |
+
+## 給天氣整合一個獨立行程
+
+第 3 步用
+`Remote.plugin(contract, { contractModule, connect: { local: {} }, config })`
+載入一般的 forecasts 外掛。天氣 SDK 阻塞或退出時，只影響它自己的行程；骰子和審核仍在宿主裡執行。天氣指令照常注入
+`Forecasts`；RPC 失敗會轉成
+`ForecastUnavailable`，指令回覆一句暫時無法使用。撤回提供者時，只移除依賴它的指令。
+
+[`src/forecastContract.ts`](src/forecastContract.ts)描述這個服務。測試跨行程呼叫
+`/weather`，銷毀提供者，再確認 `/roll`
+仍可使用。這是故障邊界，不是權限沙箱。想自己移動一個服務，先看
+[06 · 遠端外掛](../06-remote/README.zh-TW.md)。

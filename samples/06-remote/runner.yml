@@ -1,0 +1,10 @@
+# yaml-language-server: $schema=../../packages/cli/schema.json
+- id: runner
+  name: remote/runner
+  config:
+    root: ./.cache/installation
+    state: ./.cache/state
+    listen:
+      - url: ws://127.0.0.1:7443
+        auth:
+          none: { identity: tutorial }

@@ -22,7 +22,6 @@ import { RpcClient } from "effect/rpc"
 import { inject, expectTypeOf } from "vitest"
 import process from "node:process"
 import * as Remote from "../src/index"
-import * as Targets from "../src/Targets"
 import * as Port from "../src/internal/port"
 import * as Multiplex from "../src/internal/runner/Multiplex"
 import * as Framing from "../src/internal/runner/Framing"
@@ -115,13 +114,16 @@ const session = Effect.fnUntraced(function* (state: string) {
 })
 
 const proxy = Effect.fnUntraced(function* (
-	target: Targets.Runner,
+	connect: Remote.Connect,
 	directory: string,
 ) {
 	yield* Graft.provide(HostApi, { double: (n) => Effect.succeed(n * 2) })
 	const remote = yield* Graft.plugin(
-		Remote.plugin(contract, { contractModule: "remote-fixture", target }),
-		{ directory, fail: false },
+		Remote.plugin(contract, {
+			contractModule: "remote-fixture",
+			connect,
+			config: { directory, fail: false },
+		}),
 	)
 	yield* remote.await
 	const found = yield* Deferred.make<typeof ChildApi.Service>()
@@ -171,13 +173,7 @@ describe("runner stream transports", () => {
 							Stream.runHead,
 						)
 						assert.isTrue(Option.isSome(line))
-						yield* proxy(
-							Remote.runner({
-								instance: "worker",
-								transport: Remote.unix({ path }),
-							}),
-							directory,
-						)
+						yield* proxy({ instance: "worker", ...{ unix: path } }, directory)
 						yield* child.kill()
 						yield* child.exitCode
 					}),
@@ -238,13 +234,13 @@ describe("runner stream transports", () => {
 				const argv = yield* command()
 				const invocation = yield* args(directory + "/state")
 				yield* proxy(
-					Remote.runner({
+					{
 						instance: "worker",
-						transport: Remote.command(
-							[argv[0], ...Array.drop(argv, 1), ...invocation],
-							{ cwd: new URL("..", import.meta.url).pathname },
-						),
-					}),
+						...{
+							command: [argv[0], ...Array.drop(argv, 1), ...invocation],
+							...{ cwd: new URL("..", import.meta.url).pathname },
+						},
+					},
 					directory,
 				)
 			}).pipe(Effect.scoped, Effect.provide(runtime)),
@@ -297,23 +293,24 @@ describe("runner stream transports", () => {
 		() =>
 			Effect.gen(function* () {
 				expectTypeOf<
-					Extract<
-						Parameters<typeof Remote.runner>[0],
-						{ transport: Targets.Command }
-					>["auth"]
+					Extract<Remote.Connect, { command: ReadonlyArray<string> }>["auth"]
 				>().toEqualTypeOf<undefined>()
 				// Model a runtime object's extra field without weakening the public target type.
 				const environment = {
-					...Remote.command(["unused"]),
-					auth: Remote.none(),
+					...{ command: ["unused"] },
+					auth: { none: {} },
 				}
-				const transport: Pick<Targets.Command, "_tag" | "argv"> = environment
+				const connect: { command: readonly [string, ...string[]] } = {
+					command: ["unused"],
+				}
+				const configured = { ...connect, ...environment }
+				const runtimeConnect: { command: ReadonlyArray<string> } = configured
 				const fork = yield* Graft.plugin(
 					Remote.plugin(contract, {
 						contractModule: "unused",
-						target: Effect.succeed(Remote.runner({ transport })),
+						connect: { ...runtimeConnect, command: ["unused"] },
+						config: { directory: "unused", fail: false },
 					}),
-					{ directory: "unused", fail: false },
 				)
 				const error = yield* Effect.flip(fork.await)
 				assert.include(Cause.pretty(Cause.fail(error)), "do not accept auth")

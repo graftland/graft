@@ -1,4 +1,6 @@
 import { Graft, Plugin } from "@graftland/graft"
+import { SecureRandom } from "effect/crypto"
+import { Path } from "effect"
 import { ModuleResolver } from "@graftland/loader"
 import { Deferred, Effect, Schema, Stream } from "effect"
 import * as Configuration from "../internal/entryConfig"
@@ -6,8 +8,10 @@ import { boundary, resolve } from "../internal/entry"
 import * as Assembly from "../internal/assembly"
 import * as Startup from "../internal/listenerStartup"
 import { follow } from "../internal/follow"
-import { Supervisor } from "../Supervisor"
-import supervisor, { Config as SupervisorConfig } from "./supervisor"
+import { Supervisor } from "../internal/Supervisor"
+import supervisor, {
+	Config as SupervisorConfig,
+} from "../internal/supervisorPlugin"
 
 const startListener = Effect.fnUntraced(function* (
 	input: Configuration.Listen,
@@ -39,9 +43,9 @@ const startListener = Effect.fnUntraced(function* (
 })
 
 const owner = Plugin.make({
-	name: "remote-runner-runtime",
+	name: "remote-supervised-runtime",
 	config: Configuration.Runner,
-	inject: [ModuleResolver.ModuleResolver],
+	inject: [ModuleResolver.ModuleResolver, Path.Path, SecureRandom.SecureRandom],
 	apply: Effect.fnUntraced(function* (config) {
 		const options = yield* Schema.encodeEffect(SupervisorConfig)(config)
 		const engine = yield* Graft.plugin(supervisor, options)
@@ -82,7 +86,7 @@ const owner = Plugin.make({
 	}),
 })
 export default Plugin.make({
-	name: "remote-runner",
+	name: "remote-server",
 	config: Configuration.Runner,
 	apply: Effect.fnUntraced(function* (config) {
 		const encoded = yield* Schema.encodeEffect(Configuration.Runner)(config)

@@ -1,7 +1,6 @@
 import { Graft, Plugin } from "@graftland/graft"
-import { Cause, Effect, FileSystem, Option, Path, Schema } from "effect"
+import { Effect, FileSystem, Option, Path, Schema } from "effect"
 import { Authenticator, type AuthenticatorApi } from "../../Auth"
-import { AuthenticationFailed } from "../../Errors"
 import { ConfigDirectory } from "@graftland/loader"
 import { identityFromSubjectAltName } from "../../internal/auth/mtls"
 
@@ -25,16 +24,9 @@ export const make = (
 		rejectUnauthorized: true,
 	},
 	authenticate: (peer) =>
-		identityFromSubjectAltName(Option.getOrUndefined(peer.subjectAltName)).pipe(
-			Effect.mapError((error) =>
-				AuthenticationFailed.make({
-					reason: "invalid",
-					cause: Cause.fail(error),
-				}),
-			),
-		),
+		identityFromSubjectAltName(Option.getOrUndefined(peer.subjectAltName)),
 })
-export const capability = Plugin.make({
+export default Plugin.make({
 	name: "remote-certificate-authenticator",
 	config: Config,
 	inject: [FileSystem.FileSystem, Path.Path],
@@ -43,5 +35,3 @@ export const capability = Plugin.make({
 			Effect.flatMap((ca) => Graft.provide(Authenticator, make(ca))),
 		),
 })
-
-export default capability

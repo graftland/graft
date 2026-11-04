@@ -62,20 +62,32 @@ export const Connect = Schema.Union([
 		...transportFields,
 		...common,
 		command: Schema.NonEmptyArray(Schema.String),
-		auth: absent,
+		auth: Schema.optionalKey(
+			Schema.Never.annotate({
+				message: "Direct and stdio transports do not accept auth",
+			}),
+		),
 		cwd: Schema.optionalKey(Schema.String),
 		env: Schema.optionalKey(Schema.Record(Schema.String, Schema.String)),
 	}),
 	Schema.Struct({
 		...transportFields,
-		auth: absent,
+		auth: Schema.optionalKey(
+			Schema.Never.annotate({
+				message: "Direct and stdio transports do not accept auth",
+			}),
+		),
 		local: Schema.Struct({
 			command: Schema.optionalKey(Schema.NonEmptyArray(Schema.String)),
 		}),
 	}),
 	Schema.Struct({
 		...transportFields,
-		auth: absent,
+		auth: Schema.optionalKey(
+			Schema.Never.annotate({
+				message: "Direct and stdio transports do not accept auth",
+			}),
+		),
 		worker: Schema.Struct({
 			execArgv: Schema.optionalKey(Schema.Array(Schema.String)),
 		}),
@@ -95,7 +107,11 @@ export const Listen = Schema.Union([
 	Schema.Struct({
 		...transportFields,
 		stdio: Schema.Literal(true),
-		auth: absent,
+		auth: Schema.optionalKey(
+			Schema.Never.annotate({
+				message: "Direct and stdio transports do not accept auth",
+			}),
+		),
 		identity: Schema.optionalKey(Schema.String),
 	}),
 	Schema.Struct({ ...transportFields, auth, transport: Reference }),
@@ -137,7 +153,8 @@ export const hostTransport = (
 		return capability("host", "unix", { path: input.unix })
 	return capability("host", "command", {
 		argv: input.command,
-		...("cwd" in input ? { cwd: input.cwd, env: input.env } : {}),
+		...("cwd" in input && input.cwd !== undefined ? { cwd: input.cwd } : {}),
+		...("env" in input && input.env !== undefined ? { env: input.env } : {}),
 	})
 }
 export const runnerTransport = (input: Listen): Reference => {

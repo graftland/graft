@@ -1,20 +1,7 @@
 /** Execution and byte-channel capabilities; implementations live in host plugins. */
 import { Context } from "effect"
-import type {
-	Duration,
-	Effect,
-	Option,
-	PlatformError,
-	Scope,
-	Stream,
-	Sink,
-	Redacted,
-} from "effect"
-import type {
-	AuthenticationFailed,
-	ProcessExited,
-	TransportError,
-} from "./Errors"
+import type { Effect, Option, Scope, Stream, Sink, Redacted } from "effect"
+import type { AuthenticationFailed, TransportError } from "./Errors"
 import type { Prepared, VerifiedCertificate, TlsPolicy } from "./Auth"
 /** Ordered reliable bytes. Chunk boundaries have no meaning; EOF is not exit confirmation. */
 export interface Channel {
@@ -22,57 +9,6 @@ export interface Channel {
 	readonly output: Sink.Sink<unknown, Uint8Array, unknown, TransportError>
 }
 
-export interface LocalOptions {
-	readonly command?: readonly [string, ...string[]]
-	readonly contractModule: string
-	readonly session: string
-}
-export interface Execution {
-	readonly channel: Channel
-	readonly pid: Option.Option<number>
-	readonly threadId?: number
-	readonly exited: Effect.Effect<ProcessExited, TransportError>
-	readonly failure: Effect.Effect<never, TransportError>
-}
-export class LocalTransport extends Context.Service<
-	LocalTransport,
-	{
-		readonly start: (
-			options: LocalOptions,
-		) => Effect.Effect<Execution, PlatformError.PlatformError, Scope.Scope>
-	}
->()("@graftland/plugin-remote/Transport/LocalTransport") {}
-
-export interface WorkerOptions {
-	readonly execArgv?: ReadonlyArray<string>
-	readonly contractModule: string
-	readonly session: string
-}
-export class WorkerTransport extends Context.Service<
-	WorkerTransport,
-	{
-		readonly start: (
-			options: WorkerOptions,
-		) => Effect.Effect<Execution, TransportError, Scope.Scope>
-	}
->()("@graftland/plugin-remote/Transport/WorkerTransport") {}
-
-export interface WebsocketOptions {
-	readonly url: string
-	readonly tls?: {
-		readonly ca?: string
-		readonly servername?: string
-	}
-	readonly openTimeout?: Duration.Input
-}
-export interface UnixOptions {
-	readonly path: string
-}
-export interface CommandOptions {
-	readonly argv: readonly [string, ...string[]]
-	readonly cwd?: string
-	readonly env?: Readonly<Record<string, string>>
-}
 export interface Properties {
 	readonly protocol: string
 	readonly encrypted: boolean

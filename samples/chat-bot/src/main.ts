@@ -4,12 +4,14 @@
  *
  * Run it with `pnpm start` after building the workspace.
  */
-import { NodeRuntime } from "@effect/platform-node"
+import { NodeRuntime, NodeServices } from "@effect/platform-node"
 import { type Fork, Graft } from "@graftland/graft"
 import { Array, Effect, Layer, Logger, Option, Stream } from "effect"
 import { receive } from "./Chat.ts"
 import dice from "./plugins/dice.ts"
-import forecasts from "./plugins/forecasts.ts"
+import * as Remote from "@graftland/plugin-remote"
+import { SecureRandom } from "effect/crypto"
+import { contract } from "./forecastContract.ts"
 import help from "./plugins/help.ts"
 import moderation from "./plugins/moderation.ts"
 import weather from "./plugins/weather.ts"
@@ -55,7 +57,14 @@ const program = Effect.gen(function* () {
 	yield* say("bob", "/weather Paris")
 
 	yield* step("3. Load the forecasts provider; /weather starts on its own")
-	const forecastsFork = yield* Graft.plugin(forecasts, { units: "celsius" })
+	const forecastsFork = yield* Graft.plugin(
+		Remote.plugin(contract, {
+			contractModule: new URL("../dist/forecastContract.js", import.meta.url)
+				.href,
+			connect: { local: {} },
+			config: { units: "celsius" },
+		}),
+	)
 	yield* reach(weatherFork, "Active")
 	yield* Effect.log(`weather is ${yield* state(weatherFork)}`)
 	yield* say("bob", "/weather Paris")
@@ -97,7 +106,14 @@ const program = Effect.gen(function* () {
 program.pipe(
 	Effect.scoped,
 	Effect.provide(
-		Layer.provideMerge(Graft.layer, Logger.layer([Logger.consolePretty()])),
+		Layer.provideMerge(
+			Graft.layer,
+			Layer.mergeAll(
+				NodeServices.layer,
+				SecureRandom.layerWebCrypto,
+				Logger.layer([Logger.consolePretty()]),
+			),
+		),
 	),
 	NodeRuntime.runMain,
 )

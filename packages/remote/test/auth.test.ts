@@ -1,3 +1,4 @@
+import { Peer } from "../src/internal/Peer"
 import { assert, describe, it } from "@effect/vitest"
 import {
 	NodeHttpServer,
@@ -26,13 +27,12 @@ import {
 import { Digest, Mac, SecureRandom, Signature } from "effect/crypto"
 import { Jwk, Jwt } from "effect/jose"
 import { HttpServerResponse, HttpClient, FetchHttpClient } from "effect/http"
-import { expectTypeOf, inject } from "vitest"
+import { inject } from "vitest"
 import { createSecureServer } from "node:http2"
 import * as Auth from "../src/Auth"
 import * as Remote from "../src/index"
 import { TransportError } from "../src/Errors"
-import type * as Targets from "../src/Targets"
-import { Supervisor } from "../src/Supervisor"
+import { Supervisor } from "../src/internal/Supervisor"
 import { Connector, type Channel } from "../src/Transport"
 import * as Assembly from "../src/internal/assembly"
 import { default as websocket } from "../src/runner/websocket"
@@ -70,7 +70,7 @@ const availablePort = NodeSocketServer.make({
 )
 const supervisor = Graft.provide(Supervisor, {
 	accept: Effect.fnUntraced(function* (channel: Channel) {
-		const identity = yield* Auth.Peer
+		const identity = yield* Peer
 		const frame = yield* Framing.encode({
 			channel: 0,
 			payload: new TextEncoder().encode(identity),
@@ -495,18 +495,25 @@ describe("runner authentication", () => {
 				}),
 			})
 
-			const target = Remote.runner({
+			const connect = {
 				instance: "worker",
-				transport: Remote.websocket({ url: "ws://127.0.0.1:1" }),
-				auth: Remote.bearer({
-					inject: [Source],
-					read: Effect.flatMap(Source, (source) => source.token),
-				}),
-			})
+				...{ url: "ws://127.0.0.1:1" },
+				auth: {
+					bearer: {
+						token: {
+							inject: [Source],
+							read: Effect.flatMap(Source, (source) => source.token),
+						},
+					},
+				},
+			}
 			for (const attempt of [1, 2]) {
 				const fork = yield* Graft.plugin(
-					Remote.plugin(contract, { target, contractModule: "unused" }),
-					{ directory: "unused", mode: "normal", value: attempt },
+					Remote.plugin(contract, {
+						connect,
+						contractModule: "unused",
+						config: { directory: "unused", mode: "normal", value: attempt },
+					}),
 				)
 				yield* Effect.flip(fork.await)
 			}
@@ -514,21 +521,17 @@ describe("runner authentication", () => {
 		}).pipe(Effect.scoped, Effect.provide(runtime)),
 	)
 
-	it("allows header authentication on ws and unix without allowing mTLS", () => {
+	it("accepts effect credentials on ws and unix", () => {
 		const token = Effect.succeed(Redacted.make("test"))
-		Remote.runner({
-			transport: Remote.websocket({ url: "ws://localhost" }),
-			auth: Remote.jwt(token),
-		})
-		Remote.runner({
-			transport: Remote.unix({ path: "/tmp/test" }),
-			auth: Remote.bearer(token),
-		})
-		expectTypeOf<
-			Extract<
-				Parameters<typeof Remote.runner<string, readonly []>>[0],
-				{ readonly transport: Targets.Unix }
-			>["auth"]
-		>().toEqualTypeOf<Targets.HeaderAuth | undefined>()
+		const websocket: Remote.Connect = {
+			url: "ws://localhost",
+			auth: { jwt: { token } },
+		}
+		const unix: Remote.Connect = {
+			unix: "/tmp/test",
+			auth: { bearer: { token } },
+		}
+		assert.equal(websocket.url, "ws://localhost")
+		assert.equal(unix.unix, "/tmp/test")
 	})
 })

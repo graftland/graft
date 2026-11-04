@@ -1,5 +1,5 @@
 import { Cause, Effect, Fiber, Option } from "effect"
-import type { Execution } from "../../Transport"
+import type { Execution } from "../directTransport"
 import * as FailureGroup from "../FailureGroup"
 import {
 	LocalTerminationTimeout,

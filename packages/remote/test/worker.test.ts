@@ -25,7 +25,10 @@ import process from "node:process"
 import * as Remote from "../src/index"
 import { executionPlugin } from "../src/internal/execution"
 import worker from "../src/host/worker"
-import { WorkerTransport, type Execution } from "../src/Transport"
+import {
+	WorkerTransport,
+	type Execution,
+} from "../src/internal/directTransport"
 import { LocalTerminationTimeout } from "../src/Errors"
 import * as Channel from "../src/internal/workerChannel"
 import { contract, ChildApi, HostApi } from "./fixtures/services-contract"
@@ -110,7 +113,7 @@ const setup = (shutdownTimeout: Duration.Input = "5 seconds") =>
 			executionPlugin(
 				contract,
 				{ contractModule: servicesModule, shutdownTimeout },
-				Remote.worker({ execArgv: [] }),
+				{ _tag: "Worker", execArgv: [] },
 			),
 			{ directory, fail: false },
 		)
@@ -190,7 +193,7 @@ describe("direct worker execution", () => {
 					executionPlugin(
 						handles,
 						{ contractModule: handlesModule },
-						Remote.worker(),
+						{ _tag: "Worker" },
 					),
 					{ directory, mode: "leaked-handle", value: 1 },
 				)
@@ -286,7 +289,7 @@ describe("direct worker execution", () => {
 
 	it("does not accept authentication on a worker target", () => {
 		expectTypeOf<
-			ReturnType<typeof Remote.worker>["auth"]
+			Extract<Remote.Connect, { worker: object }>["auth"]
 		>().toEqualTypeOf<undefined>()
 	})
 })

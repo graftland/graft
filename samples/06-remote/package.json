@@ -1,0 +1,28 @@
+{
+	"name": "@graftland/sample-remote",
+	"version": "0.0.0",
+	"private": true,
+	"type": "module",
+	"description": "Move a greeting service without changing its caller",
+	"exports": {
+		"./contract": "./dist/contract.js"
+	},
+	"scripts": {
+		"build": "tsdown && node scripts/install.mjs",
+		"start": "graft start --watch",
+		"runner": "graft-remote serve --config runner.yml",
+		"test": "vitest run"
+	},
+	"dependencies": {
+		"@effect/platform-node": "4.1.2",
+		"@graftland/cli": "workspace:*",
+		"@graftland/graft": "workspace:*",
+		"@graftland/plugin-remote": "workspace:*",
+		"effect": "4.1.2"
+	},
+	"devDependencies": {
+		"@effect/vitest": "4.1.2",
+		"tsdown": "0.23.4",
+		"vitest": "5.1.0"
+	}
+}

@@ -1,3 +1,4 @@
+import type { CommandOptions } from "../internal/transportOptions"
 import { Plugin, Graft } from "@graftland/graft"
 import {
 	Array,
@@ -11,7 +12,7 @@ import {
 	Stream,
 } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
-import { Connector, type CommandOptions } from "../Transport"
+import { Connector } from "../Transport"
 import { ConfigDirectory } from "@graftland/loader"
 import { TransportError } from "../Errors"
 import { cleanupCause } from "../internal/cleanup"

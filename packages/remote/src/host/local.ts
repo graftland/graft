@@ -1,7 +1,7 @@
 import { Plugin, type Graft } from "@graftland/graft"
 import { Array, Effect, Scope } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
-import { LocalTransport } from "../Transport"
+import { LocalTransport } from "../internal/directTransport"
 import { command } from "../internal/runner/command"
 import * as Local from "../internal/host/local"
 

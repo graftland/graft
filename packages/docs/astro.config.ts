@@ -53,7 +53,14 @@ export default defineConfig({
 				{
 					label: "Applications",
 					translations: { "zh-CN": "应用", "zh-TW": "應用" },
-					items: ["config-file", "hot-reload", "remote", "cli", "embedding"],
+					items: [
+						"config-file",
+						"hot-reload",
+						"remote",
+						"remote-capabilities",
+						"cli",
+						"embedding",
+					],
 				},
 				{
 					label: "Project",

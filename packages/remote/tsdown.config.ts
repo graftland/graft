@@ -6,29 +6,35 @@ export default defineConfig({
 	exports: {
 		...config.exports,
 		// Executables run in plain Node, even when the host uses source conditions.
-		customExports: {
-			"./bin": "./dist/bin.js",
-			"./watchdog": "./dist/watchdog.js",
-			"./worker": "./dist/worker.js",
-		},
+		customExports: (exports) => ({
+			...Object.fromEntries(
+				Object.entries(exports).filter(
+					([name]) => name !== "./bin" && !name.startsWith("./internal/"),
+				),
+			),
+			"./internal/bin": "./dist/bin.js",
+			"./internal/watchdog": "./dist/internal/watchdogMain.js",
+			"./internal/worker": "./dist/internal/workerMain.js",
+		}),
 	},
 	entry: [
 		"src/index.ts",
 		"src/runner/index.ts",
 		"src/Contract.ts",
-		"src/Runner.ts",
+
 		"src/bin.ts",
-		"src/watchdog.ts",
-		"src/worker.ts",
+		"src/internal/watchdogMain.ts",
+		"src/internal/workerMain.ts",
 		"src/host/worker.ts",
 		"src/Transport.ts",
 		"src/Auth.ts",
 		"src/Errors.ts",
-		"src/Supervisor.ts",
+		"src/Testing.ts",
+
 		"src/host/local.ts",
 		"src/host/websocket.ts",
 		"src/host/auth/mtls.ts",
-		"src/runner/supervisor.ts",
+
 		"src/runner/websocket.ts",
 		"src/runner/auth/mtls.ts",
 		"src/host/unix.ts",

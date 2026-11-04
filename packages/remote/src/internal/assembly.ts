@@ -1,3 +1,4 @@
+import { Peer } from "./Peer"
 import { Graft, Plugin, type Fork } from "@graftland/graft"
 import {
 	Array,
@@ -12,7 +13,6 @@ import {
 import {
 	Authenticator,
 	Credentials,
-	Peer,
 	type AuthenticatorApi,
 	type CredentialsApi,
 } from "../Auth"
@@ -24,7 +24,7 @@ import {
 	type Session,
 } from "../Transport"
 import { AuthenticationFailed } from "../Errors"
-import { Supervisor } from "../Supervisor"
+import { Supervisor } from "./Supervisor"
 import { follow } from "./follow"
 import { connectionEnded, closedNormally } from "./runner/connectionEnded"
 import { ServeLifecycle } from "./ServeLifecycle"
@@ -63,7 +63,7 @@ export class CapabilityFailed extends Schema.TaggedError<
 }) {}
 
 const definition = Schema.declare(Plugin.isPlugin)
-/** Resolution belongs to the entry; phase A receives already resolved plugins and their inputs. */
+/** Entries resolve capability modules before assembling their private providers. */
 export const Invocation = Schema.Struct({
 	plugin: definition,
 	config: Schema.Unknown,

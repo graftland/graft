@@ -15,13 +15,12 @@ import {
 } from "effect"
 import { Digest, SecureRandom } from "effect/crypto"
 import { inject } from "vitest"
-import * as Remote from "../src/index"
 import { executionPlugin } from "../src/internal/execution"
-import { Supervisor } from "../src/Supervisor"
-import { LocalTransport } from "../src/Transport"
+import { Supervisor } from "../src/internal/Supervisor"
+import { LocalTransport } from "../src/internal/directTransport"
 import { Authenticator } from "../src/Auth"
 import local from "../src/host/local"
-import supervisor from "../src/runner/supervisor"
+import supervisor from "../src/internal/supervisorPlugin"
 import { default as mtls } from "../src/runner/auth/mtls"
 import {
 	default as websocket,
@@ -189,7 +188,7 @@ describe("remote capability plugins", () => {
 							import.meta.url,
 						).href,
 					},
-					Remote.local(),
+					{ _tag: "Local" },
 				),
 				{ directory, mode: "normal", value: 1 },
 			)

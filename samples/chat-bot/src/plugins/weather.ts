@@ -23,6 +23,10 @@ export default Plugin.make({
 							onNone: () => `No forecast for "${city}".`,
 							onSome: (forecast) => `${city}: ${forecast}`,
 						}),
+					).pipe(
+						Effect.catchTag("ForecastUnavailable", () =>
+							Effect.succeed("Weather is temporarily unavailable."),
+						),
 					)
 				},
 			)

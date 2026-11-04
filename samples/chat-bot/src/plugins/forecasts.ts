@@ -1,5 +1,6 @@
 import { Graft, Plugin } from "@graftland/graft"
-import { Effect, Option, Record, Schema, String } from "effect"
+import { Effect, Option, Record, String } from "effect"
+import { config } from "../forecastContract.ts"
 import { Forecasts } from "../Forecasts.ts"
 
 // Stands in for a weather API client; a real one would open its HTTP client here.
@@ -15,7 +16,7 @@ const table: Record<
 /** Publishes `Forecasts`. Every plugin that injects it waits for this one. */
 export default Plugin.make({
 	name: "forecasts",
-	config: Schema.Struct({ units: Schema.Literals(["celsius", "fahrenheit"]) }),
+	config,
 	apply: ({ units }) =>
 		Effect.gen(function* () {
 			yield* Effect.acquireRelease(

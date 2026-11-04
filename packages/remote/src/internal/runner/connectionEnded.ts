@@ -2,7 +2,7 @@ import { Array, Cause, Effect, Schema } from "effect"
 import { Socket } from "effect/socket"
 import { TransportError } from "../../Errors"
 import { EndOfStream } from "./Framing"
-import { Peer } from "../../Auth"
+import { Peer } from "../Peer"
 
 // Multiplex preserves the socket reason inside TransportError; only an entirely normal close is silent.
 export const closedNormally = (cause: Cause.Cause<unknown>): boolean =>

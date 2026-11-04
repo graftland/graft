@@ -87,7 +87,7 @@ const factory = Effect.fnUntraced(function* (
 		})
 })
 /** Configured Listener; authentication is supplied to bind, never injected here. */
-export const capability = Plugin.make({
+export default Plugin.make({
 	name: "remote-websocket-capability",
 	config: Config,
 	inject: [FileSystem.FileSystem, Path.Path],
@@ -140,5 +140,3 @@ const Listening = Schema.fromJsonString(
 		port: Schema.NullOr(Schema.Int),
 	}),
 )
-
-export default capability

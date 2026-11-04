@@ -1,4 +1,3 @@
-import { localRuntime } from "./capabilities"
 import { SecureRandom } from "effect/crypto"
 import { underlying } from "./errors"
 import { LocalTerminationTimeout, ProcessExited } from "../src/Errors"
@@ -35,7 +34,7 @@ const run = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
 		Effect.scoped,
 		Effect.provide(
 			Layer.provideMerge(
-				localRuntime,
+				Graft.layer,
 				Layer.merge(NodeServices.layer, SecureRandom.layerWebCrypto),
 			),
 		),
@@ -77,12 +76,15 @@ describe("local remote lifecycle", () => {
 		Effect.gen(function* () {
 			const { fs, directory } = yield* setup
 			const fork = yield* Graft.plugin(
-				Remote.plugin(contract, { contractModule }),
-				{
-					directory,
-					mode: "wait",
-					value: 1,
-				},
+				Remote.plugin(contract, {
+					contractModule,
+					connect: { local: {} },
+					config: {
+						directory,
+						mode: "wait",
+						value: 1,
+					},
+				}),
 			)
 			yield* waitFor(directory, "started-")
 			assert.equal(
@@ -102,12 +104,15 @@ describe("local remote lifecycle", () => {
 		Effect.gen(function* () {
 			const { directory } = yield* setup
 			const fork = yield* Graft.plugin(
-				Remote.plugin(contract, { contractModule }),
-				{
-					directory,
-					mode: "fail",
-					value: 7,
-				},
+				Remote.plugin(contract, {
+					contractModule,
+					connect: { local: {} },
+					config: {
+						directory,
+						mode: "fail",
+						value: 7,
+					},
+				}),
 			)
 			const exit = yield* Effect.exit(fork.await)
 			assert.isTrue(Exit.isFailure(exit))
@@ -142,8 +147,12 @@ describe("local remote lifecycle", () => {
 		Effect.gen(function* () {
 			const { fs, directory } = yield* setup
 			const fork = yield* Graft.plugin(
-				Remote.plugin(contract, { contractModule, retry: Schedule.recurs(1) }),
-				{ directory, mode: "retry", value: 1 },
+				Remote.plugin(contract, {
+					contractModule,
+					retry: Schedule.recurs(1),
+					connect: { local: {} },
+					config: { directory, mode: "retry", value: 1 },
+				}),
 			)
 			const active = yield* Stream.runHead(
 				fork.state.pipe(Stream.filter((state) => state._tag === "Active")),
@@ -162,12 +171,15 @@ describe("local remote lifecycle", () => {
 		Effect.gen(function* () {
 			const { directory } = yield* setup
 			const fork = yield* Graft.plugin(
-				Remote.plugin(contract, { contractModule }),
-				{
-					directory,
-					mode: "crash",
-					value: 1,
-				},
+				Remote.plugin(contract, {
+					contractModule,
+					connect: { local: {} },
+					config: {
+						directory,
+						mode: "crash",
+						value: 1,
+					},
+				}),
 			)
 			const exit = yield* Effect.exit(fork.await)
 			assert.isTrue(Exit.isFailure(exit))
@@ -191,12 +203,15 @@ describe("local remote lifecycle", () => {
 				const { fs, directory } = yield* setup
 				yield* fs.remove(`${directory}/release`)
 				const fork = yield* Graft.plugin(
-					Remote.plugin(contract, { contractModule }),
-					{
-						directory,
-						mode: "normal",
-						value: 1,
-					},
+					Remote.plugin(contract, {
+						contractModule,
+						connect: { local: {} },
+						config: {
+							directory,
+							mode: "normal",
+							value: 1,
+						},
+					}),
 				)
 				yield* fork.await
 				const [pid] = yield* waitFor(directory, "started-")
@@ -215,12 +230,15 @@ describe("local remote lifecycle", () => {
 			const { fs, directory } = yield* setup
 			const scope = yield* Scope.make()
 			const fork = yield* Graft.plugin(
-				Remote.plugin(contract, { contractModule }),
-				{
-					directory,
-					mode: "normal",
-					value: 1,
-				},
+				Remote.plugin(contract, {
+					contractModule,
+					connect: { local: {} },
+					config: {
+						directory,
+						mode: "normal",
+						value: 1,
+					},
+				}),
 			).pipe(Scope.provide(scope))
 			yield* fork.await
 			const [pid] = yield* waitFor(directory, "started-")
@@ -234,12 +252,15 @@ describe("local remote lifecycle", () => {
 		Effect.gen(function* () {
 			const { directory } = yield* setup
 			const fork = yield* Graft.plugin(
-				Remote.plugin(contract, { contractModule }),
-				{
-					directory,
-					mode: "cleanup-fail",
-					value: 1,
-				},
+				Remote.plugin(contract, {
+					contractModule,
+					connect: { local: {} },
+					config: {
+						directory,
+						mode: "cleanup-fail",
+						value: 1,
+					},
+				}),
 			)
 			yield* fork.await
 			const exit = yield* Effect.exit(fork.dispose)
@@ -268,12 +289,15 @@ describe("local remote lifecycle", () => {
 		Effect.gen(function* () {
 			const { directory } = yield* setup
 			const fork = yield* Graft.plugin(
-				Remote.plugin(contract, { contractModule }),
-				{
-					directory,
-					mode: "normal",
-					value: 9,
-				},
+				Remote.plugin(contract, {
+					contractModule,
+					connect: { local: {} },
+					config: {
+						directory,
+						mode: "normal",
+						value: 9,
+					},
+				}),
 			)
 			yield* fork.await
 			const log = yield* Stream.runHead(
@@ -317,17 +341,27 @@ describe("local remote lifecycle", () => {
 		Effect.gen(function* () {
 			const { fs, directory } = yield* setup
 			const fork = yield* Graft.plugin(
-				Remote.plugin(contract, { contractModule }),
-				{
-					directory,
-					mode: "normal",
-					value: 1,
-				},
+				Remote.plugin(contract, {
+					contractModule,
+					connect: { local: {} },
+					config: {
+						directory,
+						mode: "normal",
+						value: 1,
+					},
+				}),
 			)
 			yield* fork.await
 			const [first] = yield* waitFor(directory, "started-")
-			yield* fork.update({ directory, mode: "normal", value: 2 })
-			yield* fork.await
+			yield* fork.dispose
+			const replacement = yield* Graft.plugin(
+				Remote.plugin(contract, {
+					contractModule,
+					connect: { local: {} },
+					config: { directory, mode: "normal", value: 2 },
+				}),
+			)
+			yield* replacement.await
 			const pids = yield* waitFor(directory, "started-", 2)
 			const second = Option.getOrThrow(
 				Array.findFirst(pids, (pid) => pid !== first),
@@ -335,7 +369,7 @@ describe("local remote lifecycle", () => {
 			const value = yield* fs.readFileString(`${directory}/started-${second}`)
 			assert.equal(value, "2")
 			yield* gone(first!)
-			yield* fork.dispose
+			yield* replacement.dispose
 			yield* gone(second)
 		}).pipe(run),
 	)
@@ -345,12 +379,15 @@ describe("local remote lifecycle", () => {
 			Effect.gen(function* () {
 				const { directory } = yield* setup
 				const fork = yield* Graft.plugin(
-					Remote.plugin(contract, { contractModule }),
-					{
-						directory,
-						mode: "normal",
-						value: 1,
-					},
+					Remote.plugin(contract, {
+						contractModule,
+						connect: { local: {} },
+						config: {
+							directory,
+							mode: "normal",
+							value: 1,
+						},
+					}),
 				)
 				yield* fork.await
 				const [pid] = yield* waitFor(directory, "started-")
@@ -383,12 +420,15 @@ describe("local remote lifecycle", () => {
 			Effect.gen(function* () {
 				const { fs, directory } = yield* setup
 				const fork = yield* Graft.plugin(
-					Remote.plugin(contract, { contractModule }),
-					{
-						directory,
-						mode: "background-fail",
-						value: 8,
-					},
+					Remote.plugin(contract, {
+						contractModule,
+						connect: { local: {} },
+						config: {
+							directory,
+							mode: "background-fail",
+							value: 8,
+						},
+					}),
 				)
 				yield* fork.await
 				yield* fs.writeFileString(`${directory}/fail`, "fail")
@@ -420,8 +460,9 @@ describe("local remote lifecycle", () => {
 				Remote.plugin(contract, {
 					contractModule,
 					shutdownTimeout: "100 millis",
+					connect: { local: {} },
+					config: { directory, mode: "normal", value: 1 },
 				}),
-				{ directory, mode: "normal", value: 1 },
 			)
 			yield* fork.await
 			const [pid] = yield* waitFor(directory, "started-")
@@ -436,12 +477,15 @@ describe("local remote lifecycle", () => {
 			Effect.gen(function* () {
 				const { fs, directory } = yield* setup
 				const fork = yield* Graft.plugin(
-					Remote.plugin(contract, { contractModule }),
-					{
-						directory,
-						mode: "leaked-handle",
-						value: 1,
-					},
+					Remote.plugin(contract, {
+						contractModule,
+						connect: { local: {} },
+						config: {
+							directory,
+							mode: "leaked-handle",
+							value: 1,
+						},
+					}),
 				)
 				yield* fork.await
 				const pid = yield* waitFor(directory, "started-").pipe(
@@ -488,12 +532,15 @@ describe("local remote lifecycle", () => {
 		Effect.gen(function* () {
 			const { fs, directory } = yield* setup
 			const fork = yield* Graft.plugin(
-				Remote.plugin(contract, { contractModule }),
-				{
-					directory,
-					mode: "wait",
-					value: 1,
-				},
+				Remote.plugin(contract, {
+					contractModule,
+					connect: { local: {} },
+					config: {
+						directory,
+						mode: "wait",
+						value: 1,
+					},
+				}),
 			)
 			const [pid] = yield* waitFor(directory, "started-")
 			yield* fork.dispose

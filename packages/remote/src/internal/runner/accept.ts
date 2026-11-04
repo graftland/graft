@@ -1,6 +1,6 @@
 import { Cause, Effect, Ref, Option, Scope, Semaphore } from "effect"
 import { RpcServer } from "effect/rpc"
-import { Peer } from "../../Auth"
+import { Peer } from "../Peer"
 import { TransportError } from "../../Errors"
 import type { Channel } from "../../Transport"
 import type { Supervisor } from "./Supervisor"

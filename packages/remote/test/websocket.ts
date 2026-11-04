@@ -1,7 +1,7 @@
 import { createSecureServer } from "node:http2"
 import { Effect, Redacted } from "effect"
 import type { Duration, Scope } from "effect"
-import { Peer } from "../src/Auth"
+import { Peer } from "../src/internal/Peer"
 import type { Channel as ByteChannel } from "../src/Transport"
 import { make as mtls } from "../src/runner/auth/mtls"
 import { accept } from "../src/internal/assembly"

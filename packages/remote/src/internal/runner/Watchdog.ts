@@ -12,7 +12,9 @@ export const start = Effect.gen(function* () {
 		Effect.try({
 			try: () =>
 				new Worker(
-					new URL(import.meta.resolve("@graftland/plugin-remote/watchdog")),
+					new URL(
+						import.meta.resolve("@graftland/plugin-remote/internal/watchdog"),
+					),
 				),
 			catch: (cause) =>
 				ExecutionError.make({

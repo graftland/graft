@@ -1,10 +1,7 @@
+import type { WebsocketOptions } from "../internal/transportOptions"
 import { Plugin, Graft } from "@graftland/graft"
 import { Cause, Effect, FileSystem, Option, Path, Schema } from "effect"
-import {
-	Connector,
-	type ConnectorApi,
-	type WebsocketOptions,
-} from "../Transport"
+import { Connector, type ConnectorApi } from "../Transport"
 import { TransportError } from "../Errors"
 import { ConfigDirectory } from "@graftland/loader"
 import * as Websocket from "../internal/websocket"
@@ -36,7 +33,7 @@ export const make = (
 			),
 		),
 })
-export const capability = Plugin.make({
+export default Plugin.make({
 	name: "remote-websocket-connector",
 	config: Config,
 	inject: [FileSystem.FileSystem, Path.Path],
@@ -67,5 +64,3 @@ export const capability = Plugin.make({
 		)
 	}),
 })
-
-export default capability

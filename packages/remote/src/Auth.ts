@@ -7,14 +7,6 @@ export interface ClientCertificate {
 	readonly cert: string
 	readonly key: Redacted.Redacted<string>
 }
-export class Peer extends Context.Service<Peer, string>()(
-	"@graftland/plugin-remote/Auth/Peer",
-) {}
-export interface PreparedCredentials {
-	readonly certificate?: ClientCertificate
-	readonly authorization?: Redacted.Redacted<string>
-}
-
 export interface VerifiedCertificate {
 	readonly der: Uint8Array
 	readonly subjectAltName: Option.Option<string>

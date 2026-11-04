@@ -21,7 +21,6 @@ export const application = Effect.fnUntraced(function* (directory: string) {
 		"host/command",
 		"runner/auth/bearer",
 		"runner/auth/jwt",
-		"runner/supervisor",
 		"runner/websocket",
 		"runner/auth/mtls",
 		"runner/auth/none",

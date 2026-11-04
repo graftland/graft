@@ -13,7 +13,7 @@ import { ConfigDirectory } from "@graftland/loader"
 import { Credentials, type Prepared } from "../../Auth"
 
 export const Config = Schema.Struct({ cert: Schema.String, key: Schema.String })
-export const capability = Plugin.make({
+export default Plugin.make({
 	name: "remote-certificate-credentials",
 	config: Config,
 	inject: [FileSystem.FileSystem, Path.Path],
@@ -46,5 +46,3 @@ export const capability = Plugin.make({
 		})
 	}),
 })
-
-export default capability
