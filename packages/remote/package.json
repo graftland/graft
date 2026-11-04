@@ -115,7 +115,7 @@
 		"./internal/worker": "./dist/internal/workerMain.js"
 	},
 	"scripts": {
-		"build": "tsdown",
+		"build": "tsc -b && tsdown",
 		"test": "vitest run"
 	},
 	"peerDependencies": {

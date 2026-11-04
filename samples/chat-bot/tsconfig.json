@@ -5,13 +5,5 @@
 		"tsBuildInfoFile": ".cache/tsbuildinfo",
 		"allowImportingTsExtensions": true
 	},
-	"include": ["src", "test"],
-	"references": [
-		{
-			"path": "../../packages/core"
-		},
-		{
-			"path": "../../packages/remote"
-		}
-	]
+	"include": ["src", "test"]
 }

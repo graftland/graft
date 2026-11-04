@@ -36,7 +36,7 @@
 		"./package.json": "./package.json"
 	},
 	"scripts": {
-		"build": "tsdown && node scripts/schema.mjs",
+		"build": "tsc -b && tsdown && node scripts/schema.mjs",
 		"test": "vitest run"
 	},
 	"peerDependencies": {

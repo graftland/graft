@@ -6,14 +6,15 @@ import { declarationProject, publicPackages } from "./public-api.mjs"
 
 export default function setup() {
 	const root = resolve(dirname(fileURLToPath(import.meta.url)), "..")
-	// Regenerate declarations before inspecting them, even when pnpm test runs without a preceding build.
+	// Build the published declarations before inspecting them, even when pnpm test runs without a preceding build.
 	execFileSync(
 		"pnpm",
 		[
-			"exec",
-			"tsc",
-			"-b",
-			...publicPackages(root).map(({ directory }) => directory),
+			...publicPackages(root).flatMap(({ manifest }) => [
+				"--filter",
+				manifest.name,
+			]),
+			"build",
 		],
 		{ cwd: root, stdio: "inherit" },
 	)

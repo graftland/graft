@@ -274,11 +274,8 @@ export function declarationProject(root) {
 				return [
 					{
 						name: manifest.name + (path === "." ? "" : path.slice(1)),
-						root: join(directory, ".cache/types"),
-						file: resolve(
-							directory,
-							declarationPath(output.replace("./dist/", "./.cache/types/")),
-						),
+						root: join(directory, "dist"),
+						file: resolve(directory, declarationPath(output)),
 					},
 				]
 			},
