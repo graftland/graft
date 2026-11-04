@@ -44,51 +44,51 @@ const Spec = Schema.Union([
 ])
 const decodeSpecs = Schema.decodeEffect(Schema.Array(Spec))
 
-const install = (
+const install = Effect.fn("Manage.install")(function* (
 	directory: string,
 	changes: Readonly<Record<string, string | null>>,
-) =>
-	Effect.gen(function* () {
-		const decoded = yield* Schema.decodeEffect(PackageManager.Changes)(changes)
-		// Set by npm, pnpm and Yarn when they run graft, such as through `pnpm dlx`.
-		const userAgent = yield* Config.String("npm_config_user_agent").pipe(
-			Config.withDefault(""),
-		)
-		const manager = yield* PackageManager.make({ directory, userAgent })
-		const result = yield* manager.install(decoded)
-		yield* report(result)
-	})
+) {
+	const decoded = yield* Schema.decodeEffect(PackageManager.Changes)(changes)
+	// Set by npm, pnpm and Yarn when they run graft, such as through `pnpm dlx`.
+	const userAgent = yield* Config.String("npm_config_user_agent").pipe(
+		Config.withDefault(""),
+	)
+	const manager = yield* PackageManager.make({ directory, userAgent })
+	const result = yield* manager.install(decoded)
+	yield* report(result)
+})
 
-export const create = (options: {
+export const create = Effect.fn("Manage.create")(function* (options: {
 	readonly directory: string
 	readonly name: Option.Option<string>
 	readonly install: boolean
-}) =>
-	Effect.gen(function* () {
-		const project = yield* Create.create({
-			directory: options.directory,
-			...Option.match(options.name, {
-				onNone: () => ({}),
-				onSome: (name) => ({ name }),
-			}),
-		})
-		yield* Effect.logInfo(`Created ${project.name} in ${project.directory}`)
-		if (options.install) yield* install(project.directory, {})
+}) {
+	const project = yield* Create.create({
+		directory: options.directory,
+		...Option.match(options.name, {
+			onNone: () => ({}),
+			onSome: (name) => ({ name }),
+		}),
 	})
+	yield* Effect.logInfo(`Created ${project.name} in ${project.directory}`)
+	if (options.install) yield* install(project.directory, {})
+})
 
-export const add = (specs: ReadonlyArray<string>) =>
-	Effect.flatMap(decodeSpecs(specs), (specs) =>
-		install(
-			".",
-			Record.fromEntries(
-				Array.map(specs, (spec) =>
-					Predicate.isString(spec)
-						? ([spec, "latest"] as const)
-						: ([spec[0], spec[2]] as const),
-				),
+export const add = Effect.fn("Manage.add")(function* (
+	specs: ReadonlyArray<string>,
+) {
+	const decoded = yield* decodeSpecs(specs)
+	yield* install(
+		".",
+		Record.fromEntries(
+			Array.map(decoded, (spec) =>
+				Predicate.isString(spec)
+					? ([spec, "latest"] as const)
+					: ([spec[0], spec[2]] as const),
 			),
 		),
 	)
+})
 
 export const remove = (names: ReadonlyArray<string>) =>
 	install(

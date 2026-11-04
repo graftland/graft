@@ -29,9 +29,9 @@ export interface Options {
  * modules are imported through the hot reloader, so bare specifiers resolve
  * from the application directory whether or not `watch` is on.
  */
-export const run = (
+export const run: (
 	options: Options,
-): Effect.Effect<
+) => Effect.Effect<
 	never,
 	| Graft.ServiceConflict
 	| PlatformError.BadArgument
@@ -39,8 +39,8 @@ export const run = (
 	| Schema.SchemaError
 	| Loader.StoreError
 	| Tree.InvalidOperation
-> =>
-	Effect.gen(function* () {
+> = Effect.fn("Start.run")(
+	function* (options: Options) {
 		const path = yield* Path.Path
 		const file = path.resolve(options.config)
 		const directory = path.dirname(file)
@@ -69,17 +69,16 @@ export const run = (
 			const reloader = Plugin.make({
 				name: "reloader",
 				inject: [Loader.Loader, FileSystem.FileSystem, Path.Path],
-				apply: () =>
-					Effect.gen(function* () {
-						const loader = yield* Loader.Loader
-						yield* watchModules(hmr, directory, loader.retry).pipe(
+				apply: Effect.fnUntraced(function* () {
+					const loader = yield* Loader.Loader
+					yield* watchModules(hmr, directory, loader.retry).pipe(
+						Effect.forkScoped,
+					)
+					if (envFile !== undefined)
+						yield* watchEnvFile(envFile, reload, loader.retry).pipe(
 							Effect.forkScoped,
 						)
-						if (envFile !== undefined)
-							yield* watchEnvFile(envFile, reload, loader.retry).pipe(
-								Effect.forkScoped,
-							)
-					}),
+				}),
 			})
 			yield* Graft.plugin(reloader)
 		}
@@ -88,10 +87,12 @@ export const run = (
 			`Running ${path.relative(process.cwd(), file) || file}`,
 		)
 		return yield* Effect.never
-	}).pipe(
-		Effect.scoped,
+	},
+	Effect.scoped,
+	(effect, options) =>
 		// @effect-diagnostics-next-line strictEffectProvide:off -- this runs the whole application, so it is an entry point
 		Effect.provide(
+			effect,
 			Layer.provideMerge(
 				Graft.layer,
 				Layer.mergeAll(
@@ -103,4 +104,4 @@ export const run = (
 				),
 			),
 		),
-	)
+)

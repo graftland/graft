@@ -27,13 +27,14 @@ export const watchModules = <E, R>(
 	retry: Effect.Effect<void, E, R>,
 ) =>
 	hmr.watch([directory], { recursive: true, filter: isModule }).pipe(
-		Stream.runForEach((result) =>
-			Effect.gen(function* () {
-				if (result._tag === "Failed")
-					return yield* Effect.failCause(result.cause)
-				yield* describe(result)
-				yield* retry
-			}).pipe(
+		Stream.runForEach(
+			Effect.fnUntraced(
+				function* (result: Hmr.WatchResult) {
+					if (result._tag === "Failed")
+						return yield* Effect.failCause(result.cause)
+					yield* describe(result)
+					yield* retry
+				},
 				Effect.catchCauseIf(
 					(cause) => !Cause.hasInterrupts(cause),
 					(cause) => Effect.logError("Reloading plugin modules failed", cause),
