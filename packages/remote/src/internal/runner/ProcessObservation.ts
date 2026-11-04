@@ -13,13 +13,20 @@ import type { PlatformError } from "effect"
 import type { ChildProcessSpawner } from "effect/process"
 import * as FailureGroup from "../FailureGroup"
 
+/** Time allowed for a launcher to exit after its stdin has been closed. */
+export const stdinExitTimeout = "1 second"
+
 /** Readers outlive the failure monitor so forced termination still captures its diagnostic tail. */
 export const observe = Effect.fnUntraced(function* (
 	child: ChildProcessSpawner.ChildProcessHandle,
+	options: { readonly drainStdout?: boolean } = {},
 ) {
 	const failures = yield* FailureGroup.make<PlatformError.PlatformError>()
 	const tail = yield* Ref.make("")
-	const stdout = yield* child.stdout.pipe(Stream.runDrain, Effect.forkScoped)
+	// Command transports own stdout as a protocol stream.
+	const stdout = yield* (
+		options.drainStdout === false ? Effect.void : Stream.runDrain(child.stdout)
+	).pipe(Effect.forkScoped)
 	const stderr = yield* child.stderr.pipe(
 		Stream.decodeText(),
 		Stream.runForEach((text) =>

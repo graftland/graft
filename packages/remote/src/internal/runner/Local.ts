@@ -7,6 +7,7 @@ import {
 	TransportError,
 } from "../../Errors"
 import * as Port from "../port"
+import { stdinExitTimeout } from "./ProcessObservation"
 
 /** Process observers stay alive until exit, including forced cleanup. */
 export const connect = Effect.fnUntraced(function* (
@@ -47,7 +48,7 @@ export const connect = Effect.fnUntraced(function* (
 					Effect.andThen(Fiber.join(exited)),
 					Effect.interruptible,
 					Effect.timeoutOrElse({
-						duration: "1 second",
+						duration: stdinExitTimeout,
 						orElse: () => LocalTerminationTimeout.make({ pid: execution.pid }),
 					}),
 				)

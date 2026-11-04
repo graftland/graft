@@ -8,6 +8,15 @@ export class FrameError extends Schema.TaggedError<
 		return this.detail
 	}
 }
+/** A complete byte stream ended; malformed trailing bytes remain FrameError. */
+export class EndOfStream extends Schema.TaggedError<
+	EndOfStream,
+	{ readonly brand: unique symbol }
+>()("RunnerEndOfStream", {}) {
+	override get message() {
+		return "Runner byte channel ended"
+	}
+}
 export type Channel = 0 | 1
 export interface Frame {
 	readonly channel: Channel

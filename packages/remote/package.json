@@ -19,9 +19,21 @@
 			"source": "./src/host/auth/mtls.ts",
 			"default": "./dist/host/auth/mtls.js"
 		},
+		"./host/auth/none": {
+			"source": "./src/host/auth/none.ts",
+			"default": "./dist/host/auth/none.js"
+		},
+		"./host/command": {
+			"source": "./src/host/command.ts",
+			"default": "./dist/host/command.js"
+		},
 		"./host/local": {
 			"source": "./src/host/local.ts",
 			"default": "./dist/host/local.js"
+		},
+		"./host/unix": {
+			"source": "./src/host/unix.ts",
+			"default": "./dist/host/unix.js"
 		},
 		"./host/websocket": {
 			"source": "./src/host/websocket.ts",
@@ -35,9 +47,21 @@
 			"source": "./src/runner/auth/mtls.ts",
 			"default": "./dist/runner/auth/mtls.js"
 		},
+		"./runner/auth/none": {
+			"source": "./src/runner/auth/none.ts",
+			"default": "./dist/runner/auth/none.js"
+		},
+		"./runner/stdio": {
+			"source": "./src/runner/stdio.ts",
+			"default": "./dist/runner/stdio.js"
+		},
 		"./runner/supervisor": {
 			"source": "./src/runner/supervisor.ts",
 			"default": "./dist/runner/supervisor.js"
+		},
+		"./runner/unix": {
+			"source": "./src/runner/unix.ts",
+			"default": "./dist/runner/unix.js"
 		},
 		"./runner/websocket": {
 			"source": "./src/runner/websocket.ts",
@@ -81,11 +105,17 @@
 			"./Auth": "./dist/Auth.js",
 			"./bin": "./dist/bin.js",
 			"./host/auth/mtls": "./dist/host/auth/mtls.js",
+			"./host/auth/none": "./dist/host/auth/none.js",
+			"./host/command": "./dist/host/command.js",
 			"./host/local": "./dist/host/local.js",
+			"./host/unix": "./dist/host/unix.js",
 			"./host/websocket": "./dist/host/websocket.js",
 			"./Runner": "./dist/Runner.js",
 			"./runner/auth/mtls": "./dist/runner/auth/mtls.js",
+			"./runner/auth/none": "./dist/runner/auth/none.js",
+			"./runner/stdio": "./dist/runner/stdio.js",
 			"./runner/supervisor": "./dist/runner/supervisor.js",
+			"./runner/unix": "./dist/runner/unix.js",
 			"./runner/websocket": "./dist/runner/websocket.js",
 			"./Supervisor": "./dist/Supervisor.js",
 			"./Transport": "./dist/Transport.js",

@@ -1,19 +1,22 @@
 import { Graft, Plugin, type Fork } from "@graftland/graft"
 import { Include, Loader, ModuleResolver, type Entry } from "@graftland/loader"
-import { Array, Cause, Effect, Option, Path, Schema, Stream } from "effect"
+import {
+	Array,
+	Cause,
+	Deferred,
+	Effect,
+	Exit,
+	Logger,
+	Option,
+	Path,
+	Stream,
+} from "effect"
 import { Directory } from "./config"
 
-export class StartupError extends Schema.TaggedError<
-	StartupError,
-	{ readonly brand: unique symbol }
->()("RunnerStartupError", {
-	detail: Schema.String,
-	cause: Schema.optionalKey(Schema.Cause(Schema.Unknown, Schema.Defect())),
-}) {
-	override get message() {
-		return this.detail
-	}
-}
+import { ServeLifecycle, StartupError, make } from "./ServeLifecycle"
+import { cleanupCause } from "./cleanup"
+export { StartupError } from "./ServeLifecycle"
+
 export type Source =
 	| { readonly _tag: "Config"; readonly config: string }
 	| { readonly _tag: "Entries"; readonly entries: ReadonlyArray<Entry.Entry> }
@@ -44,6 +47,33 @@ const subtree = (
 	)
 const active = (tree: Fork.ForkTree): boolean =>
 	tree.state._tag === "Active" && Array.every(tree.children, active)
+/** Fork names identify listeners regardless of how their modules were resolved. */
+const listeners = (
+	trees: ReadonlyArray<Fork.ForkTree>,
+): ReadonlyArray<string> =>
+	Array.flatMap(trees, (tree) => [
+		...(Array.contains(
+			[
+				"remote-stdio-listener",
+				"remote-unix-listener",
+				"remote-websocket-listener",
+			],
+			tree.name,
+		)
+			? [tree.name]
+			: []),
+		...listeners(tree.children),
+	])
+const exclusive = (tree: Fork.ForkTree) => {
+	const names = listeners([tree])
+	return Array.contains(names, "remote-stdio-listener") && names.length !== 1
+		? Effect.fail(
+				StartupError.make({
+					detail: "A stdio listener must be the only listener in serve",
+				}),
+			)
+		: Effect.void
+}
 const ready = Plugin.make({
 	name: "remote-ready",
 	inject: [Loader.Loader],
@@ -57,13 +87,31 @@ const ready = Plugin.make({
 			Stream.filter(Option.isSome),
 			Stream.map((tree) => tree.value),
 			Stream.tap((tree) => check([tree])),
+			Stream.tap(exclusive),
 			Stream.filter(active),
 			Stream.runHead,
 		)
 	}),
 })
 
+/** Loader logs child cleanup errors; the supervisor's release signal also reaches the command exit. */
+const close = (entries: Fork.Fork, lifecycle: typeof ServeLifecycle.Service) =>
+	Effect.gen(function* () {
+		const disposed = yield* Effect.exit(entries.dispose)
+		const released = yield* Effect.exit(Deferred.await(lifecycle.released))
+		const cause = Array.reduce(
+			[disposed, released],
+			Cause.empty,
+			(cause: Cause.Cause<unknown>, exit: Exit.Exit<void, unknown>) =>
+				Exit.isFailure(exit) ? Cause.combine(cause, exit.cause) : cause,
+		)
+		if (cause.reasons.length > 0)
+			return yield* Effect.failCause(cleanupCause(cause))
+	})
+
 const load = Effect.fnUntraced(function* (source: Source, directory: string) {
+	const lifecycle = yield* make
+	yield* Graft.provide(ServeLifecycle, lifecycle)
 	const resolver = yield* ModuleResolver.make({
 		base: directory,
 		importer: (specifier) => import(specifier),
@@ -75,7 +123,9 @@ const load = Effect.fnUntraced(function* (source: Source, directory: string) {
 	yield* entries.await
 	const startup = yield* Graft.plugin(ready)
 	yield* startup.await
-	return yield* Effect.never
+	return yield* Deferred.await(lifecycle.ended).pipe(
+		Effect.ensuring(close(entries, lifecycle)),
+	)
 })
 export const run = Effect.fnUntraced(function* (source: Source) {
 	const path = yield* Path.Path
@@ -91,5 +141,6 @@ export const run = Effect.fnUntraced(function* (source: Source) {
 			}),
 		),
 		Effect.provideService(Directory, directory),
+		Effect.provideService(Logger.LogToStderr, true),
 	)
 })

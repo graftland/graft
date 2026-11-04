@@ -1,9 +1,13 @@
 import type { Plugin } from "@graftland/graft"
-import { Cause, Effect } from "effect"
+import { Cause, Effect, Schema } from "effect"
 import type { Context, Duration, Scope } from "effect"
-import { MtlsCredentials, type ClientCertificate } from "./Auth"
+import { MtlsCredentials, NoCredentials, type ClientCertificate } from "./Auth"
 import {
 	LocalTransport,
+	UnixTransport,
+	CommandTransport,
+	type UnixOptions,
+	type CommandOptions,
 	WebsocketTransport,
 	type WebsocketOptions,
 } from "./Transport"
@@ -64,18 +68,41 @@ export interface Local {
 	readonly command?: readonly [string, ...string[]]
 	readonly auth?: never
 }
-export interface Runner<
-	D extends ReadonlyArray<Plugin.Dependency> = readonly [],
-> {
+export interface None {
+	readonly _tag: "None"
+}
+export const none = (): None => ({ _tag: "None" })
+export interface Unix extends UnixOptions {
+	readonly _tag: "Unix"
+}
+export const unix = (options: UnixOptions): Unix => ({
+	_tag: "Unix",
+	...options,
+})
+export interface Command extends CommandOptions {
+	readonly _tag: "Command"
+	readonly auth?: never
+}
+export const command = (
+	argv: CommandOptions["argv"],
+	options: Omit<CommandOptions, "argv"> = {},
+): Command => ({ _tag: "Command", argv, ...options })
+
+interface RunnerCommon {
 	readonly _tag: "Runner"
 	/** Defaults to the current loader entry id. Required outside a loader. */
 	readonly instance?: string
-	readonly transport: Websocket
-	readonly auth: Mtls<D>
 	readonly lease?: Duration.Input
 	readonly margin?: Duration.Input
 	readonly expect?: Expected
 }
+export type Runner<D extends ReadonlyArray<Plugin.Dependency> = readonly []> =
+	RunnerCommon &
+		(
+			| { readonly transport: Websocket; readonly auth: Mtls<D> }
+			| { readonly transport: Unix; readonly auth?: None }
+			| { readonly transport: Command; readonly auth?: never }
+		)
 export const local = (options: Omit<Local, "_tag"> = {}): Local => ({
 	_tag: "Local",
 	...options,
@@ -84,10 +111,16 @@ export const runner = <
 	const Url extends string,
 	const D extends ReadonlyArray<Plugin.Dependency> = readonly [],
 >(
-	options: Omit<Runner<D>, "_tag" | "transport"> & {
-		readonly transport: Websocket<Url> &
-			(Url extends `ws://${string}` ? never : unknown)
-	},
+	options: Omit<RunnerCommon, "_tag"> &
+		(
+			| {
+					readonly transport: Websocket<Url> &
+						(Url extends `ws://${string}` ? never : unknown)
+					readonly auth: Mtls<D>
+			  }
+			| { readonly transport: Unix; readonly auth?: None }
+			| { readonly transport: Command; readonly auth?: never }
+		),
 ): Runner<D> => ({ _tag: "Runner", ...options })
 export type Target<D extends ReadonlyArray<Plugin.Dependency> = readonly []> =
 	Local | Runner<D>
@@ -96,7 +129,51 @@ export const dependencies = <D extends ReadonlyArray<Plugin.Dependency>>(
 	target: Target<D>,
 ): ReadonlyArray<
 	Context.Key<unknown, unknown> | Plugin.Optional<Context.Key<unknown, unknown>>
-> =>
-	target._tag === "Local"
-		? [LocalTransport]
-		: [WebsocketTransport, MtlsCredentials, ...target.auth.inject]
+> => {
+	if (target._tag === "Local") return [LocalTransport]
+	switch (target.transport._tag) {
+		case "Command":
+			return [CommandTransport]
+		case "Unix":
+			return [UnixTransport, NoCredentials]
+		case "Websocket":
+			return [
+				WebsocketTransport,
+				MtlsCredentials,
+				...(target.auth?._tag === "Mtls" ? target.auth.inject : []),
+			]
+	}
+}
+
+export class InvalidTarget extends Schema.TaggedError<
+	InvalidTarget,
+	{ readonly brand: unique symbol }
+>()("InvalidTarget", { detail: Schema.String }) {
+	override get message() {
+		return this.detail
+	}
+}
+/** Dynamic configuration is checked before any transport or credential effect runs. */
+export const validate = <D extends ReadonlyArray<Plugin.Dependency>>(
+	target: Target<D>,
+): Effect.Effect<void, InvalidTarget> => {
+	if (target._tag === "Local") return Effect.void
+	if (
+		target.transport._tag === "Command" &&
+		("auth" in target || "auth" in target.transport)
+	)
+		return Effect.fail(
+			InvalidTarget.make({ detail: "Command transports do not accept auth" }),
+		)
+	if (
+		target.transport._tag === "Unix" &&
+		target.auth !== undefined &&
+		target.auth._tag !== "None"
+	)
+		return Effect.fail(
+			InvalidTarget.make({
+				detail: "Unix transports only support none authentication",
+			}),
+		)
+	return Effect.void
+}

@@ -74,11 +74,7 @@ export const make = Effect.fnUntraced(function* (
 				),
 			),
 			Effect.andThen(decoder.finish),
-			Effect.andThen(
-				Effect.fail(
-					Framing.FrameError.make({ detail: "Runner byte channel ended" }),
-				),
-			),
+			Effect.andThen(Effect.fail(Framing.EndOfStream.make({}))),
 			Effect.mapError((error) =>
 				error._tag === "TransportError"
 					? error

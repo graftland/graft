@@ -86,9 +86,12 @@ const httpResponse = (
 describe("runner WebSocket mutual TLS", () => {
 	it("excludes literal ws targets from the mTLS runner API", () => {
 		expectTypeOf<
-			Parameters<
-				typeof Remote.runner<"ws://localhost", readonly []>
-			>[0]["transport"]
+			Extract<
+				Parameters<
+					typeof Remote.runner<"ws://localhost", readonly []>
+				>[0]["transport"],
+				{ readonly _tag: "Websocket" }
+			>
 		>().toEqualTypeOf<never>()
 	})
 

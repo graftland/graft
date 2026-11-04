@@ -18,11 +18,15 @@ import {
 	runner,
 	websocket,
 	mtls,
+	unix,
+	command,
+	none,
+	validate,
 	dependencies,
 	type Target,
 	type Runner,
 } from "./Targets"
-export { local, runner, websocket, mtls }
+export { local, runner, websocket, mtls, unix, command, none }
 import * as Connection from "./internal/runner/Connection"
 import * as Services from "./internal/services"
 import { Instance } from "./Instance"
@@ -88,6 +92,7 @@ const executionPlugin = <
 		retry: options.retry,
 		apply: (input) =>
 			Effect.gen(function* () {
+				yield* validate(configured)
 				const random = yield* SecureRandom.SecureRandom
 				const session = yield* random.uuidV4()
 				yield* Schema.decodeEffect(contract.config)(input)
@@ -188,6 +193,9 @@ export const plugin = <
 		apply: (input) =>
 			Effect.gen(function* () {
 				const configured = yield* target.pipe(
+					Effect.mapError((error) => publicError(contract.error, error)),
+				)
+				yield* validate(configured).pipe(
 					Effect.mapError((error) => publicError(contract.error, error)),
 				)
 				const child = yield* Graft.plugin(

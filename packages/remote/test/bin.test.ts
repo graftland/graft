@@ -122,6 +122,20 @@ describe("remote command line", () => {
 			}).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 	)
 
+	it.live("rejects stdio combined with network or authentication flags", () =>
+		Effect.gen(function* () {
+			for (const flags of [
+				["--listen", "/tmp/unused.sock"],
+				["--auth", "none"],
+			]) {
+				const result = yield* invoke(["serve", "--stdio", ...flags])
+				assert.notEqual(result.code, 0)
+				assert.include(result.stderr, "--stdio cannot be combined")
+				assert.notInclude(result.stderr, "ENOENT")
+			}
+		}).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+	)
+
 	it.live("describes the child and serve subcommands", () =>
 		Effect.gen(function* () {
 			const result = yield* invoke(["--help"])

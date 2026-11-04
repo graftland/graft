@@ -503,7 +503,7 @@ describe("network runner end to end", () => {
 					const writer = yield* socket.writer
 					yield* writer.write(new Uint8Array(8))
 					yield* until(
-						Ref.get(stdout),
+						Ref.get(stderr),
 						String.includes("Remote host connection failed"),
 					)
 				}).pipe(Effect.scoped)

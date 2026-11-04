@@ -25,5 +25,11 @@ export default defineConfig({
 		"src/runner/supervisor.ts",
 		"src/runner/websocket.ts",
 		"src/runner/auth/mtls.ts",
+		"src/host/unix.ts",
+		"src/host/command.ts",
+		"src/host/auth/none.ts",
+		"src/runner/unix.ts",
+		"src/runner/stdio.ts",
+		"src/runner/auth/none.ts",
 	],
 })

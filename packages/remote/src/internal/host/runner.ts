@@ -11,9 +11,13 @@ import {
 	Scope,
 } from "effect"
 import { RpcClient } from "effect/rpc"
-import { MtlsCredentials } from "../../Auth"
-import { WebsocketTransport } from "../../Transport"
-import type { Runner as RunnerOptions } from "../../Targets"
+import { MtlsCredentials, NoCredentials } from "../../Auth"
+import {
+	WebsocketTransport,
+	UnixTransport,
+	CommandTransport,
+} from "../../Transport"
+import { InvalidTarget, type Runner as RunnerOptions } from "../../Targets"
 import type { Connected } from "../runner/Connection"
 import { ProcessExited, TransportError } from "../../Errors"
 import { cleanupCause } from "../cleanup"
@@ -24,6 +28,35 @@ import * as Wire from "../runner/Wire"
 import { awaitTermination, defaults, childOf } from "../runner/model"
 type RunnerTarget<D extends ReadonlyArray<Plugin.Dependency>> =
 	RunnerOptions<D> & { readonly instance: string }
+
+const connectChannel = Effect.fnUntraced(function* <
+	D extends ReadonlyArray<Plugin.Dependency>,
+>(target: RunnerTarget<D>) {
+	switch (target.transport._tag) {
+		case "Command": {
+			const transport = yield* CommandTransport
+			return yield* transport.connect(target.transport)
+		}
+		case "Unix": {
+			const transport = yield* UnixTransport
+			const auth = yield* NoCredentials
+			yield* auth.prepare
+			return yield* transport.connect(target.transport)
+		}
+		case "Websocket": {
+			const transport = yield* WebsocketTransport
+			const auth = yield* MtlsCredentials
+			if (target.auth?._tag !== "Mtls")
+				return yield* InvalidTarget.make({
+					detail: "WebSocket transports require mTLS authentication",
+				})
+			const certificate = yield* target.auth.read.pipe(
+				Effect.flatMap(auth.prepare),
+			)
+			return yield* transport.connect(target.transport, certificate)
+		}
+	}
+})
 
 export const connect = <D extends ReadonlyArray<Plugin.Dependency>>(
 	target: RunnerTarget<D>,
@@ -36,14 +69,9 @@ export const connect = <D extends ReadonlyArray<Plugin.Dependency>>(
 		const instance = target.instance
 
 		const margin = Duration.toMillis(target.margin ?? "5 seconds")
-		const transport = yield* WebsocketTransport
-		const auth = yield* MtlsCredentials
-		const certificate = yield* target.auth.read.pipe(
-			Effect.flatMap(auth.prepare),
+		const channel = yield* connectChannel(target).pipe(
+			Scope.provide(processScope),
 		)
-		const channel = yield* transport
-			.connect(target.transport, certificate)
-			.pipe(Scope.provide(processScope))
 		const mux = yield* Multiplex.make(channel).pipe(Scope.provide(resources))
 		const control = yield* Port.make(Wire.channel(mux, 0), {
 			session: "session-v1",

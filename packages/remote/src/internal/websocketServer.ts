@@ -10,7 +10,7 @@ import { path, protocol, payloadLimit } from "./websocket"
 /** Authentication and HTTP rejection finish before request.upgrade acquires a WebSocket. */
 export const listen = Effect.fnUntraced(function* (
 	createServer: Parameters<typeof NodeHttpServer.make>[0],
-	options: { readonly host: string; readonly port: number },
+	options: Pick<NodeHttpServer.Options, "host" | "port" | "path">,
 	authenticate: Effect.Effect<
 		string,
 		PeerAuthenticationError,

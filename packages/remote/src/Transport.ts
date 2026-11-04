@@ -43,3 +43,29 @@ export class WebsocketTransport extends Context.Service<
 		) => Effect.Effect<Channel, TransportError, Scope.Scope>
 	}
 >()("@graftland/remote/Transport/WebsocketTransport") {}
+
+export interface UnixOptions {
+	readonly path: string
+}
+export class UnixTransport extends Context.Service<
+	UnixTransport,
+	{
+		readonly connect: (
+			options: UnixOptions,
+		) => Effect.Effect<Channel, TransportError, Scope.Scope>
+	}
+>()("@graftland/remote/Transport/UnixTransport") {}
+
+export interface CommandOptions {
+	readonly argv: readonly [string, ...string[]]
+	readonly cwd?: string
+	readonly env?: Readonly<Record<string, string>>
+}
+export class CommandTransport extends Context.Service<
+	CommandTransport,
+	{
+		readonly connect: (
+			options: CommandOptions,
+		) => Effect.Effect<Channel, TransportError, Scope.Scope>
+	}
+>()("@graftland/remote/Transport/CommandTransport") {}

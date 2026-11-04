@@ -27,3 +27,17 @@ export class MtlsAuthenticator extends Context.Service<
 		) => Effect.Effect<string, PeerAuthenticationError>
 	}
 >()("@graftland/remote/Auth/MtlsAuthenticator") {}
+
+export class NoCredentials extends Context.Service<
+	NoCredentials,
+	{
+		readonly prepare: Effect.Effect<void>
+	}
+>()("@graftland/remote/Auth/NoCredentials") {}
+
+export class NoAuthenticator extends Context.Service<
+	NoAuthenticator,
+	{
+		readonly identity: string
+	}
+>()("@graftland/remote/Auth/NoAuthenticator") {}

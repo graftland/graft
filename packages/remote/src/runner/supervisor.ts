@@ -1,5 +1,5 @@
 import { Graft, Plugin } from "@graftland/graft"
-import { Context, Effect, FileSystem, Layer, Path, Schema } from "effect"
+import { Context, Effect, FileSystem, Layer, Path, Schema, Scope } from "effect"
 import { Digest, SecureRandom } from "effect/crypto"
 import { ChildProcessSpawner } from "effect/process"
 import { Supervisor } from "../Supervisor"
@@ -9,6 +9,7 @@ import * as Stores from "../internal/runner/Store"
 import * as Execution from "../internal/runner/Execution"
 import * as Engine from "../internal/runner/Supervisor"
 import { accept } from "../internal/runner/accept"
+import * as Lifecycle from "../internal/ServeLifecycle"
 
 export const Config = Schema.Struct({
 	root: Schema.String,
@@ -20,6 +21,7 @@ export default Plugin.make({
 	name: "remote-supervisor",
 	config: Config,
 	inject: [
+		Plugin.optional(Lifecycle.ServeLifecycle),
 		FileSystem.FileSystem,
 		Path.Path,
 		ChildProcessSpawner.ChildProcessSpawner,
@@ -27,10 +29,12 @@ export default Plugin.make({
 		Digest.Digest,
 	],
 	apply: Effect.fnUntraced(function* (options) {
+		const lifecycle = yield* Effect.serviceOption(Lifecycle.ServeLifecycle)
+		const resources = yield* Lifecycle.resources(lifecycle)
 		const path = yield* Path.Path
 		const directory = yield* Directory
 		const state = path.resolve(directory, options.state)
-		yield* Lock.acquire(state)
+		yield* Lock.acquire(state).pipe(Scope.provide(resources))
 		const services = yield* Layer.build(
 			Engine.layer(options).pipe(
 				Layer.provideMerge(
@@ -40,7 +44,7 @@ export default Plugin.make({
 					),
 				),
 			),
-		)
+		).pipe(Scope.provide(resources))
 		const engine = Context.get(services, Engine.Supervisor)
 		const execution = Context.get(services, Execution.Channels)
 		yield* Plugin.fork(engine.await)
