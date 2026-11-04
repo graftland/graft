@@ -21,12 +21,14 @@ import {
 	unix,
 	command,
 	none,
+	bearer,
+	jwt,
 	validate,
 	dependencies,
 	type Target,
 	type Runner,
 } from "./Targets"
-export { local, runner, websocket, mtls, unix, command, none }
+export { local, runner, websocket, mtls, unix, command, none, bearer, jwt }
 import * as Connection from "./internal/runner/Connection"
 import * as Services from "./internal/services"
 import { Instance } from "./Instance"

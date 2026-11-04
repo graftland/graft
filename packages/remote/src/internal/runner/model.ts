@@ -32,6 +32,8 @@ export class PeerAuthenticationError extends Schema.TaggedError<
 	{ readonly brand: unique symbol }
 >()("PeerAuthenticationError", {
 	detail: Schema.String,
+	challenge: Schema.optionalKey(Schema.Literals(["missing", "invalid_token"])),
+	cause: Schema.optionalKey(diagnosticCause),
 }) {
 	override get message() {
 		return this.detail

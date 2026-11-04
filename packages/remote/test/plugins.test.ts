@@ -1,8 +1,10 @@
 import { assert, describe, it } from "@effect/vitest"
 import { NodeServices, NodeSocketServer } from "@effect/platform-node"
-import { Graft, Plugin } from "@graftland/graft"
+import { Graft, Plugin, type Fork } from "@graftland/graft"
 import {
+	Array,
 	Cause,
+	Context,
 	Deferred,
 	Effect,
 	Exit,
@@ -23,6 +25,7 @@ import local from "../src/host/local"
 import supervisor from "../src/runner/supervisor"
 import mtls from "../src/runner/auth/mtls"
 import websocket, { Config as WebsocketConfig } from "../src/runner/websocket"
+import unix from "../src/runner/unix"
 import * as Lock from "../src/internal/runner/Lock"
 import * as Websocket from "./websocket"
 import { contract } from "./fixtures/contract"
@@ -106,6 +109,63 @@ describe("remote capability plugins", () => {
 			}),
 	)
 
+	it.effect("decodes certificate requirements by listener protocol", () =>
+		Effect.gen(function* () {
+			const plain = yield* Schema.decodeEffect(WebsocketConfig)({
+				url: "ws://localhost:7443",
+			})
+			assert.equal(plain._tag, "ws")
+			const secure = yield* Schema.decodeEffect(WebsocketConfig)({
+				url: "wss://localhost:7443",
+				cert: "server.crt",
+				key: "server.key",
+			})
+			assert.equal(secure._tag, "wss")
+			for (const config of [
+				{ url: "ws://localhost:7443", cert: "server.crt" },
+				{ url: "ws://localhost:7443", key: "server.key" },
+				{ url: "wss://localhost:7443" },
+				{ url: "wss://localhost:7443", cert: "server.crt" },
+				{ url: "wss://localhost:7443", key: "server.key" },
+				{ url: "ws://localhost:7443", auth: MtlsAuthenticator.key },
+			]) {
+				const result = yield* Schema.decodeUnknownEffect(WebsocketConfig)(
+					config,
+				).pipe(Effect.exit)
+				assert.isTrue(Exit.isFailure(result))
+			}
+		}),
+	)
+
+	it.live(
+		"reports third-party mTLS on ws or unix as a listener configuration error",
+		() =>
+			Effect.gen(function* () {
+				class Custom extends Context.Service<
+					Custom,
+					typeof MtlsAuthenticator.Service
+				>()("@graftland/remote/test/plugins.test/Custom") {}
+				yield* Graft.provide(Custom, {
+					_tag: "Mtls",
+					ca: "unused",
+					authenticate: () => Effect.succeed("unused"),
+				})
+				yield* Graft.provide(Supervisor, { accept: () => Effect.void })
+				const network = yield* Graft.plugin(websocket, {
+					url: "ws://localhost:0",
+					auth: Custom.key,
+				})
+				const networkError = yield* Effect.flip(network.await)
+				assert.equal(networkError._tag, "ListenerConfigError")
+				const local = yield* Graft.plugin(unix, {
+					path: "unused.sock",
+					auth: Custom.key,
+				})
+				const localError = yield* Effect.flip(local.await)
+				assert.equal(localError._tag, "ListenerConfigError")
+			}).pipe(Effect.scoped, Effect.provide(runtime)),
+	)
+
 	it.live("withdraws the proxy before its local transport is released", () =>
 		Effect.gen(function* () {
 			const fs = yield* FileSystem.FileSystem
@@ -162,7 +222,18 @@ describe("remote capability plugins", () => {
 				yield* listener.await
 				yield* connection(port).pipe(Effect.scoped)
 				yield* auth.dispose
-				const state = yield* listener.state.pipe(
+				const state = yield* Graft.forks.pipe(
+					Stream.map((trees: ReadonlyArray<Fork.ForkTree>) =>
+						Array.flatMap(
+							Array.filter(
+								trees,
+								(tree: Fork.ForkTree) => tree.id === listener.id,
+							),
+							(tree: Fork.ForkTree) => tree.children,
+						),
+					),
+					Stream.flattenIterable,
+					Stream.map((tree) => tree.state),
 					Stream.filter((state) => state._tag === "Pending"),
 					Stream.runHead,
 				)

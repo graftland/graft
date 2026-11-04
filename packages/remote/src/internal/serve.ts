@@ -79,7 +79,16 @@ const ready = Plugin.make({
 	inject: [Loader.Loader],
 	apply: Effect.fnUntraced(function* () {
 		const loader = yield* Loader.Loader
-		yield* loader.ready
+		// A failed authenticator can leave its listener child Pending while the outer plugin is Applying.
+		yield* loader.ready.pipe(
+			Effect.raceFirst(
+				Graft.forks.pipe(
+					Stream.map((trees) => subtree(trees, loader.root.id)),
+					Stream.filter(Option.isSome),
+					Stream.runForEach((tree) => check([tree.value])),
+				),
+			),
+		)
 		// Pending can still be reacting to a provider published during startup.
 		// Observe the loader's subtree, excluding this startup observer itself.
 		yield* Graft.forks.pipe(

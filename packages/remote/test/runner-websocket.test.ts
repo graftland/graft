@@ -87,11 +87,9 @@ describe("runner WebSocket mutual TLS", () => {
 	it("excludes literal ws targets from the mTLS runner API", () => {
 		expectTypeOf<
 			Extract<
-				Parameters<
-					typeof Remote.runner<"ws://localhost", readonly []>
-				>[0]["transport"],
-				{ readonly _tag: "Websocket" }
-			>
+				Parameters<typeof Remote.runner<"ws://localhost", readonly []>>[0],
+				{ readonly auth: { readonly _tag: "Mtls" } }
+			>["transport"]
 		>().toEqualTypeOf<never>()
 	})
 
@@ -198,7 +196,7 @@ describe("runner WebSocket mutual TLS", () => {
 						url: String("ws://localhost"),
 						tls: { ca: "unused" },
 					},
-					{ cert: "unused", key: Redacted.make("unused") },
+					{ certificate: { cert: "unused", key: Redacted.make("unused") } },
 				),
 			)
 			assert.isTrue(Exit.isFailure(result))

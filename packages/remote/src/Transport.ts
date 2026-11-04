@@ -2,7 +2,7 @@
 import { Context } from "effect"
 import type { Duration, Effect, PlatformError, Scope } from "effect"
 import type { ProcessExited, TransportError } from "./Errors"
-import type { ClientCertificate } from "./Auth"
+import type { PreparedCredentials } from "./Auth"
 export type { Channel } from "./internal/port"
 import type { Channel } from "./internal/port"
 
@@ -28,8 +28,8 @@ export class LocalTransport extends Context.Service<
 
 export interface WebsocketOptions {
 	readonly url: string
-	readonly tls: {
-		readonly ca: string
+	readonly tls?: {
+		readonly ca?: string
 		readonly servername?: string
 	}
 	readonly openTimeout?: Duration.Input
@@ -39,7 +39,7 @@ export class WebsocketTransport extends Context.Service<
 	{
 		readonly connect: (
 			options: WebsocketOptions,
-			certificate: ClientCertificate,
+			credentials?: PreparedCredentials,
 		) => Effect.Effect<Channel, TransportError, Scope.Scope>
 	}
 >()("@graftland/remote/Transport/WebsocketTransport") {}
@@ -52,6 +52,7 @@ export class UnixTransport extends Context.Service<
 	{
 		readonly connect: (
 			options: UnixOptions,
+			credentials?: PreparedCredentials,
 		) => Effect.Effect<Channel, TransportError, Scope.Scope>
 	}
 >()("@graftland/remote/Transport/UnixTransport") {}

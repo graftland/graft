@@ -14,15 +14,17 @@ import {
 	Schema,
 	String,
 } from "effect"
+import { FetchHttpClient } from "effect/http"
 import { Argument, CliError, Command, Flag } from "effect/cli"
-import { Digest, SecureRandom } from "effect/crypto"
+import { Digest, SecureRandom, Signature } from "effect/crypto"
 import process from "node:process"
 import { pathToFileURL } from "node:url"
 import { load, run } from "./Runner"
 import { Bootstrap } from "./internal/runner/Bootstrap"
 import * as Watchdog from "./internal/runner/Watchdog"
 import * as Serve from "./internal/serve"
-import { MtlsAuthenticator, NoAuthenticator } from "./Auth"
+import { MtlsAuthenticator } from "./Auth"
+import * as Authentication from "./internal/auth/flags"
 import { Url } from "./internal/websocket"
 import * as Certificates from "./internal/Certificates"
 import { Config as SupervisorConfig } from "./runner/supervisor"
@@ -51,79 +53,80 @@ const Listen = Schema.Union([
 		}),
 	),
 ])
-const listenerEntries = Effect.fnUntraced(function* (options: {
-	readonly stdio: boolean
-	readonly listen: ReadonlyArray<typeof Listen.Type>
-	readonly auth: Option.Option<"mtls" | "none">
-	readonly identity: Option.Option<string>
-	readonly cert: Option.Option<string>
-	readonly key: Option.Option<string>
-	readonly ca: Option.Option<string>
-}) {
-	const identity = Option.getOrElse(options.identity, () => "anonymous")
-	if (options.stdio) {
-		if (options.listen.length > 0 || Option.isSome(options.auth))
-			return yield* CliError.UserError.make({
-				cause: "Conflicting serve options",
-				userMessage: "--stdio cannot be combined with --listen or --auth",
-			})
+const listenerEntries = Effect.fnUntraced(function* (
+	options: Parameters<typeof Authentication.entry>[0] & {
+		readonly stdio: boolean
+		readonly listen: ReadonlyArray<typeof Listen.Type>
+		readonly cert: Option.Option<string>
+		readonly key: Option.Option<string>
+	},
+) {
+	if (
+		options.stdio &&
+		(options.listen.length > 0 || Option.isSome(options.auth))
+	)
+		return yield* Authentication.usage(
+			"--stdio cannot be combined with --listen or --auth",
+		)
+	yield* Authentication.validate(options, options.stdio)
+	const secure = Array.some(
+		options.listen,
+		(address) => typeof address !== "string" && address.protocol === "wss:",
+	)
+	if (!secure && (Option.isSome(options.cert) || Option.isSome(options.key)))
+		return yield* Authentication.usage(
+			"--cert and --key require a wss:// listener",
+		)
+	if (options.stdio)
 		return [
 			{
 				id: "remote-stdio",
 				name: "@graftland/remote/runner/stdio",
-				config: { identity },
+				config: {
+					identity: Option.getOrElse(options.identity, () => "anonymous"),
+				},
 			},
 		]
-	}
 	if (options.listen.length === 0)
-		return yield* CliError.UserError.make({
-			cause: "Missing --listen",
-			userMessage: "--listen or --stdio is required without --config",
-		})
-	const mode = Option.getOrElse(options.auth, () => "none")
-	const certificate =
-		mode === "mtls"
-			? {
-					cert: yield* required(options.cert, "cert"),
-					key: yield* required(options.key, "key"),
-				}
-			: undefined
-	const authentication =
-		mode === "mtls"
-			? {
-					name: "@graftland/remote/runner/auth/mtls",
-					config: { ca: yield* required(options.ca, "ca") },
-				}
-			: { name: "@graftland/remote/runner/auth/none", config: { identity } }
+		return yield* Authentication.usage(
+			"--listen or --stdio is required without --config",
+		)
+	const auth = yield* Authentication.entry(options)
+	const certificate = secure
+		? {
+				cert: yield* required(options.cert, "cert"),
+				key: yield* required(options.key, "key"),
+			}
+		: {}
 	const listeners = yield* Effect.forEach(options.listen, (address, index) =>
 		Effect.gen(function* () {
 			const id = `remote-listener-${index}`
-			if (typeof address === "string") {
-				if (mode !== "none")
-					return yield* CliError.UserError.make({
-						cause: "Unsupported authentication",
-						userMessage: "Unix listeners only support --auth none",
-					})
+			if (
+				auth.key === MtlsAuthenticator.key &&
+				(typeof address === "string" || address.protocol !== "wss:")
+			)
+				return yield* Authentication.usage(
+					"Mutual TLS requires wss:// listeners",
+				)
+			if (typeof address === "string")
 				return {
 					id,
 					name: "@graftland/remote/runner/unix",
-					config: { path: address, auth: NoAuthenticator.key },
+					config: { path: address, auth: auth.key },
 				}
-			}
-			if (certificate === undefined)
-				return yield* CliError.UserError.make({
-					cause: "Unsupported authentication",
-					userMessage: "WebSocket listeners currently require --auth mtls",
-				})
 			const url = yield* Schema.encodeEffect(Url)(address)
 			return {
 				id,
 				name: "@graftland/remote/runner/websocket",
-				config: { ...certificate, url, auth: MtlsAuthenticator.key },
+				config: {
+					...(address.protocol === "wss:" ? certificate : {}),
+					url,
+					auth: auth.key,
+				},
 			}
 		}),
 	)
-	return [{ id: "remote-auth", ...authentication }, ...listeners]
+	return [auth.entry, ...listeners]
 })
 const serve = Command.make(
 	"serve",
@@ -134,13 +137,11 @@ const serve = Command.make(
 			Flag.atLeast(0),
 		),
 		stdio: Flag.Boolean("stdio").pipe(Flag.withDefault(false)),
-		identity: Flag.String("identity").pipe(Flag.optional),
-		auth: Flag.Literals("auth", ["mtls", "none"]).pipe(Flag.optional),
+		...Authentication.flags,
 		state: Flag.String("state").pipe(Flag.optional),
 		root: Flag.String("root").pipe(Flag.optional),
 		cert: Flag.String("cert").pipe(Flag.optional),
 		key: Flag.String("key").pipe(Flag.optional),
-		ca: Flag.String("ca").pipe(Flag.optional),
 		lease: duration("lease"),
 		grace: duration("grace"),
 	},
@@ -149,15 +150,13 @@ const serve = Command.make(
 			if (
 				options.stdio ||
 				options.listen.length > 0 ||
+				Authentication.anySupplied(options) ||
 				Array.some(
 					[
-						options.identity,
-						options.auth,
 						options.state,
 						options.root,
 						options.cert,
 						options.key,
-						options.ca,
 						options.lease,
 						options.grace,
 					],
@@ -292,8 +291,12 @@ NodeRuntime.runMain(
 					Graft.layer,
 					Layer.mergeAll(
 						NodeServices.layer,
+						FetchHttpClient.layer,
 						Digest.layerWebCrypto,
 						SecureRandom.layerWebCrypto,
+						Signature.layerWebCrypto.pipe(
+							Layer.provide(SecureRandom.layerWebCrypto),
+						),
 					),
 				),
 			)

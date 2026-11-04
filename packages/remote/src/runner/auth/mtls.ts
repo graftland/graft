@@ -13,6 +13,7 @@ export default Plugin.make({
 		const path = yield* Path.Path
 		const directory = yield* Directory
 		yield* Graft.provide(MtlsAuthenticator, {
+			_tag: "Mtls",
 			ca: yield* fs.readFileString(path.resolve(directory, ca)),
 			authenticate: identityFromSubjectAltName,
 		})

@@ -15,6 +15,14 @@
 			"default": "./dist/Auth.js"
 		},
 		"./bin": "./dist/bin.js",
+		"./host/auth/bearer": {
+			"source": "./src/host/auth/bearer.ts",
+			"default": "./dist/host/auth/bearer.js"
+		},
+		"./host/auth/jwt": {
+			"source": "./src/host/auth/jwt.ts",
+			"default": "./dist/host/auth/jwt.js"
+		},
 		"./host/auth/mtls": {
 			"source": "./src/host/auth/mtls.ts",
 			"default": "./dist/host/auth/mtls.js"
@@ -42,6 +50,14 @@
 		"./Runner": {
 			"source": "./src/Runner.ts",
 			"default": "./dist/Runner.js"
+		},
+		"./runner/auth/bearer": {
+			"source": "./src/runner/auth/bearer.ts",
+			"default": "./dist/runner/auth/bearer.js"
+		},
+		"./runner/auth/jwt": {
+			"source": "./src/runner/auth/jwt.ts",
+			"default": "./dist/runner/auth/jwt.js"
 		},
 		"./runner/auth/mtls": {
 			"source": "./src/runner/auth/mtls.ts",
@@ -104,6 +120,8 @@
 			".": "./dist/index.js",
 			"./Auth": "./dist/Auth.js",
 			"./bin": "./dist/bin.js",
+			"./host/auth/bearer": "./dist/host/auth/bearer.js",
+			"./host/auth/jwt": "./dist/host/auth/jwt.js",
 			"./host/auth/mtls": "./dist/host/auth/mtls.js",
 			"./host/auth/none": "./dist/host/auth/none.js",
 			"./host/command": "./dist/host/command.js",
@@ -111,6 +129,8 @@
 			"./host/unix": "./dist/host/unix.js",
 			"./host/websocket": "./dist/host/websocket.js",
 			"./Runner": "./dist/Runner.js",
+			"./runner/auth/bearer": "./dist/runner/auth/bearer.js",
+			"./runner/auth/jwt": "./dist/runner/auth/jwt.js",
 			"./runner/auth/mtls": "./dist/runner/auth/mtls.js",
 			"./runner/auth/none": "./dist/runner/auth/none.js",
 			"./runner/stdio": "./dist/runner/stdio.js",

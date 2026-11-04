@@ -48,7 +48,7 @@ export const connect = (options: {
 				? {}
 				: { openTimeout: options.openTimeout }),
 		},
-		options.tls,
+		{ certificate: options.tls },
 	)
 export const multiplex = (socket: Parameters<typeof Channel.fromSocket>[0]) =>
 	Channel.fromSocket(socket).pipe(Effect.flatMap(Multiplex.make))

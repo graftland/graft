@@ -31,5 +31,9 @@ export default defineConfig({
 		"src/runner/unix.ts",
 		"src/runner/stdio.ts",
 		"src/runner/auth/none.ts",
+		"src/host/auth/bearer.ts",
+		"src/host/auth/jwt.ts",
+		"src/runner/auth/bearer.ts",
+		"src/runner/auth/jwt.ts",
 	],
 })

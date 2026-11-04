@@ -11,15 +11,24 @@ import {
 	Scope,
 } from "effect"
 import { RpcClient } from "effect/rpc"
-import { MtlsCredentials, NoCredentials } from "../../Auth"
+import {
+	MtlsCredentials,
+	NoCredentials,
+	BearerCredentials,
+	JwtCredentials,
+	type PreparedCredentials,
+} from "../../Auth"
 import {
 	WebsocketTransport,
 	UnixTransport,
 	CommandTransport,
 } from "../../Transport"
-import { InvalidTarget, type Runner as RunnerOptions } from "../../Targets"
+import {
+	type Authentication,
+	type Runner as RunnerOptions,
+} from "../../Targets"
 import type { Connected } from "../runner/Connection"
-import { ProcessExited, TransportError } from "../../Errors"
+import { ProcessExited, TransportError, RemoteError } from "../../Errors"
 import { cleanupCause } from "../cleanup"
 import * as Port from "../port"
 import * as Multiplex from "../runner/Multiplex"
@@ -29,33 +38,52 @@ import { awaitTermination, defaults, childOf } from "../runner/model"
 type RunnerTarget<D extends ReadonlyArray<Plugin.Dependency>> =
 	RunnerOptions<D> & { readonly instance: string }
 
+const prepare = Effect.fnUntraced(function* <
+	D extends ReadonlyArray<Plugin.Dependency>,
+>(
+	auth: Authentication<D> | undefined,
+): Effect.fn.Return<
+	PreparedCredentials,
+	RemoteError,
+	| Plugin.Required<D>
+	| Scope.Scope
+	| MtlsCredentials
+	| NoCredentials
+	| BearerCredentials
+	| JwtCredentials
+> {
+	if (auth === undefined || auth._tag === "None") {
+		const encoder = yield* NoCredentials
+		yield* encoder.prepare
+		return {}
+	}
+	if (auth._tag === "Mtls") {
+		const encoder = yield* MtlsCredentials
+		return {
+			certificate: yield* auth.read.pipe(Effect.flatMap(encoder.prepare)),
+		}
+	}
+	const encoder = yield* auth._tag === "Bearer"
+		? BearerCredentials
+		: JwtCredentials
+	return {
+		authorization: yield* auth.read.pipe(Effect.flatMap(encoder.prepare)),
+	}
+})
 const connectChannel = Effect.fnUntraced(function* <
 	D extends ReadonlyArray<Plugin.Dependency>,
 >(target: RunnerTarget<D>) {
-	switch (target.transport._tag) {
-		case "Command": {
-			const transport = yield* CommandTransport
-			return yield* transport.connect(target.transport)
-		}
-		case "Unix": {
-			const transport = yield* UnixTransport
-			const auth = yield* NoCredentials
-			yield* auth.prepare
-			return yield* transport.connect(target.transport)
-		}
-		case "Websocket": {
-			const transport = yield* WebsocketTransport
-			const auth = yield* MtlsCredentials
-			if (target.auth?._tag !== "Mtls")
-				return yield* InvalidTarget.make({
-					detail: "WebSocket transports require mTLS authentication",
-				})
-			const certificate = yield* target.auth.read.pipe(
-				Effect.flatMap(auth.prepare),
-			)
-			return yield* transport.connect(target.transport, certificate)
-		}
+	if (target.transport._tag === "Command") {
+		const transport = yield* CommandTransport
+		return yield* transport.connect(target.transport)
 	}
+	const credentials = yield* prepare(target.auth)
+	if (target.transport._tag === "Unix") {
+		const transport = yield* UnixTransport
+		return yield* transport.connect(target.transport, credentials)
+	}
+	const transport = yield* WebsocketTransport
+	return yield* transport.connect(target.transport, credentials)
 })
 
 export const connect = <D extends ReadonlyArray<Plugin.Dependency>>(

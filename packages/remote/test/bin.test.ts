@@ -136,6 +136,79 @@ describe("remote command line", () => {
 		}).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 	)
 
+	it.live(
+		"rejects mismatched and incomplete authentication flags as usage errors",
+		() =>
+			Effect.gen(function* () {
+				const cases = [
+					["--auth", "none", "--tokens", "unused"],
+					["--auth", "bearer", "--ca", "unused"],
+					["--auth", "bearer"],
+					["--auth", "jwt", "--identity", "unused"],
+					["--auth", "jwt", "--tokens", "unused"],
+					["--auth", "jwt"],
+					[
+						"--auth",
+						"jwt",
+						"--jwt-jwks",
+						"https://unused/keys",
+						"--jwt-public-key",
+						"unused",
+					],
+					[
+						"--auth",
+						"jwt",
+						"--jwt-public-key",
+						"unused",
+						"--jwt-issuer",
+						"issuer",
+					],
+					["--auth", "jwt", "--jwt-algorithm", "HS256"],
+					["--auth", "jwt", "--jwt-clock-tolerance", "-1 second"],
+					["--auth", "jwt", "--jwt-clock-tolerance", "soon"],
+					["--auth", "mtls", "--ca", "unused"],
+				]
+				for (const flags of cases) {
+					const result = yield* invoke([
+						"serve",
+						"--listen",
+						"ws://127.0.0.1:0",
+						...flags,
+					])
+					assert.notEqual(result.code, 0)
+					// Handler-level CliError.UserError is rendered as ERROR; parser failures also include USAGE.
+					assert.include(result.stdout + result.stderr, "ERROR")
+					assert.notInclude(result.stdout + result.stderr, "    at ")
+					assert.notInclude(result.stdout + result.stderr, "ENOENT")
+				}
+			}).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+	)
+
+	it.live(
+		"reports authenticator startup failure even while its listener is waiting",
+		() =>
+			Effect.gen(function* () {
+				const fs = yield* FileSystem.FileSystem
+				const directory = yield* fs.makeTempDirectoryScoped()
+				const result = yield* invoke([
+					"serve",
+					"--listen",
+					"ws://127.0.0.1:0",
+					"--auth",
+					"bearer",
+					"--tokens",
+					directory + "/missing-tokens.json",
+					"--state",
+					directory + "/state",
+					"--root",
+					inject("remoteRoot"),
+				])
+				assert.notEqual(result.code, 0)
+				assert.include(result.stderr, "missing-tokens.json")
+				assert.notInclude(result.stdout, '"event":"Listening"')
+			}).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+	)
+
 	it.live("describes the child and serve subcommands", () =>
 		Effect.gen(function* () {
 			const result = yield* invoke(["--help"])

@@ -9,5 +9,6 @@ export default Plugin.make({
 			Schema.withDecodingDefaultKey(Effect.succeed("anonymous")),
 		),
 	}),
-	apply: (config) => Graft.provide(NoAuthenticator, config),
+	apply: (config) =>
+		Graft.provide(NoAuthenticator, { _tag: "None", ...config }),
 })

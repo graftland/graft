@@ -1,7 +1,13 @@
 import type { Plugin } from "@graftland/graft"
 import { Cause, Effect, Schema } from "effect"
-import type { Context, Duration, Scope } from "effect"
-import { MtlsCredentials, NoCredentials, type ClientCertificate } from "./Auth"
+import type { Context, Duration, Scope, Redacted } from "effect"
+import {
+	MtlsCredentials,
+	NoCredentials,
+	BearerCredentials,
+	JwtCredentials,
+	type ClientCertificate,
+} from "./Auth"
 import {
 	LocalTransport,
 	UnixTransport,
@@ -54,6 +60,56 @@ export function mtls<E, const D extends ReadonlyArray<Plugin.Dependency>>(
 		),
 	}
 }
+export interface Token<
+	Tag extends "Bearer" | "Jwt",
+	D extends ReadonlyArray<Plugin.Dependency> = readonly [],
+> {
+	readonly _tag: Tag
+	readonly inject: D
+	readonly read: Effect.Effect<
+		Redacted.Redacted<string>,
+		RemoteError,
+		Plugin.Required<D> | Scope.Scope
+	>
+}
+const token = <Tag extends "Bearer" | "Jwt">(tag: Tag) => {
+	function make<E>(
+		source: Effect.Effect<Redacted.Redacted<string>, E>,
+	): Token<Tag>
+	function make<E, const D extends ReadonlyArray<Plugin.Dependency>>(
+		source: CredentialSource<Redacted.Redacted<string>, E, D>,
+	): Token<Tag, D>
+	function make<E, const D extends ReadonlyArray<Plugin.Dependency>>(
+		source:
+			| Effect.Effect<Redacted.Redacted<string>, E>
+			| CredentialSource<Redacted.Redacted<string>, E, D>,
+	): Token<Tag, D | readonly []> {
+		const credentials: CredentialSource<
+			Redacted.Redacted<string>,
+			E,
+			D | readonly []
+		> = Effect.isEffect(source) ? { inject: [], read: source } : source
+		return {
+			_tag: tag,
+			inject: credentials.inject,
+			read: credentials.read.pipe(
+				Effect.mapError((error) =>
+					RemoteError.make({ cause: Cause.fail(error) }),
+				),
+			),
+		}
+	}
+	return make
+}
+export const bearer = token("Bearer")
+export const jwt = token("Jwt")
+export type HeaderAuth<
+	D extends ReadonlyArray<Plugin.Dependency> = readonly [],
+> = None | Token<"Bearer", D> | Token<"Jwt", D>
+export type Authentication<
+	D extends ReadonlyArray<Plugin.Dependency> = readonly [],
+> = Mtls<D> | HeaderAuth<D>
+
 export interface Websocket<
 	Url extends string = string,
 > extends WebsocketOptions {
@@ -99,8 +155,8 @@ interface RunnerCommon {
 export type Runner<D extends ReadonlyArray<Plugin.Dependency> = readonly []> =
 	RunnerCommon &
 		(
-			| { readonly transport: Websocket; readonly auth: Mtls<D> }
-			| { readonly transport: Unix; readonly auth?: None }
+			| { readonly transport: Websocket; readonly auth?: Authentication<D> }
+			| { readonly transport: Unix; readonly auth?: HeaderAuth<D> }
 			| { readonly transport: Command; readonly auth?: never }
 		)
 export const local = (options: Omit<Local, "_tag"> = {}): Local => ({
@@ -118,7 +174,8 @@ export const runner = <
 						(Url extends `ws://${string}` ? never : unknown)
 					readonly auth: Mtls<D>
 			  }
-			| { readonly transport: Unix; readonly auth?: None }
+			| { readonly transport: Websocket<Url>; readonly auth?: HeaderAuth<D> }
+			| { readonly transport: Unix; readonly auth?: HeaderAuth<D> }
 			| { readonly transport: Command; readonly auth?: never }
 		),
 ): Runner<D> => ({ _tag: "Runner", ...options })
@@ -131,18 +188,21 @@ export const dependencies = <D extends ReadonlyArray<Plugin.Dependency>>(
 	Context.Key<unknown, unknown> | Plugin.Optional<Context.Key<unknown, unknown>>
 > => {
 	if (target._tag === "Local") return [LocalTransport]
-	switch (target.transport._tag) {
-		case "Command":
-			return [CommandTransport]
-		case "Unix":
-			return [UnixTransport, NoCredentials]
-		case "Websocket":
-			return [
-				WebsocketTransport,
-				MtlsCredentials,
-				...(target.auth?._tag === "Mtls" ? target.auth.inject : []),
-			]
-	}
+	if (target.transport._tag === "Command") return [CommandTransport]
+	const transport =
+		target.transport._tag === "Unix" ? UnixTransport : WebsocketTransport
+	const auth = target.auth
+	if (auth === undefined || auth._tag === "None")
+		return [transport, NoCredentials]
+	return [
+		transport,
+		auth._tag === "Mtls"
+			? MtlsCredentials
+			: auth._tag === "Bearer"
+				? BearerCredentials
+				: JwtCredentials,
+		...auth.inject,
+	]
 }
 
 export class InvalidTarget extends Schema.TaggedError<
@@ -165,14 +225,10 @@ export const validate = <D extends ReadonlyArray<Plugin.Dependency>>(
 		return Effect.fail(
 			InvalidTarget.make({ detail: "Command transports do not accept auth" }),
 		)
-	if (
-		target.transport._tag === "Unix" &&
-		target.auth !== undefined &&
-		target.auth._tag !== "None"
-	)
+	if (target.auth?._tag === "Mtls" && target.transport._tag === "Unix")
 		return Effect.fail(
 			InvalidTarget.make({
-				detail: "Unix transports only support none authentication",
+				detail: "Mutual TLS requires wss://",
 			}),
 		)
 	return Effect.void

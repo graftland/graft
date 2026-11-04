@@ -60,11 +60,26 @@ export const listen = Effect.fnUntraced(function* (
 						)
 						return HttpServerResponse.empty()
 					}).pipe(
+						// Token decoding causes may contain credentials; report the rejection through HTTP and log only its reason.
 						Effect.catchTag("PeerAuthenticationError", (error) =>
-							Effect.logWarning(
-								"Remote host authentication failed",
-								error,
-							).pipe(Effect.as(HttpServerResponse.empty({ status: 401 }))),
+							Effect.logWarning("Remote host authentication failed", {
+								reason: error.detail,
+							}).pipe(
+								Effect.as(
+									HttpServerResponse.empty({
+										status: 401,
+										headers:
+											error.challenge === undefined
+												? {}
+												: {
+														"www-authenticate":
+															error.challenge === "missing"
+																? "Bearer"
+																: 'Bearer error="invalid_token"',
+													},
+									}),
+								),
+							),
 						),
 					),
 				)
