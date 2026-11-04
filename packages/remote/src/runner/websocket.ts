@@ -7,6 +7,7 @@ import {
 	Option,
 	Path,
 	Schema,
+	String,
 } from "effect"
 import { ConfigDirectory } from "@graftland/loader"
 import { createSecureServer } from "node:http2"
@@ -106,7 +107,7 @@ export default Plugin.make({
 					Effect.provideService(ConfigDirectory, Option.some(directory)),
 					Effect.flatMap((server) =>
 						Server.bind(server, {
-							host: config.url.hostname,
+							host: String.replace(/^\[|\]$/g, "")(config.url.hostname),
 							port: Number(
 								config.url.port || (config._tag === "wss" ? 443 : 80),
 							),

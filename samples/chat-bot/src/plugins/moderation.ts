@@ -18,7 +18,9 @@ export default Plugin.make({
 			yield* Event.on(Inbound, (message, next) =>
 				Effect.flatMap(Ref.get(banned), (words) => {
 					const text = String.toLowerCase(message.text)
-					return Array.some(words, (word) => String.includes(word)(text))
+					return Array.some(words, (word) =>
+						String.includes(String.toLowerCase(word))(text),
+					)
 						? Effect.succeedSome(`A message from ${message.user} was removed.`)
 						: next(message)
 				}),

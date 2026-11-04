@@ -533,15 +533,22 @@ export const supervise = Effect.fnUntraced(function* (
 			)
 			const tasks = yield* Ref.get(running.tasks.failures)
 			const updates = yield* Ref.get(running.updateCleanup)
+			// Only stopping apply is expected to interrupt. Resource release must finish.
+			const stoppedCause =
+				Exit.isFailure(stopped) && !Cause.hasInterruptsOnly(stopped.cause)
+					? stopped.cause
+					: Cause.empty
 			const cause = Array.reduce(
-				[stopped, withdrawn, tasksClosed, closed, released],
-				Cause.combine(tasks, updates),
+				[withdrawn, tasksClosed, closed, released],
+				Cause.combine(Cause.combine(tasks, updates), stoppedCause),
 				(cause, result) =>
-					Exit.isFailure(result) && !Cause.hasInterruptsOnly(result.cause)
-						? Cause.combine(cause, result.cause)
-						: cause,
+					Exit.isFailure(result) ? Cause.combine(cause, result.cause) : cause,
 			)
-			yield* reportFailure("Releasing the plugin's resources failed", closed)
+			if (Exit.isFailure(closed))
+				yield* Effect.logError(
+					"Releasing the plugin's resources failed",
+					closed.cause,
+				)
 			yield* reportFailure(
 				`Plugin "${running.resolution.spec.plugin.name}" failed`,
 				stopped,

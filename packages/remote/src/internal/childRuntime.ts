@@ -9,7 +9,8 @@ import * as Child from "./child"
 import * as Multiplex from "./runner/Multiplex"
 import * as Wire from "./runner/Wire"
 import type { Bootstrap } from "./runner/Bootstrap"
-import type { ExecutionError } from "./runner/model"
+import { ExecutionError } from "./runner/model"
+import { closedNormally } from "./runner/connectionEnded"
 import { endpoint } from "./control"
 
 /** Import a contract in the runner installation; importing this module performs no I/O. */
@@ -84,7 +85,21 @@ export const run = (
 					),
 					Effect.forkScoped,
 				)
-				yield* Effect.raceFirst(Effect.flip(peer.await), stop).pipe(
+				yield* Effect.raceFirst(
+					peer.await.pipe(
+						Effect.catchIf(
+							(error) => closedNormally(error.cause),
+							() => Effect.void,
+						),
+						Effect.mapError((error) =>
+							ExecutionError.make({
+								detail: "Child transport failed",
+								cause: error.cause,
+							}),
+						),
+					),
+					stop,
+				).pipe(
 					// Release exports before closing the instance scope, including on interruption.
 					Effect.ensuring(instance.release),
 				)

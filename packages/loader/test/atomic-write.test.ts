@@ -69,13 +69,16 @@ describe("scoped atomic writes", () => {
 				const { fs, file } = yield* setup
 				const entered = yield* Deferred.make<void>()
 				const cleanup = failure("cleanup")
-				const writing = yield* atomicWrite(file, "replacement").pipe(
+				const writing = yield* atomicWrite(
+					file,
+					"replacement",
+					undefined,
+					Deferred.succeed(entered, undefined).pipe(
+						Effect.andThen(Effect.never),
+					),
+				).pipe(
 					Effect.provideService(FileSystem.FileSystem, {
 						...fs,
-						rename: () =>
-							Deferred.succeed(entered, undefined).pipe(
-								Effect.andThen(Effect.never),
-							),
 						remove: () => Effect.fail(cleanup),
 					}),
 					Effect.forkChild,
@@ -199,11 +202,22 @@ describe("scoped atomic writes", () => {
 						"- id: a\n  name: unused\n  disabled: true\n",
 					)
 					const entered = yield* Deferred.make<void>()
+					const temporaryOpened = yield* Ref.make(false)
 					yield* Graft.provide(FileSystem.FileSystem, {
 						...fs,
-						rename: () =>
-							Deferred.succeed(entered, undefined).pipe(
-								Effect.andThen(Effect.never),
+						open: (path, options) =>
+							fs
+								.open(path, options)
+								.pipe(Effect.tap(() => Ref.set(temporaryOpened, true))),
+						realPath: (path) =>
+							Ref.get(temporaryOpened).pipe(
+								Effect.flatMap((editing) =>
+									editing
+										? Deferred.succeed(entered, undefined).pipe(
+												Effect.andThen(Effect.never),
+											)
+										: fs.realPath(path),
+								),
 							),
 					})
 					const fork = yield* Graft.plugin(Include.Include, { path: file })
@@ -212,6 +226,8 @@ describe("scoped atomic writes", () => {
 						.update("a", { config: "replacement" })
 						.pipe(Effect.forkChild)
 					yield* Deferred.await(entered)
+					const pending = yield* fs.readDirectory(directory)
+					assert.lengthOf(pending, 2)
 					yield* fork.dispose
 					const exit = yield* Fiber.await(editing)
 					assert(Exit.isFailure(exit))
@@ -271,3 +287,67 @@ describe("scoped atomic writes", () => {
 			),
 	)
 })
+
+for (const stage of ["write", "rename"]) {
+	it.live(
+		`waits for accepted native ${stage} completion before cancellation cleanup`,
+		() =>
+			run(() => ({}))(() =>
+				Effect.gen(function* () {
+					const { fs, file } = yield* setup
+					const started = Promise.withResolvers<void>()
+					const completion = Promise.withResolvers<void>()
+					const native = failure(stage)
+					const removed = yield* Ref.make(false)
+					const pending = Effect.tryPromise({
+						try: () => {
+							started.resolve()
+							return completion.promise
+						},
+						catch: () => native,
+					})
+					const writing = yield* atomicWrite(file, "replacement").pipe(
+						Effect.provideService(FileSystem.FileSystem, {
+							...fs,
+							open: (path, options) =>
+								fs.open(path, options).pipe(
+									Effect.map((handle) => ({
+										...handle,
+										stat: handle.stat,
+										sync: handle.sync,
+										writeAll: (bytes) =>
+											stage === "write" ? pending : handle.writeAll(bytes),
+									})),
+								),
+							rename: stage === "rename" ? () => pending : fs.rename,
+							remove: (path, options) =>
+								Ref.set(removed, true).pipe(
+									Effect.andThen(fs.remove(path, options)),
+								),
+						}),
+						Effect.forkScoped,
+					)
+					yield* Effect.promise(() => started.promise)
+					const cancelling = yield* Fiber.interrupt(writing).pipe(
+						Effect.forkScoped,
+					)
+					yield* Effect.yieldNow
+					const premature = yield* Ref.get(removed)
+					completion.reject(native)
+					yield* Fiber.join(cancelling)
+					const result = yield* Fiber.await(writing)
+					assert.isFalse(premature)
+					assert(Exit.isFailure(result))
+					assert.isTrue(Cause.hasInterrupts(result.cause))
+					assert.isTrue(
+						Array.some(
+							result.cause.reasons,
+							(reason) => reason._tag === "Fail" && reason.error === native,
+						),
+					)
+					const cleaned = yield* Ref.get(removed)
+					assert.isTrue(cleaned)
+				}),
+			),
+	)
+}

@@ -4,8 +4,18 @@ import { SecureRandom } from "effect/crypto"
 import { contract } from "../src/forecastContract"
 import { assert, describe, it } from "@effect/vitest"
 import { Graft, type Fork } from "@graftland/graft"
-import { Array, Effect, Exit, Layer, Option, Stream } from "effect"
+import {
+	Array,
+	Effect,
+	Exit,
+	Layer,
+	Logger,
+	Option,
+	Schema,
+	Stream,
+} from "effect"
 import type { Scope } from "effect"
+import { Forecasts, ForecastUnavailable } from "../src/Forecasts.ts"
 import { receive } from "../src/Chat.ts"
 import dice from "../src/plugins/dice.ts"
 import forecasts from "../src/plugins/forecasts.ts"
@@ -186,3 +196,54 @@ describe("chat-bot", () => {
 		}).pipe(run),
 	)
 })
+
+it.effect(
+	"matches uppercase banned words both initially and after an update",
+	() =>
+		Effect.gen(function* () {
+			const fork = yield* Graft.plugin(moderation, { banned: ["SPOILER"] })
+			yield* fork.await
+			yield* expectReply("SPOILER", removed)
+			yield* fork.update({ banned: ["LEAK"] })
+			yield* expectReply("LEAK", removed)
+		}).pipe(run),
+)
+
+it.effect(
+	"logs the forecast diagnostic while keeping the weather fallback response",
+	() =>
+		Effect.gen(function* () {
+			const marker = new Error("forecast diagnostic")
+			const logs: Array<Logger.Options<unknown>> = []
+			yield* Effect.gen(function* () {
+				yield* Graft.provide(Forecasts, {
+					today: () => Effect.fail(ForecastUnavailable.make({ cause: marker })),
+				})
+				const fork = yield* Graft.plugin(weather)
+				yield* fork.await
+				yield* expectReply(
+					"/weather Paris",
+					"Weather is temporarily unavailable.",
+				)
+			}).pipe(
+				Effect.provide(
+					Logger.layer([
+						Logger.make((log) => {
+							logs.push(log)
+						}),
+					]),
+				),
+			)
+			assert.isTrue(
+				Array.some(logs, (log) =>
+					Array.some(
+						log.cause.reasons,
+						(reason) =>
+							reason._tag === "Fail" &&
+							Schema.is(ForecastUnavailable)(reason.error) &&
+							reason.error.cause === marker,
+					),
+				),
+			)
+		}).pipe(run),
+)

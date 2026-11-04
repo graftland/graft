@@ -144,6 +144,31 @@ const watchEvents = Effect.fnUntraced(function* (
 
 describe("native HMR", () => {
 	it.live(
+		"replaces a restored entry while its original lease is still alive",
+		() =>
+			Effect.gen(function* () {
+				const { hmr, write, entry, fs, directory, load, reach } = yield* setup
+				yield* write("dependency.mjs", "export const value = 1")
+				yield* write("a.mjs", entry("old"))
+				const plugin = yield* load("./a.mjs")
+				const fork = yield* Graft.plugin(plugin)
+				yield* fork.await
+				yield* fs.remove(`${directory}/a.mjs`)
+				yield* hmr.reload
+				yield* reach(["old-1"])
+				yield* write("a.mjs", entry("restored"))
+				const restored = yield* hmr.reload
+				assert.deepStrictEqual(
+					restored,
+					Hmr.WatchResult.Reloaded({
+						entries: [new URL("a.mjs", `file://${directory}/`).href],
+					}),
+				)
+				yield* reach(["restored-1"])
+			}).pipe(run),
+	)
+
+	it.live(
 		"keeps raw modules in Node's cache while reloading plugin entries",
 		() =>
 			Effect.gen(function* () {
@@ -1479,12 +1504,19 @@ export const r = Plugin.make({ name: 'R', apply: () => Effect.void });`,
 			yield* write("dependency.mjs", "export const value = 1")
 			yield* write("a.mjs", entry("a"))
 			yield* write("b.mjs", entry("b"))
-			const pluginA = yield* load("./a.mjs")
+			const owner = yield* Effect.scope
+			const lease = yield* Scope.fork(owner)
+			const moduleA = yield* hmr
+				.importerScoped("./a.mjs")
+				.pipe(Scope.provide(lease))
+			const pluginA = Option.getOrThrow(Plugin.fromModule(moduleA))
 			const pluginB = yield* load("./b.mjs")
 			const a = yield* Graft.plugin(pluginA)
 			yield* Graft.plugin(pluginB)
 			yield* reach(["a-1", "b-1"])
 			yield* a.dispose
+			// Disposal and import ownership are separate; the last lease must close too.
+			yield* Scope.close(lease, Exit.void)
 			yield* fs.remove(`${directory}/a.mjs`)
 			yield* write("dependency.mjs", "export const value = 2")
 			const reloaded = yield* hmr.reload

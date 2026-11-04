@@ -11,6 +11,8 @@ import {
 	Cause,
 	Deferred,
 	Effect,
+	Exit,
+	Queue,
 	FileSystem,
 	HashSet,
 	HashMap,
@@ -53,6 +55,28 @@ import {
 	validateStructure,
 	type Path as EntryPath,
 } from "./Tree"
+
+/** Observe the producer after its resource scope closes, before merge can discard its Exit. */
+const observeSource = <A, E, R>(source: Stream.Stream<A, E, R>) =>
+	Stream.callback<A, E, R>(
+		(queue) =>
+			source.pipe(
+				Stream.runForEachArray((values) => Queue.offerAll(queue, values)),
+				Effect.scoped,
+				Effect.onExit((exit) =>
+					Exit.isFailure(exit) &&
+					Cause.hasInterrupts(exit.cause) &&
+					!Cause.hasInterruptsOnly(exit.cause)
+						? Effect.logError(
+								"Native watcher failed during cancellation",
+								exit.cause,
+							)
+						: Effect.void,
+				),
+				Effect.andThen(Queue.end(queue)),
+			),
+		{ bufferSize: 16 },
+	)
 
 const envTag: ScalarTag = {
 	tag: "!env",
@@ -680,6 +704,7 @@ export const Include: Plugin.Plugin<
 								onReady: () => Deferred.doneUnsafe(ready, Effect.void),
 							})
 							.pipe(
+								observeSource,
 								Stream.filter(
 									(event) =>
 										path.basename(event.path) === path.basename(target),

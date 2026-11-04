@@ -18,9 +18,13 @@ import * as Channel from "./socketChannel"
 import { path, protocol, payloadLimit } from "./websocket"
 
 const rejection = (error: AuthenticationFailed) =>
-	Effect.logWarning("Remote host authentication failed", {
-		reason: error.reason,
-	}).pipe(
+	Effect.logWarning(
+		"Remote host authentication failed",
+		{
+			reason: error.reason,
+		},
+		...(error.cause === undefined ? [] : [error.cause]),
+	).pipe(
 		Effect.as(
 			HttpServerResponse.empty({
 				status: 401,

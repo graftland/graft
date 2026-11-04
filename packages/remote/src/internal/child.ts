@@ -165,7 +165,17 @@ export const lifecycle = (
 				apply: () =>
 					Effect.gen(function* () {
 						for (const service of contract.provides)
-							yield* service.serve(peer).pipe(Effect.forkScoped)
+							yield* service.serve(peer).pipe(
+								Effect.tapCause((cause) =>
+									Cause.hasInterruptsOnly(cause)
+										? Effect.void
+										: Queue.offer(
+												telemetry.events,
+												ChildEvent.Failed({ cause }),
+											),
+								),
+								Effect.forkScoped,
+							)
 						yield* Effect.addFinalizer(() =>
 							Effect.gen(function* () {
 								const withdrawing = yield* SynchronizedRef.modify(

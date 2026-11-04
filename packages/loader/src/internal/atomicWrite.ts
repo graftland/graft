@@ -49,7 +49,10 @@ export const atomicWrite = Effect.fnUntraced(function* (
 					.pipe(Effect.provideService(Scope.Scope, scope)),
 				(file) =>
 					Effect.gen(function* () {
-						yield* file.writeAll(new TextEncoder().encode(text))
+						// Native writes must settle before cancellation closes the file or removes its path.
+						yield* file
+							.writeAll(new TextEncoder().encode(text))
+							.pipe(Effect.uninterruptible)
 						if (Option.isSome(previous)) {
 							const current = yield* file.stat
 							const { uid, gid } = previous.value
@@ -59,15 +62,17 @@ export const atomicWrite = Effect.fnUntraced(function* (
 								(!Equal.equals(uid, current.uid) ||
 									!Equal.equals(gid, current.gid))
 							) {
-								yield* fs.chown(temporary, uid.value, gid.value)
+								yield* fs
+									.chown(temporary, uid.value, gid.value)
+									.pipe(Effect.uninterruptible)
 							}
 						}
 						const mode = Option.match(previous, {
 							onNone: () => 0o600,
 							onSome: (info) => info.mode & 0o7777,
 						})
-						yield* fs.chmod(temporary, mode)
-						yield* file.sync
+						yield* fs.chmod(temporary, mode).pipe(Effect.uninterruptible)
+						yield* file.sync.pipe(Effect.uninterruptible)
 						// Close the handle before committing; no fallible cleanup follows rename.
 						yield* Scope.close(scope, Exit.void)
 						if (expected !== undefined) {
@@ -89,7 +94,7 @@ export const atomicWrite = Effect.fnUntraced(function* (
 						// while the temporary file was being prepared.
 						if (verifyTarget !== undefined) yield* verifyTarget
 						// Editors do not share our lock: checking and renaming cannot be atomic.
-						yield* fs.rename(temporary, target)
+						yield* fs.rename(temporary, target).pipe(Effect.uninterruptible)
 					}),
 				(_, exit) =>
 					Exit.isSuccess(exit)

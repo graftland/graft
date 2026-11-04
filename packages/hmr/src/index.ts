@@ -598,10 +598,8 @@ export const make = (
 								({ url, plugin, leases }) => [url, { plugin, leases }] as const,
 							),
 						)
-						const next = HashMap.union(
-							HashMap.filter(entries, (_, url) => !HashMap.has(selected, url)),
-							replacements,
-						)
+						// A missing entry still owns its running plugin until the last lease closes.
+						const next = HashMap.union(entries, replacements)
 
 						const pairs = Array.map(
 							candidates,

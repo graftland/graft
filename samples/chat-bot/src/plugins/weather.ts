@@ -1,5 +1,5 @@
 import { Plugin } from "@graftland/graft"
-import { Array, Effect, Option } from "effect"
+import { Array, Cause, Effect, Option } from "effect"
 import { command } from "../Chat.ts"
 import { Forecasts } from "../Forecasts.ts"
 
@@ -24,8 +24,11 @@ export default Plugin.make({
 							onSome: (forecast) => `${city}: ${forecast}`,
 						}),
 					).pipe(
-						Effect.catchTag("ForecastUnavailable", () =>
-							Effect.succeed("Weather is temporarily unavailable."),
+						Effect.catchTag("ForecastUnavailable", (error) =>
+							Effect.logWarning(
+								"Weather lookup failed",
+								Cause.fail(error),
+							).pipe(Effect.as("Weather is temporarily unavailable.")),
 						),
 					)
 				},

@@ -1,3 +1,4 @@
+import { EndOfStream } from "./runner/Framing"
 export type { Channel } from "../Transport"
 import type { Channel } from "../Transport"
 import {
@@ -512,7 +513,10 @@ const read = Effect.fnUntraced(function* (state: State, raw: unknown) {
 				TransportError.make({ cause: Cause.fail(cause) }),
 			),
 		)
-		if (message._tag === "Eof") return yield* error("Remote connection ended")
+		if (message._tag === "Eof")
+			return yield* TransportError.make({
+				cause: Cause.fail(EndOfStream.make({})),
+			})
 		const key = new RequestKey({
 			endpoint: current.endpoint,
 			id: message._tag === "Request" ? message.id : message.requestId,
@@ -572,7 +576,11 @@ const reader = (state: State) =>
 			),
 		),
 		Stream.runForEach((raw) => read(state, raw)),
-		Effect.andThen(error("Remote connection ended")),
+		Effect.andThen(
+			Effect.fail(
+				TransportError.make({ cause: Cause.fail(EndOfStream.make({})) }),
+			),
+		),
 	)
 
 /** One RPC client/server per declared endpoint; servers may start after the port. */

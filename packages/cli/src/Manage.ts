@@ -16,6 +16,18 @@ import {
 const report = (result: PackageManager.InstallResult) =>
 	Effect.logInfo(
 		`${result.agent}: ${result.added.length} added, ${result.updated.length} updated, ${result.removed.length} removed`,
+	).pipe(
+		Effect.andThen(
+			Option.match(result.snapshotCleanupFailure, {
+				onNone: () => Effect.void,
+				onSome: ({ cause, snapshotDirectory }) =>
+					Effect.logWarning(
+						"Installation committed; snapshot cleanup failed. Retry removing the retained snapshot.",
+						cause,
+						{ snapshotDirectory },
+					),
+			}),
+		),
 	)
 
 /**

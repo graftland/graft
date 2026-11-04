@@ -19,6 +19,7 @@ import {
 	Layer,
 	Logger,
 	MutableList,
+	Option,
 	String as Str,
 	Redacted,
 	Schema,
@@ -31,9 +32,9 @@ import { inject } from "vitest"
 import { createSecureServer } from "node:http2"
 import * as Auth from "../src/Auth"
 import * as Remote from "../src/index"
-import { TransportError } from "../src/Errors"
+import { AuthenticationFailed, TransportError } from "../src/Errors"
 import { Supervisor } from "../src/internal/Supervisor"
-import { Connector, type Channel } from "../src/Transport"
+import { Connector, Listener, type Channel } from "../src/Transport"
 import * as Assembly from "../src/internal/assembly"
 import { default as websocket } from "../src/runner/websocket"
 import unix from "../src/runner/unix"
@@ -535,3 +536,61 @@ describe("runner authentication", () => {
 		assert.equal(unix.unix, "/tmp/test")
 	})
 })
+
+it.live("binds a websocket listener configured with an IPv6 literal URL", () =>
+	Effect.gen(function* () {
+		const provider = yield* Graft.plugin(websocket, { url: "ws://[::1]:0" })
+		yield* provider.await
+		const listener = yield* capability(Listener)
+		const server = yield* listener.bind(Option.none())
+		yield* server
+			.serve(() => Effect.succeed(() => Effect.void))
+			.pipe(Effect.forkScoped)
+		yield* server.ready
+	}).pipe(Effect.scoped, Effect.provide(runtime)),
+)
+
+it.live(
+	"retains an authentication rejection cause without logging its authorization header",
+	() =>
+		Effect.gen(function* () {
+			const marker = new Error("JWKS unavailable")
+			const logs: Array<Logger.Options<unknown>> = []
+			yield* Effect.gen(function* () {
+				yield* Graft.provide(Auth.Authenticator, {
+					_tag: "Header",
+					authenticate: () =>
+						Effect.fail(
+							AuthenticationFailed.make({
+								reason: "invalid",
+								challenge: 'Bearer error="invalid_token"',
+								cause: Cause.die(marker),
+							}),
+						),
+				})
+				const port = yield* listen()
+				yield* reject(port, "Bearer private-test-credential")
+			}).pipe(
+				Effect.provide(
+					Logger.layer([
+						Logger.make((log) => {
+							logs.push(log)
+						}),
+					]),
+				),
+			)
+			assert.isTrue(
+				Array.some(logs, (log) =>
+					Array.some(
+						log.cause.reasons,
+						(reason) => reason._tag === "Die" && reason.defect === marker,
+					),
+				),
+			)
+			assert.isFalse(
+				Array.some(logs, (log) =>
+					Str.includes("private-test-credential")(String(log.message)),
+				),
+			)
+		}).pipe(Effect.scoped, Effect.provide(runtime)),
+)

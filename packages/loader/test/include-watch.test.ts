@@ -9,6 +9,7 @@ import {
 	Fiber,
 	FileSystem,
 	Option,
+	Logger,
 	Path,
 	Queue,
 	Ref,
@@ -322,11 +323,15 @@ it.effect(
 				yield* Queue.take(readEvents)
 				yield* Ref.set(reads, 0)
 				for (let index = 0; index < 20; index++) yield* notify
+				// Settle the producer handoff before measuring the quiet period.
+				yield* TestClock.adjust("0 millis")
 				yield* TestClock.adjust("99 millis")
 				const checked1 = yield* Ref.get(reads)
 
 				assert.strictEqual(checked1, 0)
 				yield* notify
+				// Settle the producer handoff before measuring the quiet period.
+				yield* TestClock.adjust("0 millis")
 				yield* TestClock.adjust("99 millis")
 				const checked2 = yield* Ref.get(reads)
 
@@ -340,6 +345,59 @@ it.effect(
 				const checked4 = yield* Ref.get(reads)
 
 				assert.strictEqual(checked4, 1)
+			}),
+		),
+)
+
+it.effect(
+	"logs the complete native watcher cleanup cause before merge discards it",
+	() =>
+		run(() => ({}))(() =>
+			Effect.gen(function* () {
+				const fs = yield* FileSystem.FileSystem
+				const directory = yield* fs.makeTempDirectoryScoped()
+				const file = `${directory}/graft.yml`
+				yield* fs.writeFileString(file, "[]")
+				const ready = yield* Deferred.make<void>()
+				const marker = new Error("watcher cleanup failed")
+				const logs: Array<Logger.Options<unknown>> = []
+				yield* Graft.provide(FileSystem.FileSystem, {
+					...fs,
+					watch: (_, options) =>
+						Stream.unwrap(
+							Effect.gen(function* () {
+								yield* Effect.addFinalizer(() => Effect.die(marker))
+								options?.onReady?.()
+								yield* Deferred.succeed(ready, undefined)
+								return Stream.never
+							}),
+						),
+				})
+				yield* Effect.gen(function* () {
+					const fork = yield* Graft.plugin(Include.Include, {
+						path: file,
+						watch: true,
+					})
+					yield* fork.await
+					yield* Deferred.await(ready)
+					yield* fork.dispose
+				}).pipe(
+					Effect.provide(
+						Logger.layer([
+							Logger.make((entry) => {
+								logs.push(entry)
+							}),
+						]),
+					),
+				)
+				assert.isTrue(
+					Array.some(logs, (log) =>
+						Array.some(
+							log.cause.reasons,
+							(reason) => reason._tag === "Die" && reason.defect === marker,
+						),
+					),
+				)
 			}),
 		),
 )

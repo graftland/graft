@@ -339,7 +339,7 @@ export const plugin: <P extends Plugin>(
 				const owned = yield* ownedScope(
 					scope,
 					Effect.flatMap(Ref.get(termination), (exit) =>
-						Exit.isFailure(exit) && !Cause.hasInterruptsOnly(exit.cause)
+						Exit.isFailure(exit)
 							? Effect.fail(CleanupError.make({ cause: exit.cause }))
 							: Effect.void,
 					),
