@@ -1,5 +1,5 @@
-import websocket from "@graftland/remote/host/websocket"
-import jwt from "@graftland/remote/host/auth/jwt"
+import { legacy as websocket } from "@graftland/plugin-remote/host/websocket"
+import jwt from "@graftland/plugin-remote/host/auth/jwt"
 /**
  * The host. It loads graft.yml, exports two invoices across two host restarts,
  * and shows the ledger turning away a write from the replaced generation.
@@ -34,8 +34,8 @@ export const layer = (environment: Readonly<Record<string, string>>) =>
 			NodeServices.layer,
 			SecureRandom.layerWebCrypto,
 			ModuleResolver.fromRecord({
-				"@graftland/remote/host/websocket": websocket,
-				"@graftland/remote/host/auth/jwt": jwt,
+				"@graftland/plugin-remote/internal/legacy/host/websocket": websocket,
+				"@graftland/plugin-remote/host/auth/jwt": jwt,
 				"./src/ledger.ts": ledger,
 				"./src/exporter.ts": exporter,
 			}),

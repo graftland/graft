@@ -1,8 +1,8 @@
 import { Graft, Plugin } from "@graftland/graft"
 import { Effect, Layer } from "effect"
 import local from "../src/host/local"
-import websocket from "../src/host/websocket"
-import mtls from "../src/host/auth/mtls"
+import { legacy as websocket } from "../src/host/websocket"
+import { legacy as mtls } from "../src/host/auth/mtls"
 
 const load = (
 	plugins: ReadonlyArray<Plugin.Plugin<void, void, Graft.ServiceConflict>>,

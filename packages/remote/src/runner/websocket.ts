@@ -13,7 +13,7 @@ import {
 	NoAuthenticator,
 	type LegacyAuthenticator,
 } from "../Auth"
-import { Directory } from "../internal/config"
+import { ConfigDirectory } from "@graftland/loader"
 import { createSecureServer } from "node:http2"
 import { Url, path as upgradePath } from "../internal/websocket"
 import * as Legacy from "../internal/listener"
@@ -97,7 +97,9 @@ const factory = Effect.fnUntraced(function* (
 	if (config._tag === "ws") return createServer
 	const fs = yield* FileSystem.FileSystem
 	const path = yield* Path.Path
-	const directory = yield* Directory
+	const directory = yield* ConfigDirectory.pipe(
+		Effect.map(Option.getOrElse(() => ".")),
+	)
 	const cert = yield* fs.readFileString(path.resolve(directory, config.cert))
 	const key = yield* fs.readFileString(path.resolve(directory, config.key))
 	return () =>
@@ -138,7 +140,7 @@ const bind = Effect.fnUntraced(function* (
 		}),
 	} satisfies Legacy.Binding
 })
-export default Plugin.make({
+export const legacy = Plugin.make({
 	name: "remote-websocket-listener",
 	config: Config,
 	apply: (config) =>
@@ -158,14 +160,16 @@ export const capability = Plugin.make({
 	apply: Effect.fnUntraced(function* (config) {
 		const fs = yield* FileSystem.FileSystem
 		const path = yield* Path.Path
-		const directory = yield* Directory
+		const directory = yield* ConfigDirectory.pipe(
+			Effect.map(Option.getOrElse(() => ".")),
+		)
 		yield* Graft.provide(Listener, {
 			properties: properties(config.url),
 			bind: (tls) =>
 				factory(config, tls).pipe(
 					Effect.provideService(FileSystem.FileSystem, fs),
 					Effect.provideService(Path.Path, path),
-					Effect.provideService(Directory, directory),
+					Effect.provideService(ConfigDirectory, Option.some(directory)),
 					Effect.flatMap((server) =>
 						Server.bind(server, {
 							host: config.url.hostname,
@@ -202,3 +206,5 @@ const Listening = Schema.fromJsonString(
 		port: Schema.NullOr(Schema.Int),
 	}),
 )
+
+export default capability

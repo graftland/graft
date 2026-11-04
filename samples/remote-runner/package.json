@@ -17,7 +17,7 @@
 		"@graftland/cli": "workspace:*",
 		"@graftland/graft": "workspace:*",
 		"@graftland/loader": "workspace:*",
-		"@graftland/remote": "workspace:*",
+		"@graftland/plugin-remote": "workspace:*",
 		"effect": "4.1.2"
 	},
 	"devDependencies": {

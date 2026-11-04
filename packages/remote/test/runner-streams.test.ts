@@ -1,3 +1,4 @@
+import { application } from "./application"
 import { assert, describe, it } from "@effect/vitest"
 import { NodeServices } from "@effect/platform-node"
 import { Graft, Plugin } from "@graftland/graft"
@@ -33,7 +34,7 @@ import * as Lock from "../src/internal/runner/Lock"
 import { TransportError } from "../src/Errors"
 import unix from "../src/host/unix"
 import launcher from "../src/host/command"
-import none from "../src/host/auth/none"
+import { legacy as none } from "../src/host/auth/none"
 import { ChildApi, HostApi, contract } from "./fixtures/services-contract"
 
 const platform = Layer.merge(NodeServices.layer, SecureRandom.layerWebCrypto)
@@ -43,6 +44,7 @@ const spawn = Effect.fnUntraced(function* (args: ReadonlyArray<string>) {
 	const argv = yield* command()
 	const child = yield* spawner.spawn(
 		ChildProcess.make(argv[0], [...Array.drop(argv, 1), ...args], {
+			cwd: new URL("..", import.meta.url).pathname,
 			stdin: "pipe",
 			stdout: "pipe",
 			stderr: "pipe",
@@ -252,11 +254,10 @@ describe("runner stream transports", () => {
 				yield* proxy(
 					Remote.runner({
 						instance: "worker",
-						transport: Remote.command([
-							argv[0],
-							...Array.drop(argv, 1),
-							...args(directory + "/state"),
-						]),
+						transport: Remote.command(
+							[argv[0], ...Array.drop(argv, 1), ...args(directory + "/state")],
+							{ cwd: new URL("..", import.meta.url).pathname },
+						),
 					}),
 					directory,
 				)
@@ -271,23 +272,24 @@ describe("runner stream transports", () => {
 				const fs = yield* FileSystem.FileSystem
 				const directory = yield* fs.makeTempDirectoryScoped()
 				for (const other of ["stdio", "unix"]) {
+					yield* application(directory)
 					const file = directory + "/runner.yml"
 					const yaml = yield* Schema.encodeEffect(
 						Schema.fromJsonString(Schema.Unknown),
 					)([
 						{
-							name: "@graftland/remote/runner/supervisor",
+							name: "@graftland/plugin-remote/runner/supervisor",
 							config: {
 								root: inject("remoteRoot"),
 								state: directory + "/state",
 							},
 						},
-						{ name: "@graftland/remote/runner/stdio" },
+						{ name: "@graftland/plugin-remote/runner/stdio" },
 						{
 							name:
 								other === "stdio"
 									? new URL("../dist/runner/stdio.js", import.meta.url).pathname
-									: "@graftland/remote/runner/unix",
+									: "@graftland/plugin-remote/runner/unix",
 							config:
 								other === "unix" ? { path: directory + "/unused.sock" } : {},
 						},

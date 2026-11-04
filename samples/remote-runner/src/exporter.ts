@@ -3,7 +3,7 @@
  * address, CA path, and JWT from environment variables.
  */
 import type { Plugin } from "@graftland/graft"
-import * as Remote from "@graftland/remote"
+import * as Remote from "@graftland/plugin-remote"
 import { Config, Effect, FileSystem } from "effect"
 import { contract } from "./contract.ts"
 

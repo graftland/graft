@@ -56,6 +56,13 @@ it.effect.each([
 			const bad = leaf("bad")
 			const healthy = leaf("healthy")
 			const resolver = Layer.succeed(ModuleResolver.ModuleResolver, {
+				importModule: (specifier) =>
+					Effect.fail(
+						ModuleResolver.ModuleInvalid.make({
+							specifier,
+							cause: "Unused in this fixture",
+						}),
+					),
 				resolve: (name, options) =>
 					Effect.gen(function* () {
 						if (name === "bad" && options !== undefined) {

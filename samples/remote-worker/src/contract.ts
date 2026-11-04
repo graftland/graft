@@ -1,4 +1,4 @@
-import { Contract } from "@graftland/remote"
+import { Contract } from "@graftland/plugin-remote"
 import { Context, Effect, Schema } from "effect"
 import { Rpc, RpcGroup } from "effect/rpc"
 

@@ -22,6 +22,7 @@ import type {
 	Local as LocalTarget,
 	Worker as WorkerTarget,
 	Runner as RunnerOptions,
+	RunnerCommon,
 } from "../../Targets"
 import {
 	LocalTerminationTimeout,
@@ -35,8 +36,14 @@ import * as Wire from "./Wire"
 
 type RunnerTarget<D extends ReadonlyArray<Plugin.Dependency>> =
 	RunnerOptions<D> & { readonly instance: string }
+export interface ConfiguredRunner extends Omit<RunnerCommon, "_tag"> {
+	readonly _tag: "Connector"
+}
 export type Target<D extends ReadonlyArray<Plugin.Dependency> = readonly []> =
-	LocalTarget | WorkerTarget | RunnerTarget<D>
+	| LocalTarget
+	| WorkerTarget
+	| RunnerTarget<D>
+	| (ConfiguredRunner & { readonly instance: string })
 
 type Peer = Port.Port
 export interface Connected {
@@ -64,7 +71,7 @@ export interface Connected {
 	}
 }
 export class Connection extends Context.Service<Connection, Connected>()(
-	"@graftland/remote/internal/runner/Connection",
+	"@graftland/plugin-remote/internal/runner/Connection",
 ) {}
 const connected = Connection.of
 
@@ -129,7 +136,7 @@ export const acquire = <
 		const owned = yield* scopes
 		const connection = yield* Effect.acquireRelease(
 			Effect.gen(function* () {
-				return target._tag !== "Runner"
+				return target._tag === "Local" || target._tag === "Worker"
 					? yield* Local(
 							target,
 							contractModule,

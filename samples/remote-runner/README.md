@@ -71,10 +71,10 @@ and `token` on the host; keep `ca.key` with the operator. No client TLS
 certificate is used. Existing CA files are reused by `certificates`; `--force`
 replaces requested leaf certificates.
 
-Install `@graftland/remote` and this built package with dependencies under
-`/srv/graft/install`, with its own `package.json`. These are workspace packages;
-no registry release is assumed. Run under an external supervisor that stops the
-whole process group, and preserve `/var/lib/graft`:
+Install `@graftland/plugin-remote` and this built package with dependencies
+under `/srv/graft/install`, with its own `package.json`. These are workspace
+packages; no registry release is assumed. Run under an external supervisor that
+stops the whole process group, and preserve `/var/lib/graft`:
 
 ```sh
 graft-remote serve --listen wss://0.0.0.0:7443 --auth jwt \
@@ -98,8 +98,8 @@ exporter; add a host plugin injecting `Exporter` to make calls.
 
 ## Connect over SSH
 
-Instead of wss/JWT, load `@graftland/remote/host/command` in the host YAML in
-place of `host/websocket` and `host/auth/jwt`. Use:
+Instead of wss/JWT, load `@graftland/plugin-remote/host/command` in the host
+YAML in place of `host/websocket` and `host/auth/jwt`. Use:
 
 ```ts
 Remote.runner({

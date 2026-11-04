@@ -1,5 +1,5 @@
 {
-	"name": "@graftland/remote",
+	"name": "@graftland/plugin-remote",
 	"version": "0.0.0",
 	"private": true,
 	"type": "module",
@@ -15,6 +15,10 @@
 			"default": "./dist/Auth.js"
 		},
 		"./bin": "./dist/bin.js",
+		"./Contract": {
+			"source": "./src/Contract.ts",
+			"default": "./dist/Contract.js"
+		},
 		"./Errors": {
 			"source": "./src/Errors.ts",
 			"default": "./dist/Errors.js"
@@ -54,6 +58,34 @@
 		"./host/worker": {
 			"source": "./src/host/worker.ts",
 			"default": "./dist/host/worker.js"
+		},
+		"./internal/legacy/host/auth/mtls": {
+			"source": "./src/internal/legacy/host/auth/mtls.ts",
+			"default": "./dist/internal/legacy/host/auth/mtls.js"
+		},
+		"./internal/legacy/host/auth/none": {
+			"source": "./src/internal/legacy/host/auth/none.ts",
+			"default": "./dist/internal/legacy/host/auth/none.js"
+		},
+		"./internal/legacy/host/websocket": {
+			"source": "./src/internal/legacy/host/websocket.ts",
+			"default": "./dist/internal/legacy/host/websocket.js"
+		},
+		"./internal/legacy/runner/auth/mtls": {
+			"source": "./src/internal/legacy/runner/auth/mtls.ts",
+			"default": "./dist/internal/legacy/runner/auth/mtls.js"
+		},
+		"./internal/legacy/runner/auth/none": {
+			"source": "./src/internal/legacy/runner/auth/none.ts",
+			"default": "./dist/internal/legacy/runner/auth/none.js"
+		},
+		"./internal/legacy/runner/websocket": {
+			"source": "./src/internal/legacy/runner/websocket.ts",
+			"default": "./dist/internal/legacy/runner/websocket.js"
+		},
+		"./runner": {
+			"source": "./src/runner/index.ts",
+			"default": "./dist/runner/index.js"
 		},
 		"./Runner": {
 			"source": "./src/Runner.ts",
@@ -129,6 +161,7 @@
 			".": "./dist/index.js",
 			"./Auth": "./dist/Auth.js",
 			"./bin": "./dist/bin.js",
+			"./Contract": "./dist/Contract.js",
 			"./Errors": "./dist/Errors.js",
 			"./host/auth/bearer": "./dist/host/auth/bearer.js",
 			"./host/auth/jwt": "./dist/host/auth/jwt.js",
@@ -139,6 +172,13 @@
 			"./host/unix": "./dist/host/unix.js",
 			"./host/websocket": "./dist/host/websocket.js",
 			"./host/worker": "./dist/host/worker.js",
+			"./internal/legacy/host/auth/mtls": "./dist/internal/legacy/host/auth/mtls.js",
+			"./internal/legacy/host/auth/none": "./dist/internal/legacy/host/auth/none.js",
+			"./internal/legacy/host/websocket": "./dist/internal/legacy/host/websocket.js",
+			"./internal/legacy/runner/auth/mtls": "./dist/internal/legacy/runner/auth/mtls.js",
+			"./internal/legacy/runner/auth/none": "./dist/internal/legacy/runner/auth/none.js",
+			"./internal/legacy/runner/websocket": "./dist/internal/legacy/runner/websocket.js",
+			"./runner": "./dist/runner/index.js",
 			"./Runner": "./dist/Runner.js",
 			"./runner/auth/bearer": "./dist/runner/auth/bearer.js",
 			"./runner/auth/jwt": "./dist/runner/auth/jwt.js",

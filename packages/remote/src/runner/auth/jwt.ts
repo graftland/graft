@@ -1,3 +1,4 @@
+import { Option } from "effect"
 import { Graft, Plugin } from "@graftland/graft"
 import {
 	Cause,
@@ -12,7 +13,7 @@ import { Jwk, Jwks, Jwt } from "effect/jose"
 import { Signature } from "effect/crypto"
 import { HttpClient } from "effect/http"
 import { JwtAuthenticator } from "../../Auth"
-import { Directory } from "../../internal/config"
+import { ConfigDirectory } from "@graftland/loader"
 import { PeerAuthenticationError } from "../../internal/runner/model"
 import * as Token from "../../internal/auth/token"
 
@@ -49,7 +50,9 @@ const keys = Effect.fnUntraced(function* (config: typeof Config.Type) {
 		return Jwks.layerRemote({ url: config.keys.jwksUrl })
 	const fs = yield* FileSystem.FileSystem
 	const path = yield* Path.Path
-	const directory = yield* Directory
+	const directory = yield* ConfigDirectory.pipe(
+		Effect.map(Option.getOrElse(() => ".")),
+	)
 	const pem = yield* fs.readFileString(
 		path.resolve(directory, config.keys.publicKey),
 	)

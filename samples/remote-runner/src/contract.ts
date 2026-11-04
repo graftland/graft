@@ -2,7 +2,7 @@
  * What the host and the runner share. The host imports this module, never the
  * worker implementation.
  */
-import { Contract } from "@graftland/remote"
+import { Contract } from "@graftland/plugin-remote"
 import { Context, Effect, Schema } from "effect"
 import { Rpc, RpcGroup } from "effect/rpc"
 

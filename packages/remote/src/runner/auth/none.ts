@@ -1,8 +1,8 @@
 import { Graft, Plugin } from "@graftland/graft"
 import { Effect, Schema } from "effect"
-import { NoAuthenticator } from "../../Auth"
+import { Authenticator, NoAuthenticator } from "../../Auth"
 
-export default Plugin.make({
+export const legacy = Plugin.make({
 	name: "remote-no-authenticator",
 	config: Schema.Struct({
 		identity: Schema.String.pipe(
@@ -11,4 +11,14 @@ export default Plugin.make({
 	}),
 	apply: (config) =>
 		Graft.provide(NoAuthenticator, { _tag: "None", ...config }),
+})
+
+export default Plugin.make({
+	name: "remote-none-authenticator",
+	config: Schema.Struct({
+		identity: Schema.String.pipe(
+			Schema.withDecodingDefaultKey(Effect.succeed("anonymous")),
+		),
+	}),
+	apply: (config) => Graft.provide(Authenticator, { _tag: "None", ...config }),
 })

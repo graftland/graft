@@ -174,6 +174,13 @@ it.effect("removes an unresolved entry after its resolver cleanup fails", () =>
 		const entered = yield* Deferred.make<void>()
 		const cleanup = new Error("Resolver cleanup failed")
 		const resolver = Layer.succeed(ModuleResolver.ModuleResolver, {
+			importModule: (specifier) =>
+				Effect.fail(
+					ModuleResolver.ModuleInvalid.make({
+						specifier,
+						cause: "Unused in this fixture",
+					}),
+				),
 			resolve: () =>
 				Effect.gen(function* () {
 					yield* Effect.addFinalizer(() => Effect.die(cleanup))

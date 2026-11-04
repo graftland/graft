@@ -204,6 +204,13 @@ it.effect.each(["merge", "registration", "resolver"])(
 			)
 			const environment = Layer.merge(
 				Layer.succeed(ModuleResolver.ModuleResolver, {
+					importModule: (specifier) =>
+						Effect.fail(
+							ModuleResolver.ModuleInvalid.make({
+								specifier,
+								cause: "Unused in this fixture",
+							}),
+						),
 					resolve: () => {
 						if (stage === "resolver" && Ref.getUnsafe(broken)) throw defect
 						return Effect.succeed(plugin)

@@ -99,7 +99,7 @@ const jwt = Effect.fnUntraced(function* (options: Options) {
 		key: JwtAuthenticator.key,
 		entry: {
 			id: "remote-auth",
-			name: "@graftland/remote/runner/auth/jwt",
+			name: "@graftland/plugin-remote/runner/auth/jwt",
 			config: {
 				issuer,
 				audience,
@@ -130,7 +130,7 @@ export const entry = Effect.fnUntraced(function* (options: Options) {
 				key: BearerAuthenticator.key,
 				entry: {
 					id: "remote-auth",
-					name: "@graftland/remote/runner/auth/bearer",
+					name: "@graftland/plugin-remote/runner/auth/bearer",
 					config: { tokens: yield* required(options.tokens, "tokens") },
 				},
 			}
@@ -139,7 +139,7 @@ export const entry = Effect.fnUntraced(function* (options: Options) {
 				key: MtlsAuthenticator.key,
 				entry: {
 					id: "remote-auth",
-					name: "@graftland/remote/runner/auth/mtls",
+					name: "@graftland/plugin-remote/internal/legacy/runner/auth/mtls",
 					config: { ca: yield* required(options.ca, "ca") },
 				},
 			}
@@ -148,7 +148,7 @@ export const entry = Effect.fnUntraced(function* (options: Options) {
 				key: NoAuthenticator.key,
 				entry: {
 					id: "remote-auth",
-					name: "@graftland/remote/runner/auth/none",
+					name: "@graftland/plugin-remote/internal/legacy/runner/auth/none",
 					config: {
 						identity: Option.getOrElse(options.identity, () => "anonymous"),
 					},

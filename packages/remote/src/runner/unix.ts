@@ -1,9 +1,10 @@
+import { Option } from "effect"
 import { Plugin } from "@graftland/graft"
 import { Effect, Path, Schema } from "effect"
 // @effect-diagnostics-next-line nodeBuiltinImport:off -- NodeHttpServer takes a factory for a Node HTTP/1.1 server on the Unix socket
 import { createServer } from "node:http"
 import { MtlsAuthenticator, NoAuthenticator } from "../Auth"
-import { Directory } from "../internal/config"
+import { ConfigDirectory } from "@graftland/loader"
 import * as Listener from "../internal/listener"
 
 export const Config = Schema.Struct({
@@ -16,7 +17,9 @@ export const Config = Schema.Struct({
 })
 const bind = Effect.fnUntraced(function* (config: typeof Config.Type) {
 	const path = yield* Path.Path
-	const directory = yield* Directory
+	const directory = yield* ConfigDirectory.pipe(
+		Effect.map(Option.getOrElse(() => ".")),
+	)
 	const socket = path.resolve(directory, config.path)
 	// Node rejects an occupied path and removes its own socket file when the server closes.
 	return {

@@ -81,7 +81,7 @@ const listenerEntries = Effect.fnUntraced(function* (
 		return [
 			{
 				id: "remote-stdio",
-				name: "@graftland/remote/runner/stdio",
+				name: "@graftland/plugin-remote/runner/stdio",
 				config: {
 					identity: Option.getOrElse(options.identity, () => "anonymous"),
 				},
@@ -111,13 +111,13 @@ const listenerEntries = Effect.fnUntraced(function* (
 			if (typeof address === "string")
 				return {
 					id,
-					name: "@graftland/remote/runner/unix",
+					name: "@graftland/plugin-remote/runner/unix",
 					config: { path: address, auth: auth.key },
 				}
 			const url = yield* Schema.encodeEffect(Url)(address)
 			return {
 				id,
-				name: "@graftland/remote/runner/websocket",
+				name: "@graftland/plugin-remote/internal/legacy/runner/websocket",
 				config: {
 					...(address.protocol === "wss:" ? certificate : {}),
 					url,
@@ -189,7 +189,7 @@ const serve = Command.make(
 			entries: [
 				{
 					id: "remote-supervisor",
-					name: "@graftland/remote/runner/supervisor",
+					name: "@graftland/plugin-remote/runner/supervisor",
 					config: supervisor,
 				},
 				...listeners,

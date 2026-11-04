@@ -1,6 +1,7 @@
 /**
  * Turns the `name` of an entry into a plugin.
  */
+import { ConfigDirectory } from "./ConfigDirectory"
 import { isOnlyFailure } from "./internal/recovery"
 import { Plugin } from "@graftland/graft"
 import {
@@ -31,19 +32,23 @@ export class ModuleNotFound extends Schema.TaggedError<
 	}
 }
 
-/** A module was found but importing it failed, or it exports no plugin. */
+/** A module could not be imported, or plugin resolution found no plugin export. */
 export class ModuleInvalid extends Schema.TaggedError<
 	ModuleInvalid,
 	{ readonly brand: unique symbol }
 >()("ModuleInvalid", { specifier: Schema.String, cause: Schema.Unknown }) {
 	override get message(): string {
-		return `Module "${this.specifier}" could not be loaded as a plugin`
+		return `Module "${this.specifier}" could not be loaded`
 	}
 }
 
 export class ModuleResolver extends Context.Service<
 	ModuleResolver,
 	{
+		readonly importModule: (
+			exactSpecifier: string,
+			options?: ImportOptions,
+		) => Effect.Effect<unknown, ModuleInvalid, Scope.Scope>
 		readonly resolve: (
 			name: string,
 			options?: ImportOptions,
@@ -148,7 +153,7 @@ const inCandidateScope = <A, E>(effect: Effect.Effect<A, E, Scope.Scope>) =>
 
 /**
  * Resolves names with dynamic `import`. Relative specifiers are resolved
- * against `base`; file URLs retain their query and fragment for importing, while
+ * against `ConfigDirectory` when supplied, otherwise `base`; file URLs retain their query and fragment for importing, while
  * their decoded paths identify missing candidates. Bare specifiers go through
  * `importer`, which should run in the application so its dependencies are visible.
  * Effect importers may acquire
@@ -167,7 +172,11 @@ export const make = <E>(
 			const invalid = (cause: unknown) =>
 				ModuleInvalid.make({ specifier, cause })
 			if (isPath(specifier)) {
-				const file = path.resolve(options.base, specifier)
+				const directory = yield* ConfigDirectory
+				const file = path.resolve(
+					Option.getOrElse(directory, () => options.base),
+					specifier,
+				)
 				const url = yield* path.toFileUrl(file).pipe(Effect.mapError(invalid))
 				return { target: url.href, names: [specifier, file, url.href] }
 			}
@@ -186,16 +195,13 @@ export const make = <E>(
 					: [specifier, packageOf(specifier)],
 			}
 		})
-		/** `None` when nothing exists under this specifier, so the next candidate is tried. */
-		const attempt = Effect.fnUntraced(function* (
+		const load = Effect.fnUntraced(function* (
 			specifier: string,
+			candidate: { readonly target: string },
 			observationScope: Scope.Scope,
 		) {
-			const candidate = yield* normalize(specifier)
 			return yield* Effect.tryPromise({
 				try: () => {
-					// Start Promise importers inside the registration step, so even
-					// immediate cancellation leaves their rejection observed.
 					const imported = options.importer(candidate.target, {
 						observationScope,
 					})
@@ -212,6 +218,15 @@ export const make = <E>(
 						),
 					),
 				),
+			)
+		})
+		/** Only a missing candidate permits short-name fallback. */
+		const attempt = Effect.fnUntraced(function* (
+			specifier: string,
+			observationScope: Scope.Scope,
+		) {
+			const candidate = yield* normalize(specifier)
+			return yield* load(specifier, candidate, observationScope).pipe(
 				Effect.flatMap((module) =>
 					Effect.fromOption(Plugin.fromModule(module), () =>
 						ModuleInvalid.make({ specifier, cause: "it exports no plugin" }),
@@ -229,6 +244,18 @@ export const make = <E>(
 			)
 		})
 		return {
+			importModule: Effect.fnUntraced(function* (
+				specifier: string,
+				options?: ImportOptions,
+			) {
+				const caller = yield* Effect.scope
+				const candidate = yield* normalize(specifier)
+				return yield* load(
+					specifier,
+					candidate,
+					options?.observationScope ?? caller,
+				).pipe(inCandidateScope)
+			}),
 			resolve: Effect.fnUntraced(function* (
 				name: string,
 				options?: ImportOptions,
@@ -255,6 +282,13 @@ export const fromRecord = (
 	plugins: Readonly<Record<string, Plugin.Plugin>>,
 ): Layer.Layer<ModuleResolver> =>
 	Layer.succeed(ModuleResolver, {
+		importModule: (specifier) =>
+			Effect.fromOption(Record.get(plugins, specifier), () =>
+				ModuleInvalid.make({
+					specifier,
+					cause: "it is not in the module table",
+				}),
+			).pipe(Effect.map((plugin) => ({ default: plugin }))),
 		resolve: (name) =>
 			Effect.suspend(() =>
 				Effect.fromOption(Record.get(plugins, name), () =>

@@ -37,7 +37,7 @@ const runtime = Graft.layer.pipe(
 	),
 )
 class Business extends Context.Service<Business, string>()(
-	"@graftland/remote/test/capabilities.test/Business",
+	"@graftland/plugin-remote/test/capabilities.test/Business",
 ) {}
 const find = (
 	trees: ReadonlyArray<Fork.ForkTree>,

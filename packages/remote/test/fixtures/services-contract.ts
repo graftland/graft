@@ -7,7 +7,7 @@ export class HostApi extends Context.Service<
 	{
 		readonly double: (value: number) => Effect.Effect<number>
 	}
->()("@graftland/remote/test/fixtures/services-contract/HostApi") {}
+>()("@graftland/plugin-remote/test/fixtures/services-contract/HostApi") {}
 export const Reply = Schema.Struct({
 	value: Schema.Int,
 	pid: Schema.Int,
@@ -21,7 +21,7 @@ export class ChildApi extends Context.Service<
 		readonly values: Stream.Stream<number>
 		readonly hold: Effect.Effect<void>
 	}
->()("@graftland/remote/test/fixtures/services-contract/ChildApi") {}
+>()("@graftland/plugin-remote/test/fixtures/services-contract/ChildApi") {}
 const HostRpc = RpcGroup.make(
 	Rpc.make("Double", { payload: { value: Schema.Int }, success: Schema.Int }),
 )
@@ -55,7 +55,7 @@ export const childService = Contract.service(ChildApi, ChildRpc, {
 export class ChildLabel extends Context.Service<
 	ChildLabel,
 	{ readonly read: Effect.Effect<string> }
->()("@graftland/remote/test/fixtures/services-contract/ChildLabel") {}
+>()("@graftland/plugin-remote/test/fixtures/services-contract/ChildLabel") {}
 const LabelRpc = RpcGroup.make(Rpc.make("Load", { success: Schema.String }))
 const labelService = Contract.service(ChildLabel, LabelRpc, {
 	toHandlers: (value) => ({ Load: () => value.read }),

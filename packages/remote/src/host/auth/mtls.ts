@@ -1,7 +1,15 @@
 import { Plugin, Graft } from "@graftland/graft"
-import { Cause, Effect, FileSystem, Path, Redacted, Schema } from "effect"
+import {
+	Cause,
+	Effect,
+	FileSystem,
+	Option,
+	Path,
+	Redacted,
+	Schema,
+} from "effect"
 import { CredentialsError } from "../../Errors"
-import { Directory } from "../../internal/config"
+import { ConfigDirectory } from "@graftland/loader"
 import { Credentials, MtlsCredentials, type Prepared } from "../../Auth"
 
 const plugin: Plugin.Plugin<void, void, Graft.ServiceConflict> = Plugin.service(
@@ -12,7 +20,7 @@ const plugin: Plugin.Plugin<void, void, Graft.ServiceConflict> = Plugin.service(
 	},
 )
 
-export default plugin
+export { plugin as legacy }
 
 export const Config = Schema.Struct({ cert: Schema.String, key: Schema.String })
 export const capability = Plugin.make({
@@ -22,7 +30,9 @@ export const capability = Plugin.make({
 	apply: Effect.fnUntraced(function* (config) {
 		const fs = yield* FileSystem.FileSystem
 		const path = yield* Path.Path
-		const directory = yield* Directory
+		const directory = yield* ConfigDirectory.pipe(
+			Effect.map(Option.getOrElse(() => ".")),
+		)
 		yield* Graft.provide(Credentials, {
 			kind: "Certificate",
 			// File credentials are read for each connection, not cached on activation.
@@ -46,3 +56,5 @@ export const capability = Plugin.make({
 		})
 	}),
 })
+
+export default capability

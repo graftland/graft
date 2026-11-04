@@ -26,7 +26,7 @@ const start: typeof WorkerTransport.Service.start = Effect.fnUntraced(
 			Effect.try({
 				try: () => {
 					const worker = new Worker(
-						new URL(import.meta.resolve("@graftland/remote/worker")),
+						new URL(import.meta.resolve("@graftland/plugin-remote/worker")),
 						{
 							workerData: data,
 							...(options.execArgv === undefined

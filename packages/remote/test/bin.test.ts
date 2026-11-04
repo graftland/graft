@@ -1,3 +1,4 @@
+import { application } from "./application"
 import { inject } from "vitest"
 import { assert, describe, it } from "@effect/vitest"
 import { NodeServices } from "@effect/platform-node"
@@ -14,6 +15,7 @@ const invoke = (args: ReadonlyArray<string>) =>
 		const argv = yield* command()
 		const child = yield* spawner.spawn(
 			ChildProcess.make(argv[0], [...argv.slice(1), ...args], {
+				cwd: new URL("..", import.meta.url).pathname,
 				stdout: "pipe",
 				stderr: "pipe",
 			}),
@@ -93,23 +95,24 @@ describe("remote command line", () => {
 			Effect.gen(function* () {
 				const fs = yield* FileSystem.FileSystem
 				const directory = yield* fs.makeTempDirectoryScoped()
+				yield* application(directory)
 				const file = directory + "/runner.yml"
 				yield* fs.writeFileString(
 					file,
 					`
 - id: supervisor
-  name: '@graftland/remote/runner/supervisor'
+  name: '@graftland/plugin-remote/runner/supervisor'
   config: { root: '${inject("remoteRoot")}', state: '${directory}/state' }
 - id: auth
-  name: '@graftland/remote/runner/auth/mtls'
+  name: '@graftland/plugin-remote/internal/legacy/runner/auth/mtls'
   config: { ca: '${inject("remoteTls")}/ca.crt' }
 - id: listener
-  name: '@graftland/remote/runner/websocket'
+  name: '@graftland/plugin-remote/internal/legacy/runner/websocket'
   config:
     url: wss://127.0.0.1:0
     cert: missing.crt
     key: '${inject("remoteTls")}/server.key'
-    auth: '@graftland/remote/Auth/MtlsAuthenticator'
+    auth: '@graftland/plugin-remote/Auth/MtlsAuthenticator'
 `,
 				)
 				const result = yield* invoke(["serve", "--config", file])

@@ -50,6 +50,13 @@ describe("group lifecycle", () => {
 			const journal = yield* makeJournal
 			const available = yield* Ref.make(false)
 			const resolver = Layer.succeed(ModuleResolver.ModuleResolver, {
+				importModule: (specifier) =>
+					Effect.fail(
+						ModuleResolver.ModuleInvalid.make({
+							specifier,
+							cause: "Unused in this fixture",
+						}),
+					),
 				resolve: (name) =>
 					Effect.flatMap(Ref.get(available), (ok) =>
 						ok

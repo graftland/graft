@@ -53,6 +53,7 @@ const Input = Schema.Struct({
 	transport: Invocation,
 	auth: Invocation,
 	consumer: definition,
+	input: Schema.optionalKey(Schema.Unknown),
 })
 export type Input = typeof Input.Type
 
@@ -127,7 +128,19 @@ const assembly = (
 					yield* watch(provider, key)
 				}),
 			)
-			const consumer = yield* Graft.plugin(input.consumer)
+			const consumer = yield* Graft.plugin(input.consumer, input.input)
+			// Capability publication can leave a transient Pending snapshot; business dependencies may remain Pending.
+			yield* consumer.state.pipe(
+				Stream.filter(
+					(state) =>
+						state._tag !== "Loading" &&
+						(state._tag !== "Pending" ||
+							!Array.some(keys, (key) =>
+								Array.contains(state.missing, key.key),
+							)),
+				),
+				Stream.runHead,
+			)
 			yield* follow(consumer, (cause) =>
 				Effect.fail(CapabilityFailed.make({ cause })),
 			)

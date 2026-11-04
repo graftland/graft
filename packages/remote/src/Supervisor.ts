@@ -11,4 +11,4 @@ export class Supervisor extends Context.Service<
 			channel: Channel,
 		) => Effect.Effect<void, TransportError, Peer | Scope.Scope>
 	}
->()("@graftland/remote/Supervisor") {}
+>()("@graftland/plugin-remote/Supervisor") {}

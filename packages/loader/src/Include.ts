@@ -3,6 +3,7 @@
  * formatting and comments preserved, and edits made to the file by hand are
  * picked up while the loader runs.
  */
+import { ConfigDirectory } from "./ConfigDirectory"
 import { Graft, Plugin } from "@graftland/graft"
 import type { PlatformError } from "effect"
 import {
@@ -453,7 +454,11 @@ export const Include: Plugin.Plugin<
 			const fs = yield* FileSystem.FileSystem
 			const path = yield* Path.Path
 
-			const entry = path.resolve(file)
+			const directory = yield* ConfigDirectory
+			const entry = path.resolve(
+				Option.getOrElse(directory, () => "."),
+				file,
+			)
 			const watchedTarget = yield* SubscriptionRef.make(entry)
 			const resolveTarget = fileTarget(entry).pipe(
 				Effect.provideService(FileSystem.FileSystem, fs),
@@ -652,6 +657,11 @@ export const Include: Plugin.Plugin<
 				apply: applyOp,
 				refresh,
 				external,
-			})
+			}).pipe(
+				Effect.provideService(
+					ConfigDirectory,
+					Option.some(path.dirname(entry)),
+				),
+			)
 		}),
 })

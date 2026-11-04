@@ -154,7 +154,7 @@ export const command = (
 	options: Omit<CommandOptions, "argv"> = {},
 ): Command => ({ _tag: "Command", argv, ...options })
 
-interface RunnerCommon {
+export interface RunnerCommon {
 	readonly _tag: "Runner"
 	/** Defaults to the current loader entry id. Required outside a loader. */
 	readonly instance?: string

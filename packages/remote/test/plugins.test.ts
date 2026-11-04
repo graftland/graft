@@ -18,13 +18,17 @@ import {
 import { Digest, SecureRandom } from "effect/crypto"
 import { inject } from "vitest"
 import * as Remote from "../src/index"
+import { executionPlugin } from "../src/internal/execution"
 import { Supervisor } from "../src/Supervisor"
 import { LocalTransport } from "../src/Transport"
 import { MtlsAuthenticator } from "../src/Auth"
 import local from "../src/host/local"
 import supervisor from "../src/runner/supervisor"
-import mtls from "../src/runner/auth/mtls"
-import websocket, { Config as WebsocketConfig } from "../src/runner/websocket"
+import { legacy as mtls } from "../src/runner/auth/mtls"
+import {
+	legacy as websocket,
+	Config as WebsocketConfig,
+} from "../src/runner/websocket"
 import unix from "../src/runner/unix"
 import * as Lock from "../src/internal/runner/Lock"
 import * as Websocket from "./websocket"
@@ -144,7 +148,7 @@ describe("remote capability plugins", () => {
 				class Custom extends Context.Service<
 					Custom,
 					typeof MtlsAuthenticator.Service
-				>()("@graftland/remote/test/plugins.test/Custom") {}
+				>()("@graftland/plugin-remote/test/plugins.test/Custom") {}
 				yield* Graft.provide(Custom, {
 					_tag: "Mtls",
 					ca: "unused",
@@ -174,12 +178,16 @@ describe("remote capability plugins", () => {
 			const provider = yield* Graft.plugin(local)
 			yield* provider.await
 			const proxy = yield* Graft.plugin(
-				Remote.plugin(contract, {
-					contractModule: new URL(
-						"../.cache/integration/contract.js",
-						import.meta.url,
-					).href,
-				}),
+				executionPlugin(
+					contract,
+					{
+						contractModule: new URL(
+							"../.cache/integration/contract.js",
+							import.meta.url,
+						).href,
+					},
+					Remote.local(),
+				),
 				{ directory, mode: "normal", value: 1 },
 			)
 			yield* proxy.await

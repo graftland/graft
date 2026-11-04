@@ -46,7 +46,7 @@ export class LocalTransport extends Context.Service<
 			options: LocalOptions,
 		) => Effect.Effect<Execution, PlatformError.PlatformError, Scope.Scope>
 	}
->()("@graftland/remote/Transport/LocalTransport") {}
+>()("@graftland/plugin-remote/Transport/LocalTransport") {}
 
 export interface WorkerOptions {
 	readonly execArgv?: ReadonlyArray<string>
@@ -60,7 +60,7 @@ export class WorkerTransport extends Context.Service<
 			options: WorkerOptions,
 		) => Effect.Effect<Execution, TransportError, Scope.Scope>
 	}
->()("@graftland/remote/Transport/WorkerTransport") {}
+>()("@graftland/plugin-remote/Transport/WorkerTransport") {}
 
 export interface WebsocketOptions {
 	readonly url: string
@@ -78,7 +78,7 @@ export class WebsocketTransport extends Context.Service<
 			credentials?: PreparedCredentials,
 		) => Effect.Effect<Channel, TransportError, Scope.Scope>
 	}
->()("@graftland/remote/Transport/WebsocketTransport") {}
+>()("@graftland/plugin-remote/Transport/WebsocketTransport") {}
 
 export interface UnixOptions {
 	readonly path: string
@@ -91,7 +91,7 @@ export class UnixTransport extends Context.Service<
 			credentials?: PreparedCredentials,
 		) => Effect.Effect<Channel, TransportError, Scope.Scope>
 	}
->()("@graftland/remote/Transport/UnixTransport") {}
+>()("@graftland/plugin-remote/Transport/UnixTransport") {}
 
 export interface CommandOptions {
 	readonly argv: readonly [string, ...string[]]
@@ -105,7 +105,7 @@ export class CommandTransport extends Context.Service<
 			options: CommandOptions,
 		) => Effect.Effect<Channel, TransportError, Scope.Scope>
 	}
->()("@graftland/remote/Transport/CommandTransport") {}
+>()("@graftland/plugin-remote/Transport/CommandTransport") {}
 
 export interface Properties {
 	readonly protocol: string
@@ -143,8 +143,8 @@ export interface ListenerApi {
 	) => Effect.Effect<Serving, TransportError, Scope.Scope>
 }
 export class Connector extends Context.Service<Connector, ConnectorApi>()(
-	"@graftland/remote/Transport/Connector",
+	"@graftland/plugin-remote/Transport/Connector",
 ) {}
 export class Listener extends Context.Service<Listener, ListenerApi>()(
-	"@graftland/remote/Transport/Listener",
+	"@graftland/plugin-remote/Transport/Listener",
 ) {}

@@ -93,7 +93,6 @@ export const resolve = Effect.fnUntraced(
 		const name = Array.join(Array.take(segments, scoped ? 2 : 1), "/")
 		const fs = yield* FileSystem.FileSystem
 		const path = yield* Path.Path
-		const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
 		const installation = yield* fs.realPath(root)
 		const directory = yield* fs.realPath(
 			path.join(installation, "node_modules", name),
@@ -103,7 +102,44 @@ export const resolve = Effect.fnUntraced(
 			.pipe(
 				Effect.flatMap(Schema.decodeEffect(Schema.fromJsonString(Manifest))),
 			)
-		const resolved = yield* Effect.scoped(
+		const resolved = yield* resolveEntry(installation, specifier)
+		const filename = yield* Effect.try({
+			try: () => fileURLToPath(resolved),
+			catch: (error) =>
+				PackageError.make({
+					detail: "The package export is not a file URL",
+					cause: Cause.die(error),
+				}),
+		})
+		const entry = yield* fs.realPath(filename)
+		const identity: CodeIdentity = {
+			...manifest,
+			...(includeDigest ? { digest: yield* digest(directory) } : {}),
+		}
+		return { directory, entry, identity }
+	},
+	Effect.catchTags({
+		PlatformError: (error) =>
+			Effect.fail(
+				PackageError.make({
+					detail: "Reading the installed package failed",
+					cause: Cause.fail(error),
+				}),
+			),
+		SchemaError: (error) =>
+			Effect.fail(
+				PackageError.make({
+					detail: "Reading the package manifest failed",
+					cause: Cause.fail(error),
+				}),
+			),
+	}),
+)
+
+export const resolveEntry = (installation: string, specifier: string) =>
+	Effect.gen(function* () {
+		const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+		return yield* Effect.scoped(
 			Effect.gen(function* () {
 				const child = yield* spawner.spawn(
 					ChildProcess.make(
@@ -139,35 +175,4 @@ export const resolve = Effect.fnUntraced(
 				return stdout
 			}),
 		)
-		const filename = yield* Effect.try({
-			try: () => fileURLToPath(resolved),
-			catch: (error) =>
-				PackageError.make({
-					detail: "The package export is not a file URL",
-					cause: Cause.die(error),
-				}),
-		})
-		const entry = yield* fs.realPath(filename)
-		const identity: CodeIdentity = {
-			...manifest,
-			...(includeDigest ? { digest: yield* digest(directory) } : {}),
-		}
-		return { directory, entry, identity }
-	},
-	Effect.catchTags({
-		PlatformError: (error) =>
-			Effect.fail(
-				PackageError.make({
-					detail: "Reading the installed package failed",
-					cause: Cause.fail(error),
-				}),
-			),
-		SchemaError: (error) =>
-			Effect.fail(
-				PackageError.make({
-					detail: "Reading the package manifest failed",
-					cause: Cause.fail(error),
-				}),
-			),
-	}),
-)
+	})

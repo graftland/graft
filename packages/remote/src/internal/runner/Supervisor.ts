@@ -104,7 +104,7 @@ export class Supervisor extends Context.Service<
 			handle: Handle,
 		) => Effect.Effect<Termination, SupervisorError>
 	}
->()("@graftland/remote/internal/runner/Supervisor") {}
+>()("@graftland/plugin-remote/internal/runner/Supervisor") {}
 
 type Launch = Data.TaggedEnum<{
 	Starting: {}

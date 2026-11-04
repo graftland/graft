@@ -4,10 +4,10 @@ import { Rpc, RpcGroup } from "effect/rpc"
 import { Contract } from "../src/index"
 
 class First extends Context.Service<First, {}>()(
-	"@graftland/remote/test/contract.test/First",
+	"@graftland/plugin-remote/test/contract.test/First",
 ) {}
 class Second extends Context.Service<Second, {}>()(
-	"@graftland/remote/test/contract.test/Second",
+	"@graftland/plugin-remote/test/contract.test/Second",
 ) {}
 
 const service = (key: Context.Key<unknown, {}>, tag: string) =>

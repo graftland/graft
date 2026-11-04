@@ -82,6 +82,8 @@ export interface ImportOptions {
 export interface Hmr {
 	/** Keeps imported entries registered until this HMR session closes. */
 	readonly importer: (specifier: string) => Promise<unknown>
+	/** Uses the application context and Node cache, without watching or replacing the module. */
+	readonly importModule: (specifier: string) => Effect.Effect<unknown, HmrError>
 	/** Registers an observation lease in observationScope, or the caller's scope when omitted. */
 	readonly importerScoped: (
 		specifier: string,
@@ -341,6 +343,19 @@ export const make = (
 				preserveExit,
 			)
 
+		const importModule: Hmr["importModule"] = (specifier) =>
+			serial(
+				checkOpen.pipe(
+					Effect.andThen(
+						Effect.tryPromise({
+							try: () => import(/* @vite-ignore */ hooks.rawRequest(specifier)),
+							catch: (cause) =>
+								HmrError.make({ stage: "import", specifier, cause }),
+						}),
+					),
+				),
+			)
+
 		const importerScoped: Hmr["importerScoped"] = (specifier, options) =>
 			options === undefined
 				? importWithLease(specifier)
@@ -517,6 +532,7 @@ export const make = (
 		return {
 			importer,
 			importerScoped,
+			importModule,
 			reload,
 			watch: (paths, watchOptions) =>
 				paths.length === 0

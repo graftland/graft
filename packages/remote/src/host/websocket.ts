@@ -1,5 +1,5 @@
 import { Plugin, Graft } from "@graftland/graft"
-import { Cause, Effect, FileSystem, Path, Schema } from "effect"
+import { Cause, Effect, FileSystem, Option, Path, Schema } from "effect"
 import {
 	Connector,
 	WebsocketTransport,
@@ -7,7 +7,7 @@ import {
 	type WebsocketOptions,
 } from "../Transport"
 import { TransportError } from "../Errors"
-import { Directory } from "../internal/config"
+import { ConfigDirectory } from "@graftland/loader"
 import * as Websocket from "../internal/websocket"
 import * as Channel from "../internal/socketChannel"
 
@@ -25,9 +25,9 @@ const plugin: Plugin.Plugin<void, void, Graft.ServiceConflict> = Plugin.service(
 	{ name: "remote-websocket-transport" },
 )
 
-export default plugin
+export { plugin as legacy }
 
-/** Configured Connector; the default export remains the transitional target adapter. */
+/** Configured Connector; certificate paths belong to the enclosing configuration. */
 export const Config = Schema.Struct({
 	url: Websocket.Url,
 	ca: Schema.optionalKey(Schema.String),
@@ -60,7 +60,9 @@ export const capability = Plugin.make({
 	apply: Effect.fnUntraced(function* (config) {
 		const fs = yield* FileSystem.FileSystem
 		const path = yield* Path.Path
-		const directory = yield* Directory
+		const directory = yield* ConfigDirectory.pipe(
+			Effect.map(Option.getOrElse(() => ".")),
+		)
 		const ca =
 			config.ca === undefined
 				? undefined
@@ -82,3 +84,5 @@ export const capability = Plugin.make({
 		)
 	}),
 })
+
+export default capability

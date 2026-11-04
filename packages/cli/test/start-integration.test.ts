@@ -465,3 +465,113 @@ syncBuiltinESMExports();
 		yield* Fiber.join(output)
 	}).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 )
+
+it.live(
+	"loads a remote entry whose contract module does not export a plugin",
+	() =>
+		Effect.gen(function* () {
+			const fs = yield* FileSystem.FileSystem
+			const directory = yield* fs.makeTempDirectoryScoped()
+			const file = `${directory}/host.yml`
+			const runtime = yield* quote(runtimeUrl.href)
+			const plugin = yield* quote(pluginUrl.href)
+			const effect = yield* quote(import.meta.resolve("effect"))
+			const node = yield* quote(import.meta.resolve("@effect/platform-node"))
+			const config = yield* quote(file)
+			const remote = new URL("../.cache/remote/", import.meta.url)
+			const contract = yield* quote(new URL("Contract.js", remote).href)
+			const installation = `${directory}/node_modules/@graftland/plugin-remote`
+			yield* fs.makeDirectory(installation, { recursive: true })
+			yield* fs.writeFileString(
+				`${installation}/package.json`,
+				'{"type":"module","exports":{".":"./index.mjs","./host/local":"./local.mjs"}}',
+			)
+			yield* Effect.forEach(
+				[
+					{ file: "index", source: "index" },
+					{ file: "local", source: "host/local" },
+				],
+				({ file, source }) =>
+					quote(new URL(`${source}.js`, remote).href).pipe(
+						Effect.flatMap((url) =>
+							fs.writeFileString(
+								`${installation}/${file}.mjs`,
+								`export { default } from ${url};`,
+							),
+						),
+					),
+			)
+			yield* fs.writeFileString(
+				`${directory}/contract.mjs`,
+				`
+import { make } from ${contract};
+import { Schema } from ${effect};
+export const contract = make({ name: 'cli-remote', config: Schema.String, error: Schema.Never,
+module: new URL('./implementation.mjs', import.meta.url).href });
+`,
+			)
+			yield* fs.writeFileString(
+				`${directory}/implementation.mjs`,
+				`
+import { Plugin } from ${plugin};
+import { Effect, Schema } from ${effect};
+export default Plugin.make({ name: 'remote-implementation', config: Schema.String,
+apply: (value) => Effect.acquireRelease(Effect.logInfo('REMOTE_STARTED ' + value),
+() => Effect.logInfo('REMOTE_STOPPED')) });
+`,
+			)
+			const executable = yield* quote(process.execPath)
+			const bin = yield* quote(new URL("bin.js", remote).pathname)
+			yield* fs.writeFileString(
+				file,
+				`
+- id: remote
+  name: remote
+  config:
+    contract: ./contract.mjs
+    connect:
+      local:
+        command: [${executable}, ${bin}]
+    config: hello
+`,
+			)
+			const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+			const child = yield* spawner.spawn(
+				ChildProcess.make(process.execPath, [
+					"--input-type=module",
+					"-e",
+					`
+import { Start } from ${runtime}; import { NodeRuntime } from ${node};
+Start.run({ config: ${config}, watch: true }).pipe(NodeRuntime.runMain);`,
+				]),
+			)
+			const started = yield* Deferred.make<void>()
+			const output = yield* child.all.pipe(
+				Stream.decodeText(),
+				Stream.splitLines,
+				Stream.tap((line) =>
+					String.includes("REMOTE_STARTED hello")(line)
+						? Deferred.succeed(started, undefined)
+						: Effect.void,
+				),
+				Stream.runFold(
+					() => "",
+					(text, line) => `${text}${line}\n`,
+				),
+				Effect.forkChild,
+			)
+			yield* Deferred.await(started).pipe(
+				Effect.raceFirst(
+					Fiber.join(output).pipe(
+						Effect.flatMap((text) =>
+							Effect.die(`CLI exited before remote activation: ${text}`),
+						),
+					),
+				),
+			)
+			yield* child.kill()
+			const text = yield* Fiber.join(output)
+			assert.include(text, "REMOTE_STARTED hello")
+			assert.include(text, "REMOTE_STOPPED")
+		}).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+)

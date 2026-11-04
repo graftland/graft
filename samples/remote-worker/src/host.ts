@@ -1,7 +1,7 @@
-import worker from "@graftland/remote/host/worker"
-import local from "@graftland/remote/host/local"
+import worker from "@graftland/plugin-remote/host/worker"
+import local from "@graftland/plugin-remote/host/local"
 import { Graft, Plugin } from "@graftland/graft"
-import * as Remote from "@graftland/remote"
+import * as Remote from "@graftland/plugin-remote"
 import { Deferred, Effect } from "effect"
 import { contract, Formatter, type Reply } from "./contract"
 

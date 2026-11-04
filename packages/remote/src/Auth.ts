@@ -12,7 +12,7 @@ export interface ClientCertificate {
 	readonly key: Redacted.Redacted<string>
 }
 export class Peer extends Context.Service<Peer, string>()(
-	"@graftland/remote/Auth/Peer",
+	"@graftland/plugin-remote/Auth/Peer",
 ) {}
 export class MtlsCredentials extends Context.Service<
 	MtlsCredentials,
@@ -21,7 +21,7 @@ export class MtlsCredentials extends Context.Service<
 			certificate: ClientCertificate,
 		) => Effect.Effect<ClientCertificate>
 	}
->()("@graftland/remote/Auth/MtlsCredentials") {}
+>()("@graftland/plugin-remote/Auth/MtlsCredentials") {}
 export class MtlsAuthenticator extends Context.Service<
 	MtlsAuthenticator,
 	{
@@ -31,14 +31,14 @@ export class MtlsAuthenticator extends Context.Service<
 			subjectAltName: string | undefined,
 		) => Effect.Effect<string, PeerAuthenticationError>
 	}
->()("@graftland/remote/Auth/MtlsAuthenticator") {}
+>()("@graftland/plugin-remote/Auth/MtlsAuthenticator") {}
 
 export class NoCredentials extends Context.Service<
 	NoCredentials,
 	{
 		readonly prepare: Effect.Effect<void>
 	}
->()("@graftland/remote/Auth/NoCredentials") {}
+>()("@graftland/plugin-remote/Auth/NoCredentials") {}
 
 export class NoAuthenticator extends Context.Service<
 	NoAuthenticator,
@@ -46,7 +46,7 @@ export class NoAuthenticator extends Context.Service<
 		readonly _tag: "None"
 		readonly identity: string
 	}
->()("@graftland/remote/Auth/NoAuthenticator") {}
+>()("@graftland/plugin-remote/Auth/NoAuthenticator") {}
 
 export interface PreparedCredentials {
 	readonly certificate?: ClientCertificate
@@ -60,11 +60,11 @@ export interface TokenCredentials {
 export class BearerCredentials extends Context.Service<
 	BearerCredentials,
 	TokenCredentials
->()("@graftland/remote/Auth/BearerCredentials") {}
+>()("@graftland/plugin-remote/Auth/BearerCredentials") {}
 export class JwtCredentials extends Context.Service<
 	JwtCredentials,
 	TokenCredentials
->()("@graftland/remote/Auth/JwtCredentials") {}
+>()("@graftland/plugin-remote/Auth/JwtCredentials") {}
 
 export interface HeaderAuthenticator {
 	readonly _tag: "Header"
@@ -75,11 +75,11 @@ export interface HeaderAuthenticator {
 export class BearerAuthenticator extends Context.Service<
 	BearerAuthenticator,
 	HeaderAuthenticator
->()("@graftland/remote/Auth/BearerAuthenticator") {}
+>()("@graftland/plugin-remote/Auth/BearerAuthenticator") {}
 export class JwtAuthenticator extends Context.Service<
 	JwtAuthenticator,
 	HeaderAuthenticator
->()("@graftland/remote/Auth/JwtAuthenticator") {}
+>()("@graftland/plugin-remote/Auth/JwtAuthenticator") {}
 export type LegacyAuthenticator =
 	| HeaderAuthenticator
 	| typeof MtlsAuthenticator.Service
@@ -132,9 +132,9 @@ export type AuthenticatorApi =
 	| { readonly _tag: "None"; readonly identity: string }
 
 export class Credentials extends Context.Service<Credentials, CredentialsApi>()(
-	"@graftland/remote/Auth/Credentials",
+	"@graftland/plugin-remote/Auth/Credentials",
 ) {}
 export class Authenticator extends Context.Service<
 	Authenticator,
 	AuthenticatorApi
->()("@graftland/remote/Auth/Authenticator") {}
+>()("@graftland/plugin-remote/Auth/Authenticator") {}

@@ -19,7 +19,7 @@ export class ServeLifecycle extends Context.Service<
 		readonly ended: Deferred.Deferred<void, TransportError>
 		readonly released: Deferred.Deferred<void, StartupError>
 	}
->()("@graftland/remote/internal/ServeLifecycle") {}
+>()("@graftland/plugin-remote/internal/ServeLifecycle") {}
 
 export const make = Effect.all({
 	ended: Deferred.make<void, TransportError>(),

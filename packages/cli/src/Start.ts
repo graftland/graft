@@ -50,7 +50,14 @@ export const run = (
 			base: directory,
 			importer: hmr.importerScoped,
 		})
-		yield* Graft.provide(ModuleResolver.ModuleResolver, resolver)
+		const modules = yield* ModuleResolver.make({
+			base: directory,
+			importer: hmr.importModule,
+		})
+		yield* Graft.provide(ModuleResolver.ModuleResolver, {
+			resolve: resolver.resolve,
+			importModule: modules.importModule,
+		})
 		const included = yield* Graft.plugin(Include.Include, {
 			path: file,
 			watch: options.watch,

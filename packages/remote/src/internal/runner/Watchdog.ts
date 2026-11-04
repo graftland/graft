@@ -11,7 +11,9 @@ export const start = Effect.gen(function* () {
 	const worker = yield* Effect.acquireRelease(
 		Effect.try({
 			try: () =>
-				new Worker(new URL(import.meta.resolve("@graftland/remote/watchdog"))),
+				new Worker(
+					new URL(import.meta.resolve("@graftland/plugin-remote/watchdog")),
+				),
 			catch: (cause) =>
 				ExecutionError.make({
 					detail: "Starting the child watchdog failed",

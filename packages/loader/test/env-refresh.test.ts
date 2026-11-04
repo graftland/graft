@@ -111,6 +111,13 @@ it.effect("reads the environment after a slow import finishes", () =>
 		const requested = yield* Deferred.make<void>()
 		const imported = yield* Deferred.make<void>()
 		const resolver = Layer.succeed(ModuleResolver.ModuleResolver, {
+			importModule: (specifier) =>
+				Effect.fail(
+					ModuleResolver.ModuleInvalid.make({
+						specifier,
+						cause: "Unused in this fixture",
+					}),
+				),
 			resolve: () =>
 				Deferred.succeed(requested, undefined).pipe(
 					Effect.andThen(Deferred.await(imported)),

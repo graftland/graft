@@ -26,7 +26,7 @@ The host imports only the contract. Put the implementation in a separate module
 so importing the host entry cannot start or load it:
 
 ```ts title="contract.ts"
-import { Contract } from "@graftland/remote"
+import { Contract } from "@graftland/plugin-remote"
 import { Schema } from "effect"
 
 export const config = Schema.Struct({ greeting: Schema.String })
@@ -66,12 +66,12 @@ capabilities selected by its target; it installs no providers. Missing providers
 leave the proxy Pending. Withdrawing a transport or credential provider also
 withdraws its dependent proxies.
 
-The public contract modules `@graftland/remote/Transport`, `Auth`, and
+The public contract modules `@graftland/plugin-remote/Transport`, `Auth`, and
 `Supervisor` contain service keys and interfaces, not implementations.
 `Auth.Peer` carries the authenticated identity. Load implementations by their
 module names in YAML, or import their default exports and use `Graft.plugin`:
 
-| Side   | Plugin subpaths under `@graftland/remote/`                                      | Purpose                                                                                     |
+| Side   | Plugin subpaths under `@graftland/plugin-remote/`                               | Purpose                                                                                     |
 | ------ | ------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
 | Host   | `host/local`, `host/worker`                                                     | Create a child process or Node worker. No auth plugin.                                      |
 | Host   | `host/websocket`, `host/unix`, `host/command`                                   | Connect to a runner using the selected transport.                                           |
@@ -81,14 +81,14 @@ module names in YAML, or import their default exports and use `Graft.plugin`:
 | Runner | `runner/auth/mtls`, `runner/auth/bearer`, `runner/auth/jwt`, `runner/auth/none` | Map credentials to stable identities. Stdio does not use an authenticator.                  |
 
 There can be only one provider per service key in a realm. Listener `auth`
-values are full service keys, such as `@graftland/remote/Auth/JwtAuthenticator`,
-not entry ids. Withdrawing that authenticator closes its listeners; the
-supervisor stays active.
+values are full service keys, such as
+`@graftland/plugin-remote/Auth/JwtAuthenticator`, not entry ids. Withdrawing
+that authenticator closes its listeners; the supervisor stays active.
 
 ## Start a local child or Node worker
 
 ```ts title="entry.ts"
-import * as Remote from "@graftland/remote"
+import * as Remote from "@graftland/plugin-remote"
 import { contract } from "./contract.js"
 
 export default Remote.plugin(contract, {
@@ -101,7 +101,7 @@ export default Remote.plugin(contract, {
 Load `host/local` alongside the entry:
 
 ```yaml title="graft.yml"
-- name: "@graftland/remote/host/local"
+- name: "@graftland/plugin-remote/host/local"
 - name: ./entry.ts
   config:
     greeting: Hello
@@ -115,7 +115,7 @@ Load this entry with `Graft.plugin(entry, { greeting: "Hello" })` or through
 [graft.yml](../config-file/). A custom host supplies `NodeServices.layer` and
 `SecureRandom.layerWebCrypto` (from `effect/crypto`) in the environment where
 `Graft.layer` is built. The CLI supplies both. The installed or built
-`@graftland/remote` executable starts the child for you.
+`@graftland/plugin-remote` executable starts the child for you.
 
 Each activation gets a fresh process. Config changes restart it. Child failures
 fail the host proxy; any retry policy belongs on that proxy. Retrying creates
@@ -175,8 +175,8 @@ Point the entry at a local module. Its config remains the plugin's business
 input:
 
 ```yaml title="graft.yml"
-- name: "@graftland/remote/host/websocket"
-- name: "@graftland/remote/host/auth/jwt"
+- name: "@graftland/plugin-remote/host/websocket"
+- name: "@graftland/plugin-remote/host/auth/jwt"
 - id: greeter
   name: ./greeter.ts
   config:
@@ -187,7 +187,7 @@ The entry reads runner settings from environment variables through Effect
 Config:
 
 ```ts title="greeter.ts"
-import * as Remote from "@graftland/remote"
+import * as Remote from "@graftland/plugin-remote"
 import { Config, Effect, FileSystem } from "effect"
 import { contract } from "my-plugin/contract"
 
@@ -290,17 +290,18 @@ other HTTP endpoints, including health checks.
 
 ## Prepare a runner
 
-Use Node.js 22.22 or later on Linux or macOS. Install `@graftland/remote`, the
-built plugin package, and their dependencies under the installation root. Runner
-`contractModule` values are package specifiers resolved there. The host does not
-upload code. Keep installed packages unchanged while running.
+Use Node.js 22.22 or later on Linux or macOS. Install
+`@graftland/plugin-remote`, the built plugin package, and their dependencies
+under the installation root. Runner `contractModule` values are package
+specifiers resolved there. The host does not upload code. Keep installed
+packages unchanged while running.
 
 `serve --config` loads ordinary Graft entries. This complete configuration uses
 wss and JWT; paths in the file are relative to its directory.
 
 ```yaml title="runner.yml"
 - id: remote-supervisor
-  name: "@graftland/remote/runner/supervisor"
+  name: "@graftland/plugin-remote/runner/supervisor"
   config:
     root: /srv/graft/install
     state: /var/lib/graft
@@ -308,7 +309,7 @@ wss and JWT; paths in the file are relative to its directory.
     grace: 5 seconds
 
 - id: remote-auth
-  name: "@graftland/remote/runner/auth/jwt"
+  name: "@graftland/plugin-remote/runner/auth/jwt"
   config:
     issuer: https://issuer.example
     audience: [graft]
@@ -319,12 +320,12 @@ wss and JWT; paths in the file are relative to its directory.
       publicKey: /run/secrets/jwt-public.pem
 
 - id: public
-  name: "@graftland/remote/runner/websocket"
+  name: "@graftland/plugin-remote/runner/websocket"
   config:
     url: wss://0.0.0.0:7443/graft
     cert: /run/secrets/server.crt
     key: /run/secrets/server.key
-    auth: "@graftland/remote/Auth/JwtAuthenticator"
+    auth: "@graftland/plugin-remote/Auth/JwtAuthenticator"
 ```
 
 ```sh

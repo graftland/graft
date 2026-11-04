@@ -1,4 +1,4 @@
-# @graftland/remote
+# @graftland/plugin-remote
 
 English | [简体中文](README.zh-CN.md) | [繁體中文](README.zh-TW.md)
 
@@ -9,7 +9,7 @@ Keep the contract separate from the implementation. The host imports only the
 contract. Build both modules to JavaScript, then load the capability and entry:
 
 ```ts
-import * as Remote from "@graftland/remote"
+import * as Remote from "@graftland/plugin-remote"
 import { contract } from "./contract.js"
 
 export default Remote.plugin(contract, {
@@ -19,7 +19,7 @@ export default Remote.plugin(contract, {
 ```
 
 ```yaml
-- name: "@graftland/remote/host/local"
+- name: "@graftland/plugin-remote/host/local"
 - name: ./entry.ts
 ```
 

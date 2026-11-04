@@ -1,4 +1,4 @@
-# @graftland/remote
+# @graftland/plugin-remote
 
 [English](README.md) | 简体中文 | [繁體中文](README.zh-TW.md)
 
@@ -8,7 +8,7 @@ worker 或 runner 上运行。声明跨边界服务后，消费者仍使用原�
 契约与实现分开放，宿主只导入契约。先把两者编译成 JavaScript，再加载能力插件和入口：
 
 ```ts
-import * as Remote from "@graftland/remote"
+import * as Remote from "@graftland/plugin-remote"
 import { contract } from "./contract.js"
 
 export default Remote.plugin(contract, {
@@ -18,7 +18,7 @@ export default Remote.plugin(contract, {
 ```
 
 ```yaml
-- name: "@graftland/remote/host/local"
+- name: "@graftland/plugin-remote/host/local"
 - name: ./entry.ts
 ```
 

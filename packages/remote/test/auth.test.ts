@@ -38,17 +38,17 @@ import {
 	WebsocketTransport,
 	type Channel,
 } from "../src/Transport"
-import websocket from "../src/runner/websocket"
+import { legacy as websocket } from "../src/runner/websocket"
 import unix from "../src/runner/unix"
 import bearer from "../src/runner/auth/bearer"
 import jwt from "../src/runner/auth/jwt"
-import none from "../src/runner/auth/none"
+import { legacy as none } from "../src/runner/auth/none"
 import { Config as StdioConfig } from "../src/runner/stdio"
-import hostWebsocket from "../src/host/websocket"
+import { legacy as hostWebsocket } from "../src/host/websocket"
 import hostUnix from "../src/host/unix"
 import hostBearer from "../src/host/auth/bearer"
 import hostJwt from "../src/host/auth/jwt"
-import hostNone from "../src/host/auth/none"
+import { legacy as hostNone } from "../src/host/auth/none"
 import * as Framing from "../src/internal/runner/Framing"
 import { contract } from "./fixtures/contract"
 
@@ -419,30 +419,37 @@ describe("runner authentication", () => {
 				Effect.gen(function* () {
 					const auth = yield* Graft.plugin(none, { identity: "anonymous-host" })
 					yield* auth.await
-					const port = yield* listen(Auth.NoAuthenticator.key)
-					for (const authorization of [
-						undefined,
-						"Bearer ignored",
-						"Basic ignored",
-					]) {
-						const response = yield* request(port, authorization)
-						assert.include(response, "101 Switching Protocols")
-					}
-					assert.lengthOf(
-						Array.filter(logs(), (line) =>
-							Str.includes("WebSocket listener has no authentication")(line),
-						),
-						1,
-					)
-					assert.lengthOf(
-						Array.filter(logs(), (line) =>
-							Str.includes("WebSocket connection has no authentication")(line),
-						),
-						3,
-					)
-					assert.isTrue(
-						Array.some(logs(), (line) => Str.includes("ws:// listener")(line)),
-					)
+					// Raw upgrade requests close TCP without a WebSocket close frame. Drain that listener before measuring unix logs.
+					yield* Effect.gen(function* () {
+						const port = yield* listen(Auth.NoAuthenticator.key)
+						for (const authorization of [
+							undefined,
+							"Bearer ignored",
+							"Basic ignored",
+						]) {
+							const response = yield* request(port, authorization)
+							assert.include(response, "101 Switching Protocols")
+						}
+						assert.lengthOf(
+							Array.filter(logs(), (line) =>
+								Str.includes("WebSocket listener has no authentication")(line),
+							),
+							1,
+						)
+						assert.lengthOf(
+							Array.filter(logs(), (line) =>
+								Str.includes("WebSocket connection has no authentication")(
+									line,
+								),
+							),
+							3,
+						)
+						assert.isTrue(
+							Array.some(logs(), (line) =>
+								Str.includes("ws:// listener")(line),
+							),
+						)
+					}).pipe(Effect.scoped)
 					const fs = yield* FileSystem.FileSystem
 					const directory = yield* fs.makeTempDirectoryScoped({
 						directory: "/tmp",
@@ -475,7 +482,7 @@ describe("runner authentication", () => {
 			class Source extends Context.Service<
 				Source,
 				{ readonly token: Effect.Effect<Redacted.Redacted<string>> }
-			>()("@graftland/remote/test/auth.test/Source") {}
+			>()("@graftland/plugin-remote/test/auth.test/Source") {}
 			const reads = MutableList.make<string>()
 			yield* Graft.provide(Source, {
 				token: Effect.sync(() => {

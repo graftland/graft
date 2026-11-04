@@ -71,6 +71,7 @@ const fileRequest = (
 export const modules = (base: string, include: (url: string) => boolean) => {
 	const key = `graft-hmr-${++sessions}`
 	const prefix = `${key}:`
+	const rawPrefix = `${key}:raw:`
 	/** What `request` produces: the generation that imports a specifier. */
 	const decodeRequest = Schema.decodeUnknownOption(
 		Schema.TemplateLiteralParser([
@@ -210,6 +211,11 @@ export const modules = (base: string, include: (url: string) => boolean) => {
 
 	const hooks = registerHooks({
 		resolve(specifier, context, nextResolve) {
+			if (String.startsWith(rawPrefix)(specifier))
+				return nextResolve(String.slice(rawPrefix.length)(specifier), {
+					...context,
+					parentURL: base,
+				})
 			const request = decodeRequest(specifier)
 			const entry = Option.isSome(request)
 			const id = Option.match(request, {
@@ -410,6 +416,7 @@ export const modules = (base: string, include: (url: string) => boolean) => {
 			resolved = undefined
 			return `${prefix}${importing!.generation.id}:${specifier}`
 		},
+		rawRequest: (specifier: string) => `${rawPrefix}${specifier}`,
 		resolved: () => Option.fromUndefinedOr(resolved),
 		close: () => hooks.deregister(),
 	}

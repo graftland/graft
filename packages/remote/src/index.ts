@@ -1,18 +1,19 @@
-import { Entry } from "@graftland/loader"
-import { Graft, Plugin } from "@graftland/graft"
+import { children } from "./internal/cleanup"
+import { launch } from "./internal/targetAssembly"
+import { follow } from "./internal/follow"
+import { CapabilityFailed } from "./internal/assembly"
+import { executionPlugin, publicError } from "./internal/execution"
+import { Plugin } from "@graftland/graft"
 import {
 	Array,
 	Cause,
 	Effect,
-	Fiber,
 	FileSystem,
-	Option,
 	Schema,
+	References,
 	Scope,
-	Stream,
 } from "effect"
 import type { Config, Duration, PlatformError, Schedule } from "effect"
-import { SecureRandom } from "effect/crypto"
 import {
 	local,
 	worker,
@@ -25,7 +26,6 @@ import {
 	bearer,
 	jwt,
 	validate,
-	dependencies,
 	type Target,
 	type Runner,
 } from "./Targets"
@@ -41,14 +41,10 @@ export {
 	bearer,
 	jwt,
 }
-import * as Connection from "./internal/runner/Connection"
-import * as Services from "./internal/services"
 import { Instance } from "./Instance"
 export { Instance }
-import * as Host from "./internal/host"
 import { RemoteWithdrawn, RemoteError, MissingInstance } from "./Errors"
 import * as Contract from "./Contract"
-import * as Control from "./internal/control"
 export { Contract }
 export { RemoteTerminationUnconfirmed } from "./internal/runner/model"
 export { RemoteError, RemoteWithdrawn, MissingInstance } from "./Errors"
@@ -69,109 +65,6 @@ export interface Options<
 	readonly retry?: Schedule.Schedule<unknown, unknown> | undefined
 	readonly shutdownTimeout?: Duration.Input | undefined
 }
-
-/** One owned execution per activation, with explicitly mapped services. */
-const executionPlugin = <
-	S extends Schema.Top & {
-		readonly Encoded: Schema.Json
-		readonly DecodingServices: never
-		readonly EncodingServices: never
-	},
-	E extends Schema.Top & {
-		readonly DecodingServices: never
-		readonly EncodingServices: never
-	},
-	D extends ReadonlyArray<Plugin.Dependency>,
->(
-	contract: Contract.Contract<S, E>,
-	options: Options<D>,
-	configured: Target<D>,
-): Plugin.Plugin<
-	S["Encoded"],
-	S["Encoded"],
-	| E["Type"]
-	| Contract.UndeclaredFailure
-	| RemoteError
-	| RemoteWithdrawn
-	| MissingInstance
-> =>
-	Plugin.make({
-		name: contract.name,
-		inject: [
-			SecureRandom.SecureRandom,
-			...dependencies(configured),
-			...Array.map(contract.inject, (service) => service.key),
-		],
-		config: Schema.toEncoded(contract.config),
-		retry: options.retry,
-		apply: (input) =>
-			Effect.gen(function* () {
-				yield* validate(configured)
-				const random = yield* SecureRandom.SecureRandom
-				const session = yield* random.uuidV4()
-				yield* Schema.decodeEffect(contract.config)(input)
-				const target = yield* resolveTarget(configured)
-				const active = yield* Connection.acquire(
-					target,
-					options.contractModule,
-					{
-						session,
-						serve: Services.endpoints(contract.inject),
-						call: {
-							...Services.endpoints(contract.provides),
-							[Control.endpoint]: contract.control,
-						},
-					},
-					Host.initialize(contract),
-					Host.dispose,
-					options.shutdownTimeout ?? "5 seconds",
-				)
-				yield* Host.load(active, input)
-				for (const service of contract.provides)
-					yield* service
-						.publish(active.connection.transport)
-						.pipe(Scope.provide(active.connection.resources))
-				yield* Plugin.fork(
-					Effect.raceFirst(
-						Fiber.join(active.events),
-						active.remoteFailure.await,
-					).pipe(
-						Effect.mapError((error) => publicError(contract.error, error)),
-					),
-				)
-				return () => Effect.succeed(false)
-			}).pipe(Effect.mapError((error) => publicError(contract.error, error))),
-	})
-
-const publicError = <E extends Schema.Top>(
-	declared: E,
-	error: unknown,
-):
-	| E["Type"]
-	| Contract.UndeclaredFailure
-	| RemoteWithdrawn
-	| RemoteError
-	| MissingInstance =>
-	Schema.is(declared)(error)
-		? error
-		: Schema.is(Contract.UndeclaredFailure)(error) ||
-			  Schema.is(RemoteWithdrawn)(error) ||
-			  Schema.is(MissingInstance)(error)
-			? error
-			: RemoteError.make({ cause: Cause.fail(error) })
-
-const resolveTarget = <D extends ReadonlyArray<Plugin.Dependency>>(
-	target: Target<D>,
-): Effect.Effect<Connection.Target<D>, MissingInstance> =>
-	Effect.gen(function* () {
-		if (target._tag !== "Runner") return target
-		const instance =
-			target.instance === undefined
-				? yield* Entry.CurrentId
-				: Option.some(target.instance)
-		if (Option.isNone(instance)) return yield* MissingInstance.make({})
-		return { ...target, instance: instance.value }
-	})
 
 export const plugin = <
 	S extends Schema.Top & {
@@ -197,41 +90,61 @@ export const plugin = <
 	| MissingInstance
 > => {
 	const target = options.target ?? local()
-	if (!Effect.isEffect(target))
-		return executionPlugin(contract, options, target)
 	return Plugin.make({
 		name: contract.name,
 		config: Schema.toEncoded(contract.config),
-		inject: [FileSystem.FileSystem],
+		inject: Effect.isEffect(target) ? [FileSystem.FileSystem] : [],
 		retry: options.retry,
 		apply: (input) =>
 			Effect.gen(function* () {
-				const configured = yield* target.pipe(
+				yield* Schema.decodeEffect(contract.config)(input).pipe(
 					Effect.mapError((error) => publicError(contract.error, error)),
 				)
+				const configured = yield* Effect.isEffect(target)
+					? target.pipe(
+							Effect.mapError((error) => publicError(contract.error, error)),
+						)
+					: Effect.succeed(target)
 				yield* validate(configured).pipe(
 					Effect.mapError((error) => publicError(contract.error, error)),
 				)
-				const child = yield* Graft.plugin(
+				const annotations = yield* References.CurrentLogAnnotations
+				const scope = yield* children
+				const child = yield* launch(configured, input, (target) =>
 					executionPlugin(
 						contract,
 						{ ...options, retry: undefined },
-						configured,
+						target,
+						annotations,
 					),
-					input,
-				)
-				yield* child.await
-				// The child owns the resolved dependencies; failures still belong to this proxy.
-				yield* Plugin.fork(
-					child.state.pipe(
-						Stream.runForEach((state) =>
-							state._tag === "Failed"
-								? Effect.failCause(state.cause)
-								: Effect.void,
-						),
-					),
-				)
+				).pipe(Scope.provide(scope))
+				const fail = (
+					cause: Cause.Cause<unknown>,
+				): Cause.Cause<
+					| E["Type"]
+					| Contract.UndeclaredFailure
+					| RemoteWithdrawn
+					| RemoteError
+					| MissingInstance
+				> =>
+					Cause.fromReasons(
+						Array.flatMap(cause.reasons, (reason) => {
+							if (reason._tag !== "Fail") return [reason]
+							return Schema.is(CapabilityFailed)(reason.error)
+								? Array.map(fail(reason.error.cause).reasons, (inner) =>
+										inner.annotate(Cause.reasonAnnotations(reason)),
+									)
+								: [
+										Cause.makeFailReason(
+											publicError(contract.error, reason.error),
+										).annotate(Cause.reasonAnnotations(reason)),
+									]
+						}),
+					)
+				yield* follow(child, (cause) => Effect.failCause(fail(cause)))
 				return () => Effect.succeed(false)
 			}),
 	})
 }
+
+export { host as default } from "./internal/entry"

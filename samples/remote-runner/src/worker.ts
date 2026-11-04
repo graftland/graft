@@ -1,6 +1,6 @@
 /** The implementation. It runs on the runner, in a process of its own. */
 import { Graft, Plugin } from "@graftland/graft"
-import * as Remote from "@graftland/remote"
+import * as Remote from "@graftland/plugin-remote"
 import { Effect } from "effect"
 import process from "node:process"
 import { config, Exporter, Ledger } from "./contract.ts"

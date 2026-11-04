@@ -6,14 +6,16 @@ import {
 	type AuthenticatorApi,
 } from "../../Auth"
 import { AuthenticationFailed } from "../../Errors"
-import { Directory } from "../../internal/config"
+import { ConfigDirectory } from "@graftland/loader"
 import { identityFromSubjectAltName } from "../../internal/auth/mtls"
 
 export const Config = Schema.Struct({ ca: Schema.String })
 const read = Effect.fnUntraced(function* (ca: string) {
 	const fs = yield* FileSystem.FileSystem
 	const path = yield* Path.Path
-	const directory = yield* Directory
+	const directory = yield* ConfigDirectory.pipe(
+		Effect.map(Option.getOrElse(() => ".")),
+	)
 	return yield* fs.readFileString(path.resolve(directory, ca))
 })
 export const make = (
@@ -47,7 +49,7 @@ export const capability = Plugin.make({
 })
 
 /** Transitional keyed provider for the existing runner entry. */
-export default Plugin.make({
+export const legacy = Plugin.make({
 	name: "remote-mtls-authenticator",
 	config: Config,
 	inject: [FileSystem.FileSystem, Path.Path],
@@ -62,3 +64,5 @@ export default Plugin.make({
 			),
 		),
 })
+
+export default capability

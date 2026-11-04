@@ -43,7 +43,7 @@ export class Channels extends Context.Service<
 			Scope.Scope
 		>
 	}
->()("@graftland/remote/internal/runner/Execution/Channels") {}
+>()("@graftland/plugin-remote/internal/runner/Execution/Channels") {}
 
 export const make = (root: string) =>
 	Effect.gen(function* () {

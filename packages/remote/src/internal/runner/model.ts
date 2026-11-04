@@ -307,7 +307,7 @@ export class Store extends Context.Service<
 			record: SessionRecord,
 		) => Effect.Effect<void, StateStorageError>
 	}
->()("@graftland/remote/internal/runner/model/Store") {}
+>()("@graftland/plugin-remote/internal/runner/model/Store") {}
 export type ExecutionFailure =
 	ExecutionError | PackageError | TerminationUnconfirmed
 export interface Unit {
@@ -332,7 +332,7 @@ export class Execution extends Context.Service<
 			child: ProcessIdentity,
 		) => Effect.Effect<Termination, ExecutionFailure>
 	}
->()("@graftland/remote/internal/runner/model/Execution") {}
+>()("@graftland/plugin-remote/internal/runner/model/Execution") {}
 export class RemoteTerminationUnconfirmed extends Schema.TaggedError<
 	RemoteTerminationUnconfirmed,
 	{ readonly brand: unique symbol }

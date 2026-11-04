@@ -10,7 +10,7 @@ export default async function setup() {
 		deps: {
 			alwaysBundle: [
 				"@graftland/graft",
-				"@graftland/remote",
+				"@graftland/plugin-remote",
 				"@graftland/loader",
 			],
 			neverBundle: [/^effect(?:\/|$)/, /^@effect\//],

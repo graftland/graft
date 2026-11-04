@@ -27,7 +27,8 @@ import {
 	type Authentication,
 	type Runner as RunnerOptions,
 } from "../../Targets"
-import type { Connected } from "../runner/Connection"
+import { connect as connectCapability } from "../assembly"
+import type { ConfiguredRunner, Connected } from "../runner/Connection"
 import { ProcessExited, TransportError, RemoteError } from "../../Errors"
 import { cleanupCause } from "../cleanup"
 import * as Port from "../port"
@@ -87,7 +88,7 @@ const connectChannel = Effect.fnUntraced(function* <
 })
 
 export const connect = <D extends ReadonlyArray<Plugin.Dependency>>(
-	target: RunnerTarget<D>,
+	target: RunnerTarget<D> | (ConfiguredRunner & { readonly instance: string }),
 	contractModule: string,
 	options: Port.Options,
 	resources: Scope.Scope,
@@ -97,9 +98,10 @@ export const connect = <D extends ReadonlyArray<Plugin.Dependency>>(
 		const instance = target.instance
 
 		const margin = Duration.toMillis(target.margin ?? "5 seconds")
-		const channel = yield* connectChannel(target).pipe(
-			Scope.provide(processScope),
-		)
+		const channel =
+			target._tag === "Connector"
+				? yield* connectCapability.pipe(Scope.provide(processScope))
+				: yield* connectChannel(target).pipe(Scope.provide(processScope))
 		const mux = yield* Multiplex.make(channel).pipe(Scope.provide(resources))
 		const control = yield* Port.make(Wire.channel(mux, 0), {
 			session: "session-v1",

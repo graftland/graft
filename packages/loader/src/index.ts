@@ -8,3 +8,5 @@ export * as Intercept from "./Intercept"
 export * as Loader from "./Loader"
 export * as ModuleResolver from "./ModuleResolver"
 export * as Tree from "./Tree"
+
+export { ConfigDirectory } from "./ConfigDirectory"

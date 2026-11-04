@@ -1,6 +1,6 @@
 import { SecureRandom } from "effect/crypto"
 import { NodeRuntime, NodeServices } from "@effect/platform-node"
-import * as Remote from "@graftland/remote"
+import * as Remote from "@graftland/plugin-remote"
 import { Graft } from "@graftland/graft"
 import { Console, Effect, Layer } from "effect"
 import process from "node:process"

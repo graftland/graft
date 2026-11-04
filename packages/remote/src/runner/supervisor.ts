@@ -1,9 +1,19 @@
 import { Graft, Plugin } from "@graftland/graft"
-import { Context, Effect, FileSystem, Layer, Path, Schema, Scope } from "effect"
+import {
+	Context,
+	Effect,
+	FileSystem,
+	Layer,
+	Option,
+	Path,
+	Schema,
+	Scope,
+} from "effect"
 import { Digest, SecureRandom } from "effect/crypto"
 import { ChildProcessSpawner } from "effect/process"
 import { Supervisor } from "../Supervisor"
-import { Directory, PositiveDuration } from "../internal/config"
+import { PositiveDuration } from "../internal/config"
+import { ConfigDirectory } from "@graftland/loader"
 import * as Lock from "../internal/runner/Lock"
 import * as Stores from "../internal/runner/Store"
 import * as Execution from "../internal/runner/Execution"
@@ -32,7 +42,9 @@ export default Plugin.make({
 		const lifecycle = yield* Effect.serviceOption(Lifecycle.ServeLifecycle)
 		const resources = yield* Lifecycle.resources(lifecycle)
 		const path = yield* Path.Path
-		const directory = yield* Directory
+		const directory = yield* ConfigDirectory.pipe(
+			Effect.map(Option.getOrElse(() => ".")),
+		)
 		const state = path.resolve(directory, options.state)
 		yield* Lock.acquire(state).pipe(Scope.provide(resources))
 		const services = yield* Layer.build(

@@ -77,6 +77,13 @@ it.effect(
 			const entered = yield* Deferred.make<void>()
 			const count = yield* Ref.make(0)
 			const resolver = Layer.succeed(ModuleResolver.ModuleResolver, {
+				importModule: (specifier) =>
+					Effect.fail(
+						ModuleResolver.ModuleInvalid.make({
+							specifier,
+							cause: "Unused in this fixture",
+						}),
+					),
 				resolve: () =>
 					Effect.acquireRelease(
 						Ref.update(count, (n) => n + 1),

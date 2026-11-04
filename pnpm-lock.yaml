@@ -396,7 +396,7 @@ importers:
       "@graftland/loader":
         specifier: workspace:*
         version: link:../../packages/loader
-      "@graftland/remote":
+      "@graftland/plugin-remote":
         specifier: workspace:*
         version: link:../../packages/remote
       effect:
@@ -421,7 +421,7 @@ importers:
       "@graftland/graft":
         specifier: workspace:*
         version: link:../../packages/core
-      "@graftland/remote":
+      "@graftland/plugin-remote":
         specifier: workspace:*
         version: link:../../packages/remote
       effect:

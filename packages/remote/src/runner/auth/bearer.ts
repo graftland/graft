@@ -1,3 +1,4 @@
+import { Option } from "effect"
 import { Graft, Plugin } from "@graftland/graft"
 import {
 	Array,
@@ -13,7 +14,7 @@ import { Hex } from "effect/encoding"
 // @effect-diagnostics-next-line nodeBuiltinImport:off -- Token digests use Node's constant-time comparison
 import { timingSafeEqual } from "node:crypto"
 import { BearerAuthenticator } from "../../Auth"
-import { Directory } from "../../internal/config"
+import { ConfigDirectory } from "@graftland/loader"
 import * as Token from "../../internal/auth/token"
 
 export const Config = Schema.Struct({ tokens: Schema.String })
@@ -30,7 +31,9 @@ export default Plugin.make({
 	apply: Effect.fnUntraced(function* (config) {
 		const fs = yield* FileSystem.FileSystem
 		const path = yield* Path.Path
-		const directory = yield* Directory
+		const directory = yield* ConfigDirectory.pipe(
+			Effect.map(Option.getOrElse(() => ".")),
+		)
 		const digest = yield* Digest.Digest
 		const file = yield* fs.readFileString(
 			path.resolve(directory, config.tokens),

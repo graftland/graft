@@ -20,17 +20,23 @@ describe("remote runner", () => {
 					// Run the installed copy of this test's own build, so its children
 					// resolve the same executable instead of the package's dist output.
 					runner: local(
-						"../.cache/test-lab/install/node_modules/@graftland/remote/dist/bin.js",
+						"../.cache/test-lab/install/node_modules/@graftland/plugin-remote/dist/bin.js",
 					),
 					packages: [
 						{
-							name: "@graftland/remote",
+							name: "@graftland/plugin-remote",
 							dist: local("../.cache/runner"),
 							exports: {
 								"./bin": "./dist/bin.js",
 								"./watchdog": "./dist/watchdog.js",
 								"./runner/supervisor": "./dist/runner/supervisor.js",
 								"./runner/websocket": "./dist/runner/websocket.js",
+								"./internal/legacy/runner/websocket":
+									"./dist/internal/legacy/runner/websocket.js",
+								"./internal/legacy/runner/auth/none":
+									"./dist/internal/legacy/runner/auth/none.js",
+								"./internal/legacy/runner/auth/mtls":
+									"./dist/internal/legacy/runner/auth/mtls.js",
 								"./runner/auth/jwt": "./dist/runner/auth/jwt.js",
 							},
 						},

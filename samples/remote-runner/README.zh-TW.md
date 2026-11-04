@@ -63,7 +63,7 @@ URL。JWT 過期不會關閉已通過驗證的工作階段。遭竊 token 在有
 `certificates` 會重用既有 CA，`--force` 替換所要求的終端憑證。
 
 在擁有獨立 `package.json` 的 `/srv/graft/install` 下安裝
-`@graftland/remote`、本範例編譯後的套件及依賴。這些是工作區套件，不假定已發布至 registry。用外部行程管理器涵蓋整個行程群組，保留
+`@graftland/plugin-remote`、本範例編譯後的套件及依賴。這些是工作區套件，不假定已發布至 registry。用外部行程管理器涵蓋整個行程群組，保留
 `/var/lib/graft`：
 
 ```sh
@@ -89,7 +89,7 @@ LEDGER_FILE=ledger.json pnpm exec graft start
 ## 透過 SSH 連線
 
 將宿主 YAML 中的 `host/websocket`、`host/auth/jwt` 替換為
-`@graftland/remote/host/command`，target 改成：
+`@graftland/plugin-remote/host/command`，target 改成：
 
 ```ts
 Remote.runner({

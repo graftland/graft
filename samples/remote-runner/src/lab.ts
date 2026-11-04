@@ -122,7 +122,7 @@ export const start = Effect.fn("Lab.start")(function* (options: Options) {
 				credentials.publicKey,
 			],
 		],
-		{ stdin: "ignore", stdout: "pipe", stderr: "inherit" },
+		{ cwd: root, stdin: "ignore", stdout: "pipe", stderr: "inherit" },
 	)
 	// The runner announces its port on stdout. Keep reading so it never blocks on a full pipe.
 	const ready = yield* Deferred.make<number, PlatformError.PlatformError>()

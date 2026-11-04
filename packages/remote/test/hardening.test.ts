@@ -90,7 +90,7 @@ const spy = Effect.gen(function* () {
 })
 
 class Marker extends Context.Service<Marker, string>()(
-	"@graftland/remote/test/hardening.test/Marker",
+	"@graftland/plugin-remote/test/hardening.test/Marker",
 ) {}
 
 describe("local remote hardening", () => {

@@ -3,7 +3,7 @@ title: 遠端外掛
 description: 讓外掛在子行程、Node worker 或 runner 上執行。
 ---
 
-用 `@graftland/remote` 將外掛放到獨立執行單元中。`Remote.local()`
+用 `@graftland/plugin-remote` 將外掛放到獨立執行單元中。`Remote.local()`
 啟動本機 Node.js 子行程，`Remote.worker()` 啟動 Node
 worker，`Remote.runner(...)`
 連線到另一台機器上的 runner。宿主載入的仍是一般 Graft 外掛：使用者等待服務，服務撤回時重新啟動，並在提供者之前停止。
@@ -20,7 +20,7 @@ worker，`Remote.runner(...)`
 宿主只匯入契約。把實作放在另一個模組，避免宿主匯入入口時就載入或執行它：
 
 ```ts title="contract.ts"
-import { Contract } from "@graftland/remote"
+import { Contract } from "@graftland/plugin-remote"
 import { Schema } from "effect"
 
 export const config = Schema.Struct({ greeting: Schema.String })
@@ -57,12 +57,12 @@ loader。
 remote 兩端都是一般 Graft 外掛。`Remote.plugin`
 依 target 注入所需能力，不會自動安裝提供者。缺少提供者時，代理保持 Pending；撤回傳輸或憑證提供者，也會撤回依賴它的代理。
 
-公共契約模組 `@graftland/remote/Transport`、`Auth` 和 `Supervisor`
+公共契約模組 `@graftland/plugin-remote/Transport`、`Auth` 和 `Supervisor`
 只定義服務鍵與介面，不包含實作。`Auth.Peer`
 表示驗證後的身分。用 YAML 的模組名稱載入實作，或匯入其 default export 後呼叫
 `Graft.plugin`：
 
-| 位置   | `@graftland/remote/` 下的外掛路徑                                               | 用途                                                                 |
+| 位置   | `@graftland/plugin-remote/` 下的外掛路徑                                        | 用途                                                                 |
 | ------ | ------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
 | 宿主   | `host/local`、`host/worker`                                                     | 建立子行程或 Node worker，不需要驗證外掛。                           |
 | 宿主   | `host/websocket`、`host/unix`、`host/command`                                   | 透過選定的傳輸連線到 runner。                                        |
@@ -72,12 +72,12 @@ remote 兩端都是一般 Graft 外掛。`Remote.plugin`
 | Runner | `runner/auth/mtls`、`runner/auth/bearer`、`runner/auth/jwt`、`runner/auth/none` | 將憑證對應到穩定身分；stdio 不使用驗證器。                           |
 
 同一 realm 中，一個服務鍵只能有一個提供者。listener 的 `auth` 填完整服務鍵，例如
-`@graftland/remote/Auth/JwtAuthenticator`，不是項目 id。撤回驗證器會關閉對應的 listener，supervisor 繼續執行。
+`@graftland/plugin-remote/Auth/JwtAuthenticator`，不是項目 id。撤回驗證器會關閉對應的 listener，supervisor 繼續執行。
 
 ## 啟動本機子行程或 Node worker
 
 ```ts title="entry.ts"
-import * as Remote from "@graftland/remote"
+import * as Remote from "@graftland/plugin-remote"
 import { contract } from "./contract.js"
 
 export default Remote.plugin(contract, {
@@ -90,7 +90,7 @@ export default Remote.plugin(contract, {
 與入口一起載入 `host/local`：
 
 ```yaml title="graft.yml"
-- name: "@graftland/remote/host/local"
+- name: "@graftland/plugin-remote/host/local"
 - name: ./entry.ts
   config:
     greeting: Hello
@@ -104,7 +104,7 @@ export default Remote.plugin(contract, {
 載入入口。自行嵌入 Graft 時，在建置 `Graft.layer` 的環境中提供
 `NodeServices.layer` 和 `effect/crypto` 的
 `SecureRandom.layerWebCrypto`；CLI 已提供這兩項服務。已安裝或建置好的
-`@graftland/remote` 執行檔會負責啟動子行程。
+`@graftland/plugin-remote` 執行檔會負責啟動子行程。
 
 每次啟用都有新的行程，設定變更也會重新啟動它。子行程失敗會讓宿主代理失敗；重試策略設在代理上，每次重試重新啟動行程。Effect 日誌會轉送到宿主，並帶上
 `remote.pid`。請用 Effect 記錄日誌，`console.log` 不會作為結構化日誌轉送。
@@ -150,8 +150,8 @@ Schema 必須相符。契約中的服務 key 不能重複；不同服務的 RPC 
 用相對路徑指向宿主入口模組。`config` 仍然只放外掛的業務輸入：
 
 ```yaml title="graft.yml"
-- name: "@graftland/remote/host/websocket"
-- name: "@graftland/remote/host/auth/jwt"
+- name: "@graftland/plugin-remote/host/websocket"
+- name: "@graftland/plugin-remote/host/auth/jwt"
 - id: greeter
   name: ./greeter.ts
   config:
@@ -161,7 +161,7 @@ Schema 必須相符。契約中的服務 key 不能重複；不同服務的 RPC 
 入口透過 Effect Config 從環境變數讀取 runner 設定：
 
 ```ts title="greeter.ts"
-import * as Remote from "@graftland/remote"
+import * as Remote from "@graftland/plugin-remote"
 import { Config, Effect, FileSystem } from "effect"
 import { contract } from "my-plugin/contract"
 
@@ -254,7 +254,7 @@ WebSocket 使用 `/graft`（省略時自動補上）與 `graft-remote.v1`
 ## 準備 runner
 
 使用 Linux 或 macOS，以及 Node.js 22.22 或更新版本。在安裝目錄下預先安裝
-`@graftland/remote`、編譯後的外掛套件及其依賴。runner 的 `contractModule`
+`@graftland/plugin-remote`、編譯後的外掛套件及其依賴。runner 的 `contractModule`
 從這裡解析套件名稱或子路徑；宿主不會上傳程式碼。執行期間不要修改已安裝的套件。
 
 `serve --config` 載入一般 Graft 項目。以下是完整的 wss +
@@ -262,7 +262,7 @@ JWT 設定；檔案中的相對路徑以該設定檔所在目錄為基準。
 
 ```yaml title="runner.yml"
 - id: remote-supervisor
-  name: "@graftland/remote/runner/supervisor"
+  name: "@graftland/plugin-remote/runner/supervisor"
   config:
     root: /srv/graft/install
     state: /var/lib/graft
@@ -270,7 +270,7 @@ JWT 設定；檔案中的相對路徑以該設定檔所在目錄為基準。
     grace: 5 seconds
 
 - id: remote-auth
-  name: "@graftland/remote/runner/auth/jwt"
+  name: "@graftland/plugin-remote/runner/auth/jwt"
   config:
     issuer: https://issuer.example
     audience: [graft]
@@ -281,12 +281,12 @@ JWT 設定；檔案中的相對路徑以該設定檔所在目錄為基準。
       publicKey: /run/secrets/jwt-public.pem
 
 - id: public
-  name: "@graftland/remote/runner/websocket"
+  name: "@graftland/plugin-remote/runner/websocket"
   config:
     url: wss://0.0.0.0:7443/graft
     cert: /run/secrets/server.crt
     key: /run/secrets/server.key
-    auth: "@graftland/remote/Auth/JwtAuthenticator"
+    auth: "@graftland/plugin-remote/Auth/JwtAuthenticator"
 ```
 
 ```sh

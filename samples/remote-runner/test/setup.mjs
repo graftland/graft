@@ -12,7 +12,7 @@ export default async function setup() {
 		deps: {
 			alwaysBundle: [
 				"@graftland/graft",
-				"@graftland/remote",
+				"@graftland/plugin-remote",
 				"@graftland/loader",
 			],
 			neverBundle: [/^effect(?:\/|$)/, /^@effect\//],
@@ -34,6 +34,9 @@ export default async function setup() {
 			"watchdog",
 			"runner/supervisor",
 			"runner/websocket",
+			"internal/legacy/runner/websocket",
+			"internal/legacy/runner/auth/none",
+			"internal/legacy/runner/auth/mtls",
 			"runner/auth/jwt",
 		].map(
 			(name) =>

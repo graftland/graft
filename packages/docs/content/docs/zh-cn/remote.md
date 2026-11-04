@@ -3,7 +3,7 @@ title: 远程插件
 description: 让插件在子进程、Node worker 或 runner 上运行。
 ---
 
-用 `@graftland/remote` 将插件放到独立执行单元中。`Remote.local()`
+用 `@graftland/plugin-remote` 将插件放到独立执行单元中。`Remote.local()`
 启动本机 Node.js 子进程，`Remote.worker()` 启动 Node
 worker，`Remote.runner(...)`
 连接另一台机器上的 runner。宿主加载的仍是普通 Graft 插件：消费者等待服务，服务撤回时重启，并在提供者之前停止。
@@ -20,7 +20,7 @@ worker，`Remote.runner(...)`
 宿主只导入契约。把实现放在另一个模块，避免宿主导入入口时就加载或运行它：
 
 ```ts title="contract.ts"
-import { Contract } from "@graftland/remote"
+import { Contract } from "@graftland/plugin-remote"
 import { Schema } from "effect"
 
 export const config = Schema.Struct({ greeting: Schema.String })
@@ -57,12 +57,12 @@ loader。
 remote 两端都是普通 Graft 插件。`Remote.plugin`
 根据 target 注入所需能力，不会自动安装提供者。缺少提供者时，代理保持 Pending；撤回传输或凭证提供者，也会撤回依赖它的代理。
 
-公共契约模块 `@graftland/remote/Transport`、`Auth` 和 `Supervisor`
+公共契约模块 `@graftland/plugin-remote/Transport`、`Auth` 和 `Supervisor`
 只定义服务键和接口，不包含实现。`Auth.Peer`
 表示认证后的身份。用 YAML 的模块名加载实现，或导入其 default export 后调用
 `Graft.plugin`：
 
-| 位置   | `@graftland/remote/` 下的插件路径                                               | 用途                                                             |
+| 位置   | `@graftland/plugin-remote/` 下的插件路径                                        | 用途                                                             |
 | ------ | ------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
 | 宿主   | `host/local`、`host/worker`                                                     | 创建子进程或 Node worker，不需要认证插件。                       |
 | 宿主   | `host/websocket`、`host/unix`、`host/command`                                   | 通过所选传输连接 runner。                                        |
@@ -72,12 +72,12 @@ remote 两端都是普通 Graft 插件。`Remote.plugin`
 | Runner | `runner/auth/mtls`、`runner/auth/bearer`、`runner/auth/jwt`、`runner/auth/none` | 将凭证对应到稳定身份；stdio 不使用认证器。                       |
 
 同一 realm 中，一个服务键只能有一个提供者。listener 的 `auth` 填完整服务键，例如
-`@graftland/remote/Auth/JwtAuthenticator`，不是条目 id。撤回认证器会关闭相应 listener，supervisor 继续运行。
+`@graftland/plugin-remote/Auth/JwtAuthenticator`，不是条目 id。撤回认证器会关闭相应 listener，supervisor 继续运行。
 
 ## 启动本机子进程或 Node worker
 
 ```ts title="entry.ts"
-import * as Remote from "@graftland/remote"
+import * as Remote from "@graftland/plugin-remote"
 import { contract } from "./contract.js"
 
 export default Remote.plugin(contract, {
@@ -90,7 +90,7 @@ export default Remote.plugin(contract, {
 与入口一起加载 `host/local`：
 
 ```yaml title="graft.yml"
-- name: "@graftland/remote/host/local"
+- name: "@graftland/plugin-remote/host/local"
 - name: ./entry.ts
   config:
     greeting: Hello
@@ -104,7 +104,7 @@ export default Remote.plugin(contract, {
 加载入口。自行嵌入 Graft 时，在构建 `Graft.layer` 的环境中提供
 `NodeServices.layer` 和 `effect/crypto` 的
 `SecureRandom.layerWebCrypto`；CLI 已提供这两项服务。已安装或构建好的
-`@graftland/remote` 可执行文件会负责启动子进程。
+`@graftland/plugin-remote` 可执行文件会负责启动子进程。
 
 每次激活都有新的进程，配置变化也会重启它。子进程失败会使宿主代理失败；重试策略设在代理上，每次重试重新启动进程。Effect 日志会转发到宿主，并带上
 `remote.pid`。请用 Effect 记录日志，`console.log` 不会作为结构化日志转发。
@@ -150,8 +150,8 @@ Schema 必须匹配。契约中的服务 key 不能重复；不同服务的 RPC 
 用相对路径指向宿主入口模块。`config` 仍然只放插件的业务输入：
 
 ```yaml title="graft.yml"
-- name: "@graftland/remote/host/websocket"
-- name: "@graftland/remote/host/auth/jwt"
+- name: "@graftland/plugin-remote/host/websocket"
+- name: "@graftland/plugin-remote/host/auth/jwt"
 - id: greeter
   name: ./greeter.ts
   config:
@@ -161,7 +161,7 @@ Schema 必须匹配。契约中的服务 key 不能重复；不同服务的 RPC 
 入口通过 Effect Config 从环境变量读取 runner 设置：
 
 ```ts title="greeter.ts"
-import * as Remote from "@graftland/remote"
+import * as Remote from "@graftland/plugin-remote"
 import { Config, Effect, FileSystem } from "effect"
 import { contract } from "my-plugin/contract"
 
@@ -254,7 +254,7 @@ WebSocket 使用 `/graft`（省略时自动补上）和 `graft-remote.v1`
 ## 准备 runner
 
 使用 Linux 或 macOS，以及 Node.js 22.22 或更高版本。在安装目录下预装
-`@graftland/remote`、编译后的插件包及其依赖。runner 的 `contractModule`
+`@graftland/plugin-remote`、编译后的插件包及其依赖。runner 的 `contractModule`
 从这里解析包名或子路径；宿主不会上传代码。运行期间不要修改已安装的包。
 
 `serve --config` 加载普通 Graft 条目。下面是完整的 wss +
@@ -262,7 +262,7 @@ JWT 配置；文件里的相对路径以该配置文件所在目录为基准。
 
 ```yaml title="runner.yml"
 - id: remote-supervisor
-  name: "@graftland/remote/runner/supervisor"
+  name: "@graftland/plugin-remote/runner/supervisor"
   config:
     root: /srv/graft/install
     state: /var/lib/graft
@@ -270,7 +270,7 @@ JWT 配置；文件里的相对路径以该配置文件所在目录为基准。
     grace: 5 seconds
 
 - id: remote-auth
-  name: "@graftland/remote/runner/auth/jwt"
+  name: "@graftland/plugin-remote/runner/auth/jwt"
   config:
     issuer: https://issuer.example
     audience: [graft]
@@ -281,12 +281,12 @@ JWT 配置；文件里的相对路径以该配置文件所在目录为基准。
       publicKey: /run/secrets/jwt-public.pem
 
 - id: public
-  name: "@graftland/remote/runner/websocket"
+  name: "@graftland/plugin-remote/runner/websocket"
   config:
     url: wss://0.0.0.0:7443/graft
     cert: /run/secrets/server.crt
     key: /run/secrets/server.key
-    auth: "@graftland/remote/Auth/JwtAuthenticator"
+    auth: "@graftland/plugin-remote/Auth/JwtAuthenticator"
 ```
 
 ```sh

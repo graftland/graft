@@ -32,7 +32,7 @@ import { defaults, type Limits } from "./Limits"
 export type Priority = keyof Limits
 
 export const Priority = Context.Reference<Priority>(
-	"@graftland/remote/internal/port/Priority",
+	"@graftland/plugin-remote/internal/port/Priority",
 	{ defaultValue: () => "data" },
 )
 type Endpoint = Pick<RpcGroup.RpcGroup<Rpc.Any>, "requests">

@@ -1,12 +1,12 @@
 import { ChildFailure } from "./internal/childErrors"
 export { ChildFailure }
-import { Array, Cause, Effect, Predicate, Schema } from "effect"
+import { Array, Cause, Predicate, Schema } from "effect"
 
 import type { Service } from "./internal/services"
 import * as Control from "./internal/control"
 export { service } from "./internal/services"
 
-const TypeId = "~@graftland/remote/Contract"
+const TypeId = "~@graftland/plugin-remote/Contract"
 
 /** An undeclared failure still crosses the boundary, with its diagnostic value. */
 export class UndeclaredFailure extends Schema.TaggedError<
@@ -81,20 +81,10 @@ export type Contract<
 > = ReturnType<typeof make<S, E>>
 
 /** Dynamic imports retain the control server and cause normalization; hosts retain the declared error type. */
-export interface RunnerContract {
-	readonly [TypeId]: string
-	readonly inject: ReadonlyArray<Service>
-	readonly provides: ReadonlyArray<Service>
-	readonly name: string
-	readonly module: string
-	readonly control: ReturnType<
-		typeof Control.make<Schema.Codec<Cause.Cause<unknown>, Schema.Json>>
-	>
-	readonly normalizeCause: (cause: Cause.Cause<unknown>) => Cause.Cause<unknown>
-	readonly encodeCause: (
-		cause: Cause.Cause<unknown>,
-	) => Effect.Effect<Schema.Json, Schema.SchemaError>
-}
+export type RunnerContract = Contract<
+	Schema.Codec<unknown, Schema.Json>,
+	Schema.Codec<unknown>
+>
 
 export const isContract = (value: unknown): value is RunnerContract =>
 	Predicate.hasProperty(value, TypeId) && value[TypeId] === TypeId

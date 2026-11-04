@@ -1,5 +1,11 @@
 import { Graft, Plugin, type Fork } from "@graftland/graft"
-import { Include, Loader, ModuleResolver, type Entry } from "@graftland/loader"
+import {
+	ConfigDirectory,
+	Include,
+	Loader,
+	ModuleResolver,
+	type Entry,
+} from "@graftland/loader"
 import {
 	Array,
 	Cause,
@@ -11,7 +17,7 @@ import {
 	Path,
 	Stream,
 } from "effect"
-import { Directory } from "./config"
+import * as Importer from "./importer"
 
 import { ServeLifecycle, StartupError, make } from "./ServeLifecycle"
 import { cleanupCause } from "./cleanup"
@@ -121,10 +127,8 @@ const close = (entries: Fork.Fork, lifecycle: typeof ServeLifecycle.Service) =>
 const load = Effect.fnUntraced(function* (source: Source, directory: string) {
 	const lifecycle = yield* make
 	yield* Graft.provide(ServeLifecycle, lifecycle)
-	const resolver = yield* ModuleResolver.make({
-		base: directory,
-		importer: (specifier) => import(specifier),
-	})
+	const importer = yield* Importer.make(directory)
+	const resolver = yield* ModuleResolver.make({ base: directory, importer })
 	yield* Graft.provide(ModuleResolver.ModuleResolver, resolver)
 	const entries = yield* source._tag === "Config"
 		? Graft.plugin(Include.Include, { path: source.config, watch: false })
@@ -138,18 +142,22 @@ const load = Effect.fnUntraced(function* (source: Source, directory: string) {
 })
 export const run = Effect.fnUntraced(function* (source: Source) {
 	const path = yield* Path.Path
-	const directory =
+	const resolved: Source =
 		source._tag === "Config"
-			? path.dirname(path.resolve(source.config))
+			? { _tag: "Config", config: path.resolve(source.config) }
+			: source
+	const directory =
+		resolved._tag === "Config"
+			? path.dirname(resolved.config)
 			: path.resolve(".")
-	return yield* load(source, directory).pipe(
+	return yield* load(resolved, directory).pipe(
 		Effect.mapError((error) =>
 			StartupError.make({
 				detail: "Starting the runner failed",
 				cause: Cause.fail(error),
 			}),
 		),
-		Effect.provideService(Directory, directory),
+		Effect.provideService(ConfigDirectory, Option.some(directory)),
 		Effect.provideService(Logger.LogToStderr, true),
 	)
 })

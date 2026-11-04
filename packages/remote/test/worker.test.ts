@@ -23,6 +23,7 @@ import { MessageChannel } from "node:worker_threads"
 import { expectTypeOf } from "vitest"
 import process from "node:process"
 import * as Remote from "../src/index"
+import { executionPlugin } from "../src/internal/execution"
 import worker from "../src/host/worker"
 import { WorkerTransport, type Execution } from "../src/Transport"
 import { LocalTerminationTimeout } from "../src/Errors"
@@ -106,11 +107,11 @@ const setup = (shutdownTimeout: Duration.Input = "5 seconds") =>
 			double: (value) => Effect.succeed(value * 2),
 		})
 		const launched = yield* launch(
-			Remote.plugin(contract, {
-				target: Remote.worker({ execArgv: [] }),
-				contractModule: servicesModule,
-				shutdownTimeout,
-			}),
+			executionPlugin(
+				contract,
+				{ contractModule: servicesModule, shutdownTimeout },
+				Remote.worker({ execArgv: [] }),
+			),
 			{ directory, fail: false },
 		)
 		const captured = yield* Deferred.make<typeof ChildApi.Service>()
@@ -186,10 +187,11 @@ describe("direct worker execution", () => {
 				const directory = yield* fs.makeTempDirectoryScoped()
 				yield* fs.writeFileString(directory + "/release", "ready")
 				const { proxy, execution } = yield* launch(
-					Remote.plugin(handles, {
-						target: Remote.worker(),
-						contractModule: handlesModule,
-					}),
+					executionPlugin(
+						handles,
+						{ contractModule: handlesModule },
+						Remote.worker(),
+					),
 					{ directory, mode: "leaked-handle", value: 1 },
 				)
 				const before = yield* Clock.currentTimeMillis

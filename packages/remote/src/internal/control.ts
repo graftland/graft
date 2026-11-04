@@ -30,7 +30,7 @@ export const LogEvent = Schema.Union([
 	Schema.TaggedStruct("Log", { entry: Log, dropped: Schema.Int }),
 	Schema.TaggedStruct("LogsEnded", { dropped: Schema.Int }),
 ])
-export const endpoint = "@graftland/remote/control"
+export const endpoint = "@graftland/plugin-remote/control"
 export const make = <C extends Schema.Top>(cause: C) =>
 	RpcGroup.make(
 		Rpc.make("Load", {

@@ -4,9 +4,9 @@
 # The WebSocket transport and JWT credentials plugins provide the host capabilities
 # used by the remote exporter.
 - id: websocket-transport
-  name: "@graftland/remote/host/websocket"
+  name: "@graftland/plugin-remote/internal/legacy/host/websocket"
 - id: jwt-credentials
-  name: "@graftland/remote/host/auth/jwt"
+  name: "@graftland/plugin-remote/host/auth/jwt"
 
 - id: ledger
   name: ./src/ledger.ts

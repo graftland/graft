@@ -1,3 +1,4 @@
+import { application, runHost, installModule } from "./application"
 import { runnerRuntime } from "./capabilities"
 import { SecureRandom } from "effect/crypto"
 import { Entry, Include, Loader, ModuleResolver } from "@graftland/loader"
@@ -12,6 +13,7 @@ import {
 	Deferred,
 	Effect,
 	Option,
+	Path,
 	Exit,
 	Fiber,
 	FiberSet,
@@ -92,6 +94,7 @@ const startRunner = (state: string, lease = 15000, config?: string) =>
 						]
 					: [...Array.drop(argv, 1), "serve", "--config", config],
 				{
+					cwd: new URL("..", import.meta.url).pathname,
 					stdin: "ignore",
 					stdout: "pipe",
 					stderr: "pipe",
@@ -350,24 +353,24 @@ const loadYamlHost = (directory: string, port: number) => {
 
 const runnerYaml = (state: string, listeners: number) => `
 - id: supervisor
-  name: '@graftland/remote/runner/supervisor'
+  name: '@graftland/plugin-remote/runner/supervisor'
   config:
     root: ${inject("remoteRoot")}
     state: ${state}
 - id: mtls
-  name: '@graftland/remote/runner/auth/mtls'
+  name: '@graftland/plugin-remote/internal/legacy/runner/auth/mtls'
   config:
     ca: ${inject("remoteTls")}/ca.crt
 ${Array.join(
 	Array.map(
 		Array.range(1, listeners),
 		(index) => `- id: listener-${index}
-  name: '@graftland/remote/runner/websocket'
+  name: '@graftland/plugin-remote/internal/legacy/runner/websocket'
   config:
     url: wss://127.0.0.1:0
     cert: ${inject("remoteTls")}/server.crt
     key: ${inject("remoteTls")}/server.key
-    auth: '@graftland/remote/Auth/MtlsAuthenticator'
+    auth: '@graftland/plugin-remote/Auth/MtlsAuthenticator'
 `,
 	),
 	"",
@@ -375,11 +378,120 @@ ${Array.join(
 
 describe("network runner end to end", () => {
 	it.live(
+		"loads host and runner entries with application modules and configuration-relative files",
+		() =>
+			Effect.gen(function* () {
+				const fs = yield* FileSystem.FileSystem
+				const directory = yield* fs.makeTempDirectoryScoped()
+				yield* application(directory)
+				yield* fs.copy(inject("remoteTls"), directory + "/certs")
+				const contractUrl = new URL(
+					"../.cache/integration/services-contract.js",
+					import.meta.url,
+				).href
+				const quoted = yield* Schema.encodeEffect(
+					Schema.fromJsonString(Schema.String),
+				)(contractUrl)
+				yield* fs.writeFileString(
+					directory + "/contract.mjs",
+					`export { contract as default } from ${quoted};\n`,
+				)
+				yield* installModule(
+					directory,
+					"remote-fixture",
+					new URL("file://" + directory + "/contract.mjs").href,
+				)
+				yield* installModule(
+					directory,
+					"graft-plugin-secure-socket",
+					new URL("../dist/host/websocket.js", import.meta.url).href,
+				)
+				const runner = yield* Schema.encodeEffect(
+					Schema.fromJsonString(Schema.Json),
+				)([
+					{
+						id: "runner",
+						name: "remote/runner",
+						config: {
+							root: inject("remoteRoot"),
+							state: "./state",
+							listen: [
+								{
+									url: "wss://127.0.0.1:0",
+									cert: "./certs/server.crt",
+									key: "./certs/server.key",
+									auth: { mtls: { ca: "./certs/ca.crt" } },
+								},
+							],
+						},
+					},
+				])
+				yield* fs.writeFileString(directory + "/runner.yml", runner)
+				const path = yield* Path.Path
+				const daemon = yield* startRunner(
+					directory + "/state",
+					15000,
+					path.relative(
+						new URL("..", import.meta.url).pathname,
+						directory + "/runner.yml",
+					),
+				)
+				const host = yield* Schema.encodeEffect(
+					Schema.fromJsonString(Schema.Json),
+				)([
+					{
+						id: "yaml-worker",
+						name: "remote",
+						config: {
+							contract: "remote-fixture",
+							config: { directory, fail: false },
+							connect: {
+								transport: {
+									name: "secure-socket",
+									config: {
+										url: `wss://127.0.0.1:${daemon.port}`,
+										ca: "./certs/ca.crt",
+										servername: "localhost",
+									},
+								},
+								auth: {
+									mtls: {
+										cert: "./certs/client.crt",
+										key: "./certs/client.key",
+									},
+								},
+							},
+						},
+					},
+				])
+				yield* fs.writeFileString(directory + "/host.yml", host)
+				const result = yield* runHost(directory)
+				assert.equal(result.code, 0, result.stderr)
+				const reply = yield* Schema.decodeEffect(
+					Schema.fromJsonString(
+						Schema.Struct({
+							value: Schema.Int,
+							id: Schema.String,
+							generation: Schema.Int,
+							pid: Schema.Int,
+						}),
+					),
+				)(String.trim(result.stdout))
+				assert.equal(reply.value, 41)
+				assert.equal(reply.id, "yaml-worker")
+				assert.equal(reply.generation, 1)
+				assert.throws(() => process.kill(reply.pid, 0))
+			}).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+		30000,
+	)
+
+	it.live(
 		"serves the same session protocol from YAML and shorthand flags",
 		() =>
 			Effect.gen(function* () {
 				const fs = yield* FileSystem.FileSystem
 				const directory = yield* fs.makeTempDirectoryScoped()
+				yield* application(directory)
 				const file = directory + "/runner.yml"
 				yield* fs.writeFileString(
 					file,
@@ -415,6 +527,7 @@ describe("network runner end to end", () => {
 			Effect.gen(function* () {
 				const fs = yield* FileSystem.FileSystem
 				const directory = yield* fs.makeTempDirectoryScoped()
+				yield* application(directory)
 				const file = directory + "/runner.yml"
 				yield* fs.writeFileString(file, runnerYaml(directory + "/state", 2))
 				const daemon = yield* startRunner(directory + "/state", 15000, file)

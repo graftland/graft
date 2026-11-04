@@ -18,6 +18,15 @@ export default async function setup(project) {
 		...common,
 		entry: [
 			"bin",
+			"index",
+			"runner/index",
+			"Contract",
+			"internal/legacy/host/websocket",
+			"internal/legacy/host/auth/mtls",
+			"internal/legacy/host/auth/none",
+			"internal/legacy/runner/websocket",
+			"internal/legacy/runner/auth/mtls",
+			"internal/legacy/runner/auth/none",
 			"watchdog",
 			"worker",
 			"host/worker",
@@ -51,6 +60,7 @@ export default async function setup(project) {
 			"services-contract",
 			"services-plugin",
 			"loader-entry",
+			"entry-host",
 		].map((name) => new URL(`./fixtures/${name}.ts`, import.meta.url).pathname),
 		outDir: new URL("../.cache/integration", import.meta.url).pathname,
 	})
