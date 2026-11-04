@@ -3,6 +3,7 @@
  * needs, decodes its configuration with a schema, and runs `apply` inside a
  * scope that lives exactly as long as the plugin is active.
  */
+import { RuntimeContext } from "./internal/runtimeContext"
 import type { Fiber, Schedule, Scope } from "effect"
 import { identity } from "effect/Function"
 import {
@@ -23,9 +24,6 @@ import { provide, Graft, type ServiceConflict } from "./Graft"
 
 const TypeId = "~@graftland/graft/Plugin"
 const Contract = "~@graftland/graft/Plugin/Contract"
-
-/** Dynamic Plugin<any> intentionally erases the contract; typed definitions retain it. */
-type Invariant<A> = 0 extends 1 & A ? unknown : (value: A) => A
 
 /**
  * Marks a dependency as optional: the plugin starts without it and restarts
@@ -64,7 +62,7 @@ export const fork = <A, E, R>(
 	Exclude<R, Scope.Scope> | Graft | Tasks<E>
 > =>
 	Effect.gen(function* () {
-		const { activation } = yield* Graft
+		const { activation } = yield* RuntimeContext
 		if (Option.isNone(activation.tasks))
 			return yield* Effect.die(
 				new Error("Plugin.fork requires a plugin activation"),
@@ -75,23 +73,17 @@ export const fork = <A, E, R>(
 // A definition has one input/error contract even when referenced through aliases.
 export type Plugin<Config = any, Input = any, E = any> = 0 extends 1 & Input
 	? 0 extends 1 & E
-		? DynamicPlugin<Config>
+		? Omit<Definition<Config, any, any>, typeof Contract> & {
+				readonly [Contract]: unknown
+			}
 		: Definition<Config, Input, E | Schema.SchemaError>
 	: Definition<Config, Input, E | Schema.SchemaError>
-
-/** The dynamic boundary forgets contracts instead of pretending to instantiate them at any. */
-type DynamicPlugin<Config> = Omit<
-	Definition<Config, any, any>,
-	typeof Contract
-> & {
-	readonly [Contract]: unknown
-}
 
 export interface Definition<in out Config, in out Input, in out E> {
 	readonly [TypeId]: typeof TypeId
 	readonly [Contract]: {
-		readonly input: Invariant<Input>
-		readonly error: Invariant<E>
+		readonly input: 0 extends 1 & Input ? unknown : (value: Input) => Input
+		readonly error: 0 extends 1 & E ? unknown : (value: E) => E
 	}
 	readonly name: string
 	readonly inject: ReadonlyArray<Dependency>
@@ -219,7 +211,11 @@ export const layer = <
 	options: Options<Inject> & {
 		readonly provides: ReadonlyArray<Context.Key<ROut, any>>
 	},
-): Plugin<void, void, E | TaskGroup.Errors<RIn> | ServiceConflict> =>
+): Plugin<
+	void,
+	void,
+	E | (RIn extends Tasks<infer Error> ? Error : never) | ServiceConflict
+> =>
 	make({
 		...options,
 		apply: Effect.fnUntraced(function* () {
@@ -242,7 +238,11 @@ export const service = <
 	key: Context.Key<I, S>,
 	build: Effect.Effect<S, E, R>,
 	options: Options<Inject>,
-): Plugin<void, void, E | TaskGroup.Errors<R> | ServiceConflict> =>
+): Plugin<
+	void,
+	void,
+	E | (R extends Tasks<infer Error> ? Error : never) | ServiceConflict
+> =>
 	make({
 		...options,
 		apply: () => Effect.flatMap(build, (value) => provide(key, value)),

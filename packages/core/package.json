@@ -24,6 +24,22 @@
 			"source": "./src/index.ts",
 			"default": "./dist/index.js"
 		},
+		"./Event": {
+			"source": "./src/Event.ts",
+			"default": "./dist/Event.js"
+		},
+		"./Fork": {
+			"source": "./src/Fork.ts",
+			"default": "./dist/Fork.js"
+		},
+		"./Graft": {
+			"source": "./src/Graft.ts",
+			"default": "./dist/Graft.js"
+		},
+		"./Plugin": {
+			"source": "./src/Plugin.ts",
+			"default": "./dist/Plugin.js"
+		},
 		"./package.json": "./package.json"
 	},
 	"scripts": {
@@ -41,6 +57,10 @@
 	"publishConfig": {
 		"exports": {
 			".": "./dist/index.js",
+			"./Event": "./dist/Event.js",
+			"./Fork": "./dist/Fork.js",
+			"./Graft": "./dist/Graft.js",
+			"./Plugin": "./dist/Plugin.js",
 			"./package.json": "./package.json"
 		}
 	}

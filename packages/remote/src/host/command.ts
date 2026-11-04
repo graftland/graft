@@ -1,3 +1,5 @@
+/** Options for the command connector. */
+export type { CommandOptions as Options } from "../internal/transportOptions"
 import type { CommandOptions } from "../internal/transportOptions"
 import { Plugin, Graft } from "@graftland/graft"
 import {

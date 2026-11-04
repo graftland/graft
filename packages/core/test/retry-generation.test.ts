@@ -1,3 +1,4 @@
+import { RuntimeContext } from "../src/internal/runtimeContext"
 import { assert, it } from "@effect/vitest"
 import {
 	Cause,
@@ -61,7 +62,7 @@ it.effect(
 	"records retry driver defects racing with configuration changes",
 	() =>
 		Effect.gen(function* () {
-			const { runtime } = yield* Graft.Graft
+			const { runtime } = yield* RuntimeContext
 			const constructing = yield* Deferred.make<void>()
 			const fork = yield* Graft.plugin(
 				Plugin.make({

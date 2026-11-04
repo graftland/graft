@@ -1,3 +1,4 @@
+import { RuntimeContext } from "../src/internal/runtimeContext"
 import { assert, describe, it } from "@effect/vitest"
 import {
 	Array,
@@ -37,7 +38,7 @@ describe("transactional service slots", () => {
 		"keeps the directory and unrelated forks out of pending and active wait read sets",
 		() =>
 			Effect.gen(function* () {
-				const { runtime } = yield* Graft.Graft
+				const { runtime } = yield* RuntimeContext
 				const consumer = yield* Graft.plugin(
 					Plugin.make({
 						name: "consumer",
@@ -83,7 +84,7 @@ describe("transactional service slots", () => {
 		"rolls back new slots, publication and holder counts with an outer transaction",
 		() =>
 			Effect.gen(function* () {
-				const { runtime, activation } = yield* Graft.Graft
+				const { runtime, activation } = yield* RuntimeContext
 				const failed = yield* Effect.exit(
 					Effect.tx(
 						Effect.gen(function* () {
@@ -111,7 +112,7 @@ describe("transactional service slots", () => {
 		"does not leak a handle when publication failure is caught inside a transaction",
 		() =>
 			Effect.gen(function* () {
-				const { runtime } = yield* Graft.Graft
+				const { runtime } = yield* RuntimeContext
 				yield* Graft.provide(Required, 1)
 				const directory = yield* TxRef.get(runtime.slots)
 				const slot = Option.getOrThrow(
@@ -128,7 +129,7 @@ describe("transactional service slots", () => {
 		"recreates released keys and wakes their new pending consumers",
 		() =>
 			Effect.gen(function* () {
-				const { runtime } = yield* Graft.Graft
+				const { runtime } = yield* RuntimeContext
 				const key = realmKey("", Required.key)
 				const old = yield* Effect.tx(Slots.retain(runtime, key))
 				yield* Effect.tx(Slots.release(runtime, old))
@@ -172,7 +173,7 @@ describe("transactional service slots", () => {
 					),
 					["Active", "Failed"],
 				)
-				const { runtime } = yield* Graft.Graft
+				const { runtime } = yield* RuntimeContext
 				const registry = yield* registrySnapshot(runtime)
 				assert.strictEqual(HashMap.size(registry), 1)
 			}).pipe(run),
@@ -221,7 +222,7 @@ describe("transactional service slots", () => {
 		"isolates failed publication retries and releases all of their handles",
 		() =>
 			Effect.gen(function* () {
-				const { runtime } = yield* Graft.Graft
+				const { runtime } = yield* RuntimeContext
 				const failed = yield* Graft.plugin(
 					Plugin.make({
 						name: "self dependency",

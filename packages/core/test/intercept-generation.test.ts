@@ -1,3 +1,4 @@
+import { RuntimeContext } from "../src/internal/runtimeContext"
 import { assert, it } from "@effect/vitest"
 import {
 	Deferred,
@@ -101,7 +102,7 @@ it.effect(
 			yield* Deferred.succeed(fail, undefined)
 			yield* Deferred.await(cleaning)
 			const updating = yield* Effect.forkScoped(fork.update("unprocessed"))
-			const { runtime } = yield* Graft.Graft
+			const { runtime } = yield* RuntimeContext
 			yield* Effect.tx(
 				Effect.gen(function* () {
 					const entries = yield* TxSubscriptionRef.get(runtime.forks)

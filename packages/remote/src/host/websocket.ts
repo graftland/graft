@@ -1,3 +1,5 @@
+/** Options for the websocket connector. */
+export type { WebsocketOptions as Options } from "../internal/transportOptions"
 import type { WebsocketOptions } from "../internal/transportOptions"
 import { Plugin, Graft } from "@graftland/graft"
 import { Cause, Effect, FileSystem, Option, Path, Schema } from "effect"

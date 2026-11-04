@@ -1,3 +1,4 @@
+import { RuntimeContext } from "../src/internal/runtimeContext"
 import { registrySnapshot } from "./utils.ts"
 import { assert, describe, it } from "@effect/vitest"
 import {
@@ -37,7 +38,7 @@ describe("regressions", () => {
 		"releases a dependency lease even if a scope finalizer defects",
 		() =>
 			Effect.gen(function* () {
-				const { runtime } = yield* Graft.Graft
+				const { runtime } = yield* RuntimeContext
 				const provider = yield* Graft.plugin(
 					Plugin.service(Service, Effect.succeed("ready"), {
 						name: "provider",
@@ -104,7 +105,7 @@ describe("regressions", () => {
 			Effect.gen(function* () {
 				const started = yield* Deferred.make<void>()
 				const release = yield* Deferred.make<void>()
-				const { runtime } = yield* Graft.Graft
+				const { runtime } = yield* RuntimeContext
 				const provider = yield* Graft.plugin(
 					Plugin.service(Service, Effect.succeed("ready"), {
 						name: "provider",
@@ -150,7 +151,7 @@ describe("regressions", () => {
 		"does not retain a service published during scope finalization",
 		() =>
 			Effect.gen(function* () {
-				const { runtime } = yield* Graft.Graft
+				const { runtime } = yield* RuntimeContext
 				const fork = yield* Graft.plugin(
 					Plugin.make({
 						name: "late provider",
@@ -264,7 +265,7 @@ describe("regressions", () => {
 	it.effect("records defects from interrupted apply cleanup", () =>
 		Effect.gen(function* () {
 			const started = yield* Deferred.make<void>()
-			const { runtime } = yield* Graft.Graft
+			const { runtime } = yield* RuntimeContext
 			const fork = yield* Graft.plugin(
 				Plugin.make({
 					name: "interrupted cleanup",

@@ -1,3 +1,4 @@
+import { RuntimeContext } from "../src/internal/runtimeContext"
 import { assert, describe, it } from "@effect/vitest"
 import {
 	Array,
@@ -19,7 +20,7 @@ describe("cancellation causes", () => {
 		"records an apply failure racing with replacement of that plugin",
 		() =>
 			Effect.gen(function* () {
-				const { runtime } = yield* Graft.Graft
+				const { runtime } = yield* RuntimeContext
 				const replacementStarted = yield* Deferred.make<void>()
 				const replacement = Plugin.make({
 					name: "replacement",
@@ -104,7 +105,7 @@ describe("cancellation causes", () => {
 		"records cleanup defects from an in-place update interrupted by a newer input",
 		() =>
 			Effect.gen(function* () {
-				const { runtime } = yield* Graft.Graft
+				const { runtime } = yield* RuntimeContext
 				const entered = yield* Deferred.make<void>()
 				const fork = yield* Graft.plugin(
 					Plugin.make({

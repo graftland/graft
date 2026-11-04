@@ -1,3 +1,4 @@
+import { RuntimeContext } from "../src/internal/runtimeContext"
 import { assert, it } from "@effect/vitest"
 import {
 	Array,
@@ -24,7 +25,7 @@ it.effect(
 	"records every completed apply defect when supervision is interrupted",
 	() =>
 		Effect.gen(function* () {
-			const { runtime } = yield* Graft.Graft
+			const { runtime } = yield* RuntimeContext
 			const failed = yield* Ref.make<ReadonlyArray<string>>([])
 			for (const ticks of Array.range(0, 60)) {
 				const marker = `completed apply defect (${ticks})`

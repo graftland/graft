@@ -1,3 +1,4 @@
+import { RuntimeContext } from "../src/internal/runtimeContext"
 import { assert, describe, it } from "@effect/vitest"
 import {
 	Array,
@@ -20,7 +21,7 @@ describe("registration lifetime", () => {
 		"releases event keys when the last scoped handler unregisters",
 		() =>
 			Effect.gen(function* () {
-				const { runtime } = yield* Graft.Graft
+				const { runtime } = yield* RuntimeContext
 				for (const index of Array.range(1, 20)) {
 					const event = Event.make<[]>(`temporary-event-${index}`)
 					yield* Effect.scoped(Event.on(event, () => Effect.void))
@@ -35,7 +36,7 @@ describe("registration lifetime", () => {
 		"does not leave fork entries after %i scheduler yields",
 		(ticks) =>
 			Effect.gen(function* () {
-				const { runtime } = yield* Graft.Graft
+				const { runtime } = yield* RuntimeContext
 				const plugin = Plugin.make({
 					name: "registration",
 					apply: () => Effect.void,
@@ -62,7 +63,7 @@ describe("registration lifetime", () => {
 		"does not leave event handlers behind at registration interruption boundaries",
 		() =>
 			Effect.gen(function* () {
-				const { runtime } = yield* Graft.Graft
+				const { runtime } = yield* RuntimeContext
 				const event = Event.make<[]>("interrupted-registration")
 				for (const ticks of Array.range(0, 100)) {
 					const owner = yield* Scope.make()
@@ -92,7 +93,7 @@ describe("registration lifetime", () => {
 		"fully starts a published fork cancelled after %i scheduler yields",
 		(ticks) =>
 			Effect.gen(function* () {
-				const { runtime } = yield* Graft.Graft
+				const { runtime } = yield* RuntimeContext
 				const plugin = Plugin.make({
 					name: "cancelled load",
 					apply: () => Effect.void,

@@ -4,8 +4,7 @@
  * picked up while the loader runs.
  */
 import { ConfigDirectory } from "./ConfigDirectory"
-import { Graft, Plugin } from "@graftland/graft"
-import type { PlatformError } from "effect"
+import { Plugin } from "@graftland/graft"
 import {
 	Array,
 	Cause,
@@ -49,7 +48,6 @@ import { fileTarget } from "./internal/fileTarget"
 import { atomicWrite, WriteConflict } from "./internal/atomicWrite"
 import {
 	apply,
-	InvalidOperation,
 	Op,
 	pathOf,
 	validate,
@@ -550,15 +548,7 @@ const Config = Schema.Struct({
 
 export type Config = typeof Config.Type
 
-export const Include: Plugin.Plugin<
-	Config,
-	Config,
-	| Graft.ServiceConflict
-	| PlatformError.PlatformError
-	| Schema.SchemaError
-	| StoreError
-	| InvalidOperation
-> = Plugin.make({
+export const Include = Plugin.make({
 	name: "include",
 	config: Config,
 	inject: [FileSystem.FileSystem, Path.Path],

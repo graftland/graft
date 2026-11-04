@@ -22,6 +22,9 @@ devenv shell -- pnpm test:packages
 CLI 的建置也會寫出
 `packages/cli/schema.json`，也就是[設定檔的 JSON Schema](../config-file/#編輯器支援)，由載入器的項目欄位和 CLI 登記的 intercept 產生。它不會提交到版本庫；每次發佈都會打包建置時產生的那一份。
 
+`pnpm test`
+會檢查所有發布入口是否引用了無法從公開入口存取的型別，並為不寫型別註記的使用範例產生宣告檔。檢查失敗時，應從公開簽名中移除實作細節，或補上公開契約型別的匯出；不要替範例加上註記來避開問題。
+
 ## GitHub Actions
 
 工作流程 `.github/workflows/ci.yml` 會在 pull request、推送到 `main`，以及

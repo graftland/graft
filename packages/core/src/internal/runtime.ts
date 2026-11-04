@@ -157,3 +157,6 @@ export const realmOf = (
 /** The single constructor used by publication, resolution, and failed-publication retries. */
 export const realmKey = (realm: string, service: string): ServiceKey =>
 	`${realm.length}:${realm}${service}`
+
+/** Both public and private context views address this same runtime value. */
+export const GraftKey = "@graftland/graft/Graft"

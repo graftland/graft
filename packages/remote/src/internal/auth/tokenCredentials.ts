@@ -19,13 +19,7 @@ export const Config = Schema.Struct({
 		Schema.Struct({ file: Schema.String }),
 	]),
 })
-export const plugin = (
-	name: string,
-): Plugin.Plugin<
-	typeof Config.Type,
-	typeof Config.Encoded,
-	Graft.ServiceConflict
-> =>
+export const plugin = (name: string) =>
 	Plugin.make({
 		name,
 		config: Config,

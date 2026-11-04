@@ -1,3 +1,4 @@
+import { RuntimeContext } from "../src/internal/runtimeContext"
 import { assert, it } from "@effect/vitest"
 import {
 	Deferred,
@@ -19,7 +20,7 @@ const register = (
 	registration: "on" | "once" = "on",
 ) =>
 	Effect.gen(function* () {
-		const graft = yield* Graft.Graft
+		const graft = yield* RuntimeContext
 		if (mode === "waterfall") {
 			const event = Event.middleware<void, void>(name)
 			yield* Event[registration](event, () => handler)

@@ -1,3 +1,4 @@
+import { RuntimeContext } from "../src/internal/runtimeContext"
 import { assert, describe, it } from "@effect/vitest"
 import {
 	Array,
@@ -292,7 +293,7 @@ describe("service task leases", () => {
 						)
 					}
 				}
-				const { runtime } = yield* Graft.Graft
+				const { runtime } = yield* RuntimeContext
 				const subscription = yield* PubSub.subscribe(runtime.logs)
 				const logs = yield* PubSub.takeAll(subscription)
 				assert.isTrue(

@@ -35,6 +35,7 @@ import { inheritContext } from "./internal/context"
 import { supervise, setState, withdraw } from "./internal/activation"
 import {
 	Realms,
+	GraftKey,
 	realmKey,
 	realmOf,
 	type Activation,
@@ -50,16 +51,11 @@ import {
 	type ServiceKey,
 	type Spec,
 } from "./internal/runtime"
+import { RuntimeContext } from "./internal/runtimeContext"
 import type { Plugin, InputOf, ErrorOf } from "./Plugin"
 
-/**
- * The graft a piece of code runs in: the shared runtime plus the activation
- * that owns anything it publishes.
- */
-export class Graft extends Context.Service<
-	Graft,
-	{ readonly runtime: Runtime; readonly activation: Activation }
->()("@graftland/graft/Graft") {}
+/** Identifies the current runtime. Use the module's operations to access it; its state is private. */
+export class Graft extends Context.Service<Graft, unknown>()(GraftKey) {}
 
 export class ServiceConflict extends Schema.TaggedError<
 	ServiceConflict,
@@ -90,8 +86,8 @@ export class ServiceConflict extends Schema.TaggedError<
 export const provide = Effect.fnUntraced(function* <I, S>(
 	key: Context.Key<I, S>,
 	value: S,
-) {
-	const { runtime, activation } = yield* Graft
+): Effect.fn.Return<void, ServiceConflict, Graft> {
+	const { runtime, activation } = yield* RuntimeContext
 	const realms = yield* Realms
 	const qualified = realmKey(realmOf(realms, key.key), key.key)
 	yield* Effect.tx(
@@ -199,7 +195,7 @@ const runtimeLayer = Layer.effect(
 /** Copies every log entry into the runtime, so `logs` can replay recent history. */
 const loggerLayer = Logger.layer(
 	[
-		Effect.map(Graft, ({ runtime }) =>
+		Effect.map(RuntimeContext, ({ runtime }) =>
 			Logger.make((options) => {
 				PubSub.publishUnsafe(runtime.logs, {
 					date: options.date,
@@ -334,7 +330,7 @@ export const plugin: <P extends Plugin>(
 		// forkIn starts the supervisor interruptibly even while registration is masked.
 		return yield* Effect.uninterruptible(
 			Effect.gen(function* () {
-				const { runtime, activation } = yield* Graft
+				const { runtime, activation } = yield* RuntimeContext
 				const scope = yield* Effect.scope
 				const termination = yield* Ref.make<Exit.Exit<void, unknown>>(Exit.void)
 				const owned = yield* ownedScope(
@@ -524,15 +520,15 @@ export class ReplacementConflict extends Schema.TaggedError<
 /** A plugin and the replacement `replace` swaps in for it. */
 export type ReplacementPair = readonly [from: Plugin, to: Plugin]
 
-type SameInput<Left, Right> =
-	(<T>() => T extends Left ? 1 : 2) extends <T>() => T extends Right ? 1 : 2
-		? true
-		: false
-
 /** Check every possible definition when either side is a union. */
-type CanReplace<From extends Plugin, To extends Plugin> = From extends Plugin
+export type CanReplace<
+	From extends Plugin,
+	To extends Plugin,
+> = From extends Plugin
 	? To extends Plugin
-		? SameInput<InputOf<From>, InputOf<To>> extends true
+		? (<T>() => T extends InputOf<From> ? 1 : 2) extends <
+				T,
+			>() => T extends InputOf<To> ? 1 : 2
 			? [ErrorOf<To>] extends [ErrorOf<From>]
 				? true
 				: false
@@ -540,7 +536,8 @@ type CanReplace<From extends Plugin, To extends Plugin> = From extends Plugin
 		: false
 	: false
 
-type CompatibleReplacement<Pair extends ReplacementPair> =
+/** A replacement pair whose input and error contracts are compatible. */
+export type CompatibleReplacement<Pair extends ReplacementPair> =
 	Pair extends readonly [infer From extends Plugin, infer To extends Plugin]
 		? false extends CanReplace<From, To>
 			? never
@@ -548,7 +545,9 @@ type CompatibleReplacement<Pair extends ReplacementPair> =
 		: never
 
 /** Each pair is checked independently; targets cannot widen the inferred source contract. */
-type CompatibleReplacements<Pairs extends ReadonlyArray<ReplacementPair>> = {
+export type CompatibleReplacements<
+	Pairs extends ReadonlyArray<ReplacementPair>,
+> = {
 	readonly [Index in keyof Pairs]: CompatibleReplacement<Pairs[Index]>
 }
 
@@ -561,7 +560,7 @@ export const replace: <const Pairs extends ReadonlyArray<ReplacementPair>>(
 	pairs: Pairs & CompatibleReplacements<NoInfer<Pairs>>,
 ) => Effect.Effect<void, ReplacementConflict, Graft> = Effect.fnUntraced(
 	function* (pairs: ReadonlyArray<ReplacementPair>) {
-		const { runtime } = yield* Graft
+		const { runtime } = yield* RuntimeContext
 		yield* Effect.tx(
 			Effect.gen(function* () {
 				const conflicts = yield* Aliases.replace(runtime.aliases, pairs)
@@ -619,12 +618,12 @@ export const forks: Stream.Stream<
 	never,
 	Graft
 > = Stream.unwrap(
-	Effect.map(Graft, ({ runtime }) =>
+	Effect.map(RuntimeContext, ({ runtime }) =>
 		TxSubscriptionRef.changesStream(runtime.forks).pipe(Stream.map(buildTree)),
 	),
 )
 
 /** Recent and live environment logs, including host logs; plugin execution adds identity annotations. */
 export const logs: Stream.Stream<LogEntry, never, Graft> = Stream.unwrap(
-	Effect.map(Graft, ({ runtime }) => Stream.fromPubSub(runtime.logs)),
+	Effect.map(RuntimeContext, ({ runtime }) => Stream.fromPubSub(runtime.logs)),
 )

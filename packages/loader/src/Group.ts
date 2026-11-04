@@ -558,11 +558,7 @@ const definition = Plugin.make({
 })
 
 /** Public arrays request a full refresh; internal requests retain their explicit epoch. */
-export const Group: Plugin.Plugin<
-	ReadonlyArray<Entry>,
-	ReadonlyArray<Entry>,
-	never
-> = Equal.byReference({
+export const Group = Equal.byReference({
 	...definition,
 	decode: preserveEpoch((input: ReadonlyArray<Entry>) =>
 		groups.has(input)

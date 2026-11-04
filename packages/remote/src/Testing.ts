@@ -1,6 +1,7 @@
 import type { Plugin } from "@graftland/graft"
 import {
 	Array,
+	Cause,
 	Equivalence,
 	Deferred,
 	Effect,
@@ -9,13 +10,17 @@ import {
 	String,
 	Schema,
 } from "effect"
+import type { TransportError } from "./Errors"
 import type { Channel } from "./Transport"
 import * as Framing from "./internal/runner/Framing"
 
 export class ConformanceError extends Schema.TaggedError<
 	ConformanceError,
 	{ readonly brand: unique symbol }
->()("ConformanceError", { message: Schema.String }) {}
+>()("ConformanceError", {
+	message: Schema.String,
+	cause: Schema.optionalKey(Schema.Cause(Schema.Unknown, Schema.Unknown)),
+}) {}
 const check = (condition: boolean, message: string) =>
 	condition ? Effect.void : Effect.fail(ConformanceError.make({ message }))
 export interface Capabilities {
@@ -88,7 +93,16 @@ export const transport = <E, R>(
 				),
 				"The channel changed byte order across split or coalesced chunks",
 			)
-		}),
+		}).pipe(
+			Effect.mapError((error): E | ConformanceError | TransportError =>
+				Schema.is(Framing.FrameError)(error)
+					? ConformanceError.make({
+							message: error.message,
+							cause: Cause.fail(error),
+						})
+					: error,
+			),
+		),
 		eof: Effect.gen(function* () {
 			const channel = yield* connect
 			yield* Stream.empty.pipe(Stream.run(channel.output))

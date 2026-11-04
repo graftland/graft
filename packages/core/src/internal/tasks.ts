@@ -6,7 +6,6 @@ declare const TaskErrors: unique symbol
 export interface Tasks<out E> {
 	readonly [TaskErrors]: E
 }
-export type Errors<R> = R extends Tasks<infer E> ? E : never
 
 /** One activation owns both the workers and every failure they finish with. */
 export const make = Effect.gen(function* () {

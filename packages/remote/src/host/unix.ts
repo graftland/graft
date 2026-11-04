@@ -1,3 +1,5 @@
+/** Options for the unix connector. */
+export type { UnixOptions as Options } from "../internal/transportOptions"
 import type { UnixOptions } from "../internal/transportOptions"
 import { Plugin, Graft } from "@graftland/graft"
 import { ConfigDirectory } from "@graftland/loader"

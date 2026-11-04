@@ -1,3 +1,4 @@
+import { RuntimeContext } from "../src/internal/runtimeContext"
 import { registrySnapshot, activeSnapshot } from "./utils.ts"
 import { assert, describe, it } from "@effect/vitest"
 import type { Scope } from "effect"
@@ -84,7 +85,7 @@ describe("publication dependency graph", () => {
 				const child = yield* Deferred.await(loaded)
 				yield* expectCycle(child)
 				yield* reach(parent, "Active")
-				const { runtime } = yield* Graft.Graft
+				const { runtime } = yield* RuntimeContext
 				const registry = yield* registrySnapshot(runtime)
 				assert.isFalse(HashMap.has(registry, realmKey("", Target.key)))
 				yield* journal.expect(["parent started"])
@@ -193,7 +194,7 @@ describe("publication dependency graph", () => {
 					}),
 				)
 				yield* reach(consumer, "Pending")
-				const { runtime } = yield* Graft.Graft
+				const { runtime } = yield* RuntimeContext
 				const active = yield* activeSnapshot(runtime)
 				assert.isFalse(HashMap.has(active, consumer.id))
 				const provider = yield* Graft.plugin(
@@ -233,7 +234,7 @@ describe("publication dependency graph", () => {
 		"clears graph membership and deduplicates leases when an activation stops",
 		() =>
 			Effect.gen(function* () {
-				const { runtime } = yield* Graft.Graft
+				const { runtime } = yield* RuntimeContext
 				const provider = yield* Graft.plugin(
 					Plugin.service(Target, Effect.succeed("target"), {
 						name: "provider",
@@ -315,7 +316,7 @@ describe("publication dependency graph", () => {
 					const error = Option.getOrThrow(Cause.findErrorOption(result.cause))
 					assert.strictEqual(error.reason, "Invalidated")
 				}
-				const { runtime } = yield* Graft.Graft
+				const { runtime } = yield* RuntimeContext
 				const registry = yield* registrySnapshot(runtime)
 				assert.strictEqual(HashMap.size(registry), 0)
 			}).pipe(run),

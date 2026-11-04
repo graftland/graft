@@ -1,3 +1,4 @@
+import { RuntimeContext } from "../src/internal/runtimeContext"
 import { assert, describe, it } from "@effect/vitest"
 import {
 	Array,
@@ -13,7 +14,7 @@ import {
 	TxRef,
 } from "effect"
 import { TestClock } from "effect/testing"
-import { Event, Graft } from "../src/index.ts"
+import { Event } from "../src/index.ts"
 import { run } from "./utils.ts"
 
 // Inspect ownership directly: garbage-collection timing is not a reliable retention test.
@@ -41,7 +42,7 @@ describe("once registration release", () => {
 					yield* Event.emit(event)
 					assert.strictEqual(finalizers(owner), baseline)
 				}
-				const { runtime } = yield* Graft.Graft
+				const { runtime } = yield* RuntimeContext
 				yield* Scope.close(owner, Exit.void)
 				const events = yield* TxRef.get(runtime.events)
 				assert.isFalse(HashMap.has(events, event.key))

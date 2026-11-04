@@ -1,3 +1,4 @@
+import { RuntimeContext } from "../src/internal/runtimeContext"
 import { assert, describe, it } from "@effect/vitest"
 import {
 	Array,
@@ -18,7 +19,7 @@ import { reach, run } from "./utils.ts"
 import { setState } from "../src/internal/forkState.ts"
 
 const entryOf = Effect.fnUntraced(function* (fork: Fork.Fork) {
-	const { runtime } = yield* Graft.Graft
+	const { runtime } = yield* RuntimeContext
 	const entries = yield* TxSubscriptionRef.get(runtime.forks)
 	return Option.getOrThrow(HashMap.get(entries, fork.id))
 })
@@ -251,7 +252,7 @@ describe("subtree stability", () => {
 				const child = yield* Deferred.await(handle)
 				const parentEntry = yield* entryOf(parent)
 				const childEntry = yield* entryOf(child)
-				const { runtime } = yield* Graft.Graft
+				const { runtime } = yield* RuntimeContext
 				const spec = yield* TxRef.get(childEntry.spec)
 				const before = yield* TxSubscriptionRef.get(childEntry.status.snapshot)
 				yield* Effect.tx(

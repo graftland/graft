@@ -1,3 +1,4 @@
+import { RuntimeContext } from "../src/internal/runtimeContext"
 import { assert, describe, it } from "@effect/vitest"
 import {
 	Array,
@@ -412,7 +413,7 @@ describe("supervised background tasks", () => {
 				const cleanup = yield* Effect.exit(fork.dispose)
 				assert.isTrue(Exit.isFailure(cleanup))
 				yield* Effect.log("Review task shutdown failures")
-				const { runtime } = yield* Graft.Graft
+				const { runtime } = yield* RuntimeContext
 				const subscription = yield* PubSub.subscribe(runtime.logs)
 				const logs = yield* PubSub.takeAll(subscription)
 				assert.isTrue(

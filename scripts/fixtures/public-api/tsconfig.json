@@ -1,0 +1,14 @@
+{
+	"compilerOptions": {
+		"module": "esnext",
+		"moduleResolution": "bundler",
+		"target": "esnext",
+		"strict": true,
+		"declaration": true,
+		"emitDeclarationOnly": true,
+		"skipLibCheck": true,
+		"rootDir": ".",
+		"outDir": "../../../.cache/public-api/consumer"
+	},
+	"include": ["*.ts"]
+}

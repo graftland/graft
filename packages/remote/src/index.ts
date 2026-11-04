@@ -19,6 +19,8 @@ export { RemoteError, RemoteWithdrawn, MissingInstance } from "./Errors"
 export { UndeclaredFailure } from "./Contract"
 export type {
 	Connect,
+	Authentication,
+	Token as CredentialToken,
 	Source as CredentialSource,
 } from "./internal/credentials"
 

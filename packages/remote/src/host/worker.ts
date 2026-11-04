@@ -1,4 +1,4 @@
-import { Plugin, type Graft } from "@graftland/graft"
+import { Plugin } from "@graftland/graft"
 import { Cause, Deferred, Effect, FiberSet, Option, Schema } from "effect"
 import { Worker } from "node:worker_threads"
 import { WorkerTransport } from "../internal/directTransport"
@@ -82,9 +82,7 @@ const start: typeof WorkerTransport.Service.start = Effect.fnUntraced(
 		}
 	},
 )
-const plugin: Plugin.Plugin<void, void, Graft.ServiceConflict> = Plugin.service(
-	WorkerTransport,
-	Effect.succeed({ start }),
-	{ name: "remote-thread-transport" },
-)
+const plugin = Plugin.service(WorkerTransport, Effect.succeed({ start }), {
+	name: "remote-thread-transport",
+})
 export default plugin

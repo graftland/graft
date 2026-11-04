@@ -1,3 +1,4 @@
+import { RuntimeContext } from "../src/internal/runtimeContext"
 import { assert, describe, it } from "@effect/vitest"
 import {
 	Cause,
@@ -12,7 +13,7 @@ import {
 	Scope,
 	TxRef,
 } from "effect"
-import { Event, Graft } from "../src/index.ts"
+import { Event } from "../src/index.ts"
 import { makeJournal, run } from "./utils.ts"
 
 const ownedScope = Effect.acquireRelease(Scope.make(), (scope) =>
@@ -23,7 +24,7 @@ describe("immediate event invocation", () => {
 	it.effect("owns the invocation before running the handler", () =>
 		Effect.gen(function* () {
 			const event = Event.make<[]>("immediate-ownership")
-			const { runtime } = yield* Graft.Graft
+			const { runtime } = yield* RuntimeContext
 			const size = yield* Ref.make(0)
 			yield* Event.on(event, () =>
 				Effect.gen(function* () {
@@ -179,7 +180,7 @@ describe("immediate event invocation", () => {
 			Effect.gen(function* () {
 				const event = Event.make<[]>("immediate-self-interruption")
 				const owner = yield* ownedScope
-				const { runtime } = yield* Graft.Graft
+				const { runtime } = yield* RuntimeContext
 				const cleaning = yield* Deferred.make<void>()
 				const finish = yield* Deferred.make<void>()
 				yield* Event.on(event, () =>

@@ -1,3 +1,4 @@
+import { RuntimeContext } from "../src/internal/runtimeContext"
 import { registrySnapshot } from "./utils.ts"
 import { assert, describe, it } from "@effect/vitest"
 import {
@@ -34,7 +35,7 @@ describe("teardown interleavings", () => {
 					Layer.fresh(Graft.layer),
 					rootScope,
 				)
-				const { runtime } = Context.get(context, Graft.Graft)
+				const { runtime } = Context.get(context, RuntimeContext)
 				const released = yield* Ref.make(false)
 				yield* Graft.provide(Service, "root").pipe(
 					Effect.provideContext(context),
@@ -61,7 +62,7 @@ describe("teardown interleavings", () => {
 		"drains a child consuming its parent's service before releasing the parent",
 		() =>
 			Effect.gen(function* () {
-				const { runtime } = yield* Graft.Graft
+				const { runtime } = yield* RuntimeContext
 				const journal = yield* makeJournal
 				const closing = yield* Deferred.make<void>()
 				const release = yield* Deferred.make<void>()

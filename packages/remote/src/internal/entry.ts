@@ -12,7 +12,7 @@ import {
 } from "effect"
 import { ChildProcessSpawner } from "effect/process"
 import * as Contract from "../Contract"
-import { MissingInstance } from "../Errors"
+import { MissingInstance, RemoteEntryError as EntryError } from "../Errors"
 import { LocalTransport, WorkerTransport } from "./directTransport"
 import * as Configuration from "./entryConfig"
 import * as Assembly from "./assembly"
@@ -25,19 +25,6 @@ import type { ExecutionOptions } from "./execution"
 import * as Importer from "./importer"
 import { SecureRandom } from "effect/crypto"
 
-export class EntryError extends Schema.TaggedError<
-	EntryError,
-	{ readonly brand: unique symbol }
->()("RemoteEntryError", {
-	entry: Schema.Option(Schema.String),
-	directory: Schema.Option(Schema.String),
-	field: Schema.String,
-	cause: Schema.Cause(Schema.Unknown, Schema.Unknown),
-}) {
-	override get message() {
-		return `Remote entry ${Option.getOrElse(this.entry, () => "<programmatic>")} failed at ${this.field}`
-	}
-}
 export const boundary = Effect.fnUntraced(function* (field: string) {
 	const entry = yield* Entry.CurrentId
 	const directory = yield* ConfigDirectory

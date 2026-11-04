@@ -1,3 +1,4 @@
+import { RuntimeContext } from "../src/internal/runtimeContext"
 import { assert, it } from "@effect/vitest"
 import {
 	Array,
@@ -20,7 +21,7 @@ it.effect(
 	"retains completed update defects across disposal handoff positions",
 	() =>
 		Effect.gen(function* () {
-			const { runtime } = yield* Graft.Graft
+			const { runtime } = yield* RuntimeContext
 			for (const ticks of Array.range(0, 30)) {
 				const marker = `completed update defect (${ticks})`
 				const observed = yield* Deferred.make<void>()
@@ -161,7 +162,7 @@ it.effect(
 	"observes an update defect before restarting without replaying it on later disposal",
 	() =>
 		Effect.gen(function* () {
-			const { runtime } = yield* Graft.Graft
+			const { runtime } = yield* RuntimeContext
 			const fork = yield* Graft.plugin(
 				Plugin.make({
 					name: "update recovery",

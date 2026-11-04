@@ -80,3 +80,18 @@ export class AuthenticationFailed extends Schema.TaggedError<
 	challenge: Schema.optionalKey(Schema.String),
 	cause: Schema.optionalKey(Schema.Cause(Schema.Unknown, Schema.Unknown)),
 }) {}
+
+/** A remote entry could not be resolved or configured at the indicated field. */
+export class RemoteEntryError extends Schema.TaggedError<
+	RemoteEntryError,
+	{ readonly brand: unique symbol }
+>()("RemoteEntryError", {
+	entry: Schema.Option(Schema.String),
+	directory: Schema.Option(Schema.String),
+	field: Schema.String,
+	cause: Schema.Cause(Schema.Unknown, Schema.Unknown),
+}) {
+	override get message() {
+		return `Remote entry ${Option.getOrElse(this.entry, () => "<programmatic>")} failed at ${this.field}`
+	}
+}

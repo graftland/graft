@@ -15,9 +15,11 @@ export type Source<A, D extends ReadonlyArray<Plugin.Dependency>, E = unknown> =
 				NoInfer<Plugin.Required<D>> | Scope.Scope
 			>
 	  }
-type Token<D extends ReadonlyArray<Plugin.Dependency>> =
+/** A token value, a file, or a credential effect with declared dependencies. */
+export type Token<D extends ReadonlyArray<Plugin.Dependency>> =
 	string | { readonly file: string } | Source<Redacted.Redacted<string>, D>
-type Authentication<D extends ReadonlyArray<Plugin.Dependency>> =
+/** Authentication configuration shared by TypeScript connection descriptions. */
+export type Authentication<D extends ReadonlyArray<Plugin.Dependency>> =
 	| { readonly name: string; readonly config?: unknown }
 	| { readonly none: { readonly identity?: string } }
 	| {
@@ -27,14 +29,15 @@ type Authentication<D extends ReadonlyArray<Plugin.Dependency>> =
 	  }
 	| { readonly bearer: { readonly token: Token<D> } }
 	| { readonly jwt: { readonly token: Token<D> } }
-type WithCredentials<C, D extends ReadonlyArray<Plugin.Dependency>> = C extends
-	| { readonly local: object }
-	| { readonly worker: object }
-	| { readonly command: ReadonlyArray<string> }
-	? C
-	: Omit<C, "auth"> & { readonly auth?: Authentication<D> }
 export type Connect<D extends ReadonlyArray<Plugin.Dependency> = readonly []> =
-	WithCredentials<typeof Configuration.Connect.Encoded, D>
+	typeof Configuration.Connect.Encoded extends infer C
+		? C extends
+				| { readonly local: object }
+				| { readonly worker: object }
+				| { readonly command: ReadonlyArray<string> }
+			? C
+			: Omit<C, "auth"> & { readonly auth?: Authentication<D> }
+		: never
 
 const provider = <A, E, D extends ReadonlyArray<Plugin.Dependency>>(
 	source: Source<A, D, E>,

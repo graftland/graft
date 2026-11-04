@@ -23,12 +23,14 @@ export interface Service<R = never, ClientR = never> {
 	>
 }
 
-type ConfigSchema = Schema.Top & {
+/** A self-contained configuration schema that encodes as JSON. */
+export type ConfigSchema = Schema.Top & {
 	readonly Encoded: Schema.Json
 	readonly DecodingServices: never
 	readonly EncodingServices: never
 }
-type ErrorSchema = Schema.Top & {
+/** A self-contained schema for declared failures. */
+export type ErrorSchema = Schema.Top & {
 	readonly DecodingServices: never
 	readonly EncodingServices: never
 }
@@ -46,7 +48,8 @@ export interface Contract<
 	readonly provides: ReadonlyArray<Service>
 	readonly [TypeId]: typeof TypeId
 }
-interface Options<S extends ConfigSchema, E extends ErrorSchema> {
+/** Configuration accepted by make; omitted errors default to Never. */
+export interface Options<S extends ConfigSchema, E extends ErrorSchema> {
 	readonly name: string
 	readonly config: S
 	readonly error?: E

@@ -27,6 +27,12 @@ The CLI's build also writes `packages/cli/schema.json`, the
 loader's entry fields and the intercepts the CLI registers. It is not committed;
 each release packs the one its build generated.
 
+`pnpm test` checks every published entry for types that cannot be named through
+public exports, and emits declarations for unannotated consumer examples. If it
+fails, remove implementation types from the public signature or export a type
+that belongs to the public contract; do not add annotations to the examples to
+hide the problem.
+
 ## GitHub Actions
 
 The workflow `.github/workflows/ci.yml` runs for pull requests, for pushes to

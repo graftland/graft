@@ -1,3 +1,4 @@
+import { RuntimeContext } from "../src/internal/runtimeContext"
 import { registrySnapshot } from "./utils.ts"
 import { assert, it } from "@effect/vitest"
 import {
@@ -29,7 +30,7 @@ it.effect(
 	"balances acquisition leases under interruption at varied scheduler boundaries",
 	() =>
 		Effect.gen(function* () {
-			const { runtime } = yield* Graft.Graft
+			const { runtime } = yield* RuntimeContext
 			yield* Graft.provide(Service, "ready")
 			const registry = yield* registrySnapshot(runtime)
 			const provision = Option.getOrThrow(
@@ -90,7 +91,7 @@ it.effect(
 	"removes a fork entry when its registering caller is interrupted",
 	() =>
 		Effect.gen(function* () {
-			const { runtime } = yield* Graft.Graft
+			const { runtime } = yield* RuntimeContext
 			const owner = yield* Scope.make()
 			const plugin = Plugin.make({
 				name: "interrupted registration",

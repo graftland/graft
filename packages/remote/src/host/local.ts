@@ -1,4 +1,4 @@
-import { Plugin, type Graft } from "@graftland/graft"
+import { Plugin } from "@graftland/graft"
 import { Array, Effect, Scope } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import { LocalTransport } from "../internal/directTransport"
@@ -29,13 +29,9 @@ const make = Effect.map(ChildProcessSpawner.ChildProcessSpawner, (spawner) =>
 		}),
 	}),
 )
-const plugin: Plugin.Plugin<void, void, Graft.ServiceConflict> = Plugin.service(
-	LocalTransport,
-	make,
-	{
-		name: "remote-local-transport",
-		inject: [ChildProcessSpawner.ChildProcessSpawner],
-	},
-)
+const plugin = Plugin.service(LocalTransport, make, {
+	name: "remote-local-transport",
+	inject: [ChildProcessSpawner.ChildProcessSpawner],
+})
 
 export default plugin

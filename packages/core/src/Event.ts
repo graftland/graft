@@ -2,6 +2,7 @@
  * Typed events. Handlers are registered for the lifetime of the current
  * scope and run with the registration context and a fresh invocation scope.
  */
+import { RuntimeContext } from "./internal/runtimeContext"
 import { identity } from "effect/Function"
 import {
 	Array,
@@ -99,7 +100,7 @@ const register = <Args extends ReadonlyArray<unknown>, Out, E, R>(
 	options: HandlerOptions & { readonly once: boolean },
 ): Effect.Effect<void, never, Graft | Scope.Scope | R> =>
 	Effect.gen(function* () {
-		const { runtime } = yield* Graft
+		const { runtime } = yield* RuntimeContext
 		const realms = yield* Realms
 		const context = yield* Effect.context<R>()
 		const owner = yield* Effect.scope
@@ -174,7 +175,7 @@ const handlersFor = <Args extends ReadonlyArray<unknown>, Out, E>(
 	event: Event<Args, Out, E>,
 ) =>
 	Effect.gen(function* () {
-		const { runtime } = yield* Graft
+		const { runtime } = yield* RuntimeContext
 		const realms = yield* Realms
 		const filter = yield* Filter
 		const realm = realmOf(realms, event.key)
@@ -202,7 +203,7 @@ const invoke = <Args extends ReadonlyArray<unknown>, Out, E>(
 ): Effect.Effect<Option.Option<Out>, E, Graft> =>
 	Effect.uninterruptibleMask((restore) =>
 		Effect.gen(function* () {
-			const { runtime } = yield* Graft
+			const { runtime } = yield* RuntimeContext
 			const claimed = yield* Effect.tx(
 				Effect.gen(function* () {
 					const events = yield* TxRef.get(runtime.events)
