@@ -114,8 +114,8 @@ describe("runner framing", () => {
 			const written = yield* Ref.make<ReadonlyArray<number>>([])
 			const peer = yield* Multiplex.make({
 				input: Stream.never,
-				output: Sink.forEach((data: Uint8Array) =>
-					Effect.gen(function* () {
+				output: Sink.forEach(
+					Effect.fnUntraced(function* (data: Uint8Array) {
 						yield* Deferred.succeed(entered, undefined)
 						yield* Deferred.await(gate)
 						const channels = yield* Ref.updateAndGet(

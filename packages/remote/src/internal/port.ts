@@ -167,64 +167,66 @@ interface State {
 	readonly servers: HashMap.HashMap<string, ServerEndpoint>
 	readonly clients: HashMap.HashMap<string, ClientEndpoint>
 }
-const initialize = (bytes: Channel, options: Options) =>
-	Effect.gen(function* (): Effect.gen.Return<State, never, Scope.Scope> {
-		const limits = { ...defaults, ...options.limits }
-		const workers = yield* FailureGroup.make<TransportError>()
-		const incoming = yield* TxRef.make(
-			HashMap.empty<RequestKey, RequestState<RpcMessage.FromClientEncoded>>(),
-		)
-		const outgoing = yield* TxRef.make(
-			HashMap.empty<RequestKey, RequestState<RpcMessage.FromServerEncoded>>(),
-		)
-		const queues = {
-			control: yield* TxQueue.unbounded<Pending, Cause.Done>(),
-			data: yield* TxQueue.unbounded<Pending, Cause.Done>(),
-			log: yield* TxQueue.unbounded<Pending, Cause.Done>(),
-		}
-		const servers = yield* Effect.forEach(
-			Record.toEntries(options.serve),
-			Effect.fnUntraced(function* ([name, group]) {
-				return [
-					name,
-					{
-						group,
-						ready:
-							yield* Deferred.make<
-								Parameters<RpcServer.Protocol["Service"]["run"]>[0]
-							>(),
-						disconnects: yield* Queue.dropping<number>(1),
-					},
-				] satisfies readonly [string, unknown]
-			}),
-		).pipe(Effect.map(HashMap.fromIterable))
-		const clients = yield* Effect.forEach(
-			Record.toEntries(options.call),
-			Effect.fnUntraced(function* ([name, group]) {
-				return [
-					name,
-					{
-						group,
-						ready:
-							yield* Deferred.make<
-								Parameters<RpcClient.Protocol["Service"]["run"]>[1]
-							>(),
-					},
-				] satisfies readonly [string, unknown]
-			}),
-		).pipe(Effect.map(HashMap.fromIterable))
-		return {
-			bytes,
-			options,
-			limits,
-			workers,
-			incoming,
-			outgoing,
-			queues,
-			servers,
-			clients,
-		}
-	})
+const initialize = Effect.fnUntraced(function* (
+	bytes: Channel,
+	options: Options,
+): Effect.fn.Return<State, never, Scope.Scope> {
+	const limits = { ...defaults, ...options.limits }
+	const workers = yield* FailureGroup.make<TransportError>()
+	const incoming = yield* TxRef.make(
+		HashMap.empty<RequestKey, RequestState<RpcMessage.FromClientEncoded>>(),
+	)
+	const outgoing = yield* TxRef.make(
+		HashMap.empty<RequestKey, RequestState<RpcMessage.FromServerEncoded>>(),
+	)
+	const queues = {
+		control: yield* TxQueue.unbounded<Pending, Cause.Done>(),
+		data: yield* TxQueue.unbounded<Pending, Cause.Done>(),
+		log: yield* TxQueue.unbounded<Pending, Cause.Done>(),
+	}
+	const servers = yield* Effect.forEach(
+		Record.toEntries(options.serve),
+		Effect.fnUntraced(function* ([name, group]) {
+			return [
+				name,
+				{
+					group,
+					ready:
+						yield* Deferred.make<
+							Parameters<RpcServer.Protocol["Service"]["run"]>[0]
+						>(),
+					disconnects: yield* Queue.dropping<number>(1),
+				},
+			] satisfies readonly [string, unknown]
+		}),
+	).pipe(Effect.map(HashMap.fromIterable))
+	const clients = yield* Effect.forEach(
+		Record.toEntries(options.call),
+		Effect.fnUntraced(function* ([name, group]) {
+			return [
+				name,
+				{
+					group,
+					ready:
+						yield* Deferred.make<
+							Parameters<RpcClient.Protocol["Service"]["run"]>[1]
+						>(),
+				},
+			] satisfies readonly [string, unknown]
+		}),
+	).pipe(Effect.map(HashMap.fromIterable))
+	return {
+		bytes,
+		options,
+		limits,
+		workers,
+		incoming,
+		outgoing,
+		queues,
+		servers,
+		clients,
+	}
+})
 
 const admit = Effect.fnUntraced(function* <A>(
 	state: State,
@@ -447,41 +449,38 @@ const serverProtocol = (
 			),
 	})
 }
-const next = (state: State) =>
-	Effect.tx(
-		Effect.gen(function* () {
-			yield* state.workers.check
-			for (const p of [
-				"control",
-				"data",
-				"log",
-			] satisfies ReadonlyArray<Priority>) {
-				const pending = yield* TxQueue.poll(state.queues[p])
-				if (Option.isNone(pending)) continue
-				const { frame, request } = pending.value
-				if (Option.isSome(request)) {
-					const table = yield* TxRef.get(state.outgoing)
-					const requestState = HashMap.get(table, request.value)
-					if (Option.isNone(requestState)) return Option.none<Frame>()
-					yield* TxRef.set(
-						state.outgoing,
-						HashMap.set(table, request.value, {
-							...requestState.value,
-							sent: true,
-						}),
-					)
-				}
-				return Option.some(frame)
-			}
-			if (
-				(yield* TxQueue.isDone(state.queues.control)) &&
-				(yield* TxQueue.isDone(state.queues.data)) &&
-				(yield* TxQueue.isDone(state.queues.log))
+const next = Effect.fnUntraced(function* (state: State) {
+	yield* state.workers.check
+	for (const p of [
+		"control",
+		"data",
+		"log",
+	] satisfies ReadonlyArray<Priority>) {
+		const pending = yield* TxQueue.poll(state.queues[p])
+		if (Option.isNone(pending)) continue
+		const { frame, request } = pending.value
+		if (Option.isSome(request)) {
+			const table = yield* TxRef.get(state.outgoing)
+			const requestState = HashMap.get(table, request.value)
+			if (Option.isNone(requestState)) return Option.none<Frame>()
+			yield* TxRef.set(
+				state.outgoing,
+				HashMap.set(table, request.value, {
+					...requestState.value,
+					sent: true,
+				}),
 			)
-				return yield* Cause.done()
-			return yield* Effect.txRetry
-		}),
+		}
+		return Option.some(frame)
+	}
+	if (
+		(yield* TxQueue.isDone(state.queues.control)) &&
+		(yield* TxQueue.isDone(state.queues.data)) &&
+		(yield* TxQueue.isDone(state.queues.log))
 	)
+		return yield* Cause.done()
+	return yield* Effect.txRetry
+}, Effect.tx)
 const writer = (state: State) =>
 	Stream.fromEffectRepeat(next(state)).pipe(
 		Stream.filterMap(Result.fromOption(() => undefined)),
@@ -592,18 +591,16 @@ export const make = Effect.fnUntraced(function* (
 	// The same failure remains observable through Port.await and client requests.
 	// This observer only publishes disconnects, even while the owner closes its scope.
 	yield* state.workers.await.pipe(
-		Effect.catchCause(() =>
-			Effect.uninterruptible(
-				Effect.gen(function* () {
-					for (const server of HashMap.values(state.servers))
-						yield* Queue.offer(server.disconnects, 0)
-					yield* Effect.tx(
-						TxRef.set(state.incoming, HashMap.empty()).pipe(
-							Effect.andThen(TxRef.set(state.outgoing, HashMap.empty())),
-						),
-					)
-				}),
-			),
+		Effect.catchCause(
+			Effect.fnUntraced(function* () {
+				for (const server of HashMap.values(state.servers))
+					yield* Queue.offer(server.disconnects, 0)
+				yield* Effect.tx(
+					TxRef.set(state.incoming, HashMap.empty()).pipe(
+						Effect.andThen(TxRef.set(state.outgoing, HashMap.empty())),
+					),
+				)
+			}, Effect.uninterruptible),
 		),
 		Effect.forkScoped,
 	)

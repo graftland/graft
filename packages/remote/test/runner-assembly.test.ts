@@ -31,6 +31,8 @@ import * as Multiplex from "../src/internal/runner/Multiplex"
 import * as Port from "../src/internal/port"
 import * as Wire from "../src/internal/runner/Wire"
 import { defaults } from "../src/internal/runner/model"
+import { CapabilityCombinationError } from "../src/internal/assembly"
+import { expectFailure } from "./errors"
 
 const header = Plugin.make({
 	name: "test-header-authenticator",
@@ -250,7 +252,7 @@ it.live("rejects two issuers before binding any listener", () =>
 			assert.equal(result._tag, "Failure")
 			if (result._tag === "Failure")
 				assert.include(
-					Cause.pretty(result.cause),
+					expectFailure(result.cause, CapabilityCombinationError).detail,
 					"single authentication issuer",
 				)
 			const opened = yield* Deferred.isDone(bound)
@@ -357,8 +359,10 @@ it.live(
 				})
 				const result = yield* Effect.exit(fork.await)
 				assert.equal(result._tag, "Failure")
-				if (result._tag === "Failure")
-					assert.include(Cause.pretty(result.cause), "Binding failed")
+				if (result._tag === "Failure") {
+					const error = expectFailure(result.cause, TransportError)
+					assert.include(Cause.pretty(error.cause), "Binding failed")
+				}
 				yield* Deferred.await(closed)
 			}).pipe(
 				Effect.provide(
@@ -404,16 +408,15 @@ it.live("starts two bearer listeners with different token files", () =>
 			})),
 		})
 		yield* fork.await
-		yield* Effect.forEach(listeners, ({ port, token, identity }) =>
-			Effect.scoped(
-				Effect.gen(function* () {
-					const client = yield* session(port, token)
-					const record = yield* open(client, identity)
-					assert.equal(record.handle.key.identity, identity)
-					const stopped = yield* client.Dispose(record.handle)
-					assert.equal(stopped.kind, "Exited")
-				}),
-			),
+		yield* Effect.forEach(
+			listeners,
+			Effect.fnUntraced(function* ({ port, token, identity }) {
+				const client = yield* session(port, token)
+				const record = yield* open(client, identity)
+				assert.equal(record.handle.key.identity, identity)
+				const stopped = yield* client.Dispose(record.handle)
+				assert.equal(stopped.kind, "Exited")
+			}, Effect.scoped),
 		)
 	}).pipe(Effect.scoped, Effect.provide(Layer.merge(runtime, resolver()))),
 )

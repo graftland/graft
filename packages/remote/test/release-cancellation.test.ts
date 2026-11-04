@@ -130,14 +130,11 @@ it.effect(
 						network: false,
 						carries: [],
 					},
-					connect: () =>
-						Effect.gen(function* () {
-							yield* Effect.addFinalizer(() =>
-								Effect.interruptible(Effect.never),
-							)
-							yield* Deferred.succeed(ready, undefined)
-							return { input: Stream.never, output: Sink.drain }
-						}),
+					connect: Effect.fnUntraced(function* () {
+						yield* Effect.addFinalizer(() => Effect.interruptible(Effect.never))
+						yield* Deferred.succeed(ready, undefined)
+						return { input: Stream.never, output: Sink.drain }
+					}),
 				}),
 				Effect.provideService(Credentials, {
 					kind: "None",

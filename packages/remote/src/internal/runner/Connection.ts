@@ -112,73 +112,65 @@ const finish = (causes: ReadonlyArray<Cause.Cause<unknown>>) => {
 /** Close partially acquired resources too; the normal release observes exit before stopping readers. */
 const scopes = Effect.acquireRelease(
 	Effect.all({ resources: Scope.make(), process: Scope.make() }),
-	(scopes, exit) =>
-		Effect.gen(function* () {
-			const process = yield* Effect.exit(Release.close(scopes.process, exit))
-			const resources = yield* Effect.exit(
-				Release.close(scopes.resources, exit),
-			)
-			yield* finish([reason(process), reason(resources)])
-		}),
+	Effect.fnUntraced(function* (scopes, exit) {
+		const process = yield* Effect.exit(Release.close(scopes.process, exit))
+		const resources = yield* Effect.exit(Release.close(scopes.resources, exit))
+		yield* finish([reason(process), reason(resources)])
+	}),
 )
 
 /** Setup supplies a concrete control lifecycle; release never reads a later-installed effect. */
-export const acquire = <A, E, R, D, DR>(
+export const acquire = Effect.fnUntraced(function* <A, E, R, D, DR>(
 	target: Target,
 	contractModule: string,
 	options: Port.Options,
 	setup: Effect.Effect<A, E, R | Connection>,
 	dispose: (value: A) => Effect.Effect<Cause.Cause<unknown>, D, DR>,
 	timeout: Duration.Input,
-) =>
-	Effect.gen(function* () {
-		const owned = yield* scopes
-		const connection = yield* Effect.acquireRelease(
-			Effect.gen(function* () {
-				return target._tag === "Local" || target._tag === "Worker"
-					? yield* Local(
-							target,
-							contractModule,
-							options,
-							owned.resources,
-							owned.process,
-						).pipe(Effect.map(connected))
-					: yield* RunnerConnection.connect(
-							target,
-							contractModule,
-							options,
-							owned.resources,
-							owned.process,
-						)
-			}).pipe(Effect.interruptible),
-			(connection, exit) =>
-				Effect.gen(function* () {
-					const process = yield* Effect.exit(Release.close(owned.process, exit))
-					// Wait for exit while readers are alive; collect their final cause after resources close.
-					yield* connection.diagnostics
-					const resources = yield* Effect.exit(
-						Release.close(owned.resources, exit),
+) {
+	const owned = yield* scopes
+	const connection = yield* Effect.acquireRelease(
+		Effect.gen(function* () {
+			return target._tag === "Local" || target._tag === "Worker"
+				? yield* Local(
+						target,
+						contractModule,
+						options,
+						owned.resources,
+						owned.process,
+					).pipe(Effect.map(connected))
+				: yield* RunnerConnection.connect(
+						target,
+						contractModule,
+						options,
+						owned.resources,
+						owned.process,
 					)
-					const diagnostics = yield* connection.diagnostics
-					yield* finish([reason(process), reason(resources), diagnostics])
-				}),
-		)
-		return yield* Effect.acquireRelease(
-			setup.pipe(Effect.provideService(Connection, connection)),
-			(value) =>
-				Effect.gen(function* () {
-					const graceful = yield* dispose(value).pipe(
-						Effect.interruptible,
-						Effect.timeout(timeout),
-						Effect.exit,
-					)
-					const terminated = yield* Effect.exit(
-						connection.terminate(Exit.isSuccess(graceful)),
-					)
-					yield* finish([
-						Exit.isSuccess(graceful) ? graceful.value : graceful.cause,
-						reason(terminated),
-					])
-				}),
-		)
-	})
+		}).pipe(Effect.interruptible),
+		Effect.fnUntraced(function* (connection, exit) {
+			const process = yield* Effect.exit(Release.close(owned.process, exit))
+			// Wait for exit while readers are alive; collect their final cause after resources close.
+			yield* connection.diagnostics
+			const resources = yield* Effect.exit(Release.close(owned.resources, exit))
+			const diagnostics = yield* connection.diagnostics
+			yield* finish([reason(process), reason(resources), diagnostics])
+		}),
+	)
+	return yield* Effect.acquireRelease(
+		setup.pipe(Effect.provideService(Connection, connection)),
+		Effect.fnUntraced(function* (value) {
+			const graceful = yield* dispose(value).pipe(
+				Effect.interruptible,
+				Effect.timeout(timeout),
+				Effect.exit,
+			)
+			const terminated = yield* Effect.exit(
+				connection.terminate(Exit.isSuccess(graceful)),
+			)
+			yield* finish([
+				Exit.isSuccess(graceful) ? graceful.value : graceful.cause,
+				reason(terminated),
+			])
+		}),
+	)
+})

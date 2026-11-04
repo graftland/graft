@@ -12,12 +12,27 @@ import {
 import { HttpServerRequest, HttpServerResponse } from "effect/http"
 import type { Socket } from "effect/socket"
 import { TLSSocket } from "node:tls"
-import { AuthenticationFailed, TransportError } from "../Errors"
+import {
+	type AuthenticationFailed,
+	type AuthenticatorUnavailable,
+	TransportError,
+} from "../Errors"
 import type { Accept, Handshake, Serving } from "../Transport"
 import * as Channel from "./socketChannel"
 import { path, protocol, payloadLimit } from "./websocket"
 
-const rejection = (error: AuthenticationFailed) =>
+const rejection = (error: AuthenticationFailed | AuthenticatorUnavailable) =>
+	error._tag === "AuthenticatorUnavailable"
+		? unavailable(error)
+		: unauthorized(error)
+
+// The credential was not judged, so the client is told to retry rather than to replace it.
+const unavailable = (error: AuthenticatorUnavailable) =>
+	Effect.logError("Remote host authenticator is unavailable", error.cause).pipe(
+		Effect.as(HttpServerResponse.empty({ status: 503 })),
+	)
+
+const unauthorized = (error: AuthenticationFailed) =>
 	Effect.logWarning(
 		"Remote host authentication failed",
 		{
@@ -83,7 +98,7 @@ const open = Effect.fnUntraced(function* (
 		run: <A, E, R>(
 			accept: Effect.Effect<
 				(socket: Socket.Socket) => Effect.Effect<A, E, R>,
-				AuthenticationFailed,
+				AuthenticationFailed | AuthenticatorUnavailable,
 				HttpServerRequest.HttpServerRequest
 			>,
 		) =>

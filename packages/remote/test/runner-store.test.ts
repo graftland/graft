@@ -20,6 +20,7 @@ import * as Stores from "../src/internal/runner/Store"
 import {
 	defaults,
 	SessionRecord,
+	StateStorageError,
 	type LoadedRecord,
 } from "../src/internal/runner/model"
 
@@ -233,13 +234,9 @@ describe("runner state directory", () => {
 				const directory = yield* fs.makeTempDirectoryScoped()
 				const store = yield* Stores.directory(directory)
 				yield* fs.writeFileString(directory + "/broken.json", "{")
-				const result = yield* Effect.exit(store.list)
-				assert.isTrue(Exit.isFailure(result))
-				if (Exit.isFailure(result))
-					assert.include(
-						Cause.pretty(result.cause),
-						"Runner state storage failed",
-					)
+				const error = yield* Effect.flip(store.list)
+				assert.isTrue(Schema.is(StateStorageError)(error))
+				assert.equal(error.detail, "Runner state storage failed")
 			}).pipe(Effect.scoped, Effect.provide(runtime)),
 		60_000,
 	)

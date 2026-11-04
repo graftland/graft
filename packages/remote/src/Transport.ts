@@ -1,7 +1,11 @@
 /** Execution and byte-channel capabilities; implementations live in host plugins. */
 import { Context } from "effect"
 import type { Effect, Option, Scope, Stream, Sink, Redacted } from "effect"
-import type { AuthenticationFailed, TransportError } from "./Errors"
+import type {
+	AuthenticationFailed,
+	AuthenticatorUnavailable,
+	TransportError,
+} from "./Errors"
 import type { Prepared, VerifiedCertificate, TlsPolicy } from "./Auth"
 /** Ordered reliable bytes. Chunk boundaries have no meaning; EOF is not exit confirmation. */
 export interface Channel {
@@ -24,7 +28,7 @@ export type Session = (
 ) => Effect.Effect<void, TransportError, Scope.Scope>
 export type Accept = (
 	handshake: Handshake,
-) => Effect.Effect<Session, AuthenticationFailed>
+) => Effect.Effect<Session, AuthenticationFailed | AuthenticatorUnavailable>
 export interface Serving {
 	/** Completes after serve has registered its accept loop, not merely after bind. */
 	readonly ready: Effect.Effect<void>

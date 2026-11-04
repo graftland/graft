@@ -41,33 +41,32 @@ export const connect = Effect.fnUntraced(function* (
 		resources: yield* Effect.scope,
 		transport: { ...peer, failure: failures.await, report },
 		diagnostics: Fiber.await(exited).pipe(Effect.andThen(failures.cause)),
-		terminate: (graceful: boolean) =>
-			Effect.gen(function* () {
-				// Stop observation before intentionally ending stdin or killing the process.
-				yield* failures.close
-				if (!graceful) return
-				// If this fails, the execution scope forces termination and waits for exit.
-				const status = yield* peer.end.pipe(
-					// Peer EOF can interrupt the writer as its output ends. Still confirm the unit's exit.
-					Effect.catchCauseIf(Cause.hasInterruptsOnly, () => Effect.void),
-					Effect.andThen(Fiber.join(exited)),
-					Effect.interruptible,
-					Effect.timeoutOrElse({
-						duration: stdinExitTimeout,
-						orElse: () =>
-							LocalTerminationTimeout.make({
-								...Option.match(execution.pid, {
-									onNone: () => ({}),
-									onSome: (pid) => ({ pid }),
-								}),
-								...(execution.threadId === undefined
-									? {}
-									: { threadId: execution.threadId }),
+		terminate: Effect.fnUntraced(function* (graceful: boolean) {
+			// Stop observation before intentionally ending stdin or killing the process.
+			yield* failures.close
+			if (!graceful) return
+			// If this fails, the execution scope forces termination and waits for exit.
+			const status = yield* peer.end.pipe(
+				// Peer EOF can interrupt the writer as its output ends. Still confirm the unit's exit.
+				Effect.catchCauseIf(Cause.hasInterruptsOnly, () => Effect.void),
+				Effect.andThen(Fiber.join(exited)),
+				Effect.interruptible,
+				Effect.timeoutOrElse({
+					duration: stdinExitTimeout,
+					orElse: () =>
+						LocalTerminationTimeout.make({
+							...Option.match(execution.pid, {
+								onNone: () => ({}),
+								onSome: (pid) => ({ pid }),
 							}),
-					}),
-				)
-				if (status.exitCode !== 0 || status.statusCause.reasons.length > 0)
-					return yield* status
-			}),
+							...(execution.threadId === undefined
+								? {}
+								: { threadId: execution.threadId }),
+						}),
+				}),
+			)
+			if (status.exitCode !== 0 || status.statusCause.reasons.length > 0)
+				return yield* status
+		}),
 	}
 })

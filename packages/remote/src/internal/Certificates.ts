@@ -241,20 +241,17 @@ export const write = Effect.fn("Certificates.write")(function* (
 	force: boolean = false,
 ) {
 	const fs = yield* FileSystem.FileSystem
-	yield* fs
-		.writeFileString(base + ".key", Redacted.value(pair.privateKey), {
-			flag: force ? "w" : "wx",
-			mode: 0o600,
-		})
-		.pipe(Effect.uninterruptible)
+	yield* fs.writeFileString(base + ".key", Redacted.value(pair.privateKey), {
+		flag: force ? "w" : "wx",
+		mode: 0o600,
+	})
 	// Opening an existing file does not change its permissions when renewing it.
-	yield* fs.chmod(base + ".key", 0o600).pipe(Effect.uninterruptible)
-	yield* fs
-		.writeFileString(base + ".crt", pair.certificate, {
-			flag: force ? "w" : "wx",
-		})
-		.pipe(Effect.uninterruptible)
-})
+	yield* fs.chmod(base + ".key", 0o600)
+	yield* fs.writeFileString(base + ".crt", pair.certificate, {
+		flag: force ? "w" : "wx",
+	})
+	// One region for the pair: an interruption between the files would leave a key without its certificate.
+}, Effect.uninterruptible)
 
 export interface Options {
 	readonly out: string

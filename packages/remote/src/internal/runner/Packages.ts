@@ -44,39 +44,38 @@ export const digest = Effect.fnUntraced(function* (directory: string) {
 	const hash = yield* Effect.sync(() =>
 		createHash("sha256").update("graft-package-sha256-v1\0"),
 	)
-	const visit = (
+	const visit = Effect.fnUntraced(function* (
 		relative: string,
-	): Effect.Effect<void, PackageError | PlatformError.PlatformError> =>
-		Effect.gen(function* () {
-			const filename = path.join(directory, relative)
-			const info = yield* fs.stat(filename)
-			if (info.type !== "File" && info.type !== "Directory")
-				return yield* PackageError.make({
-					detail: `Unsupported package entry: ${relative}`,
-				})
-			const name = new TextEncoder().encode(relative)
-			yield* Effect.sync(() => {
-				hash.update(
-					`${info.type}:${name.byteLength}:${info.type === "File" ? info.size : 0}:`,
-				)
-				hash.update(name)
+	): Effect.fn.Return<void, PackageError | PlatformError.PlatformError> {
+		const filename = path.join(directory, relative)
+		const info = yield* fs.stat(filename)
+		if (info.type !== "File" && info.type !== "Directory")
+			return yield* PackageError.make({
+				detail: `Unsupported package entry: ${relative}`,
 			})
-			if (info.type === "File") {
-				yield* fs.stream(filename).pipe(
-					Stream.runForEach((bytes) =>
-						Effect.sync(() => {
-							hash.update(bytes)
-						}),
-					),
-				)
-			} else {
-				const entries = yield* fs.readDirectory(filename)
-				for (const entry of Array.sort(entries, Order.String)) {
-					if (entry === "node_modules") continue
-					yield* visit(relative === "" ? entry : `${relative}/${entry}`)
-				}
-			}
+		const name = new TextEncoder().encode(relative)
+		yield* Effect.sync(() => {
+			hash.update(
+				`${info.type}:${name.byteLength}:${info.type === "File" ? info.size : 0}:`,
+			)
+			hash.update(name)
 		})
+		if (info.type === "File") {
+			yield* fs.stream(filename).pipe(
+				Stream.runForEach((bytes) =>
+					Effect.sync(() => {
+						hash.update(bytes)
+					}),
+				),
+			)
+		} else {
+			const entries = yield* fs.readDirectory(filename)
+			for (const entry of Array.sort(entries, Order.String)) {
+				if (entry === "node_modules") continue
+				yield* visit(relative === "" ? entry : `${relative}/${entry}`)
+			}
+		}
+	})
 	yield* visit("")
 	return yield* Effect.sync(() => hash.digest("hex"))
 })
@@ -136,43 +135,41 @@ export const resolve = Effect.fnUntraced(
 	}),
 )
 
-export const resolveEntry = (installation: string, specifier: string) =>
-	Effect.gen(function* () {
-		const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
-		return yield* Effect.scoped(
-			Effect.gen(function* () {
-				const child = yield* spawner.spawn(
-					ChildProcess.make(
-						process.execPath,
-						[
-							"--input-type=module",
-							"--eval",
-							"process.stdout.write(import.meta.resolve(process.argv[1]))",
-							"--",
-							specifier,
-						],
-						{
-							cwd: installation,
-							env: {},
-							stdin: "ignore",
-							stdout: "pipe",
-							stderr: "pipe",
-						},
-					),
-				)
-				const [code, stdout, stderr] = yield* Effect.all(
-					[
-						child.exitCode,
-						child.stdout.pipe(Stream.decodeText(), Stream.mkString),
-						child.stderr.pipe(Stream.decodeText(), Stream.mkString),
-					],
-					{ concurrency: "unbounded" },
-				)
-				if (code !== 0)
-					return yield* PackageError.make({
-						detail: `Package resolution failed: ${stderr}`,
-					})
-				return stdout
-			}),
-		)
-	})
+export const resolveEntry = Effect.fnUntraced(function* (
+	installation: string,
+	specifier: string,
+) {
+	const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+	const child = yield* spawner.spawn(
+		ChildProcess.make(
+			process.execPath,
+			[
+				"--input-type=module",
+				"--eval",
+				"process.stdout.write(import.meta.resolve(process.argv[1]))",
+				"--",
+				specifier,
+			],
+			{
+				cwd: installation,
+				env: {},
+				stdin: "ignore",
+				stdout: "pipe",
+				stderr: "pipe",
+			},
+		),
+	)
+	const [code, stdout, stderr] = yield* Effect.all(
+		[
+			child.exitCode,
+			child.stdout.pipe(Stream.decodeText(), Stream.mkString),
+			child.stderr.pipe(Stream.decodeText(), Stream.mkString),
+		],
+		{ concurrency: "unbounded" },
+	)
+	if (code !== 0)
+		return yield* PackageError.make({
+			detail: `Package resolution failed: ${stderr}`,
+		})
+	return stdout
+}, Effect.scoped)

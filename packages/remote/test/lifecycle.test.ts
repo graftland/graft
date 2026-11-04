@@ -47,21 +47,24 @@ const setup = Effect.gen(function* () {
 	yield* fs.writeFileString(`${directory}/release`, "release")
 	return { fs, directory }
 })
-const waitFor = (directory: string, prefix: string, count = 1) =>
-	Effect.gen(function* () {
-		const fs = yield* FileSystem.FileSystem
-		const files = yield* fs.readDirectory(directory).pipe(
-			Effect.map((files) =>
-				Array.filter(files, (file) => String.startsWith(prefix)(file)),
-			),
-			Effect.repeat({
-				schedule: Schedule.spaced("10 millis"),
-				until: (files) => files.length >= count,
-			}),
-			Effect.timeout("5 seconds"),
-		)
-		return Array.map(files, (file) => Number(String.slice(prefix.length)(file)))
-	})
+const waitFor = Effect.fnUntraced(function* (
+	directory: string,
+	prefix: string,
+	count: number = 1,
+) {
+	const fs = yield* FileSystem.FileSystem
+	const files = yield* fs.readDirectory(directory).pipe(
+		Effect.map((files) =>
+			Array.filter(files, (file) => String.startsWith(prefix)(file)),
+		),
+		Effect.repeat({
+			schedule: Schedule.spaced("10 millis"),
+			until: (files) => files.length >= count,
+		}),
+		Effect.timeout("5 seconds"),
+	)
+	return Array.map(files, (file) => Number(String.slice(prefix.length)(file)))
+})
 const gone = (pid: number) =>
 	Effect.sync(() => assert.throws(() => process.kill(pid, 0)))
 const dies = (cause: Cause.Cause<unknown>): ReadonlyArray<unknown> =>
@@ -230,7 +233,10 @@ describe("local remote lifecycle", () => {
 	it.live("closes the remote process when the owning scope closes", () =>
 		Effect.gen(function* () {
 			const { fs, directory } = yield* setup
-			const scope = yield* Scope.make()
+			// A child of the test scope, so the remote process is closed even when
+			// an assertion fails before the explicit close below.
+			const parent = yield* Effect.scope
+			const scope = yield* Scope.fork(parent)
 			const fork = yield* Graft.plugin(
 				Remote.plugin(contract, {
 					contractModule,

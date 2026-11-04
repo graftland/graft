@@ -9,26 +9,25 @@ import * as pki from "pkijs"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import { command } from "../src/internal/runner/command"
 
-const invoke = (args: ReadonlyArray<string>) =>
-	Effect.gen(function* () {
-		const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
-		const argv = yield* command()
-		const child = yield* spawner.spawn(
-			ChildProcess.make(argv[0], [...argv.slice(1), ...args], {
-				cwd: new URL("..", import.meta.url).pathname,
-				stdout: "pipe",
-				stderr: "pipe",
-			}),
-		)
-		return yield* Effect.all(
-			{
-				code: child.exitCode,
-				stdout: Stream.mkString(Stream.decodeText(child.stdout)),
-				stderr: Stream.mkString(Stream.decodeText(child.stderr)),
-			},
-			{ concurrency: "unbounded" },
-		)
-	})
+const invoke = Effect.fnUntraced(function* (args: ReadonlyArray<string>) {
+	const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+	const argv = yield* command()
+	const child = yield* spawner.spawn(
+		ChildProcess.make(argv[0], [...argv.slice(1), ...args], {
+			cwd: new URL("..", import.meta.url).pathname,
+			stdout: "pipe",
+			stderr: "pipe",
+		}),
+	)
+	return yield* Effect.all(
+		{
+			code: child.exitCode,
+			stdout: Stream.mkString(Stream.decodeText(child.stdout)),
+			stderr: Stream.mkString(Stream.decodeText(child.stderr)),
+		},
+		{ concurrency: "unbounded" },
+	)
+})
 describe("remote command line", () => {
 	it.live(
 		"requires a config file and rejects removed serve shorthand flags",

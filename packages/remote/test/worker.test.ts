@@ -66,72 +66,68 @@ const transport = Effect.gen(function* () {
 	yield* consumer.await
 	return yield* Deferred.await(found)
 })
-const launch = <C, I, E>(
+const launch = Effect.fnUntraced(function* <C, I, E>(
 	definition: Plugin.Plugin<C, I, E>,
 	input: NoInfer<I>,
-) =>
-	Effect.gen(function* () {
-		const original = yield* transport
-		const execution = yield* Deferred.make<Execution>()
-		const launched =
-			yield* Deferred.make<Fork.Fork<C, E | Schema.SchemaError>>()
-		const owner = yield* Graft.plugin(
-			Plugin.make({
-				name: "observed-worker",
-				apply: () =>
-					Effect.gen(function* () {
-						yield* Graft.provide(WorkerTransport, {
-							start: (options) =>
-								original
-									.start(options)
-									.pipe(
-										Effect.tap((value) => Deferred.succeed(execution, value)),
-									),
-						})
-						const proxy = yield* Graft.plugin(definition, input)
-						yield* proxy.await
-						yield* Deferred.succeed(launched, proxy)
-					}),
+) {
+	const original = yield* transport
+	const execution = yield* Deferred.make<Execution>()
+	const launched = yield* Deferred.make<Fork.Fork<C, E | Schema.SchemaError>>()
+	const owner = yield* Graft.plugin(
+		Plugin.make({
+			name: "observed-worker",
+			apply: Effect.fnUntraced(function* () {
+				yield* Graft.provide(WorkerTransport, {
+					start: (options) =>
+						original
+							.start(options)
+							.pipe(Effect.tap((value) => Deferred.succeed(execution, value))),
+				})
+				const proxy = yield* Graft.plugin(definition, input)
+				yield* proxy.await
+				yield* Deferred.succeed(launched, proxy)
 			}),
-			undefined,
-			{ isolate: [WorkerTransport] },
-		)
-		yield* owner.await
-		return {
-			proxy: yield* Deferred.await(launched),
-			execution: yield* Deferred.await(execution),
-		}
+		}),
+		undefined,
+		{ isolate: [WorkerTransport] },
+	)
+	yield* owner.await
+	return {
+		proxy: yield* Deferred.await(launched),
+		execution: yield* Deferred.await(execution),
+	}
+})
+const setup = Effect.fnUntraced(function* (
+	shutdownTimeout: Duration.Input = "5 seconds",
+) {
+	const fs = yield* FileSystem.FileSystem
+	const directory = yield* fs.makeTempDirectoryScoped()
+	yield* Graft.provide(HostApi, {
+		double: (value) => Effect.succeed(value * 2),
 	})
-const setup = (shutdownTimeout: Duration.Input = "5 seconds") =>
-	Effect.gen(function* () {
-		const fs = yield* FileSystem.FileSystem
-		const directory = yield* fs.makeTempDirectoryScoped()
-		yield* Graft.provide(HostApi, {
-			double: (value) => Effect.succeed(value * 2),
-		})
-		const launched = yield* launch(
-			executionPlugin(
-				contract,
-				{ contractModule: servicesModule, shutdownTimeout },
-				{ _tag: "Worker", execArgv: [] },
-			),
-			{ directory, fail: false },
-		)
-		const captured = yield* Deferred.make<typeof ChildApi.Service>()
-		const consumer = yield* Graft.plugin(
-			Plugin.make({
-				name: "worker-service-consumer",
-				inject: [ChildApi],
-				apply: () =>
-					ChildApi.pipe(
-						Effect.flatMap((api) => Deferred.succeed(captured, api)),
-						Effect.asVoid,
-					),
-			}),
-		)
-		yield* consumer.await
-		return { ...launched, fs, directory, api: yield* Deferred.await(captured) }
-	})
+	const launched = yield* launch(
+		executionPlugin(
+			contract,
+			{ contractModule: servicesModule, shutdownTimeout },
+			{ _tag: "Worker", execArgv: [] },
+		),
+		{ directory, fail: false },
+	)
+	const captured = yield* Deferred.make<typeof ChildApi.Service>()
+	const consumer = yield* Graft.plugin(
+		Plugin.make({
+			name: "worker-service-consumer",
+			inject: [ChildApi],
+			apply: () =>
+				ChildApi.pipe(
+					Effect.flatMap((api) => Deferred.succeed(captured, api)),
+					Effect.asVoid,
+				),
+		}),
+	)
+	yield* consumer.await
+	return { ...launched, fs, directory, api: yield* Deferred.await(captured) }
+})
 const waitFile = (path: string) =>
 	FileSystem.FileSystem.pipe(
 		Effect.flatMap((fs) => fs.exists(path)),

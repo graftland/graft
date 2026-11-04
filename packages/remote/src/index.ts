@@ -92,8 +92,8 @@ export const plugin = <
 			ChildProcessSpawner.ChildProcessSpawner,
 		],
 		retry: options.retry,
-		apply: () =>
-			Effect.gen(function* () {
+		apply: Effect.fnUntraced(
+			function* () {
 				const input = yield* Schema.decodeUnknownEffect(Configuration.Host)({
 					contract: options.contractModule,
 					connect: options.connect,
@@ -112,6 +112,8 @@ export const plugin = <
 				yield* follow(child, (cause) =>
 					Effect.failCause(publicCause(contract.error, cause)),
 				)
-			}).pipe(Effect.mapError((error) => publicError(contract.error, error))),
+			},
+			Effect.mapError((error) => publicError(contract.error, error)),
+		),
 	})
 export { host as default } from "./internal/entry"

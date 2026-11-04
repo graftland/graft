@@ -39,53 +39,50 @@ const run = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
 			),
 		),
 	)
-const setup = (fail = false) =>
-	Effect.gen(function* () {
-		const fs = yield* FileSystem.FileSystem
-		const directory = yield* fs.makeTempDirectoryScoped()
-		const provider = yield* Graft.plugin(
-			Plugin.make({
-				name: "host-provider",
-				apply: () =>
-					Graft.provide(HostApi, { double: (n) => Effect.succeed(n * 2) }),
+const setup = Effect.fnUntraced(function* (fail: boolean = false) {
+	const fs = yield* FileSystem.FileSystem
+	const directory = yield* fs.makeTempDirectoryScoped()
+	const provider = yield* Graft.plugin(
+		Plugin.make({
+			name: "host-provider",
+			apply: () =>
+				Graft.provide(HostApi, { double: (n) => Effect.succeed(n * 2) }),
+		}),
+	)
+	yield* provider.await
+	const proxy = yield* Graft.plugin(
+		Remote.plugin(contract, {
+			contractModule,
+			connect: { local: {} },
+			config: { directory, fail },
+		}),
+	)
+	yield* proxy.await
+	const service = yield* Deferred.make<ChildApi["Service"]>()
+	const consumer = yield* Graft.plugin(
+		Plugin.make({
+			name: "host-consumer",
+			inject: [ChildApi],
+			apply: Effect.fnUntraced(function* () {
+				const api = yield* ChildApi
+				yield* Deferred.succeed(service, api)
 			}),
-		)
-		yield* provider.await
-		const proxy = yield* Graft.plugin(
-			Remote.plugin(contract, {
-				contractModule,
-				connect: { local: {} },
-				config: { directory, fail },
-			}),
-		)
-		yield* proxy.await
-		const service = yield* Deferred.make<ChildApi["Service"]>()
-		const consumer = yield* Graft.plugin(
-			Plugin.make({
-				name: "host-consumer",
-				inject: [ChildApi],
-				apply: () =>
-					Effect.gen(function* () {
-						const api = yield* ChildApi
-						yield* Deferred.succeed(service, api)
-					}),
-			}),
-		)
-		yield* consumer.await
-		const api = yield* Deferred.await(service)
-		return { fs, directory, provider, proxy, consumer, api }
-	})
-const waitFile = (file: string) =>
-	Effect.gen(function* () {
-		const fs = yield* FileSystem.FileSystem
-		yield* fs.exists(file).pipe(
-			Effect.repeat({
-				schedule: Schedule.spaced("10 millis"),
-				until: (exists) => exists,
-			}),
-			Effect.timeout("3 seconds"),
-		)
-	})
+		}),
+	)
+	yield* consumer.await
+	const api = yield* Deferred.await(service)
+	return { fs, directory, provider, proxy, consumer, api }
+})
+const waitFile = Effect.fnUntraced(function* (file: string) {
+	const fs = yield* FileSystem.FileSystem
+	yield* fs.exists(file).pipe(
+		Effect.repeat({
+			schedule: Schedule.spaced("10 millis"),
+			until: (exists) => exists,
+		}),
+		Effect.timeout("3 seconds"),
+	)
+})
 describe("cross-process services", () => {
 	it.live(
 		"routes equal service tags independently from the control endpoint",
@@ -97,12 +94,11 @@ describe("cross-process services", () => {
 					Plugin.make({
 						name: "label-consumer",
 						inject: [ChildLabel],
-						apply: () =>
-							Effect.gen(function* () {
-								const service = yield* ChildLabel
-								const value = yield* service.read
-								yield* Deferred.succeed(label, value)
-							}),
+						apply: Effect.fnUntraced(function* () {
+							const service = yield* ChildLabel
+							const value = yield* service.read
+							yield* Deferred.succeed(label, value)
+						}),
 					}),
 				)
 				yield* consumer.await
@@ -142,22 +138,21 @@ describe("cross-process services", () => {
 					Plugin.make({
 						name: "finalizing-consumer",
 						inject: [ChildApi],
-						apply: () =>
-							Effect.gen(function* () {
-								const child = yield* ChildApi
-								yield* Effect.addFinalizer(() =>
-									Effect.gen(function* () {
-										const reply = yield* child.call(41)
-										const finalized = yield* fs
-											.exists(`${directory}/finalized-${reply.pid}`)
-											.pipe(Effect.orDie)
-										assert.isFalse(finalized)
-										yield* Ref.set(result, reply.value)
-										yield* Deferred.succeed(entered, undefined)
-										yield* Deferred.await(release)
-									}),
-								)
-							}),
+						apply: Effect.fnUntraced(function* () {
+							const child = yield* ChildApi
+							yield* Effect.addFinalizer(
+								Effect.fnUntraced(function* () {
+									const reply = yield* child.call(41)
+									const finalized = yield* fs
+										.exists(`${directory}/finalized-${reply.pid}`)
+										.pipe(Effect.orDie)
+									assert.isFalse(finalized)
+									yield* Ref.set(result, reply.value)
+									yield* Deferred.succeed(entered, undefined)
+									yield* Deferred.await(release)
+								}),
+							)
+						}),
 					}),
 				)
 				yield* finalizer.await
@@ -196,11 +191,10 @@ describe("cross-process services", () => {
 					Plugin.make({
 						name: "new-consumer",
 						inject: [ChildApi],
-						apply: () =>
-							Effect.gen(function* () {
-								const api = yield* ChildApi
-								yield* Deferred.succeed(service, api)
-							}),
+						apply: Effect.fnUntraced(function* () {
+							const api = yield* ChildApi
+							yield* Deferred.succeed(service, api)
+						}),
 					}),
 				)
 				yield* consumer.await

@@ -15,6 +15,7 @@ import {
 	Cause,
 	ConfigProvider,
 	Deferred,
+	Duration,
 	Effect,
 	Option,
 	Path,
@@ -39,6 +40,7 @@ import * as Port from "../src/internal/port"
 import * as Websocket from "./websocket"
 import * as Wire from "../src/internal/runner/Wire"
 import * as Model from "../src/internal/runner/model"
+import { expectFailure } from "./errors"
 import * as Processes from "../src/internal/runner/Processes"
 import { tcpProxy } from "./network-proxy"
 import { command } from "../src/internal/runner/command"
@@ -49,202 +51,203 @@ declare module "vitest" {
 		remoteRoot: string
 	}
 }
-const credentials = (name: string) =>
-	Effect.gen(function* () {
-		const fs = yield* FileSystem.FileSystem
-		const directory = inject("remoteTls")
-		const key = yield* fs.readFileString(directory + "/" + name + ".key")
-		return {
-			key: Redacted.make(key),
-			cert: yield* fs.readFileString(directory + "/" + name + ".crt"),
-			ca: yield* fs.readFileString(directory + "/ca.crt"),
-			servername: "localhost",
-		}
-	})
+const credentials = Effect.fnUntraced(function* (name: string) {
+	const fs = yield* FileSystem.FileSystem
+	const directory = inject("remoteTls")
+	const key = yield* fs.readFileString(directory + "/" + name + ".key")
+	return {
+		key: Redacted.make(key),
+		cert: yield* fs.readFileString(directory + "/" + name + ".crt"),
+		ca: yield* fs.readFileString(directory + "/ca.crt"),
+		servername: "localhost",
+	}
+})
 const runtime = Layer.provideMerge(
 	Graft.layer,
 	Layer.merge(NodeServices.layer, SecureRandom.layerWebCrypto),
 )
-const startRunner = (state: string, lease = 15000, config?: string) =>
-	Effect.gen(function* () {
-		const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
-		const certs = inject("remoteTls")
-		const argv = yield* command()
-		const file =
-			config ??
-			(yield* runnerConfig(
-				state,
-				[
-					{
-						url: "wss://127.0.0.1:0",
-						cert: certs + "/server.crt",
-						key: certs + "/server.key",
-						auth: { mtls: { ca: certs + "/ca.crt" } },
-					},
-				],
+const startRunner = Effect.fnUntraced(function* (
+	state: string,
+	lease: number = 15000,
+	config?: string,
+) {
+	const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+	const certs = inject("remoteTls")
+	const argv = yield* command()
+	const file =
+		config ??
+		(yield* runnerConfig(
+			state,
+			[
 				{
-					root: inject("remoteRoot"),
-					lease: `${lease} millis`,
-					grace: "5 seconds",
+					url: "wss://127.0.0.1:0",
+					cert: certs + "/server.crt",
+					key: certs + "/server.key",
+					auth: { mtls: { ca: certs + "/ca.crt" } },
 				},
-			))
-		const child = yield* spawner.spawn(
-			ChildProcess.make(
-				argv[0],
-				[...Array.drop(argv, 1), "serve", "--config", file],
-				{
-					cwd: new URL("..", import.meta.url).pathname,
-					stdin: "ignore",
-					stdout: "pipe",
-					stderr: "pipe",
-					forceKillAfter: "2 seconds",
-				},
+			],
+			{
+				root: inject("remoteRoot"),
+				lease: `${lease} millis`,
+				grace: "5 seconds",
+			},
+		))
+	const child = yield* spawner.spawn(
+		ChildProcess.make(
+			argv[0],
+			[...Array.drop(argv, 1), "serve", "--config", file],
+			{
+				cwd: new URL("..", import.meta.url).pathname,
+				stdin: "ignore",
+				stdout: "pipe",
+				stderr: "pipe",
+				forceKillAfter: "2 seconds",
+			},
+		),
+	)
+	const readers = yield* FiberSet.make<void, never>()
+	const ready = yield* Queue.unbounded<number>()
+	const stderr = yield* Ref.make("")
+	const stdout = yield* Ref.make("")
+	yield* child.stderr.pipe(
+		Stream.decodeText(),
+		Stream.runForEach((text) =>
+			Ref.update(stderr, (tail) => String.takeRight(tail + text, 8192)).pipe(
+				Effect.asVoid,
 			),
-		)
-		const readers = yield* FiberSet.make<void, never>()
-		const ready = yield* Queue.unbounded<number>()
-		const stderr = yield* Ref.make("")
-		const stdout = yield* Ref.make("")
-		yield* child.stderr.pipe(
-			Stream.decodeText(),
-			Stream.runForEach((text) =>
-				Ref.update(stderr, (tail) => String.takeRight(tail + text, 8192)).pipe(
-					Effect.asVoid,
-				),
-			),
-			Effect.orDie,
-			Effect.asVoid,
-			FiberSet.run(readers),
-		)
-		yield* child.stdout.pipe(
-			Stream.decodeText(),
-			Stream.tap((text) =>
-				Ref.update(stdout, (tail) => String.takeRight(tail + text, 8192)),
-			),
-			Stream.splitLines,
-			Stream.runForEach((line) =>
-				String.startsWith("{")(line)
-					? Schema.decodeEffect(
-							Schema.fromJsonString(
-								Schema.Struct({
-									event: Schema.Literal("Listening"),
-									port: Schema.Int,
-								}),
-							),
-						)(line).pipe(
-							Effect.flatMap((message) => Queue.offer(ready, message.port)),
-						)
-					: Effect.void,
-			),
-			Effect.orDie,
-			Effect.asVoid,
-			FiberSet.run(readers),
-		)
-		const port = yield* Effect.raceFirst(
-			Queue.take(ready),
-			child.exitCode.pipe(
-				Effect.flatMap((code) =>
-					Ref.get(stderr).pipe(
-						Effect.flatMap((tail) =>
-							Effect.die(
-								new Error(
-									"Runner exited before listening: " + code + " " + tail,
-								),
-							),
+		),
+		Effect.orDie,
+		Effect.asVoid,
+		FiberSet.run(readers),
+	)
+	yield* child.stdout.pipe(
+		Stream.decodeText(),
+		Stream.tap((text) =>
+			Ref.update(stdout, (tail) => String.takeRight(tail + text, 8192)),
+		),
+		Stream.splitLines,
+		Stream.runForEach((line) =>
+			String.startsWith("{")(line)
+				? Schema.decodeEffect(
+						Schema.fromJsonString(
+							Schema.Struct({
+								event: Schema.Literal("Listening"),
+								port: Schema.Int,
+							}),
+						),
+					)(line).pipe(
+						Effect.flatMap((message) => Queue.offer(ready, message.port)),
+					)
+				: Effect.void,
+		),
+		Effect.orDie,
+		Effect.asVoid,
+		FiberSet.run(readers),
+	)
+	const port = yield* Effect.raceFirst(
+		Queue.take(ready),
+		child.exitCode.pipe(
+			Effect.flatMap((code) =>
+				Ref.get(stderr).pipe(
+					Effect.flatMap((tail) =>
+						Effect.die(
+							new Error("Runner exited before listening: " + code + " " + tail),
 						),
 					),
 				),
 			),
-		).pipe(
-			Effect.raceFirst(
-				FiberSet.join(readers).pipe(Effect.andThen(Effect.never)),
-			),
-			Effect.timeout("30 seconds"),
-		)
-		return {
-			child,
-			port,
-			nextPort: Queue.take(ready),
-			stderr,
-			stdout,
-			outputEnded: FiberSet.awaitEmpty(readers),
-		}
-	})
-const setup = (lease = 15000, partitionable = false) =>
-	Effect.gen(function* () {
-		const fs = yield* FileSystem.FileSystem
-		const directory = yield* fs.makeTempDirectoryScoped()
-		const daemon = yield* startRunner(directory + "/state", lease)
-		const provider = yield* Graft.plugin(
-			Plugin.make({
-				name: "network-host-provider",
-				apply: () =>
-					Graft.provide(HostApi, { double: (n) => Effect.succeed(n * 2) }),
-			}),
-		)
-		yield* provider.await
-		const proxySocket = partitionable ? yield* tcpProxy(daemon.port) : undefined
-		const certificate = yield* credentials("client")
-		const connect = {
-			instance: "worker",
-			...{
-				url: `wss://127.0.0.1:${proxySocket?.port ?? daemon.port}`,
-				ca: inject("remoteTls") + "/ca.crt",
-				servername: certificate.servername,
-			},
-			auth: { mtls: Effect.succeed(certificate) },
-			lease: `${lease} millis`,
-			margin: "1 second",
-		}
-		const proxy = yield* Graft.plugin(
-			Remote.plugin(contract, {
-				contractModule: "remote-fixture",
-				connect,
-				config: { directory, fail: false },
-			}),
-		)
-		yield* proxy.await.pipe(Effect.timeout("30 seconds"))
-		const service = yield* Deferred.make<ChildApi["Service"]>()
-		const consumer = yield* Graft.plugin(
-			Plugin.make({
-				name: "network-host-consumer",
-				inject: [ChildApi],
-				apply: () =>
-					Effect.gen(function* () {
-						const api = yield* ChildApi
-						yield* Deferred.succeed(service, api)
-					}),
-			}),
-		)
-		yield* consumer.await
-		return {
-			...daemon,
-			proxySocket,
-			fs,
-			directory,
-			proxy,
-			api: yield* Deferred.await(service),
+		),
+	).pipe(
+		Effect.raceFirst(FiberSet.join(readers).pipe(Effect.andThen(Effect.never))),
+		Effect.timeout("30 seconds"),
+	)
+	return {
+		child,
+		port,
+		nextPort: Queue.take(ready),
+		stderr,
+		stdout,
+		outputEnded: FiberSet.awaitEmpty(readers),
+	}
+})
+const setup = Effect.fnUntraced(function* (
+	lease: number = 15000,
+	partitionable: boolean = false,
+) {
+	const fs = yield* FileSystem.FileSystem
+	const directory = yield* fs.makeTempDirectoryScoped()
+	const daemon = yield* startRunner(directory + "/state", lease)
+	const provider = yield* Graft.plugin(
+		Plugin.make({
+			name: "network-host-provider",
+			apply: () =>
+				Graft.provide(HostApi, { double: (n) => Effect.succeed(n * 2) }),
+		}),
+	)
+	yield* provider.await
+	const proxySocket = partitionable ? yield* tcpProxy(daemon.port) : undefined
+	const certificate = yield* credentials("client")
+	const connect = {
+		instance: "worker",
+		...{
+			url: `wss://127.0.0.1:${proxySocket?.port ?? daemon.port}`,
+			ca: inject("remoteTls") + "/ca.crt",
+			servername: certificate.servername,
+		},
+		auth: { mtls: Effect.succeed(certificate) },
+		lease: `${lease} millis`,
+		margin: "1 second",
+	}
+	const proxy = yield* Graft.plugin(
+		Remote.plugin(contract, {
+			contractModule: "remote-fixture",
 			connect,
-		}
-	})
+			config: { directory, fail: false },
+		}),
+	)
+	yield* proxy.await.pipe(Effect.timeout("30 seconds"))
+	const service = yield* Deferred.make<ChildApi["Service"]>()
+	const consumer = yield* Graft.plugin(
+		Plugin.make({
+			name: "network-host-consumer",
+			inject: [ChildApi],
+			apply: Effect.fnUntraced(function* () {
+				const api = yield* ChildApi
+				yield* Deferred.succeed(service, api)
+			}),
+		}),
+	)
+	yield* consumer.await
+	return {
+		...daemon,
+		proxySocket,
+		fs,
+		directory,
+		proxy,
+		api: yield* Deferred.await(service),
+		connect,
+	}
+})
 
-const control = (port: number, name = "client") =>
-	Effect.gen(function* () {
-		const socket = yield* Websocket.connect({
-			port,
-			tls: yield* credentials(name),
-			servername: "localhost",
-		})
-		const mux = yield* Websocket.multiplex(socket)
-		const peer = yield* Port.make(Wire.channel(mux, 0), {
-			session: "session-v1",
-			serve: {},
-			call: { session: Wire.Session },
-		})
-		return yield* RpcClient.make(Wire.Session).pipe(
-			Effect.provideService(RpcClient.Protocol, peer.clientProtocol("session")),
-		)
+const control = Effect.fnUntraced(function* (
+	port: number,
+	name: string = "client",
+) {
+	const socket = yield* Websocket.connect({
+		port,
+		tls: yield* credentials(name),
+		servername: "localhost",
 	})
+	const mux = yield* Websocket.multiplex(socket)
+	const peer = yield* Port.make(Wire.channel(mux, 0), {
+		session: "session-v1",
+		serve: {},
+		call: { session: Wire.Session },
+	})
+	return yield* RpcClient.make(Wire.Session).pipe(
+		Effect.provideService(RpcClient.Protocol, peer.clientProtocol("session")),
+	)
+})
 const until = <A, E, R>(
 	effect: Effect.Effect<A, E, R>,
 	predicate: (value: A) => boolean,
@@ -265,26 +268,25 @@ const gone = (pid: number) =>
 		}),
 		(value) => value,
 	)
-const latestRecord = (state: string) =>
-	Effect.gen(function* () {
-		const fs = yield* FileSystem.FileSystem
-		const files = yield* fs.readDirectory(state)
-		const records = yield* Effect.forEach(
-			Array.filter(files, String.endsWith(".json")),
-			(file) =>
-				fs
-					.readFileString(state + "/" + file)
-					.pipe(
-						Effect.flatMap(
-							Schema.decodeEffect(
-								Schema.fromJsonString(Schema.toCodecJson(Model.SessionRecord)),
-							),
+const latestRecord = Effect.fnUntraced(function* (state: string) {
+	const fs = yield* FileSystem.FileSystem
+	const files = yield* fs.readDirectory(state)
+	const records = yield* Effect.forEach(
+		Array.filter(files, String.endsWith(".json")),
+		(file) =>
+			fs
+				.readFileString(state + "/" + file)
+				.pipe(
+					Effect.flatMap(
+						Schema.decodeEffect(
+							Schema.fromJsonString(Schema.toCodecJson(Model.SessionRecord)),
 						),
 					),
-		)
-		assert.lengthOf(records, 1)
-		return records[0]!
-	})
+				),
+	)
+	assert.lengthOf(records, 1)
+	return records[0]!
+})
 
 const loadYamlHost = (directory: string, port: number) => {
 	const certificates = inject("remoteTls")
@@ -327,12 +329,11 @@ const loadYamlHost = (directory: string, port: number) => {
 			Plugin.make({
 				name: "yaml-host-consumer",
 				inject: [Loader.Loader, ChildApi],
-				apply: () =>
-					Effect.gen(function* () {
-						const loader = yield* Loader.Loader
-						const api = yield* ChildApi
-						yield* Deferred.succeed(found, { loader, api })
-					}),
+				apply: Effect.fnUntraced(function* () {
+					const loader = yield* Loader.Loader
+					const api = yield* ChildApi
+					yield* Deferred.succeed(found, { loader, api })
+				}),
 			}),
 		)
 		yield* consumer.await
@@ -763,18 +764,17 @@ describe("network runner end to end", () => {
 					Plugin.make({
 						name: "network-draining-consumer",
 						inject: [ChildApi],
-						apply: () =>
-							Effect.gen(function* () {
-								const service = yield* ChildApi
-								yield* Effect.addFinalizer(() =>
-									Effect.gen(function* () {
-										const response = yield* service.call(41)
-										assert.equal(response.value, 83)
-										yield* Deferred.succeed(entered, undefined)
-										yield* Deferred.await(release)
-									}),
-								)
-							}),
+						apply: Effect.fnUntraced(function* () {
+							const service = yield* ChildApi
+							yield* Effect.addFinalizer(
+								Effect.fnUntraced(function* () {
+									const response = yield* service.call(41)
+									assert.equal(response.value, 83)
+									yield* Deferred.succeed(entered, undefined)
+									yield* Deferred.await(release)
+								}),
+							)
+						}),
 					}),
 				)
 				yield* consumer.await
@@ -812,11 +812,10 @@ describe("network runner end to end", () => {
 					Effect.gen(function* () {
 						const { api, proxy, proxySocket } = yield* setup(10000, true)
 						const reply = yield* api.call(1)
-						const started = yield* Effect.sync(() => performance.now())
-						yield* proxySocket!.disconnect
-						const disposed = yield* Effect.exit(proxy.dispose)
-						const elapsed = yield* Effect.sync(
-							() => performance.now() - started,
+						const [elapsed, disposed] = yield* Effect.timed(
+							proxySocket!.disconnect.pipe(
+								Effect.andThen(Effect.exit(proxy.dispose)),
+							),
 						)
 						assert.isTrue(Exit.isFailure(disposed))
 						if (Exit.isFailure(disposed))
@@ -824,7 +823,7 @@ describe("network runner end to end", () => {
 								Cause.pretty(disposed.cause),
 								"RemoteTerminationUnconfirmed",
 							)
-						assert.isAtLeast(elapsed, 11000)
+						assert.isAtLeast(Duration.toMillis(elapsed), 11000)
 						yield* gone(reply.pid)
 					}).pipe(Effect.scoped, Effect.provide(runtime)),
 				)
@@ -951,10 +950,8 @@ describe("network runner end to end", () => {
 				const replacement = yield* Fiber.join(replacing)
 				assert.equal(replacement.handle.generation, 2)
 				yield* gone(pid)
-				const stale = yield* Effect.exit(first.Renew(opened.handle))
-				assert.isTrue(Exit.isFailure(stale))
-				if (Exit.isFailure(stale))
-					assert.include(Cause.pretty(stale.cause), "Unknown session")
+				const stale = yield* Effect.flip(first.Renew(opened.handle))
+				assert.isTrue(Schema.is(Model.StaleSession)(stale))
 				yield* second.Dispose(replacement.handle)
 				const expiring = yield* first.Open({
 					instance: "expiring",
@@ -967,10 +964,8 @@ describe("network runner end to end", () => {
 					first.Status(expiring.handle),
 					(record) => record.phase === "Stopped",
 				)
-				const late = yield* Effect.exit(first.Renew(expiring.handle))
-				assert.isTrue(Exit.isFailure(late))
-				if (Exit.isFailure(late))
-					assert.include(Cause.pretty(late.cause), "expired")
+				const late = yield* Effect.flip(first.Renew(expiring.handle))
+				assert.isTrue(Schema.is(Model.LeaseExpired)(late))
 			}).pipe(Effect.scoped, Effect.provide(runtime)),
 		90_000,
 	)
@@ -1085,13 +1080,19 @@ describe("network runner end to end", () => {
 					)
 					const failed = yield* Effect.exit(proxy.await)
 					assert.isTrue(Exit.isFailure(failed))
-					if (Exit.isFailure(failed))
-						assert.include(
-							Cause.pretty(failed.cause),
-							expect === undefined
-								? "a value with a length of at least 1"
-								: "mismatch",
-						)
+					if (Exit.isFailure(failed)) {
+						if (expect === undefined)
+							// The client rejects the empty id while encoding the request, as a defect.
+							assert.include(
+								Cause.pretty(failed.cause),
+								"a value with a length of at least 1",
+							)
+						else
+							assert.include(
+								expectFailure(failed.cause, Model.PackageError).detail,
+								"mismatch",
+							)
+					}
 					yield* proxy.dispose
 				}
 				const applied = yield* fs.exists(directory + "/pid")

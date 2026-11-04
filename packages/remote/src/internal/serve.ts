@@ -69,19 +69,21 @@ const ready = Plugin.make({
 })
 
 /** Loader logs child cleanup errors; the supervisor's release signal also reaches the command exit. */
-const close = (entries: Fork.Fork, lifecycle: typeof ServeLifecycle.Service) =>
-	Effect.gen(function* () {
-		const disposed = yield* Effect.exit(entries.dispose)
-		const released = yield* Effect.exit(Deferred.await(lifecycle.released))
-		const cause = Array.reduce(
-			[disposed, released],
-			Cause.empty,
-			(cause: Cause.Cause<unknown>, exit: Exit.Exit<void, unknown>) =>
-				Exit.isFailure(exit) ? Cause.combine(cause, exit.cause) : cause,
-		)
-		if (cause.reasons.length > 0)
-			return yield* Effect.failCause(cleanupCause(cause))
-	})
+const close = Effect.fnUntraced(function* (
+	entries: Fork.Fork,
+	lifecycle: typeof ServeLifecycle.Service,
+) {
+	const disposed = yield* Effect.exit(entries.dispose)
+	const released = yield* Effect.exit(Deferred.await(lifecycle.released))
+	const cause = Array.reduce(
+		[disposed, released],
+		Cause.empty,
+		(cause: Cause.Cause<unknown>, exit: Exit.Exit<void, unknown>) =>
+			Exit.isFailure(exit) ? Cause.combine(cause, exit.cause) : cause,
+	)
+	if (cause.reasons.length > 0)
+		return yield* Effect.failCause(cleanupCause(cause))
+})
 
 const load = Effect.fnUntraced(function* (config: string, directory: string) {
 	const lifecycle = yield* make

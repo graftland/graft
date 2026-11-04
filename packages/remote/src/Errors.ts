@@ -81,6 +81,14 @@ export class AuthenticationFailed extends Schema.TaggedError<
 	cause: Schema.optionalKey(Schema.Cause(Schema.Unknown, Schema.Unknown)),
 }) {}
 
+/** The authenticator could not reach what it needs to decide, such as its key set; the credential may still be valid. */
+export class AuthenticatorUnavailable extends Schema.TaggedError<
+	AuthenticatorUnavailable,
+	{ readonly brand: unique symbol }
+>()("AuthenticatorUnavailable", {
+	cause: Schema.Cause(Schema.Unknown, Schema.Unknown),
+}) {}
+
 /** A remote entry could not be resolved or configured at the indicated field. */
 export class RemoteEntryError extends Schema.TaggedError<
 	RemoteEntryError,

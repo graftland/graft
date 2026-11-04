@@ -6,9 +6,9 @@ import {
 	Effect,
 	Exit,
 	Fiber,
+	Predicate,
 	Queue,
 	Ref,
-	Schedule,
 	Schema,
 	Sink,
 	Stream,
@@ -29,11 +29,6 @@ const Group = RpcGroup.make(
 		"log",
 	),
 )
-const until = <A>(effect: Effect.Effect<A>, predicate: (value: A) => boolean) =>
-	effect.pipe(
-		Effect.repeat({ schedule: Schedule.spaced("1 millis"), until: predicate }),
-		Effect.timeout("2 seconds"),
-	)
 const encode = (value: unknown) =>
 	Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(value).pipe(
 		Effect.map((json) => new TextEncoder().encode(json + "\n")),
@@ -58,23 +53,24 @@ const capture = Effect.gen(function* () {
 	const peer = yield* Port.make(
 		{
 			input: Stream.never,
-			output: Sink.forEach((bytes: Uint8Array) =>
-				Effect.gen(function* () {
-					yield* Deferred.succeed(started, undefined)
-					yield* Deferred.await(gate)
-					const frame = yield* Schema.decodeEffect(
-						Schema.fromJsonString(
-							Schema.Struct({
-								priority: Schema.String,
-								message: Schema.Struct({
-									_tag: Schema.String,
-									id: Schema.optional(Schema.String),
+			output: Sink.forEach(
+				Effect.fnUntraced(
+					function* (bytes: Uint8Array) {
+						yield* Deferred.succeed(started, undefined)
+						yield* Deferred.await(gate)
+						const frame = yield* Schema.decodeEffect(
+							Schema.fromJsonString(
+								Schema.Struct({
+									priority: Schema.String,
+									message: Schema.Struct({
+										_tag: Schema.String,
+										id: Schema.optional(Schema.String),
+									}),
 								}),
-							}),
-						),
-					)(new TextDecoder().decode(bytes))
-					yield* Queue.offer(written, frame)
-				}).pipe(
+							),
+						)(new TextDecoder().decode(bytes))
+						yield* Queue.offer(written, frame)
+					},
 					Effect.mapError((cause) =>
 						TransportError.make({ cause: Cause.fail(cause) }),
 					),
@@ -120,7 +116,8 @@ const setup = Effect.gen(function* () {
 		},
 	)
 	const started = yield* Queue.unbounded<void>()
-	const closed = yield* Ref.make(0)
+	const stopped = yield* Queue.unbounded<void>()
+	const sent = yield* Queue.unbounded<RpcMessage.FromClientEncoded>()
 	const active = yield* Ref.make(0)
 	const peak = yield* Ref.make(0)
 	const track = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
@@ -137,7 +134,7 @@ const setup = Effect.gen(function* () {
 			track(
 				Queue.offer(started, undefined).pipe(
 					Effect.andThen(Effect.never),
-					Effect.ensuring(Ref.update(closed, (n) => n + 1)),
+					Effect.ensuring(Queue.offer(stopped, undefined)),
 				),
 			),
 		Echo: ({ value }) => track(Effect.yieldNow.pipe(Effect.as(value))),
@@ -151,31 +148,61 @@ const setup = Effect.gen(function* () {
 			Effect.forkScoped,
 		)
 	}
+	// Record each message only once the port has run it up to the admission gate.
+	// The port's worker starts immediately and admission is synchronous up to
+	// `txRetry`, so starting the send immediately returns only after the request
+	// is admitted or parked. The child fiber is owned by the calling fiber.
+	const protocol = left.clientProtocol("main")
 	const a = yield* RpcClient.make(Group).pipe(
-		Effect.provideService(RpcClient.Protocol, left.clientProtocol("main")),
+		Effect.provideService(RpcClient.Protocol, {
+			...protocol,
+			send: Effect.fnUntraced(function* (client, message, transferables) {
+				const sending = yield* Effect.forkChild(
+					protocol.send(client, message, transferables),
+					{ startImmediately: true },
+				)
+				yield* Queue.offer(sent, message)
+				return yield* Fiber.join(sending)
+			}),
+		}),
 	)
 	const b = yield* RpcClient.make(Group).pipe(
 		Effect.provideService(RpcClient.Protocol, right.clientProtocol("main")),
 	)
-	return { a, b, left, right, ab, ba, closed, started, active, peak }
+	// Takes recorded messages until `a` has sent the matching Echo request.
+	const sentEcho = (value?: number) =>
+		Queue.take(sent).pipe(
+			Effect.repeat({
+				until: (message) =>
+					message._tag === "Request" &&
+					message.tag === "Echo" &&
+					(value === undefined ||
+						(Predicate.hasProperty(message.payload, "value") &&
+							message.payload.value === value)),
+			}),
+		)
+	return { a, b, left, right, ab, ba, stopped, started, active, peak, sentEcho }
 })
 describe("endpoint port", () => {
 	it.live(
 		"bounds admitted calls and keeps control usable with saturated data and backpressured logs",
 		() =>
 			Effect.gen(function* () {
-				const { a, active, peak } = yield* setup
+				const { a, active, peak, started, sentEcho } = yield* setup
 				const first = yield* Effect.forkScoped(a.Hold())
 				const second = yield* Effect.forkScoped(a.Hold())
-				yield* until(Ref.get(active), (n) => n === 2)
+				yield* Queue.take(started)
+				yield* Queue.take(started)
 				const calls = yield* Effect.forEach(
 					Array.range(0, 99),
 					(value) => a.Echo({ value }),
 					{ concurrency: "unbounded" },
 				).pipe(Effect.forkScoped)
-				yield* Effect.yieldNow
+				yield* sentEcho()
 				const callsPending = yield* pending(calls)
+				const admitted = yield* Ref.get(active)
 				assert.isTrue(callsPending)
+				assert.equal(admitted, 2)
 				const received = yield* Deferred.make<void>()
 				yield* a.Flood().pipe(
 					Stream.runForEach(() =>
@@ -219,14 +246,17 @@ describe("endpoint port", () => {
 		"interrupts an admission waiter without leaking a slot and fails waiters on disconnect",
 		() =>
 			Effect.gen(function* () {
-				const { a, active, ba } = yield* setup
+				const { a, active, ba, started, sentEcho } = yield* setup
 				const first = yield* Effect.forkScoped(a.Hold())
 				yield* Effect.forkScoped(a.Hold())
-				yield* until(Ref.get(active), (n) => n === 2)
+				yield* Queue.take(started)
+				yield* Queue.take(started)
 				const canceled = yield* Effect.forkScoped(a.Echo({ value: 1 }))
-				yield* Effect.yieldNow
+				yield* sentEcho(1)
 				const canceledPending = yield* pending(canceled)
+				const canceledAdmitted = yield* Ref.get(active)
 				assert.isTrue(canceledPending)
+				assert.equal(canceledAdmitted, 2)
 				yield* Fiber.interrupt(canceled).pipe(Effect.timeout("1 second"))
 				const canceledExit = yield* Fiber.await(canceled)
 				assert.isTrue(
@@ -239,11 +269,13 @@ describe("endpoint port", () => {
 					.pipe(Effect.timeout("1 second"))
 				assert.equal(value, 2)
 				yield* Effect.forkScoped(a.Hold())
-				yield* until(Ref.get(active), (n) => n === 2)
+				yield* Queue.take(started)
 				const waiting = yield* Effect.forkScoped(a.Echo({ value: 3 }))
-				yield* Effect.yieldNow
+				yield* sentEcho(3)
 				const waitingPending = yield* pending(waiting)
+				const waitingAdmitted = yield* Ref.get(active)
 				assert.isTrue(waitingPending)
+				assert.equal(waitingAdmitted, 2)
 				yield* Queue.fail(
 					ba,
 					TransportError.make({ cause: Cause.die(new Error("Disconnected")) }),
@@ -257,10 +289,11 @@ describe("endpoint port", () => {
 
 	it.live("disconnects a peer that exceeds the inbound admission limit", () =>
 		Effect.gen(function* () {
-			const { a, ab, right, active, peak } = yield* setup
+			const { a, ab, right, peak, started } = yield* setup
 			yield* Effect.forkScoped(a.Hold())
 			yield* Effect.forkScoped(a.Hold())
-			yield* until(Ref.get(active), (n) => n === 2)
+			yield* Queue.take(started)
+			yield* Queue.take(started)
 			const overflow = yield* Schema.encodeEffect(
 				Schema.fromJsonString(Schema.Json),
 			)({
@@ -293,7 +326,7 @@ describe("endpoint port", () => {
 		"fails both RPC directions and interrupts both servers when the byte channel fails",
 		() =>
 			Effect.gen(function* () {
-				const { a, b, ab, ba, closed, started } = yield* setup
+				const { a, b, ab, ba, stopped, started } = yield* setup
 				const first = yield* Effect.forkScoped(a.Hold())
 				const second = yield* Effect.forkScoped(b.Hold())
 				// Admission precedes dispatch: wait until both handlers have installed
@@ -313,21 +346,22 @@ describe("endpoint port", () => {
 				)
 				assert.isTrue(Exit.isFailure(firstExit))
 				assert.isTrue(Exit.isFailure(secondExit))
-				yield* until(Ref.get(closed), (n) => n === 2)
+				yield* Queue.take(stopped)
+				yield* Queue.take(stopped)
 			}).pipe(Effect.scoped),
 	)
 	it.live(
 		"notifies the server even when a failure observer cancels the publisher",
 		() =>
 			Effect.gen(function* () {
-				const { b, left, ba, started, closed } = yield* setup
+				const { b, left, ba, started, stopped } = yield* setup
 				yield* Effect.forkScoped(b.Hold())
 				yield* Queue.take(started)
 				yield* Effect.raceFirst(
 					Effect.flip(left.await),
 					Queue.fail(ba, TransportError.make({ cause: Cause.empty })),
 				)
-				yield* until(Ref.get(closed), (count) => count === 1)
+				yield* Queue.take(stopped)
 			}).pipe(Effect.scoped),
 	)
 
@@ -438,12 +472,28 @@ describe("endpoint port", () => {
 						limits: { data: 2 },
 					},
 				)
+				// Signals once the port has queued an endpoint's request.
+				const queuedOn = (
+					endpoint: string,
+					queued: Deferred.Deferred<void>,
+				) => {
+					const protocol = left.clientProtocol(endpoint)
+					return {
+						...protocol,
+						send: (...args: Parameters<typeof protocol.send>) =>
+							protocol
+								.send(...args)
+								.pipe(Effect.tap(() => Deferred.succeed(queued, undefined))),
+					}
+				}
+				const textQueued = yield* Deferred.make<void>()
+				const numberQueued = yield* Deferred.make<void>()
 				const text = yield* RpcClient.make(Text, {
 					generateRequestId: () => RpcMessage.RequestId("same"),
 				}).pipe(
 					Effect.provideService(
 						RpcClient.Protocol,
-						left.clientProtocol("text"),
+						queuedOn("text", textQueued),
 					),
 				)
 				const number = yield* RpcClient.make(Number, {
@@ -451,12 +501,14 @@ describe("endpoint port", () => {
 				}).pipe(
 					Effect.provideService(
 						RpcClient.Protocol,
-						left.clientProtocol("number"),
+						queuedOn("number", numberQueued),
 					),
 				)
 				const first = yield* Effect.forkScoped(text.Echo())
 				const second = yield* Effect.forkScoped(number.Echo())
-				yield* Effect.yieldNow
+				// Both requests are on the wire before either server starts.
+				yield* Deferred.await(textQueued)
+				yield* Deferred.await(numberQueued)
 				const textHandlers = yield* Text.toHandlers({
 					Echo: () => Effect.succeed("text result"),
 				})
@@ -473,6 +525,7 @@ describe("endpoint port", () => {
 				)
 				const numberResult = yield* Fiber.join(second)
 				assert.equal(numberResult, 42)
+				// The text server has not started, so its request cannot have completed.
 				const firstPending = yield* pending(first)
 				assert.isTrue(firstPending)
 				yield* RpcServer.make(Text).pipe(
@@ -583,8 +636,7 @@ describe("endpoint port", () => {
 	)
 })
 
+// Callers first prove the fiber is blocked by construction (a full admission
+// table or a missing server); this only checks that it has not completed.
 const pending = <A, E>(fiber: Fiber.Fiber<A, E>) =>
-	Effect.raceFirst(
-		Fiber.await(fiber).pipe(Effect.as(false)),
-		Effect.yieldNow.pipe(Effect.as(true)),
-	)
+	Effect.sync(() => fiber.pollUnsafe() === undefined)

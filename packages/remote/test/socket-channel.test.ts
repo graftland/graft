@@ -4,6 +4,7 @@ import { Socket } from "effect/socket"
 import { TransportError } from "../src/Errors"
 import * as Channel from "../src/internal/socketChannel"
 import * as Framing from "../src/internal/runner/Framing"
+import { expectFailure } from "./errors"
 
 const socket = (write: Socket.Writer["write"]) =>
 	Socket.make({
@@ -100,11 +101,10 @@ describe("WebSocket byte-channel mapping", () => {
 				Effect.exit,
 			)
 			assert.equal(result._tag, "Failure")
-			if (result._tag === "Failure")
-				assert.include(
-					Cause.pretty(result.cause),
-					"Runner connection ended inside a frame",
-				)
+			if (result._tag === "Failure") {
+				const error = expectFailure(result.cause, Framing.FrameError)
+				assert.equal(error.detail, "Runner connection ended inside a frame")
+			}
 		}).pipe(Effect.scoped),
 	)
 })

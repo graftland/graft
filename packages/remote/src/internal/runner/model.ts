@@ -337,28 +337,27 @@ export class RemoteTerminationUnconfirmed extends Schema.TaggedError<
 	{ readonly brand: unique symbol }
 >()("RemoteTerminationUnconfirmed", { handle: Handle }) {}
 /** Losing contact never becomes a successful stop merely because a lease duration passed. */
-export const awaitTermination = <E, R>(
+export const awaitTermination = Effect.fnUntraced(function* <E, R>(
 	handle: Handle,
 	confirmation: Effect.Effect<Termination, E, R>,
 	leaseMillis: number,
 	marginMillis: number,
-) =>
-	Effect.gen(function* () {
-		const [elapsed, result] = yield* Effect.exit(
-			Effect.timeoutOption(confirmation, leaseMillis + marginMillis),
-		).pipe(Effect.timed)
-		if (result._tag === "Success") {
-			if (Option.isSome(result.value)) return result.value.value
-			return yield* RemoteTerminationUnconfirmed.make({ handle })
-		}
-		// Confirmation and the disconnected wait share one deadline.
-		yield* Effect.sleep(
-			Math.max(0, leaseMillis + marginMillis - Duration.toMillis(elapsed)),
-		)
-		return yield* Effect.failCause(
-			Cause.combine(
-				result.cause,
-				Cause.fail(RemoteTerminationUnconfirmed.make({ handle })),
-			),
-		)
-	})
+) {
+	const [elapsed, result] = yield* Effect.exit(
+		Effect.timeoutOption(confirmation, leaseMillis + marginMillis),
+	).pipe(Effect.timed)
+	if (result._tag === "Success") {
+		if (Option.isSome(result.value)) return result.value.value
+		return yield* RemoteTerminationUnconfirmed.make({ handle })
+	}
+	// Confirmation and the disconnected wait share one deadline.
+	yield* Effect.sleep(
+		Math.max(0, leaseMillis + marginMillis - Duration.toMillis(elapsed)),
+	)
+	return yield* Effect.failCause(
+		Cause.combine(
+			result.cause,
+			Cause.fail(RemoteTerminationUnconfirmed.make({ handle })),
+		),
+	)
+})
