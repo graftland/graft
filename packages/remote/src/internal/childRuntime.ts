@@ -5,6 +5,7 @@ import { Effect, Logger, Option } from "effect"
 import { RpcServer } from "effect/rpc"
 import { fromModule, type RunnerContract } from "../Contract"
 import * as Port from "./port"
+import { prepare, type RunnerContract as PreparedContract } from "./contract"
 import * as Services from "./services"
 import * as Child from "./child"
 import * as Multiplex from "./runner/Multiplex"
@@ -25,7 +26,7 @@ export const load = (specifier: string) =>
 	})
 
 const connect = (
-	contract: RunnerContract,
+	contract: PreparedContract,
 	channel: Port.Channel,
 	session: string,
 	bootstrap: Bootstrap | undefined,
@@ -49,7 +50,7 @@ const connect = (
 
 /** One execution unit; the executable supplies the platform and Graft services. */
 export const run = (
-	contract: RunnerContract,
+	descriptor: RunnerContract,
 	channel: Port.Channel,
 	session = "local",
 	bootstrap?: Bootstrap,
@@ -57,6 +58,7 @@ export const run = (
 ): Effect.Effect<void, ExecutionError, Graft.Graft> =>
 	Effect.scoped(
 		Effect.gen(function* () {
+			const contract = prepare(descriptor)
 			const telemetry = yield* Child.telemetry(contract)
 			const loggers = yield* Logger.CurrentLoggers
 			yield* Effect.gen(function* () {

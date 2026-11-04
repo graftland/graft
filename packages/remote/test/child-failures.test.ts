@@ -16,18 +16,15 @@ import {
 import { Rpc, RpcGroup } from "effect/rpc"
 import * as Contract from "../src/Contract"
 import * as Child from "../src/internal/child"
+import { prepare } from "../src/internal/contract"
 import * as Runtime from "../src/internal/childRuntime"
 import * as Port from "../src/internal/port"
 import { TransportError } from "../src/Errors"
 import { EndOfStream } from "../src/internal/runner/Framing"
 
-const empty = Contract.make<
-	Schema.Codec<unknown, Schema.Json>,
-	Schema.Codec<unknown>
->({
+const empty = Contract.make({
 	name: "child-failure-test",
 	config: Schema.Null,
-	error: Schema.Never,
 	module: new URL("./fixtures/empty-plugin.ts", import.meta.url).href,
 })
 class Exported extends Context.Service<Exported, string>()(
@@ -46,7 +43,10 @@ it.effect(
 				},
 				fromClient: () => "unused",
 			})
-			const contract = Contract.make({ ...empty, provides: [service] })
+			const contract = prepare<
+				Schema.Codec<unknown, Schema.Json>,
+				Schema.Codec<unknown>
+			>(Contract.make({ ...empty, provides: [service] }))
 			yield* Graft.provide(Exported, "published")
 			const peer = yield* Port.make(
 				{ input: Stream.never, output: Sink.drain },

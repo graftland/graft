@@ -16,13 +16,11 @@ import { Contract } from "@graftland/plugin-remote"
 import { Schema } from "effect"
 
 export const config = Schema.Struct({ greeting: Schema.String })
-export const contract: Contract.Contract<typeof config, typeof Schema.Never> =
-	Contract.make({
-		name: "greeter",
-		config,
-		error: Schema.Never,
-		module: new URL("./worker.js", import.meta.url).href,
-	})
+export const contract = Contract.make({
+	name: "greeter",
+	config,
+	module: new URL("./worker.js", import.meta.url).href,
+})
 ```
 
 ```ts title="worker.ts"
@@ -39,7 +37,7 @@ export default Plugin.make({
 
 契约可以导出为 `contract` 或
 `default`。配置必须能编码为 JSON；契约的 codec 不能依赖外部服务。预期内的失败放在契约的
-`error` schema 里。
+`error` schema 里；不写时默认为 `Schema.Never`。
 
 ## 从 YAML 或 TypeScript 加载
 

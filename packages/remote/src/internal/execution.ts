@@ -15,6 +15,7 @@ import * as Host from "./host"
 import { RemoteWithdrawn, RemoteError, MissingInstance } from "../Errors"
 import * as Contract from "../Contract"
 import * as Control from "./control"
+import { prepare } from "./contract"
 
 export interface ExecutionOptions {
 	readonly contractModule: string
@@ -65,6 +66,7 @@ export const executionPlugin = <
 		config: Schema.toEncoded(contract.config),
 		apply: (input) =>
 			Effect.gen(function* () {
+				const prepared = prepare(contract)
 				const random = yield* SecureRandom.SecureRandom
 				const session = yield* random.uuidV4()
 				const active = yield* Connection.acquire(
@@ -75,10 +77,10 @@ export const executionPlugin = <
 						serve: Services.endpoints(contract.inject),
 						call: {
 							...Services.endpoints(contract.provides),
-							[Control.endpoint]: contract.control,
+							[Control.endpoint]: prepared.control,
 						},
 					},
-					Host.initialize(contract),
+					Host.initialize(prepared),
 					Host.dispose,
 					options.shutdownTimeout ?? "5 seconds",
 				)

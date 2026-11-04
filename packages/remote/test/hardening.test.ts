@@ -1,6 +1,7 @@
 import * as LocalExecution from "../src/internal/host/local"
 import { SecureRandom } from "effect/crypto"
-import { AlreadyLoaded } from "../src/internal/childErrors"
+import { prepare } from "../src/internal/contract"
+import { AlreadyLoaded, type ChildFailure } from "../src/internal/childErrors"
 import { underlying } from "./errors"
 import { ProcessExited } from "../src/Errors"
 import { assert, describe, it } from "@effect/vitest"
@@ -301,13 +302,14 @@ describe("local remote hardening", () => {
 						),
 					)
 					.pipe(Scope.provide(processScope))
+				const prepared = prepare(contract)
 				const execution = yield* LocalExecution.observe(child)
 				const transport = yield* Local.connect(execution, {
 					session: "local",
 					serve: {},
-					call: { [endpoint]: contract.control },
+					call: { [endpoint]: prepared.control },
 				})
-				const client = yield* RpcClient.make(contract.control).pipe(
+				const client = yield* RpcClient.make(prepared.control).pipe(
 					Effect.provideService(
 						RpcClient.Protocol,
 						transport.clientProtocol(endpoint),
@@ -334,9 +336,7 @@ describe("local remote hardening", () => {
 				const failed =
 					yield* Deferred.make<
 						Cause.Cause<
-							| Rejected
-							| Remote.Contract.UndeclaredFailure
-							| Remote.Contract.ChildFailure
+							Rejected | Remote.Contract.UndeclaredFailure | ChildFailure
 						>
 					>()
 				yield* client.Events().pipe(
@@ -345,7 +345,7 @@ describe("local remote hardening", () => {
 							if (event._tag === "Stopped")
 								yield* Deferred.succeed(stopped, undefined)
 							else if (event._tag === "Failed") {
-								const cause = yield* contract.decodeCause(event.cause)
+								const cause = yield* prepared.decodeCause(event.cause)
 								yield* Deferred.succeed(failed, cause)
 							}
 						}),

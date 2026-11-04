@@ -16,7 +16,7 @@ export { Contract }
 export { Instance } from "./Instance"
 export { RemoteTerminationUnconfirmed } from "./internal/runner/model"
 export { RemoteError, RemoteWithdrawn, MissingInstance } from "./Errors"
-export { UndeclaredFailure, ChildFailure } from "./Contract"
+export { UndeclaredFailure } from "./Contract"
 export type {
 	Connect,
 	Source as CredentialSource,

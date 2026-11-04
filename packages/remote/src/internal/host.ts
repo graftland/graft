@@ -16,15 +16,16 @@ import { RemoteWithdrawn } from "../Errors"
 import * as Control from "./control"
 import { cleanupCause } from "./cleanup"
 import { Connection } from "./runner/Connection"
-import type { Service } from "./services"
+import type { Service } from "../Contract"
+import type { ChildFailure } from "./childErrors"
+import type { prepare } from "./contract"
 
 type ErrorSchema = Schema.Top & {
 	readonly DecodingServices: never
 	readonly EncodingServices: never
 }
-type ControlGroup<E extends ErrorSchema> = ContractModule.Contract<
-	Schema.Codec<unknown, Schema.Json>,
-	E
+type ControlGroup<E extends ErrorSchema> = ReturnType<
+	typeof prepare<Schema.Codec<unknown, Schema.Json>, E>
 >["control"]
 interface Contract<E extends ErrorSchema> {
 	readonly control: ControlGroup<E>
@@ -32,9 +33,7 @@ interface Contract<E extends ErrorSchema> {
 	readonly decodeCause: (
 		input: unknown,
 	) => Effect.Effect<
-		Cause.Cause<
-			E["Type"] | ContractModule.UndeclaredFailure | ContractModule.ChildFailure
-		>,
+		Cause.Cause<E["Type"] | ContractModule.UndeclaredFailure | ChildFailure>,
 		Schema.SchemaError
 	>
 }
@@ -57,7 +56,7 @@ const forwardEvents = <E extends ErrorSchema>(
 		const remoteFailure = yield* FailureGroup.make<
 			| E["Type"]
 			| ContractModule.UndeclaredFailure
-			| ContractModule.ChildFailure
+			| ChildFailure
 			| RemoteWithdrawn
 		>()
 		const events = yield* race(
@@ -179,9 +178,7 @@ export const load = <E extends ErrorSchema>(
 						(
 							cause,
 						): cause is Cause.Cause<
-							| E["Type"]
-							| ContractModule.UndeclaredFailure
-							| ContractModule.ChildFailure
+							E["Type"] | ContractModule.UndeclaredFailure | ChildFailure
 						> => Cause.isCause(cause),
 						Effect.failCause,
 					),

@@ -1,3 +1,4 @@
+import { expectTypeOf } from "vitest"
 import { assert, describe, it } from "@effect/vitest"
 import { Context, Effect, Schema } from "effect"
 import { Rpc, RpcGroup } from "effect/rpc"
@@ -19,7 +20,6 @@ const options = {
 	name: "tag-validation",
 	module: "unused",
 	config: Schema.Struct({}),
-	error: Schema.Never,
 }
 describe("contract endpoint validation", () => {
 	it("rejects duplicate injected service keys at definition time", () => {
@@ -71,4 +71,16 @@ describe("contract endpoint validation", () => {
 			}),
 		)
 	})
+})
+
+it("defaults the error schema to Never without widening its type", () => {
+	const contract = Contract.make(options)
+	expectTypeOf(contract.error).toEqualTypeOf<typeof Schema.Never>()
+	assert.strictEqual(contract.error, Schema.Never)
+})
+it("preserves an explicitly declared error schema", () => {
+	const error = Schema.Literal("unavailable")
+	const contract = Contract.make({ ...options, error })
+	expectTypeOf(contract.error).toEqualTypeOf<typeof error>()
+	assert.strictEqual(contract.error, error)
 })

@@ -17,13 +17,11 @@ import { Contract } from "@graftland/plugin-remote"
 import { Schema } from "effect"
 
 export const config = Schema.Struct({ greeting: Schema.String })
-export const contract: Contract.Contract<typeof config, typeof Schema.Never> =
-	Contract.make({
-		name: "greeter",
-		config,
-		error: Schema.Never,
-		module: new URL("./worker.js", import.meta.url).href,
-	})
+export const contract = Contract.make({
+	name: "greeter",
+	config,
+	module: new URL("./worker.js", import.meta.url).href,
+})
 ```
 
 ```ts title="worker.ts"
@@ -40,7 +38,7 @@ export default Plugin.make({
 
 Export the contract as `contract` or `default`. Config must encode as JSON;
 contract codecs must not require services. Declare expected failures with the
-contract's `error` schema.
+contract's optional `error` schema; it defaults to `Schema.Never`.
 
 ## Load it from YAML or TypeScript
 

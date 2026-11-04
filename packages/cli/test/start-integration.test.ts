@@ -506,7 +506,7 @@ it.live(
 				`
 import { make } from ${contract};
 import { Schema } from ${effect};
-export const contract = make({ name: 'cli-remote', config: Schema.String, error: Schema.Never,
+export const contract = make({ name: 'cli-remote', config: Schema.String,
 module: new URL('./implementation.mjs', import.meta.url).href });
 `,
 			)

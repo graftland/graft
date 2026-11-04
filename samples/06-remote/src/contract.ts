@@ -35,11 +35,9 @@ const greeter = Contract.service(Greeter, api, {
 	}),
 })
 export const config = Schema.Struct({ greeting: Schema.String })
-export const contract: Contract.Contract<typeof config, typeof Schema.Never> =
-	Contract.make({
-		name: "greeter",
-		config,
-		error: Schema.Never,
-		module: new URL("./greeter.js", import.meta.url).href,
-		provides: [greeter],
-	})
+export const contract = Contract.make({
+	name: "greeter",
+	config,
+	module: new URL("./greeter.js", import.meta.url).href,
+	provides: [greeter],
+})

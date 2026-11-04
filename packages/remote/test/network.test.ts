@@ -688,7 +688,6 @@ describe("network runner end to end", () => {
 				const empty = Remote.Contract.make({
 					name: "missing-instance",
 					config: Schema.Struct({}),
-					error: Schema.Never,
 					module: "unused",
 				})
 				const proxy = yield* Graft.plugin(

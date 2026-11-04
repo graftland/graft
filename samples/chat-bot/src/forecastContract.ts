@@ -26,11 +26,9 @@ const forecasts = Contract.service(Forecasts, api, {
 export const config = Schema.Struct({
 	units: Schema.Literals(["celsius", "fahrenheit"]),
 })
-export const contract: Contract.Contract<typeof config, typeof Schema.Never> =
-	Contract.make({
-		name: "forecasts",
-		config,
-		error: Schema.Never,
-		module: new URL("./plugins/forecasts.js", import.meta.url).href,
-		provides: [forecasts],
-	})
+export const contract = Contract.make({
+	name: "forecasts",
+	config,
+	module: new URL("./plugins/forecasts.js", import.meta.url).href,
+	provides: [forecasts],
+})

@@ -20,7 +20,7 @@ import {
 	SynchronizedRef,
 } from "effect"
 import type { Schema } from "effect"
-import { type RunnerContract } from "../Contract"
+import { type RunnerContract } from "./contract"
 import { Instance, type Identity } from "../Instance"
 import type * as Port from "./port"
 import type { Event, Log, LogEvent } from "./control"

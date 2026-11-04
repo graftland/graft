@@ -1,27 +1,9 @@
 import { Array, Context, Effect, Record } from "effect"
 import { Graft } from "@graftland/graft"
 import { RpcClient, RpcServer } from "effect/rpc"
-import type { Scope } from "effect"
 import type { Rpc, RpcClientError, RpcGroup } from "effect/rpc"
-import type * as Port from "./port"
+import type { Service } from "../Contract"
 
-type Peer = Port.Port
-
-/** RPC types stay inside the descriptor; Graft supplies its dynamic activation context. */
-export interface Service<R = never, ClientR = never> {
-	readonly key: Context.Key<unknown, unknown>
-	readonly group: Pick<RpcGroup.RpcGroup<Rpc.Any>, "requests">
-	readonly serve: (
-		port: Pick<Peer, "serverProtocol">,
-	) => Effect.Effect<never, never, R>
-	readonly publish: (
-		port: Pick<Peer, "clientProtocol">,
-	) => Effect.Effect<
-		void,
-		Graft.ServiceConflict,
-		Graft.Graft | Scope.Scope | ClientR
-	>
-}
 export const service = <
 	I,
 	S,

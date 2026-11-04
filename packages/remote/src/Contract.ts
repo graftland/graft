@@ -1,12 +1,59 @@
-import { ChildFailure } from "./internal/childErrors"
-export { ChildFailure }
-import { Array, Cause, Predicate, Schema } from "effect"
-
-import type { Service } from "./internal/services"
+import { Array, Predicate, Schema } from "effect"
+import type { Context, Effect, Scope } from "effect"
+import type { Graft } from "@graftland/graft"
+import type { Rpc, RpcClient, RpcGroup, RpcServer } from "effect/rpc"
 import * as Control from "./internal/control"
 export { service } from "./internal/services"
 
 const TypeId = "~@graftland/plugin-remote/Contract"
+
+/** RPC types stay inside the descriptor; Graft supplies its dynamic activation context. */
+export interface Service<R = never, ClientR = never> {
+	readonly key: Context.Key<unknown, unknown>
+	readonly group: Pick<RpcGroup.RpcGroup<Rpc.Any>, "requests">
+	readonly serve: (port: {
+		readonly serverProtocol: (endpoint: string) => RpcServer.Protocol["Service"]
+	}) => Effect.Effect<never, never, R>
+	readonly publish: (port: {
+		readonly clientProtocol: (endpoint: string) => RpcClient.Protocol["Service"]
+	}) => Effect.Effect<
+		void,
+		Graft.ServiceConflict,
+		Graft.Graft | Scope.Scope | ClientR
+	>
+}
+
+type ConfigSchema = Schema.Top & {
+	readonly Encoded: Schema.Json
+	readonly DecodingServices: never
+	readonly EncodingServices: never
+}
+type ErrorSchema = Schema.Top & {
+	readonly DecodingServices: never
+	readonly EncodingServices: never
+}
+
+/** The shared configuration and service declarations for one remote plugin. */
+export interface Contract<
+	S extends ConfigSchema,
+	E extends ErrorSchema = typeof Schema.Never,
+> {
+	readonly name: string
+	readonly config: S
+	readonly error: E
+	readonly module: string
+	readonly inject: ReadonlyArray<Service>
+	readonly provides: ReadonlyArray<Service>
+	readonly [TypeId]: typeof TypeId
+}
+interface Options<S extends ConfigSchema, E extends ErrorSchema> {
+	readonly name: string
+	readonly config: S
+	readonly error?: E
+	readonly module: string
+	readonly inject?: ReadonlyArray<Service>
+	readonly provides?: ReadonlyArray<Service>
+}
 
 /** An undeclared failure still crosses the boundary, with its diagnostic value. */
 export class UndeclaredFailure extends Schema.TaggedError<
@@ -15,24 +62,15 @@ export class UndeclaredFailure extends Schema.TaggedError<
 >()("UndeclaredFailure", { original: Schema.Defect({ includeStack: true }) }) {}
 
 /** Pure metadata shared by the host and the executable runner bootstrap. */
-export const make = <
-	S extends Schema.Top & {
-		readonly Encoded: Schema.Json
-		readonly DecodingServices: never
-		readonly EncodingServices: never
-	},
-	E extends Schema.Top & {
-		readonly DecodingServices: never
-		readonly EncodingServices: never
-	},
->(options: {
-	readonly name: string
-	readonly config: S
-	readonly error: E
-	readonly module: string
-	readonly inject?: ReadonlyArray<Service>
-	readonly provides?: ReadonlyArray<Service>
-}) => {
+export function make<S extends ConfigSchema, E extends ErrorSchema>(
+	options: Options<S, E> & { readonly error: E },
+): Contract<S, E>
+export function make<S extends ConfigSchema>(
+	options: Options<S, typeof Schema.Never>,
+): Contract<S>
+export function make<S extends ConfigSchema, E extends ErrorSchema>(
+	options: Options<S, E>,
+): Contract<S, E | typeof Schema.Never> {
 	// Keys are runtime strings; tuple types cannot distinguish independently created keys.
 	const keys = Array.map(
 		[...(options.inject ?? []), ...(options.provides ?? [])],
@@ -45,42 +83,17 @@ export const make = <
 		throw new Error(
 			"Service keys must be unique within a remote contract and must not use the control endpoint",
 		)
-	const failure = Schema.Union([options.error, UndeclaredFailure, ChildFailure])
-	const codec = Schema.toCodecJson(
-		Schema.Cause(failure, Schema.Defect({ includeStack: true })),
-	)
-	const declared = Schema.is(failure)
-	const normalizeCause = (cause: Cause.Cause<unknown>) =>
-		Cause.map(cause, (error) =>
-			declared(error) ? error : UndeclaredFailure.make({ original: error }),
-		)
+
 	return {
 		...options,
-		control: Control.make(codec),
-		normalizeCause,
+		error: options.error ?? Schema.Never,
 		inject: options.inject ?? [],
 		provides: options.provides ?? [],
 		[TypeId]: TypeId,
-		encodeCause: (cause: Cause.Cause<unknown>) =>
-			normalizeCause(cause).pipe(Schema.encodeEffect(codec)),
-		decodeCause: Schema.decodeUnknownEffect(codec),
 	}
 }
 
-/** The shared config, error codecs, and service declarations for one remote plugin. */
-export type Contract<
-	S extends Schema.Top & {
-		readonly Encoded: Schema.Json
-		readonly DecodingServices: never
-		readonly EncodingServices: never
-	},
-	E extends Schema.Top & {
-		readonly DecodingServices: never
-		readonly EncodingServices: never
-	},
-> = ReturnType<typeof make<S, E>>
-
-/** Dynamic imports retain the control server and cause normalization; hosts retain the declared error type. */
+/** A contract whose schemas are discovered through a dynamic import. */
 export type RunnerContract = Contract<
 	Schema.Codec<unknown, Schema.Json>,
 	Schema.Codec<unknown>
