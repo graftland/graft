@@ -1,15 +1,62 @@
 ---
 title: Graft
-description: 基於 Effect 的外掛框架，可在行程執行期間載入、取代和卸載外掛。
+description:
+  園藝學 Effect 系統。以 Effect
+  打造的外掛框架，可在行程執行期間載入、取代和卸載外掛。
+template: splash
+hero:
+  title: "<span>園藝學</span> <span>Effect</span> <span>系統</span>"
+  tagline:
+    Graft 在 Effect
+    上把應用程式養成一棵外掛樹。行程持續執行，任意一枝都可以載入、取代或卸載。放心修剪。
+  image:
+    alt: Graft 標誌：一個 G，橫筆是插向圓心的箭頭
+    file: ../../../src/assets/graft-mark.svg
+  actions:
+    - text: 種下第一個外掛
+      link: quickstart/
+      icon: right-arrow
+    - text: 核心概念
+      link: concepts/
+      variant: minimal
 ---
 
 import { Card, CardGrid } from "@astrojs/starlight/components"
 
-Graft 用外掛樹組織應用程式。每個外掛都可以發布服務，也可以使用其他外掛的服務。外掛可以在行程執行期間載入、重新設定、取代或卸載。卸載外掛時，Graft 會先停止所有依賴它的外掛，再釋放它自身的資源。
+<div class="graft-manifesto">
+	<p>
+		<strong>軟體不是造出來的，是長出來的。</strong>
+	</p>
+	<p>
+		外掛到來、生根、結果。有的被剪掉，有的在樹不倒的情況下被換掉。好園丁從不擔心一根枝條從哪裡來，也不擔心剪掉它會怎樣。
+	</p>
+	<p>
+		Graft 給你這份確定。每個外掛都嫁接在一個 scope 上，每個 fiber
+		都有歸屬，每個失敗都能追溯到根。
+	</p>
+</div>
 
-Graft 基於 [Effect](https://effect.website) 建構。外掛是在 `Scope`
-中執行的 Effect。服務是 Effect 的 `Context` 鍵。失敗時會保留完整的
-`Cause`。Graft 只補充 Effect 尚未提供的能力：可在執行期間發布和撤回的服務、外掛樹、事件、設定檔和熱重載。
+## 三項承諾
+
+<CardGrid>
+	<Card title="砧木">
+		服務是 Effect 的 <code>Context</code> 鍵，由 layer 或其他外掛提供。外掛在{" "}
+		<code>inject</code> 中列出所需服務，由編譯器檢查。見
+		<a href="services/">服務</a>。
+	</Card>
+	<Card title="修剪">
+		每個外掛都在自己的 <code>Scope</code>{" "}
+		中執行。外掛消失時，相依於它的部分先停止，再執行它的
+		finalizer。失敗保留完整的 <code>Cause</code>。見
+		<a href="lifecycle/">生命週期</a>。
+	</Card>
+	<Card title="高接換種">
+		不砍樹，只換品種。熱重載只取代受變更影響的外掛，在一次交易中完成；新程式碼失敗時保留舊程式碼。見
+		<a href="hot-reload/">熱重載</a>。
+	</Card>
+</CardGrid>
+
+## 第一次嫁接
 
 ```ts
 import { Graft, Plugin } from "@graftland/graft"
@@ -38,23 +85,33 @@ const hello = Plugin.make({
 })
 ```
 
+## 找到你的方向
+
 <CardGrid>
 	<Card title="快速上手" icon="rocket">
-		依照[快速開始](quickstart/)建立專案，並啟用熱重載執行。
+		依照[快速開始](quickstart/)建立專案，並啟用熱重載執行。接著閱讀[核心概念](concepts/)。
 	</Card>
 	<Card title="撰寫外掛" icon="puzzle">
-		[外掛](plugins/)宣告所需的服務、解碼設定，並管理自身的資源。
+		[外掛](plugins/)、[服務](services/)和[事件](events/)：應用程式的基本組成。
 	</Card>
-	<Card title="共用服務" icon="random">
-		[服務](services/)可以在執行期間發布和撤回，Graft
-		會依安全的順序完成這些操作。
+	<Card title="執行應用程式" icon="setting">
+		用[設定檔](config-file/)描述它，用[命令列](cli/)啟動它，並以[熱重載](hot-reload/)修改它。
 	</Card>
-	<Card title="從 cordis 遷移" icon="open-book">
+	<Card title="從 cordis 遷移？" icon="open-book">
 		了解 [cordis 的概念在 Graft 中如何對應](cordis/)。
 	</Card>
 </CardGrid>
 
-要讓外掛在另一個行程或另一台機器上執行，請看 [Remote](remote/overview/)。
+## 文件地圖
+
+| 區段           | 頁面                                                                                                  | 閱讀目的                   |
+| -------------- | ----------------------------------------------------------------------------------------------------- | -------------------------- |
+| **從這裡開始** | [快速開始](quickstart/)、[核心概念](concepts/)、[從 cordis 遷移](cordis/)                             | 了解模型並執行點什麼。     |
+| **建構外掛**   | [外掛](plugins/)、[服務](services/)、[事件](events/)                                                  | 撰寫程式碼。               |
+| **結構**       | [生命週期](lifecycle/)、[領域](isolation/)、[Intercept](intercepts/)、[取代外掛](replace/)            | 控制外掛之間的關係與變化。 |
+| **應用程式**   | [設定檔](config-file/)、[命令列](cli/)、[熱重載](hot-reload/)、[在自己的程式中使用 Graft](embedding/) | 執行並維運應用程式。       |
+| **參考**       | [Fork 控制代碼](fork-handle/)、[Loader API](loader-api/)、[HMR API](hmr-api/)、[錯誤](errors/)        | 查閱確切行為。             |
+| **專案**       | [發佈](releases/)                                                                                     | 檢查並發佈 Graft。         |
 
 ## 套件
 
@@ -68,3 +125,9 @@ const hello = Plugin.make({
 | `@graftland/package-manager` | 使用 npm、pnpm 或 Yarn 安裝相依套件。安裝失敗時，透過[快照還原](cli/#套件管理器)復原。 |
 
 所有套件共用同一個版本號，一同發布，並需要 `effect` 4.1.x。
+
+園藝只出現在這一頁。在其餘文件和程式碼裡，`Scope` 仍然叫
+`Scope`。Graft的外掛模型借鑑自
+[cordis](https://github.com/cordiverse/cordis)。cordis 在時空中組合，Graft 只照料自己的園子。
+
+要讓插件在另一個進程或另一台機器上執行，請看 [Remote](remote/overview/)。

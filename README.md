@@ -1,10 +1,18 @@
+<img src="packages/docs/src/assets/graft-mark.svg" alt="" width="72" align="right">
+
 # Graft
+
+**Horticultural Effect Systems.** _Prune fearlessly._
 
 English | [简体中文](README.zh-CN.md) | [繁體中文](README.zh-TW.md)
 
-A plugin framework built on [Effect](https://effect.website). Graft runs an
-application as a tree of plugins. Plugins publish and use services. You can
-load, reconfigure, replace and unload them while the process keeps running.
+Software is not built. It is grown.
+
+Graft is a plugin framework for [Effect](https://effect.website). Your
+application is a tree of plugins. Each plugin is grafted onto a scope, draws on
+the services around it, and publishes services of its own. You can load,
+reconfigure, replace and unload any branch while the process keeps running. Cut
+anywhere, and the rest of the tree carries on.
 
 ```ts
 import { Graft, Plugin } from "@graftland/graft"
@@ -33,6 +41,20 @@ const hello = Plugin.make({
 })
 ```
 
+## Why Graft
+
+- **Rootstock.** Services are Effect `Context` keys, provided by `Layer`s or by
+  other plugins. A plugin declares what it needs in `inject`, and the compiler
+  checks it.
+- **Pruning.** Every plugin runs in its own `Scope`, and every fiber it starts
+  has an owner. When a plugin goes away, the plugins that depend on it stop
+  first. Then its finalizers run. Nothing is left behind, and a failure keeps
+  its full `Cause`.
+- **Top-working.** Change the variety without felling the tree.
+  `graft start --watch` reimports only what your change affects and swaps the
+  affected plugins in one transaction. If the new code fails, the old plugins
+  keep running.
+
 To run Graft on Node.js, you need version 22.19 or later. To develop this
 workspace, you need Node.js 22.22 or later. This includes building the
 documentation with Astro.
@@ -47,8 +69,13 @@ npx graft start --watch
 
 Read the [documentation](https://graftland.github.io/graft/) (also in
 [简体中文](https://graftland.github.io/graft/zh-cn/) and
-[繁體中文](https://graftland.github.io/graft/zh-tw/)). Do you know cordis? See
-[how its concepts map to Graft](https://graftland.github.io/graft/cordis/).
+[繁體中文](https://graftland.github.io/graft/zh-tw/)).
+
+Graft draws its plugin model from
+[cordis](https://github.com/cordiverse/cordis). Where cordis composes across
+space and time, Graft keeps to the garden. See
+[how cordis concepts map to Graft](https://graftland.github.io/graft/cordis/).
+To let a coding agent do the port, install the [migration skills](skills).
 
 ## Samples
 

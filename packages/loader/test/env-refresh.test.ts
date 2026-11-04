@@ -14,8 +14,15 @@ import {
 	Record,
 	Ref,
 	Schema,
+	type Scope,
 } from "effect"
-import { Entry, Intercept, Loader, ModuleResolver } from "../src/index.ts"
+import {
+	Entry,
+	Group,
+	Intercept,
+	Loader,
+	ModuleResolver,
+} from "../src/index.ts"
 import { loaderService } from "./utils.ts"
 
 const Setting = Context.Reference(
@@ -299,62 +306,101 @@ it.live("ready waits while a loaded entry reads its environment again", () =>
 	}),
 )
 
-it.effect(
-	"retry refreshes children a loading group already started",
-	() =>
-		Effect.gen(function* () {
-			const { variables, provider } = yield* makeEnvironment({ VALUE: "a" })
-			const latest = yield* Ref.make(HashMap.empty<string, string>())
-			const started = yield* Deferred.make<void>()
-			const leaf = Plugin.make({
-				name: "leaf",
-				config: Schema.Struct({ id: Schema.String, value: Schema.String }),
-				apply: ({ id, value }) =>
-					Ref.update(latest, HashMap.set(id, value)).pipe(
-						Effect.andThen(Deferred.succeed(started, undefined)),
-						Effect.asVoid,
+it.effect("retry refreshes children a loading group already started", () =>
+	Effect.gen(function* () {
+		const { variables, provider } = yield* makeEnvironment({ VALUE: "a" })
+		const latest = yield* Ref.make(HashMap.empty<string, string>())
+		const started = yield* Deferred.make<void>()
+		const groupLoading = yield* Deferred.make<void>()
+		const releaseGroup = yield* Deferred.make<void>()
+		const reconciled = yield* Deferred.make<void>()
+		// Plugin definitions erase requirements; this test delegates to Group with its declared services.
+		const applyGroup = Group.Group.apply as (
+			entries: ReadonlyArray<Entry.Entry>,
+		) => Effect.Effect<
+			void | Plugin.Update<
+				ReadonlyArray<Entry.Entry>,
+				never,
+				ModuleResolver.ModuleResolver
+			>,
+			never,
+			Graft.Graft | Scope.Scope | ModuleResolver.ModuleResolver
+		>
+		const heldGroup: typeof Group.Group = {
+			...Group.Group,
+			apply: (entries) =>
+				applyGroup(entries).pipe(
+					Effect.tap(() =>
+						Array.some(entries, (entry) => entry.id === "leaf-0")
+							? Deferred.succeed(groupLoading, undefined).pipe(
+									Effect.andThen(Deferred.await(releaseGroup)),
+								)
+							: Effect.void,
 					),
-			})
-			const ids = Array.makeBy(200, (n) => `leaf-${n}`)
-			const group = {
-				id: "group",
-				name: "group",
-				group: true,
-				config: Array.map(ids, (id) => ({
-					id,
-					name: "leaf",
-					config: { id, value: new Entry.Env({ name: "VALUE" }) },
-				})),
-			}
-			yield* Effect.gen(function* () {
-				yield* Graft.plugin(Loader.plugin, [group])
-				const loader = yield* loaderService
-				// The group is likely still loading the rest of its children.
-				yield* Deferred.await(started)
-				yield* Ref.set(variables, { VALUE: "b" })
-				yield* loader.retry
-				yield* loader.ready
-				const values = yield* Ref.get(latest)
-				const stale = Array.filter(ids, (id) =>
-					Option.exists(HashMap.get(values, id), (value) => value !== "b"),
-				)
-				assert.strictEqual(HashMap.size(values), ids.length)
-				assert.deepStrictEqual(stale, [])
-			}).pipe(
-				Effect.scoped,
-				Effect.provide(
-					Layer.provideMerge(
-						Graft.layer,
-						Layer.mergeAll(
-							registry,
-							ConfigProvider.layer(provider),
-							ModuleResolver.fromRecord({ leaf }),
-						),
+					Effect.map((update) =>
+						update === undefined
+							? undefined
+							: (next: ReadonlyArray<Entry.Entry>) =>
+									update(next).pipe(
+										Effect.tap(() =>
+											Array.some(entries, (entry) => entry.id === "group")
+												? Deferred.succeed(reconciled, undefined)
+												: Effect.void,
+										),
+									),
 					),
 				),
+		}
+		const leaf = Plugin.make({
+			name: "leaf",
+			config: Schema.Struct({ id: Schema.String, value: Schema.String }),
+			apply: ({ id, value }) =>
+				Ref.update(latest, HashMap.set(id, value)).pipe(
+					Effect.andThen(Deferred.succeed(started, undefined)),
+					Effect.asVoid,
+				),
+		})
+		const ids = Array.makeBy(2, (n) => `leaf-${n}`)
+		const group = {
+			id: "group",
+			name: "group",
+			group: true,
+			config: Array.map(ids, (id) => ({
+				id,
+				name: "leaf",
+				config: { id, value: new Entry.Env({ name: "VALUE" }) },
+			})),
+		}
+		yield* Effect.gen(function* () {
+			yield* Graft.replace([[Group.Group, heldGroup]])
+			yield* Graft.plugin(Loader.plugin, [group])
+			const loader = yield* loaderService
+			// Hold the actual group in Loading after its children have been registered.
+			yield* Deferred.await(groupLoading)
+			yield* Deferred.await(started)
+			yield* Ref.set(variables, { VALUE: "b" })
+			yield* loader.retry
+			yield* Deferred.await(reconciled)
+			yield* Deferred.succeed(releaseGroup, undefined)
+			yield* loader.ready
+			const values = yield* Ref.get(latest)
+			const stale = Array.filter(ids, (id) =>
+				Option.exists(HashMap.get(values, id), (value) => value !== "b"),
 			)
-		}),
-	// This exercises creation, refresh, and cleanup of 200 children. Allow
-	// CPU contention in the full suite; elapsed time is not an assertion.
-	15_000,
+			assert.strictEqual(HashMap.size(values), ids.length)
+			assert.deepStrictEqual(stale, [])
+		}).pipe(
+			Effect.scoped,
+			Effect.provide(
+				Layer.provideMerge(
+					Graft.layer,
+					Layer.mergeAll(
+						registry,
+						ConfigProvider.layer(provider),
+						ModuleResolver.fromRecord({ leaf }),
+					),
+				),
+			),
+		)
+	}),
 )

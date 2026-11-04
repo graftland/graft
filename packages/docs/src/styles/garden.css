@@ -1,0 +1,64 @@
+/* The Graft palette: bark for the neutrals, cambium green for the accent. */
+:root {
+	--graft-font-display: "Fraunces", Georgia, "Times New Roman", serif;
+
+	--sl-color-white: #f4f1ea;
+	--sl-color-gray-1: #e8e2d6;
+	--sl-color-gray-2: #c9c0b0;
+	--sl-color-gray-3: #968b7b;
+	--sl-color-gray-4: #62584c;
+	--sl-color-gray-5: #3d352e;
+	--sl-color-gray-6: #2a241f;
+	--sl-color-black: #1c1814;
+
+	--sl-color-accent-low: #24361a;
+	--sl-color-accent: #7fb241;
+	--sl-color-accent-high: #c5e86c;
+}
+
+:root[data-theme="light"] {
+	--sl-color-white: #2a211c;
+	--sl-color-gray-1: #3b2f2a;
+	--sl-color-gray-2: #4f433b;
+	--sl-color-gray-3: #6b5e53;
+	--sl-color-gray-4: #998c7e;
+	--sl-color-gray-5: #cfc6b6;
+	--sl-color-gray-6: #e9e3d7;
+	--sl-color-gray-7: #efeadf;
+	--sl-color-black: #f7f4ed;
+
+	--sl-color-accent-low: #e3efcf;
+	--sl-color-accent: #5a8a2a;
+	--sl-color-accent-high: #3a5e17;
+}
+
+.site-title,
+.hero h1,
+h1#_top,
+.sl-markdown-content :is(h2, h3) {
+	font-family: var(--graft-font-display);
+	font-optical-sizing: auto;
+	letter-spacing: -0.01em;
+}
+
+.hero h1 {
+	font-weight: 600;
+}
+
+.hero .tagline {
+	max-width: 36rem;
+}
+
+/* The manifesto under the hero reads like an epigraph. */
+.graft-manifesto {
+	max-width: 40rem;
+	margin-inline: auto;
+	font-family: var(--graft-font-display);
+	font-size: var(--sl-text-xl);
+	line-height: 1.6;
+	color: var(--sl-color-gray-1);
+}
+
+.graft-manifesto strong {
+	color: var(--sl-color-text-accent);
+}

@@ -40,6 +40,12 @@ export interface Fork<in Input = any, out E = any> {
 	 */
 	readonly await: Effect.Effect<void, E | Schema.SchemaError>
 	/**
+	 * Waits until this fork and its descendants have no Loading states.
+	 * Pending and Failed count as settled; failures are observed through state or await.
+	 * This is a current-state barrier, not a barrier for queued configuration requests.
+	 */
+	readonly stable: Effect.Effect<void>
+	/**
 	 * Requests the latest configuration. Concurrent requests may skip intermediate inputs.
 	 * Completes when handled or superseded, including when this input was never applied.
 	 * Does not wait for a restart to finish; use await or state to observe settlement.

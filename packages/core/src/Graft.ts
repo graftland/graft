@@ -13,8 +13,8 @@ import {
 	Layer,
 	Logger,
 	Option,
-	Result,
 	Order,
+	Record,
 	PubSub,
 	References,
 	Ref,
@@ -26,8 +26,10 @@ import {
 } from "effect"
 import { CleanupError, ForkState, type Fork, type ForkTree } from "./Fork"
 import { publicationCycle, resolutionChanged } from "./internal/dependencies"
-import { PluginIdentity } from "./internal/pluginIdentity"
+import * as Slots from "./internal/slots"
+import * as Aliases from "./internal/aliases"
 import { ownedScope } from "./internal/scope"
+import * as ForkStatus from "./internal/forkState"
 import { inheritContext } from "./internal/context"
 import { supervise, setState, withdraw } from "./internal/activation"
 import {
@@ -35,8 +37,11 @@ import {
 	realmKey,
 	realmOf,
 	type Activation,
-	type ActiveResolution,
+	type Slot,
 	type ForkEntry,
+	type ForkStatus as ForkStatusHandle,
+	type LocalSnapshot,
+	type GraphNode,
 	type Handler,
 	type LogEntry,
 	type Provision,
@@ -87,13 +92,7 @@ export const provide = Effect.fnUntraced(function* <I, S>(
 ) {
 	const { runtime, activation } = yield* Graft
 	const realms = yield* Realms
-	const provision: Provision = {
-		key: realmKey(realmOf(realms, key.key), key.key),
-		service: key.key,
-		value,
-		owner: activation.fork,
-		consumers: TxRef.makeUnsafe(HashSet.empty<number>()),
-	}
+	const qualified = realmKey(realmOf(realms, key.key), key.key)
 	yield* Effect.tx(
 		Effect.gen(function* () {
 			const published = yield* TxRef.get(activation.published)
@@ -104,26 +103,25 @@ export const provide = Effect.fnUntraced(function* <I, S>(
 					),
 				)
 			}
-			const registry = yield* TxRef.get(runtime.registry)
-			const active = yield* TxRef.get(runtime.active)
-			if (
-				Option.exists(HashMap.get(active, activation.fork), (resolution) =>
-					resolutionChanged(resolution, registry),
-				)
-			) {
+			const { resolution } = yield* TxRef.get(activation.node.state)
+			if (resolution !== undefined && (yield* resolutionChanged(resolution))) {
 				return yield* ServiceConflict.make({
 					service: key.key,
 					reason: "Invalidated",
 				})
 			}
-			if (HashMap.has(registry, provision.key)) {
+			// Retaining and publishing share the caller's transaction, including an outer Effect.tx.
+			const directory = yield* TxRef.get(runtime.slots)
+			const existing = HashMap.get(directory, qualified)
+			if (
+				Option.isSome(existing) &&
+				(yield* TxRef.get(existing.value.provision))._tag === "Some"
+			) {
 				return yield* ServiceConflict.make({ service: key.key })
 			}
-			if (yield* publicationCycle(runtime, activation.fork, provision.key)) {
-				const direct = Option.exists(
-					HashMap.get(active, activation.fork),
-					(resolution) => HashSet.has(resolution.watch, provision.key),
-				)
+			if (yield* publicationCycle(activation.node, qualified)) {
+				const direct =
+					resolution !== undefined && HashMap.has(resolution.watch, qualified)
 				return yield* ServiceConflict.make({
 					service: key.key,
 					realm: realmOf(realms, key.key),
@@ -131,10 +129,17 @@ export const provide = Effect.fnUntraced(function* <I, S>(
 					reason: direct ? "SelfDependency" : "DependencyCycle",
 				})
 			}
-			yield* TxRef.set(
-				runtime.registry,
-				HashMap.set(registry, provision.key, provision),
-			)
+			const slot = yield* Slots.retain(runtime, qualified)
+			const provision: Provision = {
+				key: qualified,
+				service: key.key,
+				value,
+				owner: activation.fork,
+				node: activation.node,
+				slot,
+				consumers: TxRef.makeUnsafe(HashSet.empty<number>()),
+			}
+			yield* TxRef.set(slot.provision, Option.some(provision))
 			yield* TxRef.set(
 				activation.published,
 				Option.some(Array.append(published.value, provision)),
@@ -154,10 +159,9 @@ const runtimeLayer = Layer.effect(
 		const ambient = yield* Effect.context<never>()
 		const runtime: Runtime = {
 			ambient,
-			registry: yield* TxRef.make(HashMap.empty<ServiceKey, Provision>()),
-			active: yield* TxRef.make(HashMap.empty<number, ActiveResolution>()),
+			slots: yield* TxRef.make(HashMap.empty<ServiceKey, Slot>()),
 			forks: yield* TxSubscriptionRef.make(HashMap.empty<number, ForkEntry>()),
-			aliases: yield* TxRef.make(HashMap.empty<PluginIdentity, Plugin>()),
+			aliases: Aliases.make(),
 			events: yield* TxRef.make(
 				HashMap.empty<string, ReadonlyArray<Handler>>(),
 			),
@@ -172,6 +176,15 @@ const runtimeLayer = Layer.effect(
 		)
 		const activation: Activation = {
 			fork: 0,
+			node: {
+				id: 0,
+				parent: undefined,
+				state: TxRef.makeUnsafe<GraphNode["state"]["value"]>({
+					live: true,
+					resolution: undefined,
+				}),
+			},
+			status: undefined,
 			tasks: Option.none(),
 			published,
 			provisionKeys: HashSet.empty(),
@@ -236,31 +249,6 @@ export interface PluginOptions {
 	readonly intercept?: ReadonlyArray<Intercept> | undefined
 }
 
-/** Aliases are kept flat (no alias points at an aliased plugin), so one lookup suffices. */
-const resolveAlias = (
-	aliases: HashMap.HashMap<PluginIdentity, Plugin>,
-	plugin: Plugin,
-): Plugin =>
-	Option.getOrElse(
-		HashMap.get(aliases, new PluginIdentity(plugin)),
-		() => plugin,
-	)
-
-const addAlias = (
-	aliases: HashMap.HashMap<PluginIdentity, Plugin>,
-	from: Plugin,
-	to: Plugin,
-): HashMap.HashMap<PluginIdentity, Plugin> => {
-	// The replacement is live from now on, so it is never an alias itself.
-	const redirected = HashMap.map(
-		HashMap.remove(aliases, new PluginIdentity(to)),
-		(current) => (current === from ? to : current),
-	)
-	return from === to
-		? redirected
-		: HashMap.set(redirected, new PluginIdentity(from), to)
-}
-
 const isolation =
 	(id: number) => (entry: Isolatable | readonly [Isolatable, string]) =>
 		"key" in entry
@@ -272,8 +260,7 @@ const isolation =
  * updated in place, or begun restarting. A later change also counts.
  */
 const accept = (
-	runtime: Runtime,
-	id: number,
+	status: ForkStatusHandle,
 	spec: TxRef.TxRef<Spec>,
 	f: (current: Spec) => Spec,
 ): Effect.Effect<void> =>
@@ -284,9 +271,8 @@ const accept = (
 		})
 		yield* Effect.tx(
 			Effect.gen(function* () {
-				const forks = yield* TxSubscriptionRef.get(runtime.forks)
-				const entry = HashMap.get(forks, id)
-				if (Option.isNone(entry) || entry.value.accepted === next) return
+				const snapshot = yield* TxSubscriptionRef.get(status.snapshot)
+				if (snapshot.disposed || snapshot.accepted === next) return
 				const current = yield* TxRef.get(spec)
 				if (current !== next) return
 				return yield* Effect.txRetry
@@ -295,22 +281,16 @@ const accept = (
 	})
 
 const makeFork = <I, E>(
-	runtime: Runtime,
+	status: ForkStatusHandle,
 	id: number,
 	spec: TxRef.TxRef<Spec>,
 	dispose: Effect.Effect<void, CleanupError>,
 ): Fork<I, E> => {
-	const state = TxSubscriptionRef.changesStream(runtime.forks).pipe(
-		Stream.map((forks) => {
-			// The shared registry erases entry types; this ID keeps its definition's bound under compatible replacement.
-			const entry = HashMap.get(forks, id) as Option.Option<
-				ForkEntry<E | Schema.SchemaError>
-			>
-			return Option.match(entry, {
-				onNone: () => ForkState.Disposed(),
-				onSome: (entry) => entry.state,
-			})
-		}),
+	const state = TxSubscriptionRef.changesStream(status.snapshot).pipe(
+		// The definition's error bound is retained under compatible replacements.
+		Stream.map(
+			(snapshot) => (snapshot as LocalSnapshot<E | Schema.SchemaError>).state,
+		),
 		Stream.changes,
 		Stream.takeUntil(ForkState.$is("Disposed")),
 	)
@@ -326,9 +306,10 @@ const makeFork = <I, E>(
 					: Effect.void,
 			),
 		),
+		stable: ForkStatus.stable(status),
 		update: (input) =>
-			accept(runtime, id, spec, (current) => ({ ...current, input })),
-		restart: accept(runtime, id, spec, (current) => ({
+			accept(status, spec, (current) => ({ ...current, input })),
+		restart: accept(status, spec, (current) => ({
 			...current,
 			revision: current.revision + 1,
 		})),
@@ -364,20 +345,34 @@ export const plugin: <P extends Plugin>(
 					),
 				)
 				const forkScope = owned.scope
-				const { id, spec } = yield* Effect.acquireRelease(
+				const { id, spec, node, status } = yield* Effect.acquireRelease(
 					Effect.tx(
 						Effect.gen(function* () {
 							const id = yield* TxRef.get(runtime.ids)
 							yield* TxRef.set(runtime.ids, id + 1)
-							const aliases = yield* TxRef.get(runtime.aliases)
-							const resolved = resolveAlias(aliases, plugin)
+							const resolved = yield* Aliases.resolve(runtime.aliases, plugin)
 							const spec = TxRef.makeUnsafe<Spec>({
 								plugin: resolved,
 								input,
 								revision: 0,
 							})
+							const node: GraphNode = {
+								id,
+								parent: activation.node.id === 0 ? undefined : activation.node,
+								state: TxRef.makeUnsafe<GraphNode["state"]["value"]>({
+									live: true,
+									resolution: undefined,
+								}),
+							}
+							const initialSpec = yield* TxRef.get(spec)
+							const status = yield* ForkStatus.make(
+								activation.status,
+								initialSpec,
+							)
 							const entry: ForkEntry = {
 								id,
+								node,
+								status,
 								parent: activation.fork === 0 ? undefined : activation.fork,
 								spec,
 								accepted: undefined,
@@ -389,11 +384,19 @@ export const plugin: <P extends Plugin>(
 								runtime.forks,
 								HashMap.set(id, entry),
 							)
-							return { id, spec }
+							return { id, spec, node, status }
 						}),
 					),
-					({ id }) =>
-						TxSubscriptionRef.update(runtime.forks, HashMap.remove(id)),
+					({ id, node, status }) =>
+						Effect.tx(
+							Effect.gen(function* () {
+								yield* TxRef.set(node.state, {
+									live: false,
+									resolution: undefined,
+								})
+								yield* ForkStatus.dispose(runtime, id, status)
+							}),
+						),
 				).pipe(Scope.provide(forkScope))
 				const realms = HashMap.fromIterable(
 					Array.map(options?.isolate ?? [], isolation(id)),
@@ -407,7 +410,15 @@ export const plugin: <P extends Plugin>(
 						yield* Effect.suspend(() =>
 							Array.reduce(
 								options?.intercept ?? [],
-								supervise(runtime, id, spec, processing, termination).pipe(
+								supervise(
+									runtime,
+									id,
+									spec,
+									processing,
+									node,
+									status,
+									termination,
+								).pipe(
 									Effect.updateService(Realms, (outer) =>
 										HashMap.union(outer, realms),
 									),
@@ -442,6 +453,7 @@ export const plugin: <P extends Plugin>(
 										setState(
 											runtime,
 											id,
+											status,
 											ForkState.Failed({ cause: completeCause }),
 											attempted,
 										).pipe(Effect.andThen(Ref.set(termination, Exit.void))),
@@ -479,7 +491,7 @@ export const plugin: <P extends Plugin>(
 				)
 				yield* Effect.forkIn(supervisor, forkScope)
 				return makeFork<InputOf<P>, ErrorOf<P>>(
-					runtime,
+					status,
 					id,
 					spec,
 					owned.close(Exit.void),
@@ -539,35 +551,13 @@ export const replace: <const Pairs extends ReadonlyArray<ReplacementPair>>(
 		const { runtime } = yield* Graft
 		yield* Effect.tx(
 			Effect.gen(function* () {
-				const current = yield* TxRef.get(runtime.aliases)
-				const aliases = Array.reduce(pairs, current, (aliases, [from, to]) =>
-					addAlias(aliases, from, to),
-				)
-				// Validate against the same snapshot we commit. Both existing forks and
-				// future imports must resolve to the requested target, independent of order.
-				const conflicts = Array.filterMap(pairs, ([from, to], index) => {
-					const overlap =
-						from !== to &&
-						Array.some(
-							pairs,
-							([other, target]) =>
-								other !== target && (to === other || from === target),
-						)
-					const inconsistent =
-						resolveAlias(aliases, from) !== to ||
-						resolveAlias(aliases, resolveAlias(current, from)) !== to ||
-						resolveAlias(aliases, to) !== to
-					return overlap || inconsistent
-						? Result.succeed(index)
-						: Result.fail(undefined)
-				})
+				const conflicts = yield* Aliases.replace(runtime.aliases, pairs)
 				if (conflicts.length > 0)
 					return yield* ReplacementConflict.make({ indices: conflicts })
-				yield* TxRef.set(runtime.aliases, aliases)
 				const forks = yield* TxSubscriptionRef.get(runtime.forks)
 				for (const entry of HashMap.values(forks)) {
 					const spec = yield* TxRef.get(entry.spec)
-					const next = resolveAlias(aliases, spec.plugin)
+					const next = yield* Aliases.resolve(runtime.aliases, spec.plugin)
 					if (next !== spec.plugin) {
 						yield* TxRef.set(entry.spec, {
 							...spec,
@@ -586,10 +576,19 @@ const byId = Order.mapInput(Order.Number, (entry: ForkEntry) => entry.id)
 const buildTree = (
 	forks: HashMap.HashMap<number, ForkEntry>,
 ): ReadonlyArray<ForkTree> => {
-	const entries = Array.sort(HashMap.toValues(forks), byId)
+	// Group once: filtering every entry for each node would be quadratic, and
+	// the tree is rebuilt on every fork change.
+	const key = (parent: number | undefined) =>
+		parent === undefined ? "" : `${parent}`
+	const byParent = Array.groupBy(
+		Array.sort(HashMap.toValues(forks), byId),
+		(entry) => key(entry.parent),
+	)
 	const children = (parent: number | undefined): ReadonlyArray<ForkTree> =>
 		Array.map(
-			Array.filter(entries, (entry) => entry.parent === parent),
+			Record.get(byParent, key(parent)).pipe(
+				Option.getOrElse((): ReadonlyArray<ForkEntry> => []),
+			),
 			(entry) => ({
 				id: entry.id,
 				name: entry.name,

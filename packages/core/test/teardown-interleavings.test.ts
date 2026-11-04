@@ -1,3 +1,4 @@
+import { registrySnapshot } from "./utils.ts"
 import { assert, describe, it } from "@effect/vitest"
 import {
 	Array,
@@ -13,7 +14,6 @@ import {
 	Schema,
 	Scope,
 	Stream,
-	TxRef,
 } from "effect"
 import { Graft, Plugin } from "../src/index.ts"
 import { realmKey } from "../src/internal/runtime.ts"
@@ -50,7 +50,7 @@ describe("teardown interleavings", () => {
 				yield* Scope.close(rootScope, Exit.void)
 				yield* reach(consumer, "Pending")
 				const cleaned = yield* Ref.get(released)
-				const registry = yield* TxRef.get(runtime.registry)
+				const registry = yield* registrySnapshot(runtime)
 				assert.isTrue(cleaned)
 				assert.strictEqual(HashMap.size(registry), 0)
 				yield* consumer.dispose
@@ -94,7 +94,7 @@ describe("teardown interleavings", () => {
 				const disposing = yield* Effect.forkScoped(parent.dispose)
 				yield* Deferred.await(closing)
 				yield* journal.expect([])
-				const registry = yield* TxRef.get(runtime.registry)
+				const registry = yield* registrySnapshot(runtime)
 				assert.isFalse(HashMap.has(registry, realmKey("", Service.key)))
 				yield* Deferred.succeed(release, undefined)
 				yield* Fiber.join(disposing)

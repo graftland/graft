@@ -1,15 +1,61 @@
 ---
 title: Graft
-description: 基于 Effect 的插件框架，可在进程运行期间加载、替换和卸载插件。
+description:
+  园艺学 Effect 系统。基于 Effect
+  的插件框架，可在进程运行期间加载、替换和卸载插件。
+template: splash
+hero:
+  title: "<span>园艺学</span> <span>Effect</span> <span>系统</span>"
+  tagline:
+    Graft 在 Effect
+    上把应用养成一棵插件树。进程持续运行，任意一枝都可以加载、替换或卸载。放心修剪。
+  image:
+    alt: Graft 标志：一个 G，横笔是插向圆心的箭头
+    file: ../../../src/assets/graft-mark.svg
+  actions:
+    - text: 种下第一个插件
+      link: quickstart/
+      icon: right-arrow
+    - text: 核心概念
+      link: concepts/
+      variant: minimal
 ---
 
 import { Card, CardGrid } from "@astrojs/starlight/components"
 
-Graft 用插件树组织应用。每个插件都可以发布服务、依赖其他插件的服务，也可以在进程运行期间加载、重新配置、替换或卸载。卸载插件时，Graft 会先停止所有依赖它的插件，再释放它自身的资源。
+<div class="graft-manifesto">
+	<p>
+		<strong>软件不是造出来的，是长出来的。</strong>
+	</p>
+	<p>
+		插件到来、生根、结果。有的被剪掉，有的在树不倒的情况下被换掉。好园丁从不担心一根枝条从哪里来，也不担心剪掉它会怎样。
+	</p>
+	<p>
+		Graft 给你这份确定。每个插件都嫁接在一个 scope 上，每个 fiber
+		都有归属，每个失败都能追溯到根。
+	</p>
+</div>
 
-Graft 基于 [Effect](https://effect.website) 构建。插件是在 `Scope`
-中运行的 Effect，服务使用 Effect 的 `Context` 键，失败时保留完整的
-`Cause`。Graft 只补充 Effect 尚未提供的能力：可在运行期间发布和撤回的服务、插件树、事件、配置文件和热重载。
+## 三项承诺
+
+<CardGrid>
+	<Card title="砧木">
+		服务是 Effect 的 <code>Context</code> 键，由 layer 或其他插件提供。插件在{" "}
+		<code>inject</code> 中列出所需服务，由编译器检查。见
+		<a href="services/">服务</a>。
+	</Card>
+	<Card title="修剪">
+		每个插件都在自己的 <code>Scope</code>{" "}
+		中运行。插件消失时，依赖它的部分先停止，再执行它的 finalizer。失败保留完整的{" "}
+		<code>Cause</code>。见<a href="lifecycle/">生命周期</a>。
+	</Card>
+	<Card title="高接换种">
+		不砍树，只换品种。热重载只替换受改动影响的插件，在一次事务中完成；新代码失败时保留旧代码。见
+		<a href="hot-reload/">热重载</a>。
+	</Card>
+</CardGrid>
+
+## 第一次嫁接
 
 ```ts
 import { Graft, Plugin } from "@graftland/graft"
@@ -38,23 +84,33 @@ const hello = Plugin.make({
 })
 ```
 
+## 查找方向
+
 <CardGrid>
 	<Card title="快速上手" icon="rocket">
-		按照[快速开始](quickstart/)创建项目，并启用热重载运行。
+		按照[快速开始](quickstart/)创建项目，并启用热重载运行。然后阅读[核心概念](concepts/)。
 	</Card>
 	<Card title="编写插件" icon="puzzle">
-		[插件](plugins/)声明依赖、解码配置，并管理自身的资源。
+		[插件](plugins/)、[服务](services/)和[事件](events/)：构成应用的基本部件。
 	</Card>
-	<Card title="共享服务" icon="random">
-		[服务](services/)可以在运行期间发布和撤回，Graft
-		会按安全的顺序完成这些操作。
+	<Card title="运行应用" icon="setting">
+		用[配置文件](config-file/)描述应用，用[命令行](cli/)启动，再通过[热重载](hot-reload/)修改。
 	</Card>
 	<Card title="从 cordis 迁移" icon="open-book">
 		了解 [cordis 的概念在 Graft 中如何对应](cordis/)。
 	</Card>
 </CardGrid>
 
-要让插件在另一个进程或另一台机器上运行，请看 [Remote](remote/overview/)。
+## 文档地图
+
+| 分区         | 页面                                                                                              | 阅读目的                   |
+| ------------ | ------------------------------------------------------------------------------------------------- | -------------------------- |
+| **入门**     | [快速开始](quickstart/)、[核心概念](concepts/)、[从 cordis 迁移](cordis/)                         | 了解模型并运行示例。       |
+| **构建插件** | [插件](plugins/)、[服务](services/)、[事件](events/)                                              | 编写代码。                 |
+| **结构**     | [生命周期](lifecycle/)、[领域](isolation/)、[Intercept](intercepts/)、[替换插件](replace/)        | 控制插件之间的关系与变化。 |
+| **应用**     | [配置文件](config-file/)、[命令行](cli/)、[热重载](hot-reload/)、[在程序中使用 Graft](embedding/) | 运行和维护应用。           |
+| **参考**     | [Fork 句柄](fork-handle/)、[Loader API](loader-api/)、[HMR API](hmr-api/)、[错误](errors/)        | 查阅确切行为。             |
+| **项目**     | [发布](releases/)                                                                                 | 检查并发布 Graft。         |
 
 ## 包
 
@@ -68,3 +124,9 @@ const hello = Plugin.make({
 | `@graftland/package-manager` | 使用 npm、pnpm 或 Yarn 安装依赖。安装失败时，通过[快照回滚](cli/#包管理器)撤销。 |
 
 所有包共用同一个版本号，一同发布，并需要 `effect` 4.1.x。
+
+园艺只出现在这一页。在其余文档和代码里，`Scope` 仍然叫
+`Scope`。Graft的插件模型借鉴自
+[cordis](https://github.com/cordiverse/cordis)。cordis 在时空中组合，Graft 只照料自己的园子。
+
+要让插件在另一个进程或另一台机器上运行，请看 [Remote](remote/overview/)。

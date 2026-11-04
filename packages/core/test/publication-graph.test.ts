@@ -1,3 +1,4 @@
+import { registrySnapshot, activeSnapshot } from "./utils.ts"
 import { assert, describe, it } from "@effect/vitest"
 import type { Scope } from "effect"
 import {
@@ -84,7 +85,7 @@ describe("publication dependency graph", () => {
 				yield* expectCycle(child)
 				yield* reach(parent, "Active")
 				const { runtime } = yield* Graft.Graft
-				const registry = yield* TxRef.get(runtime.registry)
+				const registry = yield* registrySnapshot(runtime)
 				assert.isFalse(HashMap.has(registry, realmKey("", Target.key)))
 				yield* journal.expect(["parent started"])
 			}).pipe(ambient),
@@ -193,7 +194,7 @@ describe("publication dependency graph", () => {
 				)
 				yield* reach(consumer, "Pending")
 				const { runtime } = yield* Graft.Graft
-				const active = yield* TxRef.get(runtime.active)
+				const active = yield* activeSnapshot(runtime)
 				assert.isFalse(HashMap.has(active, consumer.id))
 				const provider = yield* Graft.plugin(
 					Plugin.service(Target, Effect.succeed("target"), {
@@ -247,7 +248,7 @@ describe("publication dependency graph", () => {
 					}),
 				)
 				yield* consumer.await
-				const registry = yield* TxRef.get(runtime.registry)
+				const registry = yield* registrySnapshot(runtime)
 				const provision = Option.getOrThrow(
 					HashMap.get(registry, realmKey("", Target.key)),
 				)
@@ -255,7 +256,7 @@ describe("publication dependency graph", () => {
 				assert.deepStrictEqual(leased, HashSet.make(consumer.id))
 				yield* consumer.dispose
 				yield* provider.dispose
-				const active = yield* TxRef.get(runtime.active)
+				const active = yield* activeSnapshot(runtime)
 				const remaining = yield* TxRef.get(provision.consumers)
 				assert.strictEqual(HashMap.size(active), 0)
 				assert.strictEqual(HashSet.size(remaining), 0)
@@ -315,7 +316,7 @@ describe("publication dependency graph", () => {
 					assert.strictEqual(error.reason, "Invalidated")
 				}
 				const { runtime } = yield* Graft.Graft
-				const registry = yield* TxRef.get(runtime.registry)
+				const registry = yield* registrySnapshot(runtime)
 				assert.strictEqual(HashMap.size(registry), 0)
 			}).pipe(run),
 	)

@@ -8,9 +8,13 @@ import {
 	Array,
 	Cause,
 	Context,
+	Data,
 	Effect,
 	Exit,
 	Layer,
+	HashMap,
+	Ref,
+	Result,
 	Option,
 	Path,
 	Predicate,
@@ -124,13 +128,34 @@ export interface ImportOptions {
 	readonly observationScope: Scope.Scope
 }
 
+/**
+ * Opt-in resolution planning. Increment revision after installations, removals or
+ * resolution changes. exists must only resolve names, without acquiring resources.
+ * observe runs on every call, including cache hits, and owns missing-path watches.
+ */
+export interface ResolutionEnvironment<E = never> {
+	readonly revision: Effect.Effect<number>
+	readonly exists: (specifier: string) => Effect.Effect<boolean, E>
+	readonly observe: (
+		specifiers: ReadonlyArray<string>,
+		options: ImportOptions,
+	) => Effect.Effect<void, E, Scope.Scope>
+}
+
 export interface Options<E = never> {
+	readonly resolution?: ResolutionEnvironment<E>
+
 	readonly base: string
 	readonly importer: (
 		specifier: string,
 		options: ImportOptions,
 	) => Promise<unknown> | Effect.Effect<unknown, E, Scope.Scope>
 }
+
+class PlanKey extends Data.Class<{
+	readonly name: string
+	readonly target: string
+}> {}
 
 /** Failed attempts release their resources before recovery; successful leases stay with the entry. */
 const inCandidateScope = <A, E>(effect: Effect.Effect<A, E, Scope.Scope>) =>
@@ -195,6 +220,59 @@ export const make = <E>(
 					: [specifier, packageOf(specifier)],
 			}
 		})
+		type Candidate = Effect.Success<ReturnType<typeof normalize>> & {
+			readonly specifier: string
+			readonly exists: Result.Result<boolean, ModuleInvalid>
+		}
+		const plans = yield* Ref.make({
+			revision: -1,
+			entries: HashMap.empty<PlanKey, ReadonlyArray<Candidate>>(),
+		})
+		const plan = Effect.fnUntraced(function* (name: string) {
+			// Relative requests share a resolver but may come from different Include directories.
+			const key = new PlanKey({ name, target: (yield* normalize(name)).target })
+			const environment = options.resolution
+			const revision =
+				environment === undefined ? 0 : yield* environment.revision
+			const cached = yield* Ref.get(plans)
+			if (cached.revision === revision) {
+				const found = HashMap.get(cached.entries, key)
+				if (Option.isSome(found)) return found.value
+			} else yield* Ref.set(plans, { revision, entries: HashMap.empty() })
+			const normalized = yield* Effect.forEach(candidates(name), (specifier) =>
+				Effect.map(normalize(specifier), (candidate) => ({
+					...candidate,
+					specifier,
+				})),
+			)
+			// Keep probe failures in priority order. A later candidate's typed
+			// failure matters only if all preceding candidates were missing.
+			const selected = yield* Effect.forEach(normalized, (candidate) =>
+				Effect.map(
+					environment === undefined
+						? Effect.succeed(Result.succeed(true))
+						: environment.exists(candidate.target).pipe(
+								Effect.mapError((cause) =>
+									ModuleInvalid.make({ specifier: candidate.specifier, cause }),
+								),
+								Effect.result,
+							),
+					(exists) => ({ ...candidate, exists }),
+				),
+			)
+			// A slow old plan cannot repopulate a cache after its revision changed.
+			// Probe failures may be transient, so only fully answered plans are cached.
+			yield* Ref.update(plans, (current) =>
+				current.revision !== revision ||
+				Array.some(selected, (candidate) => Result.isFailure(candidate.exists))
+					? current
+					: {
+							...current,
+							entries: HashMap.set(current.entries, key, selected),
+						},
+			)
+			return selected
+		})
 		const load = Effect.fnUntraced(function* (
 			specifier: string,
 			candidate: { readonly target: string },
@@ -202,6 +280,8 @@ export const make = <E>(
 		) {
 			return yield* Effect.tryPromise({
 				try: () => {
+					// Start Promise importers inside the registration step, so even
+					// immediate cancellation leaves their rejection observed.
 					const imported = options.importer(candidate.target, {
 						observationScope,
 					})
@@ -222,10 +302,10 @@ export const make = <E>(
 		})
 		/** Only a missing candidate permits short-name fallback. */
 		const attempt = Effect.fnUntraced(function* (
-			specifier: string,
+			candidate: Candidate,
 			observationScope: Scope.Scope,
 		) {
-			const candidate = yield* normalize(specifier)
+			const { specifier } = candidate
 			return yield* load(specifier, candidate, observationScope).pipe(
 				Effect.flatMap((module) =>
 					Effect.fromOption(Plugin.fromModule(module), () =>
@@ -258,13 +338,25 @@ export const make = <E>(
 			}),
 			resolve: Effect.fnUntraced(function* (
 				name: string,
-				options?: ImportOptions,
+				importOptions?: ImportOptions,
 			) {
 				const caller = yield* Effect.scope
-				const observationScope = options?.observationScope ?? caller
+				const observationScope = importOptions?.observationScope ?? caller
 				const tried = candidates(name)
-				for (const specifier of tried) {
-					const plugin = yield* attempt(specifier, observationScope)
+				if (options.resolution !== undefined)
+					yield* inCandidateScope(
+						options.resolution
+							.observe(tried, { observationScope })
+							.pipe(
+								Effect.mapError((cause) =>
+									ModuleInvalid.make({ specifier: name, cause }),
+								),
+							),
+					)
+				const selected = yield* plan(name)
+				for (const candidate of selected) {
+					if (!(yield* Effect.fromResult(candidate.exists))) continue
+					const plugin = yield* attempt(candidate, observationScope)
 					if (Option.isSome(plugin)) return plugin.value
 				}
 				return yield* ModuleNotFound.make({ plugin: name, tried })

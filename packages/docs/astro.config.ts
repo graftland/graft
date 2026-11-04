@@ -14,8 +14,31 @@ export default defineConfig({
 		starlight({
 			title: "Graft",
 			description:
-				"A plugin framework built on Effect: plugins, services and hot reload in a running process.",
+				"Horticultural Effect Systems. A plugin framework for Effect: load, replace and unload plugins in a running process.",
 			favicon: "/favicon.svg",
+			logo: { src: "./src/assets/graft-mark.svg" },
+			customCss: ["./src/styles/garden.css"],
+			head: [
+				{
+					tag: "link",
+					attrs: { rel: "preconnect", href: "https://fonts.googleapis.com" },
+				},
+				{
+					tag: "link",
+					attrs: {
+						rel: "preconnect",
+						href: "https://fonts.gstatic.com",
+						crossorigin: true,
+					},
+				},
+				{
+					tag: "link",
+					attrs: {
+						rel: "stylesheet",
+						href: "https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400..700&display=swap",
+					},
+				},
+			],
 			// English pages are at the root; translations are in a folder named
 			// after the locale.
 			defaultLocale: "root",
@@ -43,17 +66,27 @@ export default defineConfig({
 				{
 					label: "Start here",
 					translations: { "zh-CN": "开始", "zh-TW": "開始" },
-					items: ["index", "quickstart", "cordis"],
+					items: ["index", "quickstart", "concepts", "cordis"],
 				},
 				{
-					label: "Guides",
-					translations: { "zh-CN": "指南", "zh-TW": "指南" },
-					items: ["plugins", "services", "lifecycle", "isolation", "events"],
+					label: "Build plugins",
+					translations: { "zh-CN": "编写插件", "zh-TW": "編寫插件" },
+					items: ["plugins", "services", "events"],
+				},
+				{
+					label: "Structure",
+					translations: { "zh-CN": "组织与变更", "zh-TW": "組織與變更" },
+					items: ["lifecycle", "isolation", "intercepts", "replace"],
 				},
 				{
 					label: "Applications",
 					translations: { "zh-CN": "应用", "zh-TW": "應用" },
-					items: ["config-file", "hot-reload", "cli", "embedding"],
+					items: ["config-file", "cli", "hot-reload", "embedding"],
+				},
+				{
+					label: "Reference",
+					translations: { "zh-CN": "参考", "zh-TW": "參考" },
+					items: ["fork-handle", "loader-api", "hmr-api", "errors"],
 				},
 				{
 					label: "Remote",

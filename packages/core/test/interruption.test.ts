@@ -1,3 +1,4 @@
+import { registrySnapshot } from "./utils.ts"
 import { assert, it } from "@effect/vitest"
 import {
 	Array,
@@ -16,7 +17,8 @@ import {
 import { Graft, Plugin } from "../src/index.ts"
 import { realmKey } from "../src/internal/runtime.ts"
 import { supervise } from "../src/internal/activation.ts"
-import type { Spec } from "../src/internal/runtime.ts"
+import * as ForkStatus from "../src/internal/forkState.ts"
+import type { GraphNode, Spec } from "../src/internal/runtime.ts"
 import { run } from "./utils.ts"
 
 class Service extends Context.Service<Service, string>()(
@@ -29,7 +31,7 @@ it.effect(
 		Effect.gen(function* () {
 			const { runtime } = yield* Graft.Graft
 			yield* Graft.provide(Service, "ready")
-			const registry = yield* TxRef.get(runtime.registry)
+			const registry = yield* registrySnapshot(runtime)
 			const provision = Option.getOrThrow(
 				HashMap.get(registry, realmKey("", Service.key)),
 			)
@@ -46,17 +48,33 @@ it.effect(
 				})
 				const initial = yield* TxRef.get(spec)
 				const processing = yield* TxRef.make(initial)
-				const supervisor = yield* supervise(runtime, -1, spec, processing).pipe(
+				const node: GraphNode = {
+					id: -1,
+					parent: undefined,
+					state: TxRef.makeUnsafe<GraphNode["state"]["value"]>({
+						live: true,
+						resolution: undefined,
+					}),
+				}
+				const status = yield* ForkStatus.make(undefined, initial)
+				const supervisor = yield* supervise(
+					runtime,
+					-1,
+					spec,
+					processing,
+					node,
+					status,
+				).pipe(
 					Effect.provideService(References.MaxOpsBeforeYield, 4),
 					Effect.forkScoped,
 				)
 				for (const _ of Array.range(0, ticks)) yield* Effect.yieldNow
 				yield* Fiber.interrupt(supervisor)
 				const count = yield* TxRef.get(provision.consumers)
-				const active = yield* TxRef.get(runtime.active)
+				const graph = yield* TxRef.get(node.state)
 				assert.strictEqual(
-					HashMap.size(active),
-					0,
+					graph.resolution,
+					undefined,
 					`Activation leaked after ${ticks} yields`,
 				)
 				assert.strictEqual(

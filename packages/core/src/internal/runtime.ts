@@ -9,17 +9,31 @@ import type {
 	TxRef,
 	TxSubscriptionRef,
 } from "effect"
-import { Context, Data, HashMap, HashSet, Option } from "effect"
+import { Context, HashMap, HashSet, Option } from "effect"
 import type { ForkState } from "../Fork"
 import type { Plugin } from "../Plugin"
 import type { Group } from "./tasks"
-import type { PluginIdentity } from "./pluginIdentity"
+import type { Aliases } from "./aliases"
 
-/** Structural identity keeps realm labels and service keys independent, including embedded separators. */
-export class ServiceKey extends Data.Class<{
-	readonly realm: string
-	readonly service: string
-}> {}
+/** Length-prefixed encoding keeps realm and service identities unambiguous. */
+export type ServiceKey = string
+
+/** A retained directory entry. Empty slots remain reachable while any operation holds them. */
+export interface Slot {
+	readonly key: ServiceKey
+	readonly provision: TxRef.TxRef<Option.Option<Provision>>
+	readonly holders: TxRef.TxRef<number>
+}
+
+/** A fork's topology remains visible through withdrawal until its leases are released. */
+export interface GraphNode {
+	readonly id: number
+	readonly parent: GraphNode | undefined
+	readonly state: TxRef.TxRef<{
+		readonly live: boolean
+		readonly resolution: ActiveResolution | undefined
+	}>
+}
 
 /** A service value published into one realm by one activation. */
 export interface Provision {
@@ -27,12 +41,16 @@ export interface Provision {
 	readonly service: string
 	readonly value: unknown
 	readonly owner: number
+	readonly node: GraphNode
+	readonly slot: Slot
 	readonly consumers: TxRef.TxRef<HashSet.HashSet<number>>
 }
 
 /** One run of a plugin's `apply`, from dependency acquisition to teardown. */
 export interface Activation {
+	readonly status: ForkStatus | undefined
 	readonly fork: number
+	readonly node: GraphNode
 	readonly tasks: Option.Option<Group>
 	/** Context keys supplied by this activation's resolved provisions, never inherited by children. */
 	readonly provisionKeys: HashSet.HashSet<string>
@@ -44,7 +62,7 @@ export interface Activation {
 
 /** Transactional dependency snapshot retained until all leases are released. */
 export interface ActiveResolution {
-	readonly watch: HashSet.HashSet<ServiceKey>
+	readonly watch: HashMap.HashMap<ServiceKey, Slot>
 	readonly provisions: ReadonlyArray<Provision>
 }
 
@@ -54,8 +72,26 @@ export interface Spec {
 	readonly revision: number
 }
 
+/** A fork's own state, independently observable from the display tree. */
+export interface LocalSnapshot<out E = unknown> {
+	readonly state: ForkState<E>
+	readonly accepted: Spec | undefined
+	readonly name: string
+	readonly input: unknown
+	readonly disposed: boolean
+}
+
+/** Loading counts include the fork itself and its live descendants. */
+export interface ForkStatus {
+	readonly snapshot: TxSubscriptionRef.TxSubscriptionRef<LocalSnapshot>
+	readonly loading: TxRef.TxRef<number>
+	readonly parent: ForkStatus | undefined
+}
+
 export interface ForkEntry<out E = unknown> {
+	readonly status: ForkStatus
 	readonly id: number
+	readonly node: GraphNode
 	readonly parent: number | undefined
 	readonly spec: TxRef.TxRef<Spec>
 	/** The spec the supervisor last acted on; `Fork.update` waits for it to catch up. */
@@ -94,12 +130,11 @@ export interface Handler<
 export interface Runtime {
 	/** Services from the environment `Graft.layer` was built in; they satisfy `inject` too. */
 	readonly ambient: Context.Context<never>
-	readonly registry: TxRef.TxRef<HashMap.HashMap<ServiceKey, Provision>>
-	readonly active: TxRef.TxRef<HashMap.HashMap<number, ActiveResolution>>
+	readonly slots: TxRef.TxRef<HashMap.HashMap<ServiceKey, Slot>>
 	readonly forks: TxSubscriptionRef.TxSubscriptionRef<
 		HashMap.HashMap<number, ForkEntry>
 	>
-	readonly aliases: TxRef.TxRef<HashMap.HashMap<PluginIdentity, Plugin>>
+	readonly aliases: Aliases
 	readonly events: TxRef.TxRef<HashMap.HashMap<string, ReadonlyArray<Handler>>>
 	readonly ids: TxRef.TxRef<number>
 	readonly logs: PubSub.PubSub<LogEntry>
@@ -121,4 +156,4 @@ export const realmOf = (
 
 /** The single constructor used by publication, resolution, and failed-publication retries. */
 export const realmKey = (realm: string, service: string): ServiceKey =>
-	new ServiceKey({ realm, service })
+	`${realm.length}:${realm}${service}`

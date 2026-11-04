@@ -1,9 +1,15 @@
+<img src="packages/docs/src/assets/graft-mark.svg" alt="" width="72" align="right">
+
 # Graft
+
+**园艺学 Effect 系统。** _放心修剪。_
 
 [English](README.md) | 简体中文 | [繁體中文](README.zh-TW.md)
 
-基于 [Effect](https://effect.website)
-的插件框架。Graft 把应用作为一棵插件树来运行。插件发布并使用服务。你可以在进程持续运行的同时加载、重新配置、替换和卸载它们。
+软件不是造出来的，是长出来的。
+
+Graft 是基于 [Effect](https://effect.website)
+的插件框架。应用是一棵插件树：每个插件嫁接在一个 scope 上，从周围汲取服务，也发布自己的服务。你可以在进程持续运行的同时加载、重新配置、替换和卸载任意一枝。剪掉哪里，树的其余部分都照常生长。
 
 ```ts
 import { Graft, Plugin } from "@graftland/graft"
@@ -32,6 +38,16 @@ const hello = Plugin.make({
 })
 ```
 
+## 为什么选择 Graft
+
+- **砧木。** 服务是 Effect 的 `Context` 键，由 `Layer` 或其他插件提供。插件在
+  `inject` 中声明依赖，由编译器检查。
+- **修剪。** 每个插件都在自己的 `Scope`
+  中运行，它启动的每个 fiber 都有归属。插件消失时，依赖它的插件先停止，然后执行它的 finalizer。不留残枝，失败也保留完整的
+  `Cause`。
+- **高接换种。** 不砍树，只换品种。`graft start --watch`
+  只重新导入受改动影响的部分，并在一次事务中替换相关插件。新代码失败时，旧插件继续运行。
+
 在 Node.js 上运行 Graft 需要 22.19 或更高版本。开发本工作区需要 Node.js
 22.22 或更高版本，其中包括用 Astro 构建文档。
 
@@ -43,7 +59,11 @@ cd my-app
 npx graft start --watch
 ```
 
-阅读[文档](https://graftland.github.io/graft/zh-cn/)。了解 cordis？请看[它的概念如何对应到 Graft](https://graftland.github.io/graft/zh-cn/cordis/)。
+阅读[文档](https://graftland.github.io/graft/zh-cn/)。
+
+Graft 的插件模型借鉴自
+[cordis](https://github.com/cordiverse/cordis)。cordis 在时空中组合，Graft 只照料自己的园子。请看
+[cordis 的概念如何对应到 Graft](https://graftland.github.io/graft/zh-cn/cordis/)。想让编程智能体完成迁移，可以安装[迁移 skills](skills)。
 
 ## 示例
 

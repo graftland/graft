@@ -11,6 +11,9 @@ export const isContainer = (value: unknown): value is object =>
 // Only graphs built here can be reused; a caller's shallow freeze proves nothing.
 const owned = new WeakSet<object>()
 
+/** Internal evidence that every plain container in this graph has been captured. */
+export const isSnapshot = (value: object): boolean => owned.has(value)
+
 /**
  * Copy and freeze a data graph without changing the caller's objects. Sharing,
  * cycles, sparse arrays and null prototypes survive the copy. Own properties

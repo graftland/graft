@@ -18,6 +18,22 @@
 		"Nix": {
 			"language_servers": ["nixd", "!nil"]
 		},
+		"JavaScript": {
+			"language_servers": [
+				"typescript-language-server",
+				"!typescript-ls",
+				"!vtsls",
+				"..."
+			]
+		},
+		"JSX": {
+			"language_servers": [
+				"typescript-language-server",
+				"!typescript-ls",
+				"!vtsls",
+				"..."
+			]
+		},
 		"TypeScript": {
 			"language_servers": [
 				"typescript-language-server",

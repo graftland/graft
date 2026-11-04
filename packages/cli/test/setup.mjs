@@ -1,4 +1,6 @@
+import { writeFile } from "node:fs/promises"
 import { build } from "tsdown"
+import packageConfig from "../../../tsdown.config.ts"
 
 export default function setup() {
 	return build({
@@ -53,6 +55,32 @@ export default function setup() {
 					resolve: { conditionNames: ["source", "import", "node"] },
 				},
 			}),
+		)
+		.then(() =>
+			Promise.all(
+				["cli", "create", "package-manager"].map((name) =>
+					build({
+						...packageConfig,
+						config: false,
+						entry: [
+							new URL(
+								name === "cli" ? "../src/bin.ts" : `../../${name}/src/index.ts`,
+								import.meta.url,
+							).pathname,
+						],
+						outDir: new URL(`../.cache/commands/${name}`, import.meta.url)
+							.pathname,
+						dts: false,
+						exports: false,
+					}),
+				),
+			),
+		)
+		.then(() =>
+			writeFile(
+				new URL("../.cache/commands/package.json", import.meta.url),
+				'{"version":"0.0.0"}',
+			),
 		)
 		.then(() => undefined)
 }

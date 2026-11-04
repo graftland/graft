@@ -89,7 +89,10 @@ Worker 在同一把鎖下完成儲存和目標發布，並透過 `Deferred` 交�
 - 失敗的外掛 fork 會重新啟動，即使它們位於注入包裝器或 group 包裝器之下。
 - 健康的實例和未完成的解析保持原樣。
 
-對一般編輯的對帳也會重試失敗的項目。
+一般 API 編輯與檔案變更只對變更的項目進行差量對帳；未變的健康兄弟與子樹保留目前環境值。編輯單一葉節點不再隱式刷新整棵樹。參與對帳的群組仍會重試失敗項目，並保留未完成的解析。需要整棵樹重新讀取環境時，明確呼叫
+`retry` 或 `loader.root.update(entries)`；刷新會穿過巢狀群組與注入包裝器。
+
+獨立兄弟的更新與移除清理並行執行；同一項目的操作仍循序，替代實例須等待舊實例清理結束，群組也會等待本輪必要工作全部完成。Include 合併入口與實際目標的通知，在連續 100ms 沒有新通知後刷新；監聽安裝後的補讀與符號連結目標切換仍保留。
 
 `ready` 會一直等到目前的目標版本已經對帳完畢，並且沒有 fork 處於
 `Loading`。`Pending` 和 `Failed`
@@ -327,3 +330,9 @@ watch 模式同時監聽入口目錄和目前目標目錄。入口連結改變�
 
 屬於 [Graft](https://github.com/graftland/graft)。依
 [Apache 2.0](https://github.com/graftland/graft/blob/main/LICENSE) 授權。
+
+`ModuleResolver.make` 的選用 `resolution`
+協定快取解析計畫，不快取 importer 結果。`revision`
+在安裝、移除或解析環境變更後必須更新；`exists` 只檢查候選是否存在；`observe`
+在每次解析（包括快取命中）中取得觀察租約。未提供此協定時，每次仍以原名稱優先執行 importer。詳見
+[Resolution plans](./README.md#resolution-plans)。

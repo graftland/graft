@@ -1,13 +1,20 @@
 ---
-title: 在程式中使用 Graft
-description: 從自己的 Effect 程式執行外掛，不需要 CLI。
+title: 在自己的程式中使用 Graft
+description: 在自己的 Effect 程式中執行外掛，無需 CLI。
 ---
 
-CLI 是建立在這些函式庫之上的一個小程式。你也可以用同樣的方式，在自己的 Effect 程式中執行 Graft。
+CLI 是建立在這些函式庫之上的一個小程式。你可以用同樣的方式，在自己的 Effect 程式中執行 Graft。
+
+| 你想要…                 | 使用                                | 章節                          |
+| ----------------------- | ----------------------------------- | ----------------------------- |
+| 從程式碼載入少量外掛    | `Graft.layer` 和 `Graft.plugin`     | [直接執行外掛](#直接執行外掛) |
+| 從一份項目清單載入外掛  | `Loader.plugin` 和 `ModuleResolver` | [載入設定項目](#載入設定項目) |
+| 從 YAML 檔案載入外掛    | `Include.Include`                   | [載入設定檔](#載入設定檔)     |
+| 不使用 CLI 而重載程式碼 | `@graftland/hmr`                    | [HMR API](../hmr-api/)        |
 
 ## 直接執行外掛
 
-`Graft.layer` 建立執行階段。在 `Scope` 內載入外掛，關閉 `Scope` 就會卸載它們：
+`Graft.layer` 建立 runtime。在一個 scope 中載入外掛，關閉該 scope 就會卸載它們：
 
 ```ts
 import { NodeRuntime, NodeServices } from "@effect/platform-node"
@@ -27,13 +34,13 @@ program.pipe(
 )
 ```
 
-Layer 環境中的服務對所有外掛都可用，這裡就是 Node.js 服務。請參閱[來自環境的服務](../services/#來自環境的服務)。
+Layer 環境中的服務對每個外掛都可用，這裡就是 Node.js 的服務。請參閱[來自環境的服務](../services/#來自環境的服務)。
 
 ## 載入設定項目
 
 `Loader.plugin`
 執行保存在記憶體中的[設定項目](../config-file/#設定項目欄位)清單。透過 `Loader`
-服務所做的編輯只會修改這份清單。設定項目需要 `ModuleResolver` 將名稱解析為外掛：
+服務所做的編輯只會改變這份清單。這些項目需要 `ModuleResolver` 把名稱轉成外掛：
 
 ```ts
 import { Loader, ModuleResolver } from "@graftland/loader"
@@ -49,13 +56,17 @@ const program = Effect.gen(function* () {
 const resolver = ModuleResolver.fromRecord({ greeter, hello })
 ```
 
-`ModuleResolver.fromRecord`
-從固定的對照表解析名稱，適合打包後的應用程式和測試。`ModuleResolver.layer({ base, importer })`
-則透過匯入模組來解析：相對名稱從 `base` 解析，套件名稱透過 `importer`
-解析。`importer` 通常是在應用程式中撰寫的
-`(specifier) => import(specifier)`，如此才能找到應用程式的相依套件。
+### 選擇解析器
 
-將解析器和 Node.js 服務一起提供到環境中：
+| 解析器                                     | 如何找到外掛                                                     | 適用於                 |
+| ------------------------------------------ | ---------------------------------------------------------------- | ---------------------- |
+| `ModuleResolver.fromRecord(table)`         | 從固定的表中查找。                                               | 打包後的應用程式、測試 |
+| `ModuleResolver.layer({ base, importer })` | 匯入模組。相對名稱從 `base` 解析，套件名稱透過 `importer` 解析。 | 含有外掛檔案的應用程式 |
+
+通常 `importer` 是寫在你應用程式中的
+`(specifier) => import(specifier)`，這樣它才能找到你應用程式的相依套件。
+
+把解析器提供在環境中，與 Node.js 服務放在一起：
 
 ```ts
 program.pipe(
@@ -70,11 +81,31 @@ program.pipe(
 )
 ```
 
+### 解析計畫
+
+`ModuleResolver.make` 快取的是正規化後的候選計畫，從不快取匯入器的結果。
+
+- 沒有選用的 `resolution` 環境時，每次呼叫仍會先嘗試原始名稱，再嘗試命名慣例。
+- 成功的匯入器在每次呼叫時都會執行，因此自訂匯入器保有每次呼叫的行為和資源 scope。
+
+`resolution` 環境可以略過已知不存在的候選項目：
+
+| 成員                                        | 作用                                                                                                             |
+| ------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `revision`                                  | 回傳解析環境版本的 Effect。在安裝、移除或其他解析變更之後推進它，以捨棄已快取的計畫，包括否定的決定。            |
+| `exists(specifier)`                         | 檢查正規化後的候選項目，但不匯入也不取得資源。候選項目的優先順序保持不變。                                       |
+| `observe(specifiers, { observationScope })` | 每次解析都會執行，包括快取命中和失敗的計畫，以保留對不存在的名稱或路徑的觀察。其資源遵循候選項目和觀察的 scope。 |
+
+:::caution選擇啟用時，請同時提供失效機制和觀察。如果沒有可靠的
+`revision`，請不要設定 `resolution`。較舊的進行中計畫不能覆寫較新的已快取版本。
+
+:::
+
 ## 載入設定檔
 
 `Include.Include` 是 `graft start`
-使用的外掛。它讀取 YAML 檔案並將編輯結果寫回；設定 `watch: true`
-後，還會接收你手動做的修改：
+背後的外掛。它讀取 YAML 檔案，並把編輯寫回該檔案。使用 `watch: true`
+時，它也會接收你手動所做的變更：
 
 ```ts
 import { Include } from "@graftland/loader"
@@ -85,5 +116,10 @@ const program = Effect.gen(function* () {
 })
 ```
 
-它需要 `FileSystem` 和 `Path`，例如由 `NodeServices.layer` 提供。使用 `initial`
-時，如果檔案尚未存在，會用這些初始設定項目建立檔案。
+| 需求／選項 | 說明                                                         |
+| ---------- | ------------------------------------------------------------ |
+| 服務       | 需要 `FileSystem` 和 `Path`，例如來自 `NodeServices.layer`。 |
+| `initial`  | 如果檔案尚不存在，就用這些項目建立檔案。                     |
+| `watch`    | 接收手動所做的變更。                                         |
+
+從程式碼編輯設定項目，請參閱 [Loader API](../loader-api/)。

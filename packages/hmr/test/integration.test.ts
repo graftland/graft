@@ -11,6 +11,7 @@ import {
 	Exit,
 	FileSystem,
 	HashMap,
+	HashSet,
 	Fiber,
 	Option,
 	Path,
@@ -29,7 +30,7 @@ import {
 } from "@graftland/graft"
 
 const runtimeUrl = new URL("../.cache/integration/runtime.mjs", import.meta.url)
-const { Hmr, Graft } = createRequire(import.meta.url)(
+const { Hmr, Graft, modules, nativeImport } = createRequire(import.meta.url)(
 	runtimeUrl.pathname,
 ) as typeof import("./runtime.ts")
 const quote = Schema.encodeEffect(Schema.fromJsonString(Schema.String))
@@ -103,7 +104,692 @@ const run = <A, E>(
 		Effect.scoped,
 	)
 
+const watchEvents = Effect.fnUntraced(function* (
+	hmr: import("../src/index").Hmr,
+	directory: string,
+	fs: FileSystem.FileSystem,
+) {
+	const events = yield* Queue.unbounded<FileSystem.WatchEvent>()
+	const results = yield* Queue.unbounded<import("../src/index").WatchResult>()
+	const ready = yield* Deferred.make<void>()
+	yield* hmr
+		.watch([directory], {
+			debounce: 0,
+			onReady: () => Deferred.doneUnsafe(ready, Exit.void),
+		})
+		.pipe(
+			Stream.runForEach((result) => Queue.offer(results, result)),
+			Effect.provideService(FileSystem.FileSystem, {
+				...fs,
+				watch: (_path, options) =>
+					Stream.unwrap(
+						Effect.sync(() => {
+							options?.onReady?.()
+							return Stream.fromQueue(events)
+						}),
+					),
+			}),
+			Effect.forkScoped,
+		)
+	yield* Deferred.await(ready)
+	return {
+		events,
+		results,
+		changed: (path: string) =>
+			Queue.offer(events, { _tag: "Update", path }).pipe(
+				Effect.andThen(Queue.take(results)),
+			),
+	}
+})
+
 describe("native HMR", () => {
+	it.live(
+		"keeps raw modules in Node's cache while reloading plugin entries",
+		() =>
+			Effect.gen(function* () {
+				const { hmr, write, entry, directory } = yield* setup
+				yield* write("contract.mjs", "export const contract = { version: 1 }")
+				yield* write("dependency.mjs", "export const value = 1")
+				yield* write("plugin.mjs", entry("first"))
+				const contract = yield* hmr.importModule("./contract.mjs")
+				const original = yield* hmr.importerScoped("./plugin.mjs")
+				yield* write("contract.mjs", "export const contract = { version: 2 }")
+				yield* write("dependency.mjs", "export const value = 2")
+				const reloaded = yield* hmr.reload
+				assert.deepStrictEqual(
+					reloaded,
+					Hmr.WatchResult.Reloaded({
+						entries: [new URL("plugin.mjs", `file://${directory}/`).href],
+					}),
+				)
+				const sameContract = yield* hmr.importModule("./contract.mjs")
+				const replacement = yield* hmr.importerScoped("./plugin.mjs")
+				assert.strictEqual(sameContract, contract)
+				assert.notStrictEqual(replacement, original)
+			}).pipe(run),
+	)
+
+	it.live(
+		"invalidates importers while reusing clean shared dependencies and independent entries",
+		() =>
+			Effect.gen(function* () {
+				const { hmr, write, entry, fs, directory } = yield* setup
+				yield* write(
+					"dependency.mjs",
+					"export const value = 1; export const identity = {}",
+				)
+				for (const name of ["a", "b"])
+					yield* write(
+						`${name}.mjs`,
+						`${entry(name)}; export { identity } from './dependency.mjs'`,
+					)
+				yield* write(
+					"c.mjs",
+					String.replace(
+						"import { value } from './dependency.mjs';",
+						"const value = 1;",
+					)(entry("c")),
+				)
+				const a = yield* hmr.importerScoped("./a.mjs")
+				const b = yield* hmr.importerScoped("./b.mjs")
+				const c = yield* hmr.importerScoped("./c.mjs")
+				const { changed } = yield* watchEvents(hmr, directory, fs)
+				yield* write(
+					"a.mjs",
+					`${entry("edited")}; export { identity } from './dependency.mjs'`,
+				)
+				const one = yield* changed("a.mjs")
+				assert.deepStrictEqual(
+					one,
+					Hmr.WatchResult.Reloaded({
+						entries: [new URL("a.mjs", `file://${directory}/`).href],
+					}),
+				)
+				const nextA = yield* hmr.importerScoped("./a.mjs")
+				const sameB = yield* hmr.importerScoped("./b.mjs")
+				assert.notStrictEqual(nextA, a)
+				assert.strictEqual(sameB, b)
+				assert(
+					Predicate.hasProperty(nextA, "identity") &&
+						Predicate.hasProperty(b, "identity"),
+				)
+				assert.strictEqual(nextA.identity, b.identity)
+				yield* write(
+					"dependency.mjs",
+					"export const value = 2; export const identity = {}",
+				)
+				const shared = yield* changed("dependency.mjs")
+				assert(shared._tag === "Reloaded")
+				assert.strictEqual(shared.entries.length, 2)
+				const newestA = yield* hmr.importerScoped("./a.mjs")
+				const newestB = yield* hmr.importerScoped("./b.mjs")
+				const sameC = yield* hmr.importerScoped("./c.mjs")
+				assert(
+					Predicate.hasProperty(newestA, "identity") &&
+						Predicate.hasProperty(newestB, "identity"),
+				)
+				assert.strictEqual(newestA.identity, newestB.identity)
+				assert.notStrictEqual(newestA.identity, b.identity)
+				assert.strictEqual(sameC, c)
+				const forced = yield* hmr.reload
+				assert(forced._tag === "Reloaded")
+				assert.strictEqual(forced.entries.length, 3)
+				const forcedC = yield* hmr.importerScoped("./c.mjs")
+				assert.notStrictEqual(forcedC, c)
+			}).pipe(run),
+	)
+
+	it.live(
+		"retries the full dirty closure after a failed incremental candidate",
+		() =>
+			Effect.gen(function* () {
+				const { hmr, write, entry, fs, directory, load, reach } = yield* setup
+				yield* write("dependency.mjs", "export const value = 1")
+				for (const name of ["a", "b"]) {
+					yield* write(`${name}.mjs`, entry(name))
+					const plugin = yield* load(`./${name}.mjs`)
+					const fork = yield* Graft.plugin(plugin)
+					yield* fork.await
+				}
+				const { changed } = yield* watchEvents(hmr, directory, fs)
+				yield* write(
+					"dependency.mjs",
+					"import './new.mjs'; export const value = 2",
+				)
+				const failed = yield* changed("dependency.mjs")
+				assert.strictEqual(failed._tag, "Failed")
+				yield* reach(["a-1", "b-1"])
+				yield* write("new.mjs", "export const ready = true")
+				const recovered = yield* changed("new.mjs")
+				assert(recovered._tag === "Reloaded")
+				assert.strictEqual(recovered.entries.length, 2)
+				yield* reach(["a-2", "b-2"])
+			}).pipe(run),
+	)
+
+	it.live(
+		"keeps late dynamic imports attached to their original module view",
+		() =>
+			Effect.gen(function* () {
+				const { hmr, write, entry, fs, directory } = yield* setup
+				yield* write("dependency.mjs", "export const value = 1")
+				yield* write(
+					"a.mjs",
+					`${entry("a")}; export const lazy = () => import('./dependency.mjs')`,
+				)
+				const original = yield* hmr.importerScoped("./a.mjs")
+				assert(
+					Predicate.hasProperty(original, "lazy") &&
+						typeof original.lazy === "function",
+				)
+				const lazy = original.lazy as () => Promise<{ value: number }>
+				const { changed } = yield* watchEvents(hmr, directory, fs)
+				yield* write("dependency.mjs", "export const value = 2")
+				const result = yield* changed("dependency.mjs")
+				assert.strictEqual(result._tag, "Reloaded")
+				const old = yield* Effect.promise(lazy)
+				assert.strictEqual(old.value, 1)
+				const current = yield* hmr.importerScoped("./a.mjs")
+				assert(
+					Predicate.hasProperty(current, "lazy") &&
+						typeof current.lazy === "function",
+				)
+				const currentLazy = current.lazy as () => Promise<{ value: number }>
+				const latest = yield* Effect.promise(currentLazy)
+				assert.strictEqual(latest.value, 2)
+			}).pipe(run),
+	)
+
+	it.live("closes cyclic importer graphs during incremental reload", () =>
+		Effect.gen(function* () {
+			const { hmr, write, entry, fs, directory, load } = yield* setup
+			yield* write(
+				"dependency.mjs",
+				"import {read} from './cycle.mjs'; export const value = read(); export function base() { return 1 }",
+			)
+			yield* write(
+				"cycle.mjs",
+				"import {base} from './dependency.mjs'; export const read = () => base()",
+			)
+			yield* write("a.mjs", entry("cycle"))
+			const first = yield* load("./a.mjs")
+			assert.strictEqual(first.name, "cycle-1")
+			const { changed } = yield* watchEvents(hmr, directory, fs)
+			yield* write(
+				"cycle.mjs",
+				"import {base} from './dependency.mjs'; export const read = () => base() + 1",
+			)
+			const result = yield* changed("cycle.mjs")
+			assert.strictEqual(result._tag, "Reloaded")
+			const next = yield* load("./a.mjs")
+			assert.strictEqual(next.name, "cycle-2")
+		}).pipe(run),
+	)
+
+	it.live(
+		"validates the entire shared Plugin identity group before incremental publication",
+		() =>
+			Effect.gen(function* () {
+				const { hmr, write, entry, fs, directory, load, reach } = yield* setup
+				yield* write("dependency.mjs", "export const value = 1")
+				yield* write("b.mjs", entry("shared"))
+				yield* write("a.mjs", "export {default} from './b.mjs'")
+				const a = yield* load("./a.mjs")
+				const b = yield* load("./b.mjs")
+				assert.strictEqual(a, b)
+				const fork = yield* Graft.plugin(a)
+				yield* fork.await
+				const { changed } = yield* watchEvents(hmr, directory, fs)
+				yield* write("a.mjs", entry("split"))
+				const result = yield* changed("a.mjs")
+				assert(result._tag === "Skipped")
+				assert.strictEqual(result.reason, "ambiguous-exports")
+				yield* reach(["shared-1"])
+			}).pipe(run),
+	)
+
+	it.live(
+		"preserves a released entry identity and dependency graph on a new lease",
+		() =>
+			Effect.gen(function* () {
+				const { hmr, write, entry, fs, directory, load } = yield* setup
+				yield* write("dependency.mjs", "export const value = 1")
+				yield* write("a.mjs", entry("a"))
+				const original = yield* hmr
+					.importerScoped("./a.mjs")
+					.pipe(Effect.scoped)
+				const reacquired = yield* hmr.importerScoped("./a.mjs")
+				assert.strictEqual(reacquired, original)
+				const { changed } = yield* watchEvents(hmr, directory, fs)
+				yield* write("dependency.mjs", "export const value = 2")
+				const result = yield* changed("dependency.mjs")
+				assert.strictEqual(result._tag, "Reloaded")
+				const next = yield* load("./a.mjs")
+				assert.strictEqual(next.name, "a-2")
+			}).pipe(run),
+	)
+
+	it.live(
+		"restores transitive observations when an old route reconnects a cached instance",
+		() =>
+			Effect.gen(function* () {
+				const { write, base } = yield* setup
+				yield* write("a.mjs", "export const lazy = () => import('./b.mjs')")
+				yield* write("b.mjs", "export { value } from './c.mjs'")
+				yield* write("c.mjs", "export const value = 1")
+				yield* write("d.mjs", "export const value = 1")
+				const hooks = yield* Effect.acquireRelease(
+					Effect.sync(() =>
+						modules(base, String.startsWith(new URL(".", base).href)),
+					),
+					(hooks) => Effect.sync(hooks.close),
+				)
+				const generation = hooks.prepare()
+				hooks.start(generation)
+				const a = yield* Effect.promise(() =>
+					nativeImport(hooks.request("./a.mjs")),
+				)
+				const b = yield* Effect.promise(() =>
+					nativeImport(hooks.request("./b.mjs")),
+				)
+				yield* Effect.promise(() => nativeImport(hooks.request("./d.mjs")))
+				hooks.discard()
+				const active = Array.map(["a.mjs", "d.mjs"], (name) => ({
+					url: new URL(name, base).href,
+					generation,
+				}))
+				const next = hooks.prepare(
+					active,
+					hooks.invalidated(active, HashSet.make(new URL("d.mjs", base).href)),
+				)
+				hooks.start(next, true)
+				yield* Effect.promise(() => nativeImport(hooks.request("./d.mjs")))
+				hooks.discard()
+				const committed = Array.map(active, (attempt) => ({
+					...attempt,
+					generation: next,
+				}))
+				hooks.collect(committed)
+				assert.isFalse(
+					HashMap.has(hooks.files(committed), new URL("c.mjs", base).href),
+				)
+				assert(Predicate.hasProperty(a, "lazy") && typeof a.lazy === "function")
+				const lazy = a.lazy as () => Promise<unknown>
+				const reconnected = yield* Effect.promise(lazy)
+				assert.strictEqual(reconnected, b)
+				const c = new URL("c.mjs", base).href
+				const observed = hooks.files(committed)
+				assert(
+					HashMap.has(observed, c),
+					"The reconnected instance must retain its static dependencies",
+				)
+				assert.isString(Option.getOrThrow(HashMap.get(observed, c)).content)
+				assert(
+					hooks.affected(
+						committed[0]!,
+						hooks.invalidated(committed, HashSet.make(c)),
+					),
+				)
+				assert(
+					Array.some(
+						hooks.resolutions(committed),
+						(attempt) => attempt.request === c,
+					),
+				)
+			}).pipe(run),
+	)
+
+	it.live(
+		"requires restart after an old route reconnects a cached native capability",
+		() =>
+			Effect.gen(function* () {
+				const { hmr, write, entry, fs, directory } = yield* setup
+				const independent = (name: string) =>
+					String.replace(
+						"import { value } from './dependency.mjs';",
+						"const value = 1;",
+					)(entry(name))
+				yield* write(
+					"a.mjs",
+					`${independent("a")}; export const lazy = () => import('./b.mjs')`,
+				)
+				yield* write("b.mjs", `${independent("b")}; import './c.mjs'`)
+				yield* write(
+					"c.mjs",
+					"import { createRequire } from 'node:module'; export const native = createRequire(import.meta.url)",
+				)
+				yield* write("d.mjs", independent("d"))
+				const a = yield* hmr.importerScoped("./a.mjs")
+				const b = yield* hmr.importerScoped("./b.mjs").pipe(Effect.scoped)
+				yield* hmr.importerScoped("./d.mjs")
+				const { changed } = yield* watchEvents(hmr, directory, fs)
+				yield* write("d.mjs", independent("edited"))
+				assert.strictEqual((yield* changed("d.mjs"))._tag, "Reloaded")
+				assert(Predicate.hasProperty(a, "lazy") && typeof a.lazy === "function")
+				const lazy = a.lazy as () => Promise<unknown>
+				const reconnected = yield* Effect.promise(lazy)
+				assert.strictEqual(reconnected, b)
+				const result = yield* hmr.reload
+				assert.deepStrictEqual(
+					result,
+					Hmr.WatchResult.Skipped({
+						reason: "restart-required",
+						modules: ["node:module"],
+					}),
+				)
+			}).pipe(run),
+	)
+
+	it.live(
+		"retains cached instance facts until close without observing unleased entries",
+		() =>
+			Effect.gen(function* () {
+				const { write, base } = yield* setup
+				yield* write("dependency.mjs", "export const value = 1")
+				yield* write("b.mjs", "export const value = 1")
+				const hooks = yield* Effect.acquireRelease(
+					Effect.sync(() =>
+						modules(base, String.startsWith(new URL(".", base).href)),
+					),
+					(hooks) => Effect.sync(hooks.close),
+				)
+				let generation = hooks.prepare()
+				hooks.start(generation)
+				yield* write(
+					"a.mjs",
+					"export {value} from './dependency.mjs'; export const lazy = () => import('./dependency.mjs')",
+				)
+				const first = yield* Effect.promise(() =>
+					nativeImport(hooks.request("./a.mjs")),
+				)
+				yield* Effect.promise(() => nativeImport(hooks.request("./b.mjs")))
+				hooks.discard()
+				const a = new URL("a.mjs", base).href
+				let attempts = [
+					{ url: a, generation },
+					{ url: new URL("b.mjs", base).href, generation },
+				]
+				hooks.collect(attempts)
+				for (let i = 0; i < 12; i++) {
+					yield* write(
+						"a.mjs",
+						`export {value} from './dependency.mjs'; export const revision = ${i}`,
+					)
+					generation = hooks.prepare(
+						attempts,
+						hooks.invalidated(attempts, HashSet.make(a)),
+					)
+					hooks.start(generation, true)
+					yield* Effect.promise(() => nativeImport(hooks.request("./a.mjs")))
+					hooks.discard()
+					attempts = Array.map(attempts, (attempt) =>
+						attempt.url === a ? { ...attempt, generation } : attempt,
+					)
+					hooks.collect(attempts)
+					assert.strictEqual(hooks.counts().sources, i + 4)
+					assert.strictEqual(hooks.counts().edges, i + 2)
+				}
+				hooks.collect([])
+				assert.strictEqual(HashMap.size(hooks.files([])), 0)
+				assert.strictEqual(hooks.counts().sources, 15)
+				assert.strictEqual(hooks.counts().edges, 13)
+				assert(
+					Predicate.hasProperty(first, "lazy") &&
+						typeof first.lazy === "function",
+				)
+				const lazy = first.lazy as () => Promise<{ value: number }>
+				const old = yield* Effect.promise(lazy)
+				assert.strictEqual(old.value, 1)
+				hooks.close()
+				assert.strictEqual(hooks.counts().sources, 0)
+				assert.strictEqual(hooks.counts().edges, 0)
+			}).pipe(run),
+	)
+
+	it.live("preserves the old resolution view during activation cleanup", () =>
+		Effect.gen(function* () {
+			const { hmr, fs, directory, write, load, reach } = yield* setup
+			const entered = yield* Deferred.make<void>()
+			const imported = yield* Deferred.make<number>()
+			const release = Promise.withResolvers<void>()
+			const key = `graft-hmr-cleanup:${directory}`
+			const keySource = yield* quote(key)
+			const runtime = yield* quote(runtimeUrl.href)
+			const effect = yield* quote(effectUrl)
+			yield* Effect.acquireRelease(
+				Effect.sync(() => {
+					Reflect.set(globalThis, key, {
+						enter: () => Deferred.doneUnsafe(entered, Exit.void),
+						release: release.promise,
+						imported: (value: number) =>
+							Deferred.doneUnsafe(imported, Exit.succeed(value)),
+					})
+				}),
+				() =>
+					Effect.sync(() => {
+						release.resolve()
+						Reflect.deleteProperty(globalThis, key)
+					}),
+			)
+			yield* write("dependency.mjs", "export const value = 1")
+			yield* write(
+				"a.mjs",
+				`import {Plugin} from ${runtime}; import {Effect} from ${effect}; import {value} from './dependency.mjs'; const gate=globalThis[${keySource}]; export default Plugin.make({name:'cleanup-'+value, apply: () => Effect.addFinalizer(() => Effect.promise(async () => {gate.enter(); await gate.release; const old = await import('./dependency.mjs'); gate.imported(old.value)}))});`,
+			)
+			const plugin = yield* load("./a.mjs")
+			const fork = yield* Graft.plugin(plugin)
+			yield* fork.await
+			const { changed } = yield* watchEvents(hmr, directory, fs)
+			yield* write("dependency.mjs", "export const value = 2")
+			const result = yield* changed("dependency.mjs")
+			assert.strictEqual(result._tag, "Reloaded")
+			yield* Deferred.await(entered)
+			release.resolve()
+			const value = yield* Deferred.await(imported)
+			assert.strictEqual(value, 1)
+			yield* reach(["cleanup-2"])
+		}).pipe(run),
+	)
+
+	it.live(
+		"retains edits arriving while an incremental candidate import is suspended",
+		() =>
+			Effect.gen(function* () {
+				const { hmr, fs, directory, write, entry, load } = yield* setup
+				yield* write("dependency.mjs", "export const value = 1")
+				for (const name of ["a", "b"]) {
+					yield* write(`${name}.mjs`, entry(name))
+					yield* load(`./${name}.mjs`)
+				}
+				const entered = yield* Deferred.make<void>()
+				const release = Promise.withResolvers<void>()
+				const key = `graft-hmr-events:${directory}`
+				const keySource = yield* quote(key)
+				yield* Effect.acquireRelease(
+					Effect.sync(() => {
+						Reflect.set(globalThis, key, {
+							enter: () => Deferred.doneUnsafe(entered, Exit.void),
+							release: release.promise,
+						})
+					}),
+					() =>
+						Effect.sync(() => {
+							release.resolve()
+							Reflect.deleteProperty(globalThis, key)
+						}),
+				)
+				const { events, results } = yield* watchEvents(hmr, directory, fs)
+				yield* write(
+					"a.mjs",
+					`const gate=globalThis[${keySource}]; gate.enter(); await gate.release; ${entry("edited-a")}`,
+				)
+				yield* Queue.offer(events, { _tag: "Update", path: "a.mjs" })
+				yield* Deferred.await(entered)
+				yield* write("b.mjs", entry("edited-b"))
+				yield* Queue.offer(events, { _tag: "Update", path: "b.mjs" })
+				release.resolve()
+				const first = yield* Queue.take(results)
+				const second = yield* Queue.take(results)
+				assert(first._tag === "Reloaded" && second._tag === "Reloaded")
+				assert.strictEqual(first.entries.length, 1)
+				assert.strictEqual(second.entries.length, 1)
+				const a = yield* load("./a.mjs")
+				const b = yield* load("./b.mjs")
+				assert.strictEqual(a.name, "edited-a-1")
+				assert.strictEqual(b.name, "edited-b-1")
+			}).pipe(run),
+	)
+
+	it.effect(
+		"allows a reload to complete while a filesystem snapshot is in flight",
+		() =>
+			Effect.gen(function* () {
+				const { hmr, fs, directory, write, entry, load } = yield* setup
+				yield* write("dependency.mjs", "export const value = 1")
+				yield* write("a.mjs", entry("a"))
+				yield* load("./a.mjs")
+				const reloaded = yield* Deferred.make<void>()
+				const ready = yield* Deferred.make<void>()
+				const armed = yield* Ref.make(true)
+				const results = yield* Ref.make(0)
+				yield* write("dependency.mjs", "export const value = 2")
+				yield* hmr.watch([directory], { debounce: 0 }).pipe(
+					Stream.runForEach(() => Ref.update(results, (n) => n + 1)),
+					Effect.provideService(FileSystem.FileSystem, {
+						...fs,
+						watch: () =>
+							Stream.unwrap(
+								Deferred.succeed(ready, undefined).pipe(
+									Effect.as(Stream.never),
+								),
+							),
+						readFile: (path) =>
+							fs
+								.readFile(path)
+								.pipe(
+									Effect.tap(() =>
+										path !== `${directory}/dependency.mjs`
+											? Effect.void
+											: Ref.getAndSet(armed, false).pipe(
+													Effect.flatMap((armed) =>
+														armed
+															? hmr.reload.pipe(
+																	Effect.orDie,
+																	Effect.andThen(
+																		Deferred.succeed(reloaded, undefined),
+																	),
+																)
+															: Effect.void,
+													),
+												),
+									),
+								),
+					}),
+					Effect.forkScoped,
+				)
+				yield* Deferred.await(ready)
+				yield* TestClock.adjust("1 second")
+				yield* Deferred.await(reloaded)
+				yield* TestClock.adjust("1 second")
+				const count = yield* Ref.get(results)
+				assert.strictEqual(count, 0)
+				const current = yield* load("./a.mjs")
+				assert.strictEqual(current.name, "a-2")
+			}).pipe(run),
+	)
+
+	it.live(
+		"preserves a leased failed import when an unrelated lease closes",
+		() =>
+			Effect.gen(function* () {
+				const { hmr, write, entry } = yield* setup
+				yield* write("dependency.mjs", "export const value = 1")
+				yield* write("a.mjs", "throw new Error('Initial import failed')")
+				const failed = yield* Effect.exit(hmr.importerScoped("./a.mjs"))
+				assert(Exit.isFailure(failed))
+				yield* write("b.mjs", entry("b"))
+				yield* hmr.importerScoped("./b.mjs").pipe(Effect.scoped)
+				yield* write("a.mjs", entry("fixed"))
+				const cached = yield* Effect.exit(hmr.importerScoped("./a.mjs"))
+				assert(Exit.isFailure(cached))
+				yield* hmr.reload
+				const recovered = yield* hmr.importerScoped("./a.mjs")
+				assert(Option.isSome(Plugin.fromModule(recovered)))
+			}).pipe(run),
+	)
+
+	it.live(
+		"checks native capabilities acquired through a reused dependency before publication",
+		() =>
+			Effect.gen(function* () {
+				const { hmr, fs, directory, write, entry, load, reach } = yield* setup
+				yield* write(
+					"dependency.mjs",
+					"export const value = 1; export const native = () => import('node:module')",
+				)
+				yield* write("a.mjs", entry("a"))
+				const plugin = yield* load("./a.mjs")
+				const fork = yield* Graft.plugin(plugin)
+				yield* fork.await
+				const { changed } = yield* watchEvents(hmr, directory, fs)
+				yield* write(
+					"a.mjs",
+					`import {native} from './dependency.mjs'; await native(); ${entry("new")}`,
+				)
+				const result = yield* changed("a.mjs")
+				assert(result._tag === "Skipped")
+				assert.strictEqual(result.reason, "restart-required")
+				yield* reach(["a-1"])
+			}).pipe(run),
+	)
+
+	it.live(
+		"does not throw a candidate restart error into concurrent old module code",
+		() =>
+			Effect.gen(function* () {
+				const { hmr, fs, directory, write, entry } = yield* setup
+				yield* write("dependency.mjs", "export const value = 1")
+				yield* write(
+					"a.mjs",
+					`${entry("a")}; export const native = () => import('node:module')`,
+				)
+				const original = yield* hmr.importerScoped("./a.mjs")
+				assert(
+					Predicate.hasProperty(original, "native") &&
+						typeof original.native === "function",
+				)
+				const native = original.native as () => Promise<unknown>
+				const entered = yield* Deferred.make<void>()
+				const release = Promise.withResolvers<void>()
+				const key = `graft-hmr-native:${directory}`
+				const keySource = yield* quote(key)
+				yield* Effect.acquireRelease(
+					Effect.sync(() => {
+						Reflect.set(globalThis, key, {
+							enter: () => Deferred.doneUnsafe(entered, Exit.void),
+							release: release.promise,
+						})
+					}),
+					() =>
+						Effect.sync(() => {
+							release.resolve()
+							Reflect.deleteProperty(globalThis, key)
+						}),
+				)
+				const { events, results } = yield* watchEvents(hmr, directory, fs)
+				yield* write(
+					"a.mjs",
+					`const gate=globalThis[${keySource}]; gate.enter(); await gate.release; ${entry("new")}`,
+				)
+				yield* Queue.offer(events, { _tag: "Update", path: "a.mjs" })
+				yield* Deferred.await(entered)
+				yield* Effect.promise(native)
+				release.resolve()
+				const result = yield* Queue.take(results)
+				assert.strictEqual(result._tag, "Reloaded")
+			}).pipe(run),
+	)
+
 	it.live.each(["cjs", "mjs"])(
 		"requires a restart for cached createRequire dependencies (%s)",
 		(extension) =>

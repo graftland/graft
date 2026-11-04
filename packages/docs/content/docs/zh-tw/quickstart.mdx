@@ -48,7 +48,7 @@ Node 轉接器要求的版本。該版本也提供熱重載所需的 `module.reg
    `Hello plugin stopped`，然後是 `Hello again!`。
 
 4. 在應用程式執行期間修改程式碼。編輯
-   `hello.mjs`（例如讓它輸出兩次訊息），然後儲存。Graft 會匯入模組的新版本，用它取代正在執行的外掛。如果新程式碼匯入失敗，舊版本會繼續執行，Graft 會把錯誤記錄到日誌中。
+   `hello.mjs`（例如讓訊息輸出兩次）並儲存。Graft 會匯入模組的新版本，並用它取代執行中的外掛。如果新程式碼匯入失敗，舊版本會繼續執行，Graft 並記錄錯誤。
 
 </Steps>
 
@@ -69,9 +69,9 @@ export default Plugin.make({
 })
 ```
 
-外掛模組透過預設匯出或名為 `plugin`
-的匯出提供外掛。匯入模組時不應啟動任何工作。連線、計時器和伺服器都應在 `apply`
-內啟動，以便 Graft 能夠釋放這些資源。請參閱[外掛](../plugins/)。
+外掛模組以預設匯出，或以名為 `plugin`
+的匯出來提供它的外掛。匯入模組時不得啟動任何東西。請在 `apply`
+內開啟連線、計時器和伺服器，這樣 Graft 才能釋放它們。請參閱[外掛](../plugins/)。
 
 ## 從 npm 新增外掛
 
@@ -79,10 +79,20 @@ export default Plugin.make({
 npx graft add graft-plugin-review
 ```
 
-`graft add` 使用專案的套件管理器安裝套件。如果安裝失敗，它會將 `package.json`
-和鎖定檔還原。安裝和復原期間，不要編輯專案檔案或執行其他安裝命令。還原會覆寫修改，不會合併修改。請參閱[安裝獨佔與復原](../cli/#套件管理器)。安裝後，在
-`graft.yml` 中新增該外掛的設定項目。`name` 可以使用短名稱
-`review`。Graft 會依序尋找 `review`、`@graftland/plugin-review` 和
+`graft add` 使用專案的套件管理器安裝套件。如果安裝失敗，它會把 `package.json`
+和鎖定檔還原成原來的樣子。安裝或復原期間，請不要編輯專案檔案，也不要執行其他安裝程式。還原會覆寫變更，不會合併它們。請參閱[安裝的所有權與還原](../cli/#套件管理器)。接著在
+`graft.yml` 中為該外掛新增一個項目。它的 `name` 可以是短名稱
+`review`，Graft 會依序尋找 `review`、`@graftland/plugin-review` 和
 `graft-plugin-review`。請參閱[設定檔](../config-file/)。
 
-要讓外掛在另一個行程或另一台機器上執行，請看 [Remote](../remote/overview/)。
+## 後續步驟
+
+| 你想要…                  | 請閱讀                                    |
+| ------------------------ | ----------------------------------------- |
+| 了解各個組成部分         | [核心概念](../concepts/)                  |
+| 撰寫自己的外掛           | [外掛](../plugins/)                       |
+| 在外掛之間共用狀態       | [服務](../services/)                      |
+| 設定更多項目             | [設定檔](../config-file/)                 |
+| 在自己的程式中執行 Graft | [在自己的程式中使用 Graft](../embedding/) |
+
+要讓插件在另一個進程或另一台機器上執行，請看 [Remote](../remote/overview/)。

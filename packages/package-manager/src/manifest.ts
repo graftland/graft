@@ -1,4 +1,13 @@
-import { Array, Effect, HashMap, Option, Record, Schema, String } from "effect"
+import {
+	Array,
+	Effect,
+	HashMap,
+	Chunk,
+	Option,
+	Record,
+	Schema,
+	String,
+} from "effect"
 
 export const PackageName = Schema.String.check(
 	Schema.isPattern(
@@ -56,24 +65,30 @@ export const applyChanges = (
 	manifest: Manifest,
 	changes: Changes,
 ): Manifest => {
+	const edits = Record.toEntries(changes)
+	if (edits.length === 0) return manifest
 	let next = manifest
-	for (const [name, spec] of Record.toEntries(changes)) {
-		const existing = Array.filter(fields, (field) =>
-			Record.has(next[field] ?? {}, name),
+	const additions = Array.flatMap(edits, ([name, spec]) =>
+		spec !== null &&
+		!Array.some(fields, (field) => Record.has(manifest[field] ?? {}, name))
+			? [[name, spec] as const]
+			: [],
+	)
+	for (const field of fields) {
+		const entries = Array.flatMap(
+			Record.toEntries(manifest[field] ?? {}),
+			([name, old]) => {
+				const spec = Record.has(changes, name) ? changes[name]! : old
+				return spec === null ? [] : [[name, spec] as const]
+			},
 		)
-		const targets =
-			spec === null || existing.length > 0
-				? existing
-				: (["dependencies"] as const)
-		for (const field of targets) {
-			const deps = next[field] ?? {}
+		if (field === "dependencies" && additions.length > 0) {
 			next = {
 				...next,
-				[field]:
-					spec === null
-						? Record.remove(deps, name)
-						: Record.set(deps, name, spec),
+				[field]: Record.fromEntries([...entries, ...additions]),
 			}
+		} else if (manifest[field] !== undefined) {
+			next = { ...next, [field]: Record.fromEntries(entries) }
 		}
 	}
 	return next
@@ -99,7 +114,7 @@ const readObject = Effect.fnUntraced(function* (source: string) {
 			source,
 		),
 	)
-	let members: ReadonlyArray<Member> = []
+	let members = Chunk.empty<Member>()
 	let cursor = 1
 	let start = (tokens[0]?.index ?? 0) + 1
 	while (cursor < tokens.length && tokens[cursor]?.[0] !== "}") {
@@ -114,7 +129,7 @@ const readObject = Effect.fnUntraced(function* (source: string) {
 			if (token[0] === "}" || token[0] === "]") depth--
 			end = token.index! + token[0].length
 		} while (depth > 0)
-		members = Array.append(members, {
+		members = Chunk.append(members, {
 			name: yield* decodeKey(key[0]),
 			leading: String.slice(start, key.index)(source),
 			key: key[0],
@@ -131,11 +146,17 @@ const readObject = Effect.fnUntraced(function* (source: string) {
 	}
 	const close = tokens[cursor]!.index
 	const tail = String.slice(start, close)(source)
-	return { members, tail, open: tokens[0]!.index!, close }
+	return {
+		members: Chunk.toArray(members),
+		tail,
+		open: tokens[0]!.index!,
+		close,
+	}
 })
 
 /** Ordered edits preserve insertion order; None removes every occurrence. */
-type Edits = ReadonlyArray<readonly [string, Option.Option<string>]>
+type Edit = readonly [string, Option.Option<string>]
+type Edits = ReadonlyArray<Edit>
 
 const editObject = Effect.fnUntraced(function* (
 	source: string,
@@ -213,7 +234,7 @@ export const encodeManifest = Effect.fnUntraced(function* (
 	const { members } = yield* readObject(original)
 	const changes = yield* Effect.reduce(
 		fields,
-		(): Edits => [],
+		() => Chunk.empty<Edit>(),
 		Effect.fnUntraced(function* (changes, field) {
 			const oldSpecs = HashMap.fromIterable(
 				Record.toEntries(before[field] ?? {}),
@@ -226,7 +247,7 @@ export const encodeManifest = Effect.fnUntraced(function* (
 					...Record.keys(before[field] ?? {}),
 					...Record.keys(manifest[field] ?? {}),
 				]),
-				(): Edits => [],
+				() => Chunk.empty<Edit>(),
 				Effect.fnUntraced(function* (specs, name) {
 					const old = HashMap.get(oldSpecs, name)
 					const next = HashMap.get(nextSpecs, name)
@@ -236,18 +257,20 @@ export const encodeManifest = Effect.fnUntraced(function* (
 						onNone: () => Effect.succeedNone,
 						onSome: (value) => encodeString(value).pipe(Effect.asSome),
 					})
-					return Array.append(specs, [name, value] as const)
+					return Chunk.append(specs, [name, value] as const)
 				}),
 			)
-			if (specs.length === 0) return changes
+			if (Chunk.isEmpty(specs)) return changes
 			const section = Array.findLast(members, (member) => member.name === field)
 			const source = Option.match(section, {
 				onNone: () => "{}",
 				onSome: (member) => member.value,
 			})
-			const edited = yield* editObject(source, specs)
-			return Array.append(changes, [field, Option.some(edited)] as const)
+			const edited = yield* editObject(source, Chunk.toArray(specs))
+			return Chunk.append(changes, [field, Option.some(edited)] as const)
 		}),
 	)
-	return changes.length === 0 ? original : yield* editObject(original, changes)
+	return Chunk.isEmpty(changes)
+		? original
+		: yield* editObject(original, Chunk.toArray(changes))
 })

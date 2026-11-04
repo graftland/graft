@@ -1,5 +1,15 @@
 import { assert, describe, it } from "@effect/vitest"
-import { Array, Cause, Effect, Exit, HashMap, Option, Ref } from "effect"
+import {
+	Array,
+	Cause,
+	Effect,
+	Exit,
+	HashMap,
+	Option,
+	Ref,
+	Record,
+	Schema,
+} from "effect"
 import {
 	applyChanges,
 	decodeManifest,
@@ -17,6 +27,49 @@ const edit = Effect.fnUntraced(function* (
 })
 
 describe("manifest structure", () => {
+	it.effect(
+		"preserves order and section membership across a large batch of edits",
+		() =>
+			Effect.gen(function* () {
+				const names = Array.makeBy(512, (i) => `dep-${i}`)
+				const dependencies = Record.fromEntries(
+					Array.map(names, (name) => [name, "1"] as const),
+				)
+				const encode = Schema.encodeEffect(
+					Schema.fromJsonString(Schema.Unknown),
+				)
+				const original = yield* encode({
+					custom: { value: "unchanged" },
+					dependencies,
+					devDependencies: { shared: "1" },
+					optionalDependencies: { shared: "1" },
+				})
+				const changes = Record.fromEntries([
+					...Array.map(
+						names,
+						(name, i) => [name, i % 2 === 0 ? null : "2"] as const,
+					),
+					["shared", "3"] as const,
+					["added-b", "1"] as const,
+					["added-a", "1"] as const,
+				])
+				const output = yield* edit(original, changes)
+				const expected = yield* encode({
+					custom: { value: "unchanged" },
+					dependencies: Record.fromEntries([
+						...Array.flatMap(names, (name, i) =>
+							i % 2 === 0 ? [] : [[name, "2"] as const],
+						),
+						["added-b", "1"] as const,
+						["added-a", "1"] as const,
+					]),
+					devDependencies: { shared: "3" },
+					optionalDependencies: { shared: "3" },
+				})
+				assert.strictEqual(output, expected)
+			}).pipe(run),
+	)
+
 	it.effect(
 		"removes dependencies whose names also exist on Object.prototype",
 		() =>

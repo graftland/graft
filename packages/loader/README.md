@@ -105,7 +105,16 @@ activation. It also does these things:
 - Failed plugin forks restart, even under injection or group wrappers.
 - Healthy instances and unfinished resolutions stay as they are.
 
-Reconciliation of ordinary edits also retries failed entries.
+Ordinary API edits and file changes reconcile only changed entries. Unchanged
+healthy siblings and subtrees retain their current environment; editing one leaf
+no longer implicitly refreshes the whole tree. Failed entries in a reconciled
+group are still retried, and unfinished resolution keeps its activation. Use
+`retry` or `loader.root.update(entries)` to explicitly refresh environment
+values throughout the tree, including nested groups and injection gates.
+
+Independent sibling updates and removals run concurrently. Each entry's work
+remains serialized, and replacement waits for that entry's old cleanup. The
+group waits for all required work before accepting the target.
 
 `ready` waits until the current target version has been reconciled and no fork
 is `Loading`. `Pending` and `Failed` count as settled. Lifecycle callbacks may
@@ -378,6 +387,10 @@ invalid document.
 
 Without `watch`, an invalid initial document fails `Include` initialization.
 
+Include merges notifications from the entry and physical-target watchers and
+refreshes after 100 ms without another notification. Watcher installation still
+requests a catch-up read, including after switching a symlink target.
+
 ## Module resolver
 
 `ModuleResolver.make` accepts either a Promise importer or an Effect importer
@@ -439,3 +452,32 @@ concurrent-save window as content checking; it is not a multi-file transaction.
 
 Part of [Graft](https://github.com/graftland/graft). Licensed under
 [Apache 2.0](https://github.com/graftland/graft/blob/main/LICENSE).
+
+### Resolution plans
+
+`ModuleResolver.make` caches normalized candidate plans, never importer results.
+Without `resolution`, every call still tries the original name first and then
+the naming conventions. Custom importers keep their per-call behavior and
+scopes.
+
+An optional `resolution` environment can skip candidates known to be absent:
+
+- `revision` is an Effect returning the current resolution-environment version.
+  Advance it after installation, removal or any resolution change. Changing the
+  version discards prior plans, including negative decisions.
+- `exists(specifier)` checks a normalized candidate without importing it or
+  acquiring resources. Candidate priority remains unchanged.
+- `observe(specifiers, { observationScope })` runs on every resolve, including
+  cache hits and failed plans. Use it to retain observations of missing names or
+  paths. Its resources follow the existing candidate and observation scopes.
+
+The successful importer still runs for every call. Applications opting into this
+protocol must supply invalidation and observation; without a reliable revision,
+leave `resolution` unset. An in-flight older plan cannot overwrite a newer
+cached revision.
+
+Anonymous YAML entries are matched by name and a conservative configuration
+fingerprint, followed by exact comparison. Duplicate matches retain their order.
+Cyclic and opaque configurations use a conservative fallback, which can still
+require quadratic matching. Serialization after YAML mutation is still parsed
+and validated before writing; an unchanged document reuses its validated target.

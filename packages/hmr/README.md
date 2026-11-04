@@ -16,9 +16,12 @@ npm install @graftland/hmr effect
 
 ## Watching files
 
-`watch` uses native filesystem events, so reloads happen quickly. It also checks
-the contents of loaded, versioned modules inside the watched paths once per
-second. This catches changes that the native backend missed. For example:
+`watch` merges native event paths before checking observed files. An event alone
+does not trigger a reload: content or a local resolution must actually change.
+It polls file metadata and resolutions once per second, using stat to avoid
+reading unchanged files, and audits contents at least every ten seconds while
+idle. Events force a content check even when stat is unchanged. These checks
+recover missed events, including:
 
 - the startup window of the macOS directory watcher
 - a save between an import and the watcher installation
@@ -35,8 +38,13 @@ How the checks work:
 - An unchanged failed attempt stays acknowledged until the next change. Polling
   does not retry it again and again.
 - The check respects `recursive`. It stops when the consumer closes the stream.
-- Its cost depends on the contents of those modules, not on the size of the
-  directory tree.
+- Recursive watching installs nonrecursive directory watches from the observed
+  graph. It does not recursively enumerate unrelated directories or
+  node_modules. Missing paths use the nearest existing ancestor; loaded dist
+  modules remain observable. The directory set is reconciled once per second.
+- Reads run outside the session lock with bounded concurrency. Results are
+  accepted only if the observation version still matches. Import baselines store
+  SHA-256 digests of the bytes actually loaded, not full source strings.
 
 `watch(paths, options)` accepts `filter(absolutePath)` in addition to
 `recursive`, `onReady`, and `debounce`. The predicate filters both native events
@@ -53,6 +61,26 @@ The CLI uses this filter for JavaScript and TypeScript module files outside
 `node_modules`. YAML configuration changes belong to the loader. They never
 trigger an HMR reload of every entry.
 
+## Incremental replacement
+
+Public `hmr.reload` always forces a fresh import of every registered entry and
+its tracked dependencies. It also advances the import view when there are no
+entries, allowing a failed first import to be retried.
+
+Automatic `watch` reloads invalidate changed module instances and their
+transitive importers, including cycles. Entries sharing the same old Plugin
+object are checked together. Clean dependencies and independent entries keep
+their existing instances. All candidates pass import, export identity and
+resolution checks before one `Graft.replace` publication. Failure leaves the
+running plugins unchanged and retains the dirty set and failed observations for
+the next change. Events arriving during a reload remain available for the next
+pass.
+
+Each module instance keeps its own resolution view. Late dynamic imports from
+old code, including activation cleanup, do not switch to a global latest
+version. Reused modules retain their dependency edges. Dependencies that have
+never been imported cannot be discovered in advance.
+
 ## Failures
 
 Debouncing does not make file writes atomic. If a reload meets incomplete code,
@@ -68,10 +96,9 @@ delivery barrier.
 ## When a restart is needed
 
 CommonJS and native dependencies need a process restart. HMR tracks dependency
-facts by generation for the session. This includes dynamic imports during plugin
-activation, after the entry import completes. Once HMR records such a
-dependency, later reloads of that generation return `Skipped` with
-`restart-required`.
+facts by module instance, including dynamic imports during plugin activation.
+While a leased entry can reach such a dependency, reload returns
+`Skipped / restart-required`.
 
 Loading through `require` is not isolated by ESM URL versions. This includes
 `require(esm)`. HMR is careful here. It treats a versioned module's import of
@@ -88,7 +115,7 @@ periodic status check suppresses unchanged reports. This warning does not mean
 that a reload occurred.
 
 Local file entry leases and their reachable dependency edges keep the requested
-path and its resolved target, together with the importing parent and generation.
+path and its resolved target, together with the importing module instance.
 Reload checks this relationship before it imports, and again before it publishes
 any replacement. The same owned graph supplies polling, including dependencies
 from failed attempts awaiting retry; releasing the last lease removes its graph
@@ -104,6 +131,11 @@ They do not cover changes to package export maps or bare-package resolution.
 
 `importerScoped(specifier)` is an Effect that needs `Scope`. Each call owns a
 lease on the entry. The last release removes the entry from later reloads.
+Reacquiring an entry in the same import view preserves its cached identity. The
+current view retains the facts needed for those cache hits, without watching
+unleased entries. A committed reload retires that entry cache. Instantiated
+views retain source digests, dependency edges and native capability markers,
+because old code can reconnect cached instances without replaying their imports.
 
 `importerScoped(specifier, { observationScope })` separates the observation
 lease from temporary importer resources. `ModuleResolver` passes this scope as
@@ -119,12 +151,13 @@ observation generation; removing or disabling the entry closes it.
 
 How polling and restarts work with leases:
 
-- Polling finds its file set from each live lease. It uses the running
-  generation and the latest uncommitted import attempt.
+- Polling finds its file set from each live lease. It uses the running module
+  instances and the latest uncommitted import attempt.
 - It keeps failed imports and missing local dependencies, so it can retry them.
 - It stops reading an entry, and the dependencies only that entry uses, when the
   last owner closes.
-- A successful replacement retires the old dependency graph.
+- A successful replacement stops observing files no longer reachable from any
+  active or pending entry. Cached instance facts survive for old routing views.
 - Only dependencies that can be reached from leased entries can require a
   restart.
 - The Promise-based `importer` keeps its registrations until the HMR session
@@ -150,6 +183,18 @@ Native watcher producers observe their complete Exit after source cleanup and
 before entering background stream merging. Mixed interruption failures are
 logged there with the full Cause; pure interruption is silent. Ordinary backend
 failures still propagate to the consumer without duplicate logging.
+
+## Long development sessions
+
+Node does not evict versioned ESM instances. Incremental reload reduces the
+number created, but a long development session still accumulates module
+instances. HMR reclaims unused reachability caches and uninstantiated views.
+Instantiated routing views and their source digests, dependency edges and native
+capability markers remain until the session closes: arbitrary old code can
+reconnect cached modules, whose static imports Node will not replay. Observation
+and polling still cover only active and pending leases. This does not give
+process memory a hard upper bound. Restart the process when needed; HMR does not
+supervise or restart a child process.
 
 ## Cancellation
 
