@@ -1,6 +1,13 @@
 # yaml-language-server: $schema=../../packages/cli/schema.json
 # The ledger runs on the host. The exporter runs on the runner; its instance
 # name on the runner is its entry id.
+# The TLS transport and mTLS credentials plugins provide the host capabilities
+# used by the remote exporter.
+- id: tls-transport
+  name: "@graftland/remote/host/tls"
+- id: mtls-credentials
+  name: "@graftland/remote/host/auth/mtls"
+
 - id: ledger
   name: ./src/ledger.ts
 

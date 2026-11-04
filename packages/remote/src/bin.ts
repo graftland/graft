@@ -8,11 +8,8 @@ import {
 	Array,
 	Duration,
 	Effect,
-	FileSystem,
 	Layer,
-	Fiber,
 	Option,
-	Redacted,
 	Schema,
 } from "effect"
 import { Argument, CliError, Command, Flag } from "effect/cli"
@@ -22,67 +19,115 @@ import { pathToFileURL } from "node:url"
 import { load, run } from "./Runner"
 import { Bootstrap } from "./internal/runner/Bootstrap"
 import * as Watchdog from "./internal/runner/Watchdog"
-import * as Server from "./internal/runner/Server"
+import * as Serve from "./internal/serve"
+import { MtlsAuthenticator } from "./Auth"
 import * as Certificates from "./internal/Certificates"
+import { Config as SupervisorConfig } from "./runner/supervisor"
 
-const duration = (name: string, fallback: string) =>
+const duration = (name: string) =>
 	Flag.String(name).pipe(
-		Flag.withDefault(fallback),
 		Flag.withSchema(Schema.DurationFromString),
-		Flag.map(Duration.toMillis),
 		Flag.filter(
-			(value) => Number.isFinite(value) && value > 0,
+			(value) => Duration.isFinite(value) && Duration.toMillis(value) > 0,
 			() => "Duration must be finite and positive",
 		),
+		Flag.optional,
+	)
+const required = <A>(value: Option.Option<A>, flag: string) =>
+	Effect.fromOption(value, () =>
+		CliError.UserError.make({
+			cause: `Missing --${flag}`,
+			userMessage: `--${flag} is required without --config`,
+		}),
 	)
 const serve = Command.make(
 	"serve",
 	{
-		host: Flag.String("host").pipe(Flag.withDefault("127.0.0.1")),
+		config: Flag.String("config").pipe(Flag.optional),
+		host: Flag.String("host").pipe(Flag.optional),
 		port: Flag.Int("port").pipe(
-			Flag.withDefault(7443),
 			Flag.filter(
 				(value) => value >= 0 && value <= 65535,
 				() => "Port must be between 0 and 65535",
 			),
+			Flag.optional,
 		),
-		state: Flag.String("state"),
-		root: Flag.String("root"),
-		cert: Flag.String("cert"),
-		key: Flag.String("key"),
-		ca: Flag.String("ca"),
-		lease: duration("lease", "15 seconds"),
-		grace: duration("grace", "5 seconds"),
+		state: Flag.String("state").pipe(Flag.optional),
+		root: Flag.String("root").pipe(Flag.optional),
+		cert: Flag.String("cert").pipe(Flag.optional),
+		key: Flag.String("key").pipe(Flag.optional),
+		ca: Flag.String("ca").pipe(Flag.optional),
+		lease: duration("lease"),
+		grace: duration("grace"),
 	},
-	(options) =>
-		Effect.gen(function* () {
-			const fs = yield* FileSystem.FileSystem
-			const privateKey = yield* fs.readFileString(options.key)
-			const server = yield* Server.serve({
-				...options,
-				tls: {
-					cert: yield* fs.readFileString(options.cert),
-					key: Redacted.make(privateKey),
-					ca: yield* fs.readFileString(options.ca),
+	Effect.fnUntraced(function* (options) {
+		if (Option.isSome(options.config)) {
+			if (
+				Array.some(
+					[
+						options.host,
+						options.port,
+						options.state,
+						options.root,
+						options.cert,
+						options.key,
+						options.ca,
+						options.lease,
+						options.grace,
+					],
+					(value: Option.Option<unknown>) => Option.isSome(value),
+				)
+			)
+				return yield* CliError.UserError.make({
+					cause: "Conflicting serve options",
+					userMessage: "--config cannot be combined with serve shorthand flags",
+				})
+			return yield* Serve.run({ _tag: "Config", config: options.config.value })
+		}
+		const state = yield* required(options.state, "state")
+		const root = yield* required(options.root, "root")
+		const cert = yield* required(options.cert, "cert")
+		const key = yield* required(options.key, "key")
+		const ca = yield* required(options.ca, "ca")
+		const supervisor = yield* Schema.encodeEffect(SupervisorConfig)({
+			state,
+			root,
+			...Option.match(options.lease, {
+				onNone: () => ({}),
+				onSome: (lease) => ({ lease }),
+			}),
+			...Option.match(options.grace, {
+				onNone: () => ({}),
+				onSome: (grace) => ({ grace }),
+			}),
+		})
+		return yield* Serve.run({
+			_tag: "Entries",
+			entries: [
+				{
+					id: "remote-supervisor",
+					name: "@graftland/remote/runner/supervisor",
+					config: supervisor,
 				},
-			})
-			const message = yield* Schema.encodeEffect(
-				Schema.fromJsonString(
-					Schema.Struct({
-						event: Schema.Literal("Listening"),
-						port: Schema.NullOr(Schema.Int),
-					}),
-				),
-			)({
-				event: "Listening",
-				port:
-					server.address._tag === "UnixPathAddress"
-						? null
-						: server.address.port,
-			})
-			yield* Console.log(message)
-			return yield* Fiber.join(server.server)
-		}),
+				{
+					id: "remote-auth",
+					name: "@graftland/remote/runner/auth/mtls",
+					config: { ca },
+				},
+				{
+					id: "remote-listener",
+					name: "@graftland/remote/runner/tls",
+					config: {
+						host: Option.getOrElse(options.host, () => "127.0.0.1"),
+						port: Option.getOrElse(options.port, () => 7443),
+						cert,
+						key,
+						auth: MtlsAuthenticator.key,
+					},
+				},
+			],
+		})
+	}),
 )
 const certificates = Command.make(
 	"certificates",
@@ -174,10 +219,13 @@ NodeRuntime.runMain(
 	Effect.scoped(
 		Effect.gen(function* () {
 			const context = yield* Layer.build(
-				Layer.mergeAll(
-					Layer.provideMerge(Graft.layer, NodeServices.layer),
-					Digest.layerWebCrypto,
-					SecureRandom.layerWebCrypto,
+				Layer.provideMerge(
+					Graft.layer,
+					Layer.mergeAll(
+						NodeServices.layer,
+						Digest.layerWebCrypto,
+						SecureRandom.layerWebCrypto,
+					),
 				),
 			)
 			return yield* Command.run(cli, { version: "0.0.0" }).pipe(

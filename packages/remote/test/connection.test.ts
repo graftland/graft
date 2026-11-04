@@ -1,3 +1,4 @@
+import * as LocalExecution from "../src/internal/host/local"
 import { assert, describe, it } from "@effect/vitest"
 import { NodeServices } from "@effect/platform-node"
 import { Effect, Exit, Scope } from "effect"
@@ -28,7 +29,8 @@ describe("local connection ownership", () => {
 						),
 					)
 					.pipe(Scope.provide(processScope))
-				const connection = yield* Local.connect(child, {
+				const execution = yield* LocalExecution.observe(child)
+				const connection = yield* Local.connect(execution, {
 					session: "test",
 					serve: {},
 					call: {},

@@ -1,9 +1,11 @@
 import { NodeSocket, NodeSocketServer } from "@effect/platform-node"
-import { Array, Context, Effect, Option, Redacted, String } from "effect"
+import { Effect, Option, Redacted } from "effect"
 import type { Duration } from "effect"
 import type { Socket } from "effect/socket"
 import { TLSSocket } from "node:tls"
 import { PeerAuthenticationError } from "./model"
+import { Peer } from "../../Auth"
+import { identityFromSubjectAltName } from "../auth/mtls"
 
 export interface Credentials {
 	readonly key: Redacted.Redacted<string>
@@ -19,51 +21,33 @@ export interface ConnectOptions extends ListenOptions {
 	readonly servername: string
 	readonly openTimeout?: Duration.Input
 }
-/** A dedicated CA attests the stable SAN URI used as the session namespace. */
-export class Peer extends Context.Service<Peer, string>()(
-	"@graftland/remote/internal/runner/Tls/Peer",
-) {}
 
-/** The dedicated CA supplies one graft URI and ordinary, unquoted SAN fields. */
-export const identityFromSubjectAltName = (san: string | undefined) => {
-	const uris = Array.filter(
-		String.split(san ?? "", ", "),
-		String.startsWith("URI:graft://"),
-	)
-	const [uri] = uris
-	return uris.length === 1 && uri !== undefined
-		? Effect.succeed(String.slice(4)(uri))
-		: Effect.fail(
-				PeerAuthenticationError.make({
-					detail: "The peer certificate must contain exactly one graft SAN URI",
-				}),
-			)
-}
+const authenticated = (authenticate: typeof identityFromSubjectAltName) =>
+	Effect.gen(function* () {
+		const socket = yield* Effect.serviceOption(NodeSocket.NetSocket)
+		if (Option.isNone(socket))
+			return yield* PeerAuthenticationError.make({
+				detail: "An authenticated TLS client certificate is required",
+			})
+		const raw = socket.value
+		// Own the socket before validation: a rejected SAN must close even without a reader.
+		yield* Effect.addFinalizer(() =>
+			Effect.sync(() => {
+				raw.destroy()
+			}),
+		)
+		// NetSocket is typed as net.Socket; this narrows it without a cast. TLS already authenticated the peer.
+		if (!(raw instanceof TLSSocket))
+			return yield* PeerAuthenticationError.make({
+				detail: "An authenticated TLS client certificate is required",
+			})
+		return yield* authenticate(raw.getPeerCertificate().subjectaltname)
+	})
 
-const authenticated = Effect.gen(function* () {
-	const socket = yield* Effect.serviceOption(NodeSocket.NetSocket)
-	if (Option.isNone(socket))
-		return yield* PeerAuthenticationError.make({
-			detail: "An authenticated TLS client certificate is required",
-		})
-	const raw = socket.value
-	// Own the socket before validation: a rejected SAN must close even without a reader.
-	yield* Effect.addFinalizer(() =>
-		Effect.sync(() => {
-			raw.destroy()
-		}),
-	)
-	// NetSocket is typed as net.Socket; this narrows it without a cast. TLS already authenticated the peer.
-	if (!(raw instanceof TLSSocket))
-		return yield* PeerAuthenticationError.make({
-			detail: "An authenticated TLS client certificate is required",
-		})
-	return yield* identityFromSubjectAltName(
-		raw.getPeerCertificate().subjectaltname,
-	)
-})
-
-export const listen = Effect.fnUntraced(function* (options: ListenOptions) {
+export const listen = Effect.fnUntraced(function* (
+	options: ListenOptions,
+	authenticate = identityFromSubjectAltName,
+) {
 	const server = yield* NodeSocketServer.makeTls({
 		host: options.host,
 		port: options.port,
@@ -82,7 +66,7 @@ export const listen = Effect.fnUntraced(function* (options: ListenOptions) {
 			server.run((socket) =>
 				Effect.scoped(
 					Effect.gen(function* () {
-						const peer = yield* authenticated
+						const peer = yield* authenticated(authenticate)
 						return yield* handler(socket).pipe(
 							Effect.provideService(Peer, peer),
 						)

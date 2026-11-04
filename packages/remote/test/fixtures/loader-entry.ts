@@ -9,14 +9,18 @@ const target = Effect.gen(function* () {
 	const read = (name: string) =>
 		Config.String(name).pipe(Effect.flatMap((path) => fs.readFileString(path)))
 	return Remote.runner({
-		host: yield* Config.String("RUNNER_HOST"),
-		port: yield* Config.Port("RUNNER_PORT"),
-		tls: {
+		transport: Remote.tls({
+			host: yield* Config.String("RUNNER_HOST"),
+			port: yield* Config.Port("RUNNER_PORT"),
 			servername: yield* Config.String("RUNNER_SERVERNAME"),
 			ca: yield* read("RUNNER_CA"),
-			cert: yield* read("RUNNER_CERT"),
-			key: yield* read("RUNNER_KEY").pipe(Effect.map(Redacted.make)),
-		},
+		}),
+		auth: Remote.mtls(
+			Effect.all({
+				cert: read("RUNNER_CERT"),
+				key: read("RUNNER_KEY").pipe(Effect.map(Redacted.make)),
+			}),
+		),
 	})
 })
 const entry: Plugin.Plugin = Remote.plugin(contract, {

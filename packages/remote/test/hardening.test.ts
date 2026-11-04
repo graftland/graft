@@ -1,3 +1,5 @@
+import * as LocalExecution from "../src/internal/host/local"
+import { localRuntime } from "./capabilities"
 import { SecureRandom } from "effect/crypto"
 import { AlreadyLoaded } from "../src/internal/childErrors"
 import { underlying } from "./errors"
@@ -39,7 +41,7 @@ const contractModule = new URL(
 	import.meta.url,
 ).href
 const runtime = Layer.provideMerge(
-	Graft.layer,
+	localRuntime,
 	Layer.merge(NodeServices.layer, SecureRandom.layerWebCrypto),
 )
 const setup = Effect.gen(function* () {
@@ -74,7 +76,7 @@ const spy = Effect.gen(function* () {
 		),
 	)
 	const layer = Layer.provideMerge(
-		Graft.layer,
+		localRuntime,
 		Layer.mergeAll(
 			Layer.succeed(
 				SecureRandom.SecureRandom,
@@ -287,7 +289,8 @@ describe("local remote hardening", () => {
 						),
 					)
 					.pipe(Scope.provide(processScope))
-				const transport = yield* Local.connect(child, {
+				const execution = yield* LocalExecution.observe(child)
+				const transport = yield* Local.connect(execution, {
 					session: "local",
 					serve: {},
 					call: { [endpoint]: contract.control },

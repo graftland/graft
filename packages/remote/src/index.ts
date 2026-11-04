@@ -1,5 +1,5 @@
 import { Entry } from "@graftland/loader"
-import { Plugin } from "@graftland/graft"
+import { Graft, Plugin } from "@graftland/graft"
 import {
 	Array,
 	Cause,
@@ -9,12 +9,20 @@ import {
 	Option,
 	Schema,
 	Scope,
+	Stream,
 } from "effect"
 import type { Config, Duration, PlatformError, Schedule } from "effect"
-import { ChildProcessSpawner } from "effect/process"
 import { SecureRandom } from "effect/crypto"
-import { local, runner, type Target, type Runner } from "./Targets"
-export { local, runner }
+import {
+	local,
+	runner,
+	tls,
+	mtls,
+	dependencies,
+	type Target,
+	type Runner,
+} from "./Targets"
+export { local, runner, tls, mtls }
 import * as Connection from "./internal/runner/Connection"
 import * as Services from "./internal/services"
 import { Instance } from "./Instance"
@@ -27,12 +35,14 @@ export { Contract }
 export { RemoteTerminationUnconfirmed } from "./internal/runner/model"
 export { RemoteError, RemoteWithdrawn, MissingInstance } from "./Errors"
 
-export interface Options {
+export interface Options<
+	D extends ReadonlyArray<Plugin.Dependency> = readonly [],
+> {
 	/** A configured runner is evaluated on activation, with access to certificate files. */
 	readonly target?:
-		| Target
+		| Target<D>
 		| Effect.Effect<
-				Runner,
+				Runner<D>,
 				Config.ConfigError | PlatformError.PlatformError,
 				FileSystem.FileSystem
 		  >
@@ -43,7 +53,7 @@ export interface Options {
 }
 
 /** One owned execution per activation, with explicitly mapped services. */
-export const plugin = <
+const executionPlugin = <
 	S extends Schema.Top & {
 		readonly Encoded: Schema.Json
 		readonly DecodingServices: never
@@ -53,9 +63,11 @@ export const plugin = <
 		readonly DecodingServices: never
 		readonly EncodingServices: never
 	},
+	D extends ReadonlyArray<Plugin.Dependency>,
 >(
 	contract: Contract.Contract<S, E>,
-	options: Options,
+	options: Options<D>,
+	configured: Target<D>,
 ): Plugin.Plugin<
 	S["Encoded"],
 	S["Encoded"],
@@ -69,10 +81,7 @@ export const plugin = <
 		name: contract.name,
 		inject: [
 			SecureRandom.SecureRandom,
-			...(Effect.isEffect(options.target) ? [FileSystem.FileSystem] : []),
-			...(!Effect.isEffect(options.target) && options.target?._tag !== "Runner"
-				? [ChildProcessSpawner.ChildProcessSpawner]
-				: []),
+			...dependencies(configured),
 			...Array.map(contract.inject, (service) => service.key),
 		],
 		config: Schema.toEncoded(contract.config),
@@ -82,7 +91,7 @@ export const plugin = <
 				const random = yield* SecureRandom.SecureRandom
 				const session = yield* random.uuidV4()
 				yield* Schema.decodeEffect(contract.config)(input)
-				const target = yield* resolveTarget(options.target)
+				const target = yield* resolveTarget(configured)
 				const active = yield* Connection.acquire(
 					target,
 					options.contractModule,
@@ -132,17 +141,10 @@ const publicError = <E extends Schema.Top>(
 			? error
 			: RemoteError.make({ cause: Cause.fail(error) })
 
-const resolveTarget = (
-	configured: Options["target"],
-): Effect.Effect<
-	Connection.Target,
-	MissingInstance | Config.ConfigError | PlatformError.PlatformError,
-	FileSystem.FileSystem
-> =>
+const resolveTarget = <D extends ReadonlyArray<Plugin.Dependency>>(
+	target: Target<D>,
+): Effect.Effect<Connection.Target<D>, MissingInstance> =>
 	Effect.gen(function* () {
-		const target = Effect.isEffect(configured)
-			? yield* configured
-			: (configured ?? local())
 		if (target._tag === "Local") return target
 		const instance =
 			target.instance === undefined
@@ -151,3 +153,63 @@ const resolveTarget = (
 		if (Option.isNone(instance)) return yield* MissingInstance.make({})
 		return { ...target, instance: instance.value }
 	})
+
+export const plugin = <
+	S extends Schema.Top & {
+		readonly Encoded: Schema.Json
+		readonly DecodingServices: never
+		readonly EncodingServices: never
+	},
+	E extends Schema.Top & {
+		readonly DecodingServices: never
+		readonly EncodingServices: never
+	},
+	const D extends ReadonlyArray<Plugin.Dependency> = readonly [],
+>(
+	contract: Contract.Contract<S, E>,
+	options: Options<D>,
+): Plugin.Plugin<
+	S["Encoded"],
+	S["Encoded"],
+	| E["Type"]
+	| Contract.UndeclaredFailure
+	| RemoteError
+	| RemoteWithdrawn
+	| MissingInstance
+> => {
+	const target = options.target ?? local()
+	if (!Effect.isEffect(target))
+		return executionPlugin(contract, options, target)
+	return Plugin.make({
+		name: contract.name,
+		config: Schema.toEncoded(contract.config),
+		inject: [FileSystem.FileSystem],
+		retry: options.retry,
+		apply: (input) =>
+			Effect.gen(function* () {
+				const configured = yield* target.pipe(
+					Effect.mapError((error) => publicError(contract.error, error)),
+				)
+				const child = yield* Graft.plugin(
+					executionPlugin(
+						contract,
+						{ ...options, retry: undefined },
+						configured,
+					),
+					input,
+				)
+				yield* child.await
+				// The child owns the resolved dependencies; failures still belong to this proxy.
+				yield* Plugin.fork(
+					child.state.pipe(
+						Stream.runForEach((state) =>
+							state._tag === "Failed"
+								? Effect.failCause(state.cause)
+								: Effect.void,
+						),
+					),
+				)
+				return () => Effect.succeed(false)
+			}),
+	})
+}

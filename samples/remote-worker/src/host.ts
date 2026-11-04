@@ -1,3 +1,4 @@
+import local from "@graftland/remote/host/local"
 import { Graft, Plugin } from "@graftland/graft"
 import * as Remote from "@graftland/remote"
 import { Deferred, Effect } from "effect"
@@ -6,6 +7,8 @@ import { contract, Formatter, type Reply } from "./contract"
 export const formatInChild = Effect.fn("formatInChild")(function* (
 	options: Remote.Options,
 ) {
+	const transport = yield* Graft.plugin(local)
+	yield* transport.await
 	const result = yield* Deferred.make<typeof Reply.Type>()
 	const proxy = yield* Graft.plugin(Remote.plugin(contract, options), {
 		prefix: "Worker: ",

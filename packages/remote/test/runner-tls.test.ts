@@ -1,3 +1,5 @@
+import { Peer } from "../src/Auth"
+import { identityFromSubjectAltName } from "../src/internal/auth/mtls"
 import { assert, describe, it } from "@effect/vitest"
 import { NodeServices, NodeSocket } from "@effect/platform-node"
 import { Cause, Deferred, Effect, Exit, FileSystem, Redacted } from "effect"
@@ -39,7 +41,7 @@ const server = Effect.gen(function* () {
 describe("runner mutual TLS", () => {
 	it.effect("reads the unique graft URI from a dedicated CA certificate", () =>
 		Effect.gen(function* () {
-			const valid = yield* Tls.identityFromSubjectAltName(
+			const valid = yield* identityFromSubjectAltName(
 				"DNS:localhost, URI:graft://real",
 			)
 			assert.equal(valid, "graft://real")
@@ -48,7 +50,7 @@ describe("runner mutual TLS", () => {
 				"DNS:localhost",
 				"URI:graft://one, URI:graft://two",
 			]) {
-				const result = yield* Effect.exit(Tls.identityFromSubjectAltName(san))
+				const result = yield* Effect.exit(identityFromSubjectAltName(san))
 				assert.isTrue(Exit.isFailure(result), String(san))
 			}
 		}),
@@ -63,7 +65,7 @@ describe("runner mutual TLS", () => {
 				yield* listener
 					.run((socket) =>
 						Effect.gen(function* () {
-							const authenticated = yield* Tls.Peer
+							const authenticated = yield* Peer
 							yield* Deferred.succeed(identity, authenticated)
 							const peer = yield* Multiplex.fromSocket(socket)
 							const input = yield* peer.take(1)
@@ -225,7 +227,7 @@ describe("runner mutual TLS", () => {
 				yield* listener
 					.run((socket) =>
 						Effect.gen(function* () {
-							const identity = yield* Tls.Peer
+							const identity = yield* Peer
 							const peer = yield* Multiplex.fromSocket(socket)
 							yield* peer.send(0, bytes(identity))
 							return yield* Effect.never

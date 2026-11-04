@@ -28,7 +28,14 @@ export default async function setup() {
 	})
 	await build({
 		...common,
-		entry: ["bin", "watchdog"].map(
+		root: new URL("../../../packages/remote/src", import.meta.url).pathname,
+		entry: [
+			"bin",
+			"watchdog",
+			"runner/supervisor",
+			"runner/tls",
+			"runner/auth/mtls",
+		].map(
 			(name) =>
 				new URL(`../../../packages/remote/src/${name}.ts`, import.meta.url)
 					.pathname,

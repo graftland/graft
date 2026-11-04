@@ -1,0 +1,174 @@
+import { assert, describe, it } from "@effect/vitest"
+import { NodeServices, NodeSocketServer } from "@effect/platform-node"
+import { Graft, Plugin } from "@graftland/graft"
+import {
+	Deferred,
+	Effect,
+	Exit,
+	FileSystem,
+	Layer,
+	Option,
+	Redacted,
+	Stream,
+} from "effect"
+import { Digest, SecureRandom } from "effect/crypto"
+import { inject } from "vitest"
+import * as Remote from "../src/index"
+import { Supervisor } from "../src/Supervisor"
+import { LocalTransport } from "../src/Transport"
+import { MtlsAuthenticator } from "../src/Auth"
+import local from "../src/host/local"
+import supervisor from "../src/runner/supervisor"
+import mtls from "../src/runner/auth/mtls"
+import tls from "../src/runner/tls"
+import * as Lock from "../src/internal/runner/Lock"
+import * as Tls from "../src/internal/runner/Tls"
+import { contract } from "./fixtures/contract"
+
+const runtime = Layer.provideMerge(
+	Graft.layer,
+	Layer.mergeAll(
+		NodeServices.layer,
+		SecureRandom.layerWebCrypto,
+		Digest.layerWebCrypto,
+	),
+)
+const capture = Effect.gen(function* () {
+	const result = yield* Deferred.make<typeof Supervisor.Service>()
+	const consumer = yield* Graft.plugin(
+		Plugin.make({
+			name: "supervisor-observer",
+			inject: [Supervisor],
+			apply: () =>
+				Effect.flatMap(Supervisor, (value) =>
+					Deferred.succeed(result, value),
+				).pipe(Effect.asVoid),
+		}),
+	)
+	yield* consumer.await
+	return yield* Deferred.await(result)
+})
+const availablePort = NodeSocketServer.make({
+	host: "127.0.0.1",
+	port: 0,
+}).pipe(
+	Effect.map((server) => {
+		assert.notEqual(server.address._tag, "UnixPathAddress")
+		return server.address._tag === "UnixPathAddress" ? 0 : server.address.port
+	}),
+	Effect.scoped,
+)
+const connection = Effect.fnUntraced(function* (port: number) {
+	const fs = yield* FileSystem.FileSystem
+	const root = inject("remoteTls")
+	const key = yield* fs.readFileString(root + "/client.key")
+	const socket = yield* Tls.connect({
+		host: "127.0.0.1",
+		port,
+		servername: "localhost",
+		tls: {
+			ca: yield* fs.readFileString(root + "/ca.crt"),
+			cert: yield* fs.readFileString(root + "/client.crt"),
+			key: Redacted.make(key),
+		},
+	})
+	yield* socket.reader
+})
+
+describe("remote capability plugins", () => {
+	it.live("withdraws the proxy before its local transport is released", () =>
+		Effect.gen(function* () {
+			const fs = yield* FileSystem.FileSystem
+			const directory = yield* fs.makeTempDirectoryScoped()
+			yield* fs.writeFileString(directory + "/release", "release")
+			const provider = yield* Graft.plugin(local)
+			yield* provider.await
+			const proxy = yield* Graft.plugin(
+				Remote.plugin(contract, {
+					contractModule: new URL(
+						"../.cache/integration/contract.js",
+						import.meta.url,
+					).href,
+				}),
+				{ directory, mode: "normal", value: 1 },
+			)
+			yield* proxy.await
+			const active = yield* Stream.runHead(proxy.state)
+			assert.equal(Option.getOrThrow(active)._tag, "Active")
+			yield* provider.dispose
+			const state = yield* proxy.state.pipe(
+				Stream.filter((state) => state._tag === "Pending"),
+				Stream.runHead,
+			)
+			assert.deepEqual(Option.getOrThrow(state), {
+				_tag: "Pending",
+				missing: [LocalTransport.key],
+			})
+		}).pipe(Effect.scoped, Effect.provide(runtime)),
+	)
+	it.live(
+		"closes a TLS listener when authentication is withdrawn without restarting the supervisor",
+		() =>
+			Effect.gen(function* () {
+				const fs = yield* FileSystem.FileSystem
+				const directory = yield* fs.makeTempDirectoryScoped()
+				const owner = yield* Graft.plugin(supervisor, {
+					root: inject("remoteRoot"),
+					state: directory,
+				})
+				yield* owner.await
+				const before = yield* capture
+				const auth = yield* Graft.plugin(mtls, {
+					ca: inject("remoteTls") + "/ca.crt",
+				})
+				yield* auth.await
+				const port = yield* availablePort
+				const listener = yield* Graft.plugin(tls, {
+					host: "127.0.0.1",
+					port,
+					cert: inject("remoteTls") + "/server.crt",
+					key: inject("remoteTls") + "/server.key",
+					auth: MtlsAuthenticator.key,
+				})
+				yield* listener.await
+				yield* connection(port).pipe(Effect.scoped)
+				yield* auth.dispose
+				const state = yield* listener.state.pipe(
+					Stream.filter((state) => state._tag === "Pending"),
+					Stream.runHead,
+				)
+				assert.deepEqual(Option.getOrThrow(state), {
+					_tag: "Pending",
+					missing: [MtlsAuthenticator.key],
+				})
+				const refused = yield* connection(port).pipe(Effect.scoped, Effect.exit)
+				assert.isTrue(Exit.isFailure(refused))
+				const active = yield* Stream.runHead(owner.state)
+				assert.equal(Option.getOrThrow(active)._tag, "Active")
+				const after = yield* capture
+				assert.strictEqual(after, before)
+			}).pipe(Effect.scoped, Effect.provide(runtime)),
+	)
+	it.live("holds the directory lock until the supervisor is withdrawn", () =>
+		Effect.gen(function* () {
+			const fs = yield* FileSystem.FileSystem
+			const directory = yield* fs.makeTempDirectoryScoped()
+			const owner = yield* Graft.plugin(supervisor, {
+				root: inject("remoteRoot"),
+				state: directory,
+			})
+			yield* owner.await
+			const occupied = yield* Lock.acquire(directory).pipe(
+				Effect.scoped,
+				Effect.exit,
+			)
+			assert.isTrue(Exit.isFailure(occupied))
+			yield* owner.dispose
+			const released = yield* Lock.acquire(directory).pipe(
+				Effect.scoped,
+				Effect.exit,
+			)
+			assert.isTrue(Exit.isSuccess(released))
+		}).pipe(Effect.scoped, Effect.provide(runtime)),
+	)
+})

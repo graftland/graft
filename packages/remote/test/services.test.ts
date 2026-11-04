@@ -1,3 +1,4 @@
+import { localRuntime } from "./capabilities"
 import { SecureRandom } from "effect/crypto"
 import { underlying } from "./errors"
 import { assert, describe, it } from "@effect/vitest"
@@ -34,7 +35,7 @@ const run = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
 		Effect.scoped,
 		Effect.provide(
 			Layer.provideMerge(
-				Graft.layer,
+				localRuntime,
 				Layer.merge(NodeServices.layer, SecureRandom.layerWebCrypto),
 			),
 		),

@@ -117,5 +117,3 @@ export const run = (
 			)
 		}),
 	)
-
-export { serve } from "./internal/runner/Server"

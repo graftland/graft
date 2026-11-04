@@ -1,3 +1,5 @@
+import tls from "@graftland/remote/host/tls"
+import mtls from "@graftland/remote/host/auth/mtls"
 /**
  * The host. It loads graft.yml, exports two invoices across two host restarts,
  * and shows the ledger turning away a write from the replaced generation.
@@ -32,6 +34,8 @@ export const layer = (environment: Readonly<Record<string, string>>) =>
 			NodeServices.layer,
 			SecureRandom.layerWebCrypto,
 			ModuleResolver.fromRecord({
+				"@graftland/remote/host/tls": tls,
+				"@graftland/remote/host/auth/mtls": mtls,
 				"./src/ledger.ts": ledger,
 				"./src/exporter.ts": exporter,
 			}),

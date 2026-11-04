@@ -1,3 +1,4 @@
+import { inject } from "vitest"
 import { assert, describe, it } from "@effect/vitest"
 import { NodeServices } from "@effect/platform-node"
 import { Effect, FileSystem, Stream, String } from "effect"
@@ -63,6 +64,61 @@ describe("remote command line", () => {
 				}
 			}).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 	)
+	it.live("rejects mixing a runner config file with shorthand flags", () =>
+		Effect.gen(function* () {
+			const result = yield* invoke([
+				"serve",
+				"--config",
+				"missing.yml",
+				"--host",
+				"127.0.0.1",
+			])
+			assert.notEqual(result.code, 0)
+			assert.include(
+				result.stdout + result.stderr,
+				"--config cannot be combined",
+			)
+			assert.include(result.stdout + result.stderr, "ERROR")
+			assert.notInclude(result.stdout + result.stderr, "ENOENT")
+		}).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+	)
+
+	it.live(
+		"reports listener startup failures before claiming a configured runner is ready",
+		() =>
+			Effect.gen(function* () {
+				const fs = yield* FileSystem.FileSystem
+				const directory = yield* fs.makeTempDirectoryScoped()
+				const file = directory + "/runner.yml"
+				yield* fs.writeFileString(
+					file,
+					`
+- id: supervisor
+  name: '@graftland/remote/runner/supervisor'
+  config: { root: '${inject("remoteRoot")}', state: '${directory}/state' }
+- id: auth
+  name: '@graftland/remote/runner/auth/mtls'
+  config: { ca: '${inject("remoteTls")}/ca.crt' }
+- id: listener
+  name: '@graftland/remote/runner/tls'
+  config:
+    host: 127.0.0.1
+    port: 0
+    cert: missing.crt
+    key: '${inject("remoteTls")}/server.key'
+    auth: '@graftland/remote/Auth/MtlsAuthenticator'
+`,
+				)
+				const result = yield* invoke(["serve", "--config", file])
+				assert.notEqual(result.code, 0)
+				assert.include(
+					result.stdout + result.stderr,
+					directory + "/missing.crt",
+				)
+				assert.notInclude(result.stdout, '"event":"Listening"')
+			}).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+	)
+
 	it.live("describes the child and serve subcommands", () =>
 		Effect.gen(function* () {
 			const result = yield* invoke(["--help"])

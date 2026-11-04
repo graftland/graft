@@ -1,4 +1,6 @@
-import * as FailureGroup from "../FailureGroup"
+import type { Plugin } from "@graftland/graft"
+import { LocalTransport } from "../../Transport"
+import * as RunnerConnection from "../host/runner"
 import {
 	Array,
 	Cause,
@@ -6,13 +8,10 @@ import {
 	Effect,
 	Duration,
 	Exit,
-	Fiber,
 	Option,
-	Ref,
 	Scope,
 } from "effect"
-import { ChildProcess, ChildProcessSpawner } from "effect/process"
-import { RpcClient, type RpcClientError } from "effect/rpc"
+import type { RpcClientError } from "effect/rpc"
 import type { Schema } from "effect"
 import type { RemoteTerminationUnconfirmed } from "./model"
 import type {
@@ -27,15 +26,12 @@ import {
 import { cleanupCause } from "../cleanup"
 import * as Port from "../port"
 import * as LocalProcess from "./Local"
-import * as Multiplex from "./Multiplex"
-import * as Packages from "./Packages"
-import * as Tls from "./Tls"
 import * as Wire from "./Wire"
-import { awaitTermination, defaults, childOf } from "./model"
-import { command } from "./command"
 
-type RunnerTarget = RunnerOptions & { readonly instance: string }
-export type Target = LocalTarget | RunnerTarget
+type RunnerTarget<D extends ReadonlyArray<Plugin.Dependency>> =
+	RunnerOptions<D> & { readonly instance: string }
+export type Target<D extends ReadonlyArray<Plugin.Dependency> = readonly []> =
+	LocalTarget | RunnerTarget<D>
 
 type Peer = Port.Port
 export interface Connected {
@@ -66,202 +62,25 @@ export class Connection extends Context.Service<Connection, Connected>()(
 ) {}
 const connected = Connection.of
 
-export const Local = (
+const Local = Effect.fnUntraced(function* (
 	target: LocalTarget,
 	contractModule: string,
 	options: Port.Options,
 	resources: Scope.Scope,
 	processScope: Scope.Scope,
-) =>
-	Effect.gen(function* () {
-		const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
-		const argv = yield* command(target.command)
-		const child = yield* spawner
-			.spawn(
-				ChildProcess.make(
-					argv[0],
-					[...Array.drop(argv, 1), contractModule, options.session],
-					{
-						stdin: "pipe",
-						stdout: "pipe",
-						stderr: "pipe",
-						additionalFds: { fd3: { type: "output" } },
-						forceKillAfter: "1 second",
-					},
-				),
-			)
-			.pipe(Scope.provide(processScope))
-		return yield* LocalProcess.connect(child, options).pipe(
-			Scope.provide(resources),
-		)
-	})
-
-export const Runner = (
-	target: RunnerTarget,
-	contractModule: string,
-	options: Port.Options,
-	resources: Scope.Scope,
-	processScope: Scope.Scope,
-) =>
-	Effect.gen(function* () {
-		const instance = target.instance
-
-		const margin = Duration.toMillis(target.margin ?? "5 seconds")
-		const socket = yield* Tls.connect({
+) {
+	const transport = yield* LocalTransport
+	const execution = yield* transport
+		.start({
 			...target,
-			servername: target.tls.servername,
-		}).pipe(Scope.provide(processScope))
-		const mux = yield* Multiplex.fromSocket(socket).pipe(
-			Scope.provide(resources),
-		)
-		const control = yield* Port.make(Wire.channel(mux, 0), {
-			session: "session-v1",
-			serve: {},
-			call: { session: Wire.Session },
-		}).pipe(Scope.provide(resources))
-		const session = yield* RpcClient.make(Wire.Session).pipe(
-			Effect.provideService(
-				RpcClient.Protocol,
-				control.clientProtocol("session"),
-			),
-			Scope.provide(resources),
-		)
-		const expectedGeneration = yield* session.HighWater({ instance })
-		const record = yield* session.Open({
-			instance,
-			expectedGeneration,
-			requestId: options.session,
-			limits: defaults,
-			...(target.lease === undefined
-				? {}
-				: {
-						leaseMillis: Duration.toMillis(target.lease),
-					}),
+			contractModule,
+			session: options.session,
 		})
-		const failures = yield* FailureGroup.make<TransportError>().pipe(
-			Scope.provide(resources),
-		)
-		const finishStarted = yield* Ref.make(false)
-		const terminate = yield* Effect.cached(
-			Effect.gen(function* () {
-				yield* Ref.set(finishStarted, true)
-				yield* failures.close
-				const result = yield* awaitTermination(
-					record.handle,
-					session.Dispose(record.handle),
-					record.leaseMillis,
-					margin,
-				)
-				const { code, signal, stderr, cause } = result.exit
-				yield* Effect.logInfo("Remote execution terminated", {
-					code,
-					...(signal === null ? {} : { signal }),
-					...(stderr === undefined || stderr === "" ? {} : { stderr }),
-					...(cause === undefined || cause.reasons.length === 0
-						? {}
-						: { cause }),
-				}).pipe(
-					Effect.annotateLogs({
-						"remote.instance": record.handle.key.instance,
-						"remote.generation": record.handle.generation,
-						"remote.termination": result.kind,
-					}),
-				)
-				if (result.cause.reasons.length > 0)
-					return yield* Effect.failCause(cleanupCause(result.cause))
-			}),
-		)
-		yield* Scope.addFinalizer(
-			processScope,
-			Effect.gen(function* () {
-				if (!(yield* Ref.get(finishStarted)))
-					yield* terminate.pipe(
-						Effect.catchCause((cause) => Effect.failCause(cleanupCause(cause))),
-					)
-			}),
-		)
-		const renewed = yield* Effect.forever(
-			Effect.sleep(record.leaseMillis / 3).pipe(
-				Effect.andThen(session.Renew(record.handle)),
-			),
-		).pipe(Effect.forkIn(resources))
-		const code = yield* session.Load({
-			handle: record.handle,
-			specifier: contractModule,
-			digest: target.expect?.digest !== undefined,
-		})
-		yield* Packages.verify(code, target.expect)
-		const loaded = yield* session.Status(record.handle)
-		const peer = yield* Port.make(Wire.channel(mux, 1), {
-			...options,
-			session: record.handle.token,
-			limits: record.limits,
-		}).pipe(Scope.provide(resources))
-		const report = (cause: Cause.Cause<unknown>) =>
-			failures.failCause(
-				Cause.map(cause, (error) =>
-					TransportError.make({ cause: Cause.fail(error) }),
-				),
-			)
-		yield* failures.await.pipe(
-			Effect.catchCause((cause) =>
-				Cause.hasInterruptsOnly(cause)
-					? Effect.void
-					: peer.fail(TransportError.make({ cause })),
-			),
-			Effect.forkIn(resources),
-		)
-
-		yield* failures.run(
-			Fiber.join(renewed).pipe(
-				Effect.catchCause((cause) =>
-					Effect.gen(function* () {
-						if (Cause.hasInterruptsOnly(cause)) return
-						const status = yield* Effect.exit(
-							session.Status(record.handle).pipe(Effect.timeout("5 seconds")),
-						)
-						if (Exit.isSuccess(status) && status.value.phase === "Stopped") {
-							const exit = status.value.termination.exit
-							yield* report(
-								Cause.combine(
-									cause,
-									Cause.fail(
-										ProcessExited.make({
-											pid: Option.map(childOf(loaded), (child) => child.pid),
-											exitCode: exit.code,
-											stderr: exit.stderr ?? "",
-											statusCause: exit.cause ?? Cause.empty,
-										}),
-									),
-								),
-							)
-						} else
-							yield* report(
-								Exit.isFailure(status)
-									? Cause.combine(cause, status.cause)
-									: cause,
-							)
-					}),
-				),
-			),
-		)
-		return connected({
-			resources,
-			pid: Option.map(childOf(loaded), (child) => child.pid),
-			diagnostics: failures.cause,
-			terminate: () =>
-				Effect.gen(function* () {
-					// No renewal may extend a disconnected session while termination waits out its lease.
-					yield* Fiber.interrupt(renewed)
-					yield* terminate
-				}),
-			transport: {
-				...peer,
-				failure: peer.await,
-				report,
-			},
-		})
-	})
+		.pipe(Scope.provide(processScope))
+	return yield* LocalProcess.connect(execution, options).pipe(
+		Scope.provide(resources),
+	)
+})
 
 const reason = <A, E>(exit: Exit.Exit<A, E>) =>
 	Exit.isFailure(exit) ? exit.cause : Cause.empty
@@ -284,8 +103,15 @@ const scopes = Effect.acquireRelease(
 )
 
 /** Setup supplies a concrete control lifecycle; release never reads a later-installed effect. */
-export const acquire = <A, E, R, D, DR>(
-	target: Target,
+export const acquire = <
+	A,
+	E,
+	R,
+	D,
+	DR,
+	Deps extends ReadonlyArray<Plugin.Dependency>,
+>(
+	target: Target<Deps>,
 	contractModule: string,
 	options: Port.Options,
 	setup: Effect.Effect<A, E, R | Connection>,
@@ -304,7 +130,7 @@ export const acquire = <A, E, R, D, DR>(
 							owned.resources,
 							owned.process,
 						).pipe(Effect.map(connected))
-					: yield* Runner(
+					: yield* RunnerConnection.connect(
 							target,
 							contractModule,
 							options,

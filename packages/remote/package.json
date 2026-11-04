@@ -10,10 +10,46 @@
 			"source": "./src/index.ts",
 			"default": "./dist/index.js"
 		},
+		"./Auth": {
+			"source": "./src/Auth.ts",
+			"default": "./dist/Auth.js"
+		},
 		"./bin": "./dist/bin.js",
+		"./host/auth/mtls": {
+			"source": "./src/host/auth/mtls.ts",
+			"default": "./dist/host/auth/mtls.js"
+		},
+		"./host/local": {
+			"source": "./src/host/local.ts",
+			"default": "./dist/host/local.js"
+		},
+		"./host/tls": {
+			"source": "./src/host/tls.ts",
+			"default": "./dist/host/tls.js"
+		},
 		"./Runner": {
 			"source": "./src/Runner.ts",
 			"default": "./dist/Runner.js"
+		},
+		"./runner/auth/mtls": {
+			"source": "./src/runner/auth/mtls.ts",
+			"default": "./dist/runner/auth/mtls.js"
+		},
+		"./runner/supervisor": {
+			"source": "./src/runner/supervisor.ts",
+			"default": "./dist/runner/supervisor.js"
+		},
+		"./runner/tls": {
+			"source": "./src/runner/tls.ts",
+			"default": "./dist/runner/tls.js"
+		},
+		"./Supervisor": {
+			"source": "./src/Supervisor.ts",
+			"default": "./dist/Supervisor.js"
+		},
+		"./Transport": {
+			"source": "./src/Transport.ts",
+			"default": "./dist/Transport.js"
 		},
 		"./watchdog": "./dist/watchdog.js",
 		"./package.json": "./package.json"
@@ -40,8 +76,17 @@
 	"publishConfig": {
 		"exports": {
 			".": "./dist/index.js",
+			"./Auth": "./dist/Auth.js",
 			"./bin": "./dist/bin.js",
+			"./host/auth/mtls": "./dist/host/auth/mtls.js",
+			"./host/local": "./dist/host/local.js",
+			"./host/tls": "./dist/host/tls.js",
 			"./Runner": "./dist/Runner.js",
+			"./runner/auth/mtls": "./dist/runner/auth/mtls.js",
+			"./runner/supervisor": "./dist/runner/supervisor.js",
+			"./runner/tls": "./dist/runner/tls.js",
+			"./Supervisor": "./dist/Supervisor.js",
+			"./Transport": "./dist/Transport.js",
 			"./watchdog": "./dist/watchdog.js",
 			"./package.json": "./package.json"
 		}

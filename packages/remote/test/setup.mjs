@@ -16,10 +16,18 @@ const common = {
 export default async function setup(project) {
 	await build({
 		...common,
-		entry: ["bin", "watchdog"].map(
-			(name) => new URL(`../src/${name}.ts`, import.meta.url).pathname,
-		),
+		entry: [
+			"bin",
+			"watchdog",
+			"host/local",
+			"host/tls",
+			"host/auth/mtls",
+			"runner/supervisor",
+			"runner/tls",
+			"runner/auth/mtls",
+		].map((name) => new URL(`../src/${name}.ts`, import.meta.url).pathname),
 		outDir: new URL("../dist", import.meta.url).pathname,
+		root: new URL("../src", import.meta.url).pathname,
 		clean: false,
 	})
 	await build({

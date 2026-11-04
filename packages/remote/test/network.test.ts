@@ -1,3 +1,4 @@
+import { runnerRuntime } from "./capabilities"
 import { SecureRandom } from "effect/crypto"
 import { Entry, Include, Loader, ModuleResolver } from "@graftland/loader"
 import { assert, describe, it } from "@effect/vitest"
@@ -18,6 +19,7 @@ import {
 	Layer,
 	Redacted,
 	Ref,
+	Queue,
 	Schema,
 	Schedule,
 	Stream,
@@ -55,10 +57,10 @@ const credentials = (name: string) =>
 		}
 	})
 const runtime = Layer.provideMerge(
-	Graft.layer,
+	runnerRuntime,
 	Layer.merge(NodeServices.layer, SecureRandom.layerWebCrypto),
 )
-const startRunner = (state: string, lease = 15000) =>
+const startRunner = (state: string, lease = 15000, config?: string) =>
 	Effect.gen(function* () {
 		const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
 		const certs = inject("remoteTls")
@@ -66,28 +68,30 @@ const startRunner = (state: string, lease = 15000) =>
 		const child = yield* spawner.spawn(
 			ChildProcess.make(
 				argv[0],
-				[
-					argv[1]!,
-					"serve",
-					"--host",
-					"127.0.0.1",
-					"--port",
-					"0",
-					"--state",
-					state,
-					"--root",
-					inject("remoteRoot"),
-					"--cert",
-					certs + "/server.crt",
-					"--key",
-					certs + "/server.key",
-					"--ca",
-					certs + "/ca.crt",
-					"--lease",
-					`${lease} millis`,
-					"--grace",
-					"5 seconds",
-				],
+				config === undefined
+					? [
+							...Array.drop(argv, 1),
+							"serve",
+							"--host",
+							"127.0.0.1",
+							"--port",
+							"0",
+							"--state",
+							state,
+							"--root",
+							inject("remoteRoot"),
+							"--cert",
+							certs + "/server.crt",
+							"--key",
+							certs + "/server.key",
+							"--ca",
+							certs + "/ca.crt",
+							"--lease",
+							`${lease} millis`,
+							"--grace",
+							"5 seconds",
+						]
+					: [...Array.drop(argv, 1), "serve", "--config", config],
 				{
 					stdin: "ignore",
 					stdout: "pipe",
@@ -97,7 +101,7 @@ const startRunner = (state: string, lease = 15000) =>
 			),
 		)
 		const readers = yield* FiberSet.make<void, never>()
-		const ready = yield* Deferred.make<number>()
+		const ready = yield* Queue.unbounded<number>()
 		const stderr = yield* Ref.make("")
 		const stdout = yield* Ref.make("")
 		yield* child.stderr.pipe(
@@ -127,9 +131,7 @@ const startRunner = (state: string, lease = 15000) =>
 								}),
 							),
 						)(line).pipe(
-							Effect.flatMap((message) =>
-								Deferred.succeed(ready, message.port),
-							),
+							Effect.flatMap((message) => Queue.offer(ready, message.port)),
 						)
 					: Effect.void,
 			),
@@ -138,7 +140,7 @@ const startRunner = (state: string, lease = 15000) =>
 			FiberSet.run(readers),
 		)
 		const port = yield* Effect.raceFirst(
-			Deferred.await(ready),
+			Queue.take(ready),
 			child.exitCode.pipe(
 				Effect.flatMap((code) =>
 					Ref.get(stderr).pipe(
@@ -161,6 +163,7 @@ const startRunner = (state: string, lease = 15000) =>
 		return {
 			child,
 			port,
+			nextPort: Queue.take(ready),
 			stderr,
 			stdout,
 			outputEnded: FiberSet.awaitEmpty(readers),
@@ -180,11 +183,16 @@ const setup = (lease = 15000, partitionable = false) =>
 		)
 		yield* provider.await
 		const proxySocket = partitionable ? yield* tcpProxy(daemon.port) : undefined
+		const certificate = yield* credentials("client")
 		const target = Remote.runner({
 			instance: "worker",
-			host: "127.0.0.1",
-			port: proxySocket?.port ?? daemon.port,
-			tls: yield* credentials("client"),
+			transport: Remote.tls({
+				host: "127.0.0.1",
+				port: proxySocket?.port ?? daemon.port,
+				ca: certificate.ca,
+				servername: certificate.servername,
+			}),
+			auth: Remote.mtls(Effect.succeed(certificate)),
 			lease,
 			margin: "1 second",
 		})
@@ -339,12 +347,113 @@ const loadYamlHost = (directory: string, port: number) => {
 		return { reply, entry }
 	}).pipe(
 		Effect.scoped,
-		Effect.provide(Layer.provideMerge(Layer.fresh(Graft.layer), environment)),
+		Effect.provide(Layer.provideMerge(Layer.fresh(runnerRuntime), environment)),
 		Effect.timeout("30 seconds"),
 	)
 }
 
+const runnerYaml = (state: string, listeners: number) => `
+- id: supervisor
+  name: '@graftland/remote/runner/supervisor'
+  config:
+    root: ${inject("remoteRoot")}
+    state: ${state}
+- id: mtls
+  name: '@graftland/remote/runner/auth/mtls'
+  config:
+    ca: ${inject("remoteTls")}/ca.crt
+${Array.join(
+	Array.map(
+		Array.range(1, listeners),
+		(index) => `- id: listener-${index}
+  name: '@graftland/remote/runner/tls'
+  config:
+    host: 127.0.0.1
+    port: 0
+    cert: ${inject("remoteTls")}/server.crt
+    key: ${inject("remoteTls")}/server.key
+    auth: '@graftland/remote/Auth/MtlsAuthenticator'
+`,
+	),
+	"",
+)}`
+
 describe("network runner end to end", () => {
+	it.live(
+		"serves the same session protocol from YAML and shorthand flags",
+		() =>
+			Effect.gen(function* () {
+				const fs = yield* FileSystem.FileSystem
+				const directory = yield* fs.makeTempDirectoryScoped()
+				const file = directory + "/runner.yml"
+				yield* fs.writeFileString(
+					file,
+					runnerYaml(directory + "/yaml-state", 1),
+				)
+				const shorthand = yield* startRunner(directory + "/flag-state")
+				const configured = yield* startRunner(
+					directory + "/yaml-state",
+					15000,
+					file,
+				)
+				for (const port of [shorthand.port, configured.port]) {
+					const client = yield* control(port)
+					const highWater = yield* client.HighWater({ instance: "equivalent" })
+					assert.isNull(highWater)
+					const opened = yield* client.Open({
+						instance: "equivalent",
+						requestId: "open",
+						expectedGeneration: null,
+						limits: Model.defaults,
+					})
+					assert.equal(opened.handle.generation, 1)
+					assert.equal(opened.handle.key.identity, "graft://test-host")
+					assert.equal((yield* client.Dispose(opened.handle)).kind, "Exited")
+				}
+			}).pipe(Effect.scoped, Effect.provide(runtime)),
+		30000,
+	)
+
+	it.live(
+		"shares the instance namespace across two TLS listeners",
+		() =>
+			Effect.gen(function* () {
+				const fs = yield* FileSystem.FileSystem
+				const directory = yield* fs.makeTempDirectoryScoped()
+				const file = directory + "/runner.yml"
+				yield* fs.writeFileString(file, runnerYaml(directory + "/state", 2))
+				const daemon = yield* startRunner(directory + "/state", 15000, file)
+				const otherPort = yield* daemon.nextPort
+				assert.notEqual(daemon.port, otherPort)
+				const first = yield* control(daemon.port)
+				const second = yield* control(otherPort)
+				const opened = yield* first.Open({
+					instance: "shared",
+					requestId: "first",
+					expectedGeneration: null,
+					limits: Model.defaults,
+				})
+				yield* first.Load({
+					handle: opened.handle,
+					specifier: "remote-fixture",
+				})
+				const loaded = yield* first.Status(opened.handle)
+				const child = Option.getOrThrow(Model.childOf(loaded))
+				const highWater = yield* second.HighWater({ instance: "shared" })
+				assert.equal(highWater, 1)
+				const replacement = yield* second.Open({
+					instance: "shared",
+					requestId: "second",
+					expectedGeneration: 1,
+					limits: Model.defaults,
+				})
+				assert.equal(replacement.handle.generation, 2)
+				assert.throws(() => process.kill(child.pid, 0))
+				assert.equal((yield* second.Dispose(replacement.handle)).kind, "Exited")
+			}).pipe(Effect.scoped, Effect.provide(runtime)),
+		30000,
+	)
+
 	it.live(
 		"ends a graceful host session without runner errors or empty termination details",
 		() =>
@@ -485,14 +594,18 @@ describe("network runner end to end", () => {
 					Remote.plugin(empty, {
 						contractModule: "unused",
 						target: Remote.runner({
-							host: "127.0.0.1",
-							port: 0,
-							tls: {
+							transport: Remote.tls({
+								host: "127.0.0.1",
+								port: 0,
 								servername: "localhost",
 								ca: "unused",
-								cert: "unused",
-								key: Redacted.make("unused"),
-							},
+							}),
+							auth: Remote.mtls(
+								Effect.succeed({
+									cert: "unused",
+									key: Redacted.make("unused"),
+								}),
+							),
 						}),
 					}),
 					{},
@@ -514,7 +627,7 @@ describe("network runner end to end", () => {
 			}).pipe(
 				Effect.scoped,
 				Effect.provide(
-					Layer.provideMerge(Graft.layer, SecureRandom.layerWebCrypto),
+					Layer.provideMerge(runnerRuntime, SecureRandom.layerWebCrypto),
 				),
 			),
 	)
@@ -846,6 +959,7 @@ describe("network runner end to end", () => {
 					}),
 				)
 				yield* provider.await
+				const certificate = yield* credentials("client")
 				for (const [index, expect] of [
 					{ version: "wrong" },
 					{ digest: "wrong" },
@@ -856,9 +970,13 @@ describe("network runner end to end", () => {
 							contractModule: "remote-fixture",
 							target: Remote.runner({
 								instance: expect === undefined ? "" : "pin-" + index,
-								host: "127.0.0.1",
-								port: daemon.port,
-								tls: yield* credentials("client"),
+								transport: Remote.tls({
+									host: "127.0.0.1",
+									port: daemon.port,
+									ca: certificate.ca,
+									servername: certificate.servername,
+								}),
+								auth: Remote.mtls(Effect.succeed(certificate)),
 								...(expect === undefined ? {} : { expect }),
 							}),
 						}),
