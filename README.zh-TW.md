@@ -63,7 +63,7 @@ npx graft start --watch
 
 Graft 的外掛模型借鑑自
 [cordis](https://github.com/cordiverse/cordis)。cordis 在時空中組合，Graft 只照料自己的園子。請看
-[cordis 的概念如何對應到 Graft](https://graftland.github.io/graft/zh-tw/cordis/)。
+[cordis 的概念如何對應到 Graft](https://graftland.github.io/graft/zh-tw/cordis/)。想讓程式設計代理完成遷移，可以安裝[遷移 skills](skills)。
 
 ## 範例
 

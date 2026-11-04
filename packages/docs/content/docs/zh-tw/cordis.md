@@ -47,3 +47,13 @@ Graft 沿用 [cordis](https://github.com/cordiverse/cordis)
 - **情境代理、mixin 和存取器。** Effect 環境和一般函式即可完成同樣的工作。
 - **資源樹。**
   cordis 可以列出每個外掛持有的 effect。Graft 顯示 fork 樹，資源層級的細節交給 Effect 的追蹤工具。
+
+## 讓程式設計代理遷移
+
+儲存庫提供兩個[代理 skill](https://github.com/graftland/graft/tree/main/skills)，引導代理完成遷移。`migrate-cordis-plugin`
+改寫外掛、服務及其測試；`migrate-cordis-app` 遷移
+`cordis.yml`、外掛清單和主程式。用下面的指令安裝：
+
+```sh
+npx skills add graftland/graft
+```

@@ -47,3 +47,13 @@ Graft 参考了 [cordis](https://github.com/cordiverse/cordis)
 - **上下文代理、mixin 和访问器。** Effect 环境和普通函数即可完成同样的工作。
 - **资源树。**
   cordis 可以列出每个插件持有的 effect。Graft 展示 fork 树，资源级别的细节交给 Effect 的追踪工具。
+
+## 让编程智能体迁移
+
+仓库提供两个[智能体 skill](https://github.com/graftland/graft/tree/main/skills)，引导智能体完成迁移。`migrate-cordis-plugin`
+改写插件、服务及其测试；`migrate-cordis-app` 迁移
+`cordis.yml`、插件列表和宿主程序。用下面的命令安装：
+
+```sh
+npx skills add graftland/graft
+```

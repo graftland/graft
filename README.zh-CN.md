@@ -63,7 +63,7 @@ npx graft start --watch
 
 Graft 的插件模型借鉴自
 [cordis](https://github.com/cordiverse/cordis)。cordis 在时空中组合，Graft 只照料自己的园子。请看
-[cordis 的概念如何对应到 Graft](https://graftland.github.io/graft/zh-cn/cordis/)。
+[cordis 的概念如何对应到 Graft](https://graftland.github.io/graft/zh-cn/cordis/)。想让编程智能体完成迁移，可以安装[迁移 skills](skills)。
 
 ## 示例
 

@@ -75,6 +75,7 @@ Graft draws its plugin model from
 [cordis](https://github.com/cordiverse/cordis). Where cordis composes across
 space and time, Graft keeps to the garden. See
 [how cordis concepts map to Graft](https://graftland.github.io/graft/cordis/).
+To let a coding agent do the port, install the [migration skills](skills).
 
 ## Samples
 

@@ -56,3 +56,15 @@ only what Effect does not have.
   functions do the same job.
 - **A resource tree.** cordis can list the effects that each plugin holds. Graft
   shows the fork tree. It leaves resource-level detail to Effect's tracing.
+
+## Migrate with a coding agent
+
+The repository ships two
+[agent skills](https://github.com/graftland/graft/tree/main/skills) that walk an
+agent through a port. `migrate-cordis-plugin` rewrites plugins, services and
+their tests. `migrate-cordis-app` moves `cordis.yml`, the plugin list and the
+host. Install both with:
+
+```sh
+npx skills add graftland/graft
+```
