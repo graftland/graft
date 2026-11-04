@@ -41,7 +41,7 @@ import * as Wire from "../src/internal/runner/Wire"
 import * as Model from "../src/internal/runner/model"
 import * as Processes from "../src/internal/runner/Processes"
 import { tcpProxy } from "./network-proxy"
-import { command } from "../src/internal/runner/command"
+import { cliCommand as command } from "./application"
 import { ChildApi, HostApi, contract } from "./fixtures/services-contract"
 
 declare module "vitest" {
@@ -69,7 +69,7 @@ const startRunner = (state: string, lease = 15000, config?: string) =>
 	Effect.gen(function* () {
 		const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
 		const certs = inject("remoteTls")
-		const argv = yield* command()
+		const argv = yield* command
 		const file =
 			config ??
 			(yield* runnerConfig(
@@ -89,17 +89,13 @@ const startRunner = (state: string, lease = 15000, config?: string) =>
 				},
 			))
 		const child = yield* spawner.spawn(
-			ChildProcess.make(
-				argv[0],
-				[...Array.drop(argv, 1), "serve", "--config", file],
-				{
-					cwd: new URL("..", import.meta.url).pathname,
-					stdin: "ignore",
-					stdout: "pipe",
-					stderr: "pipe",
-					forceKillAfter: "2 seconds",
-				},
-			),
+			ChildProcess.make(argv[0], [...Array.drop(argv, 1), "start", file], {
+				cwd: new URL("..", import.meta.url).pathname,
+				stdin: "ignore",
+				stdout: "pipe",
+				stderr: "pipe",
+				forceKillAfter: "2 seconds",
+			}),
 		)
 		const readers = yield* FiberSet.make<void, never>()
 		const ready = yield* Queue.unbounded<number>()

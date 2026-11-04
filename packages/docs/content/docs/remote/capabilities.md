@@ -58,16 +58,17 @@ nothing, and the end of a channel does not prove the plugin process exited.
 1. **Bind** with the TLS policy from the authenticator; only mTLS has one. TLS
    settings, including client certificate requests, come from this policy.
 2. **Serve** with an `accept` function. Remote waits for `ready`, which means
-   the accept loop runs, while watching `serve` for failure. A runner starts
-   when all listeners are ready; a later failure affects only that listener.
+   the accept loop runs, while watching `graft start` for failure. A runner
+   starts when all listeners are ready; a later failure affects only that
+   listener.
 3. **Accept** each connection by calling `accept` with what the host presented,
    before any HTTP upgrade. On `AuthenticationFailed`, an HTTP listener answers
    401 with the error's `challenge` as `WWW-Authenticate`.
 4. **Run** the returned session with the channel. Remote attaches the identity.
 
 - Own every session fiber and resource in a scope.
-- A `stdio`-style listener ends `serve` at end of input; a network listener
-  accepts until interrupted.
+- A `stdio`-style listener ends `graft start` at end of input; a network
+  listener accepts until interrupted.
 - `AuthenticationFailed.reason` is `"missing"` or `"invalid"`. Built-in bearer
   and JWT use the challenges `Bearer` and `Bearer error="invalid_token"`.
 - Only issuer-based authenticators declare an `issuer`; a runner rejects
@@ -110,8 +111,8 @@ it.live("preserves bytes", () =>
 | `Testing.rejection(httpResponse, challenge?)` | Rejected credentials get 401, no upgrade, and the expected challenge.                                                                                        |
 
 Failures are `ConformanceError`. Also test wrong credentials, preserved causes,
-scope cancellation, TLS applied at `bind`, `serve` failing before `ready`, and
-two differently configured copies at once, as the
+scope cancellation, TLS applied at `bind`, `graft start` failing before `ready`,
+and two differently configured copies at once, as the
 [built-in fixtures](https://github.com/graftland/graft/blob/main/packages/plugin-remote/test/capabilities.test.ts)
 do.
 
@@ -125,6 +126,5 @@ do.
 | Runner listeners      | `runner/websocket`, `runner/unix`, `runner/stdio`                               |
 | Runner authenticators | `runner/auth/mtls`, `runner/auth/bearer`, `runner/auth/jwt`, `runner/auth/none` |
 
-`/internal/bin`, `/internal/worker` and `/internal/watchdog` let Remote find its
-own executables. They are not public APIs, and neither are `graft-remote`
-commands other than `serve` and `certificates`.
+The `/internal/child`, `/internal/worker` and `/internal/watchdog` exports let
+Remote start its runtimes. They are not public APIs.

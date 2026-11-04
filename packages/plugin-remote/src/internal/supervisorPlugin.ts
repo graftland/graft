@@ -19,7 +19,7 @@ import * as Stores from "./runner/Store"
 import * as Execution from "./runner/Execution"
 import * as Engine from "./runner/Supervisor"
 import { accept } from "./runner/accept"
-import * as Lifecycle from "./ServeLifecycle"
+import * as Lifecycle from "./RunnerLifecycle"
 
 export const Config = Schema.Struct({
 	root: Schema.String,
@@ -31,7 +31,7 @@ export default Plugin.make({
 	name: "remote-supervisor",
 	config: Config,
 	inject: [
-		Plugin.optional(Lifecycle.ServeLifecycle),
+		Plugin.optional(Lifecycle.RunnerLifecycle),
 		FileSystem.FileSystem,
 		Path.Path,
 		ChildProcessSpawner.ChildProcessSpawner,
@@ -39,7 +39,7 @@ export default Plugin.make({
 		Digest.Digest,
 	],
 	apply: Effect.fnUntraced(function* (options) {
-		const lifecycle = yield* Effect.serviceOption(Lifecycle.ServeLifecycle)
+		const lifecycle = yield* Effect.serviceOption(Lifecycle.RunnerLifecycle)
 		const resources = yield* Lifecycle.resources(lifecycle)
 		const path = yield* Path.Path
 		const directory = yield* ConfigDirectory.pipe(

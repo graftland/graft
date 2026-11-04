@@ -77,7 +77,7 @@ const greeter = Contract.service(Greeter, api, {
 
 | `connect` 形式                | 外掛執行於                           | 其他欄位                                                                                   |
 | ----------------------------- | ------------------------------------ | ------------------------------------------------------------------------------------------ |
-| `local: {}`                   | 宿主上的子行程。                     | `local.command` 取代內附的 `graft-remote`，例如 `[node, /path/to/bin.js]`。                |
+| `local: {}`                   | 宿主上的子行程。                     | `local.command` 取代內附的 內部 child 入口，例如 `[node, /path/to/childMain.js]`。         |
 | `worker: {}`                  | 宿主行程中的 Node worker。           | `worker.execArgv`：傳給 worker 的 Node 選項。                                              |
 | `url: wss://…` 或 `ws://…`    | runner 的 WebSocket listener。       | `ca`：改為信任的 CA 檔案，取代 Node 信任的 CA。`servername`：取代 URL 主機名稱的驗證名稱。 |
 | `unix: path`                  | runner 的 Unix socket。              | —                                                                                          |

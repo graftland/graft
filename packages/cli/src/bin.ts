@@ -2,10 +2,14 @@
 /**
  * The `graft` executable. Running this module starts the program.
  */
-import { NodeRuntime, NodeServices } from "@effect/platform-node"
-import { Effect, Option } from "effect"
-import { Argument, Command, Flag } from "effect/cli"
+import { NodeRuntime } from "@effect/platform-node"
+import { Array, Effect, Option, Layer, Logger, Stdio } from "effect"
+import { Argument, Command, Flag, CliError } from "effect/cli"
 import { version } from "../package.json" with { type: "json" }
+
+import { Graft } from "@graftland/graft"
+import { platform } from "./Application"
+import * as Host from "./internal/commandHost"
 
 const start = Command.make(
 	"start",
@@ -64,12 +68,28 @@ const create = Command.make(
 
 const add = Command.make(
 	"add",
-	{ packages: Argument.variadic(Argument.String("package")) },
-	({ packages }) =>
-		Effect.promise(() => import("./Manage")).pipe(
+	{
+		packages: Argument.variadic(Argument.String("package")),
+		plugin: Flag.String("plugin").pipe(Flag.optional),
+		global: Flag.Boolean("global").pipe(Flag.withDefault(false)),
+	},
+	Effect.fnUntraced(function* ({ packages, plugin, global }) {
+		if (
+			(global && Option.isNone(plugin)) ||
+			(Option.isSome(plugin) && packages.length > 0)
+		)
+			return yield* CliError.UserError.make({
+				cause: "Conflicting install options",
+				userMessage:
+					"Use add --plugin <name> [--global] without package arguments",
+			})
+		const Manage = yield* Effect.promise(() => import("./Manage")).pipe(
 			Effect.uninterruptible,
-			Effect.flatMap((Manage) => Manage.add(packages)),
-		),
+		)
+		return yield* Option.isSome(plugin)
+			? Manage.addPlugin(plugin.value, global)
+			: Manage.add(packages)
+	}),
 ).pipe(
 	Command.withDescription(
 		"Add dependencies, restoring the project if installing fails",
@@ -92,10 +112,57 @@ const remove = Command.make(
 
 const graft = Command.make("graft").pipe(
 	Command.withDescription("Run and manage Graft applications"),
-	Command.withSubcommands([start, create, add, remove]),
+	Command.withSharedFlags({
+		stdio: Flag.Boolean("stdio").pipe(Flag.withDefault(false)),
+		noPlugins: Flag.Boolean("no-plugins").pipe(Flag.withDefault(false)),
+	}),
 )
 
-Command.run(graft, { version }).pipe(
-	Effect.provide(NodeServices.layer),
-	NodeRuntime.runMain,
+const program = Effect.gen(function* () {
+	const stdio = yield* Stdio.Stdio
+	const args = yield* stdio.args
+	return yield* Host.output(
+		Effect.scoped(
+			Effect.gen(function* () {
+				const context = yield* Layer.build(Graft.layer)
+				return yield* Host.run(
+					[start, create, add, remove],
+					graft,
+					version,
+					args,
+				).pipe(Effect.provideContext(context))
+			}),
+		),
+		args,
+	)
+})
+NodeRuntime.runMain(
+	Effect.scoped(
+		Effect.gen(function* () {
+			const context = yield* Layer.build(platform)
+			return yield* program.pipe(Effect.provideContext(context))
+		}),
+	).pipe(
+		(effect) =>
+			Effect.withFiber((main) =>
+				effect.pipe(
+					Effect.tapCause((cause) =>
+						Array.every(
+							cause.reasons,
+							(reason) =>
+								reason._tag === "Interrupt" && reason.fiberId === main.id,
+						) ||
+						Array.every(
+							cause.reasons,
+							(reason) =>
+								reason._tag === "Fail" && CliError.isCliError(reason.error),
+						)
+							? Effect.void
+							: Effect.logError(cause),
+					),
+				),
+			),
+		Effect.provideService(Logger.LogToStderr, true),
+	),
+	{ disableErrorReporting: true },
 )

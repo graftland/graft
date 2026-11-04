@@ -3,6 +3,8 @@
  * changes: untouched entries keep running, configuration changes are applied
  * through `Fork.update`, and anything else is unloaded and loaded again.
  */
+import { Select } from "./Entry"
+
 import { Graft, Plugin, Fork } from "@graftland/graft"
 import {
 	Array,
@@ -248,6 +250,7 @@ const definition = Plugin.make({
 	inject: [ModuleResolver],
 	apply: (entries) =>
 		Effect.gen(function* () {
+			const select = yield* Select
 			const resolver = yield* ModuleResolver
 			const registry = yield* Intercept.Registry
 			const context = yield* Effect.context<Graft.Graft | Scope.Scope>()
@@ -431,7 +434,7 @@ const definition = Plugin.make({
 				const epoch = epochOf(next) ?? nextEpoch()
 				const wanted = Array.filter(
 					snapshot(next),
-					(entry) => entry.disabled !== true,
+					(entry) => entry.disabled !== true && select(entry),
 				)
 				const byId = HashMap.fromIterable(
 					Array.map(wanted, (entry) => [entry.id, entry] as const),

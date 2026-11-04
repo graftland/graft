@@ -9,7 +9,7 @@ export const command = (override?: readonly [string, ...string[]]) =>
 			override ?? [
 				process.execPath,
 				fileURLToPath(
-					import.meta.resolve("@graftland/plugin-remote/internal/bin"),
+					import.meta.resolve("@graftland/plugin-remote/internal/child"),
 				),
 			],
 	)

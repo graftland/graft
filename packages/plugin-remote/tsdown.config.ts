@@ -9,10 +9,10 @@ export default defineConfig({
 		customExports: (exports) => ({
 			...Object.fromEntries(
 				Object.entries(exports).filter(
-					([name]) => name !== "./bin" && !name.startsWith("./internal/"),
+					([name]) => !name.startsWith("./internal/"),
 				),
 			),
-			"./internal/bin": "./dist/bin.js",
+			"./internal/child": "./dist/internal/childMain.js",
 			"./internal/watchdog": "./dist/internal/watchdogMain.js",
 			"./internal/worker": "./dist/internal/workerMain.js",
 		}),
@@ -22,7 +22,8 @@ export default defineConfig({
 		"src/runner/index.ts",
 		"src/Contract.ts",
 
-		"src/bin.ts",
+		"src/cli.ts",
+		"src/internal/childMain.ts",
 		"src/internal/watchdogMain.ts",
 		"src/internal/workerMain.ts",
 		"src/host/worker.ts",

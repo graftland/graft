@@ -1,64 +1,17 @@
 #!/usr/bin/env node
-/** Runs local children and WebSocket supervisors, and issues their deployment certificates. */
+/** Internal executable for local and supervised child runtimes. */
 import { Graft } from "@graftland/graft"
 import { NodeRuntime } from "@effect/platform-node"
-import { Console, Array, Effect, Layer, Logger, Option, Schema } from "effect"
-import { Argument, CliError, Command, Flag } from "effect/cli"
+import { Array, Effect, Layer, Logger, Option, Schema } from "effect"
+import { Argument, CliError, Command } from "effect/cli"
 import process from "node:process"
 import { pathToFileURL } from "node:url"
-import { platform } from "./internal/platform"
-import { bytes } from "./internal/stdioChannel"
-import { load, run } from "./internal/childRuntime"
-import { Bootstrap } from "./internal/runner/Bootstrap"
-import * as Watchdog from "./internal/runner/Watchdog"
-import * as Serve from "./internal/serve"
-import * as Certificates from "./internal/Certificates"
+import { platform } from "./platform"
+import { bytes } from "./stdioChannel"
+import { load, run } from "./childRuntime"
+import { Bootstrap } from "./runner/Bootstrap"
+import * as Watchdog from "./runner/Watchdog"
 
-const serve = Command.make(
-	"serve",
-	{ config: Flag.String("config") },
-	({ config }) => Serve.run(config),
-)
-const certificates = Command.make(
-	"certificates",
-	{
-		out: Flag.String("out").pipe(
-			Flag.withDescription("Directory for the CA and issued certificates"),
-		),
-		server: Flag.String("server").pipe(
-			Flag.atLeast(0),
-			Flag.withDescription(
-				"Runner DNS name or IP address; repeat for additional SANs",
-			),
-		),
-		identity: Flag.String("identity").pipe(
-			Flag.atLeast(0),
-			Flag.withDescription(
-				"Host identity; repeat to issue multiple client certificates",
-			),
-		),
-		days: Flag.Int("days").pipe(
-			Flag.withDefault(365),
-			Flag.filter(
-				(days) => days > 0,
-				() => "Days must be a positive integer",
-			),
-		),
-		force: Flag.Boolean("force").pipe(
-			Flag.withDefault(false),
-			Flag.withDescription(
-				"Replace requested leaf certificates, keeping the existing CA",
-			),
-		),
-	},
-	(options) =>
-		Certificates.generate(options).pipe(
-			Effect.andThen(Console.log(`Certificates written to ${options.out}`)),
-			Effect.catchTag("CertificateExists", (error) =>
-				CliError.UserError.make({ cause: error, userMessage: error.message }),
-			),
-		),
-)
 const child = Command.make(
 	"child",
 	{
@@ -88,7 +41,7 @@ const child = Command.make(
 		}),
 )
 const cli = Command.make(
-	"graft-remote",
+	"remote-child",
 	{
 		contract: Argument.String("contract").pipe(Argument.optional),
 		session: Argument.String("session").pipe(Argument.withDefault("local")),
@@ -98,14 +51,13 @@ const cli = Command.make(
 			if (Option.isNone(contract))
 				return yield* CliError.UserError.make({
 					cause: "Missing contract module",
-					userMessage:
-						"A contract module or the child/serve/certificates subcommand is required",
+					userMessage: "A contract module or the child subcommand is required",
 				})
 			const definition = yield* load(contract.value)
 			const channel = yield* bytes
 			return yield* run(definition, channel, session)
 		}),
-).pipe(Command.withSubcommands([child, serve, certificates]))
+).pipe(Command.withSubcommands([child]))
 
 NodeRuntime.runMain(
 	Effect.scoped(

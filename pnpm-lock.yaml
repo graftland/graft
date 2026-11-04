@@ -49,6 +49,9 @@ importers:
       "@graftland/package-manager":
         specifier: workspace:*
         version: link:../package-manager
+      yaml:
+        specifier: 2.9.1
+        version: 2.9.1
     devDependencies:
       "@effect/vitest":
         specifier: 4.1.2
@@ -192,6 +195,9 @@ importers:
       "@effect/platform-node":
         specifier: 4.1.2
         version: 4.1.2(effect@4.1.2)(redis@6.3.1)
+      "@graftland/cli":
+        specifier: workspace:*
+        version: link:../cli
       "@graftland/graft":
         specifier: workspace:*
         version: link:../core

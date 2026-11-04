@@ -26,7 +26,7 @@ runner in a container or a VM.
 - [Host entries](https://graftland.github.io/graft/remote/hosts/): contracts,
   `remote` entries, services and errors.
 - [Runners](https://graftland.github.io/graft/remote/runners/): run plugins on
-  another machine with `graft-remote serve`.
+  another machine with `graft start runner.yml`.
 - [Transport and authentication](https://graftland.github.io/graft/remote/transport-auth/)
 - [Replacement and stopping](https://graftland.github.io/graft/remote/lifecycle/)
 - [Capability plugins](https://graftland.github.io/graft/remote/capabilities/)

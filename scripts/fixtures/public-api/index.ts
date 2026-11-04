@@ -1,3 +1,5 @@
+import { Commands } from "@graftland/cli/Commands"
+import { Command } from "effect/cli"
 import { Event, Graft, Plugin } from "@graftland/graft"
 import { Group, Include, Loader, ModuleResolver } from "@graftland/loader"
 import * as Remote from "@graftland/plugin-remote"
@@ -118,3 +120,12 @@ export const listener = Plugin.service(
 	{ name: "fixture-listener" },
 )
 export default Plugin.make({ name: "default", apply: () => Effect.void })
+
+export const commands = Plugin.make({
+	name: "fixture-commands",
+	inject: [Commands],
+	apply: () =>
+		Effect.flatMap(Commands, (commands) =>
+			commands.register(Command.make("example", {}, () => Effect.void)),
+		),
+})

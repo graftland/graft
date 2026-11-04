@@ -86,15 +86,15 @@ Graft 的插件模型借鉴自
 
 ## 软件包
 
-| 软件包                                                   | 作用                                                                   |
-| -------------------------------------------------------- | ---------------------------------------------------------------------- |
-| [`@graftland/graft`](packages/core)                      | 基于 Effect 的插件框架：插件、fork、服务、隔离、事件和日志。           |
-| [`@graftland/loader`](packages/loader)                   | 从条目列表或 YAML 配置文件加载插件。                                   |
-| [`@graftland/hmr`](packages/hmr)                         | 在 Node.js 上重载插件模块，无需重启进程。                              |
-| [`@graftland/cli`](packages/cli)                         | `graft` 命令：`start`、`create`、`add` 和 `remove`。                   |
-| [`@graftland/create`](packages/create)                   | 生成新的 Graft 项目。`graft create` 使用它。                           |
-| [`@graftland/package-manager`](packages/package-manager) | 用 npm、pnpm 或 Yarn 安装依赖，失败时回滚。                            |
-| [`@graftland/plugin-remote`](packages/remote)            | 让插件在子进程、worker 或另一台机器上运行；提供 `graft-remote serve`。 |
+| 软件包                                                   | 作用                                                                       |
+| -------------------------------------------------------- | -------------------------------------------------------------------------- |
+| [`@graftland/graft`](packages/core)                      | 基于 Effect 的插件框架：插件、fork、服务、隔离、事件和日志。               |
+| [`@graftland/loader`](packages/loader)                   | 从条目列表或 YAML 配置文件加载插件。                                       |
+| [`@graftland/hmr`](packages/hmr)                         | 在 Node.js 上重载插件模块，无需重启进程。                                  |
+| [`@graftland/cli`](packages/cli)                         | `graft` 命令：`start`、`create`、`add` 和 `remove`。                       |
+| [`@graftland/create`](packages/create)                   | 生成新的 Graft 项目。`graft create` 使用它。                               |
+| [`@graftland/package-manager`](packages/package-manager) | 用 npm、pnpm 或 Yarn 安装依赖，失败时回滚。                                |
+| [`@graftland/plugin-remote`](packages/plugin-remote)     | 让插件在子进程、worker 或另一台机器上运行；提供 `graft start runner.yml`。 |
 
 所有软件包以相同版本一起发布。它们都需要 `effect` 4.1.x。
 

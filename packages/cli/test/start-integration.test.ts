@@ -27,11 +27,8 @@ describe("CLI configuration startup", () => {
 				const fs = yield* FileSystem.FileSystem
 				const directory = yield* fs.makeTempDirectoryScoped()
 				const file = `${directory}/graft.yml`
-				const runtime = yield* quote(runtimeUrl.href)
 				const plugin = yield* quote(pluginUrl.href)
 				const effect = yield* quote(import.meta.resolve("effect"))
-				const node = yield* quote(import.meta.resolve("@effect/platform-node"))
-				const config = yield* quote(file)
 				yield* fs.writeFileString(file, "plugins: [\n")
 				yield* fs.writeFileString(
 					`${directory}/plugin.mjs`,
@@ -43,15 +40,17 @@ export default Plugin.make({ name: 'recovered', apply: () => Effect.logInfo('REC
 				)
 				const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
 				const child = yield* spawner.spawn(
-					ChildProcess.make(process.execPath, [
-						"--input-type=module",
-						"-e",
-						`
-import { Start } from ${runtime};
-import { NodeRuntime } from ${node};
-Start.run({ config: ${config}, watch: ${watch} }).pipe(NodeRuntime.runMain);
-`,
-					]),
+					ChildProcess.make(
+						process.execPath,
+						[
+							new URL("../.cache/commands/cli/bin.js", import.meta.url)
+								.pathname,
+							"start",
+							file,
+							...(watch ? ["--watch"] : []),
+						],
+						{ cwd: directory, env: { GRAFT_HOME: directory + "/home" } },
+					),
 				)
 				const invalid = yield* Deferred.make<void>()
 				const recovered = yield* Deferred.make<void>()
@@ -521,7 +520,9 @@ apply: (value) => Effect.acquireRelease(Effect.logInfo('REMOTE_STARTED ' + value
 `,
 			)
 			const executable = yield* quote(process.execPath)
-			const bin = yield* quote(new URL("bin.js", remote).pathname)
+			const bin = yield* quote(
+				new URL("internal/childMain.js", remote).pathname,
+			)
 			yield* fs.writeFileString(
 				file,
 				`

@@ -101,15 +101,15 @@ After those, larger applications show what Graft is for:
 
 ## Packages
 
-| Package                                                  | What it does                                                                              |
-| -------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
-| [`@graftland/graft`](packages/core)                      | A plugin framework built on Effect: plugins, forks, services, isolation, events and logs. |
-| [`@graftland/loader`](packages/loader)                   | Loads plugins from a list of entries or a YAML config file.                               |
-| [`@graftland/hmr`](packages/hmr)                         | Reloads plugin modules on Node.js without restarting the process.                         |
-| [`@graftland/cli`](packages/cli)                         | The `graft` command: `start`, `create`, `add` and `remove`.                               |
-| [`@graftland/create`](packages/create)                   | Generates a new Graft project. `graft create` uses it.                                    |
-| [`@graftland/package-manager`](packages/package-manager) | Installs dependencies with npm, pnpm or Yarn, and rolls back on failure.                  |
-| [`@graftland/plugin-remote`](packages/remote)            | Runs a plugin in a child process, a worker or on another machine; `graft-remote serve`.   |
+| Package                                                  | What it does                                                                                |
+| -------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| [`@graftland/graft`](packages/core)                      | A plugin framework built on Effect: plugins, forks, services, isolation, events and logs.   |
+| [`@graftland/loader`](packages/loader)                   | Loads plugins from a list of entries or a YAML config file.                                 |
+| [`@graftland/hmr`](packages/hmr)                         | Reloads plugin modules on Node.js without restarting the process.                           |
+| [`@graftland/cli`](packages/cli)                         | The `graft` command: `start`, `create`, `add` and `remove`.                                 |
+| [`@graftland/create`](packages/create)                   | Generates a new Graft project. `graft create` uses it.                                      |
+| [`@graftland/package-manager`](packages/package-manager) | Installs dependencies with npm, pnpm or Yarn, and rolls back on failure.                    |
+| [`@graftland/plugin-remote`](packages/plugin-remote)     | Runs a plugin in a child process, a worker or on another machine; `graft start runner.yml`. |
 
 All packages are released together with the same version. They all need `effect`
 4.1.x.

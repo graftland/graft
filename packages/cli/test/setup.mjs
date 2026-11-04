@@ -19,14 +19,16 @@ export default function setup() {
 		.then(() =>
 			build({
 				config: false,
-				entry: [new URL("./plugin.ts", import.meta.url).pathname],
+				entry: ["plugin", "command-plugin"].map(
+					(name) => new URL(`./${name}.ts`, import.meta.url).pathname,
+				),
 				outDir: new URL("../.cache/integration", import.meta.url).pathname,
 				clean: false,
 				format: "esm",
 				platform: "node",
 				dts: false,
 				deps: {
-					alwaysBundle: ["@graftland/graft"],
+					alwaysBundle: ["@graftland/graft", "@graftland/cli"],
 					neverBundle: [/^effect(?:\/|$)/],
 				},
 				inputOptions: {
@@ -37,7 +39,7 @@ export default function setup() {
 		.then(() =>
 			build({
 				config: false,
-				entry: ["index", "Contract", "bin", "host/local"].map(
+				entry: ["index", "Contract", "internal/childMain", "host/local"].map(
 					(name) =>
 						new URL(`../../plugin-remote/src/${name}.ts`, import.meta.url)
 							.pathname,
@@ -80,7 +82,7 @@ export default function setup() {
 		.then(() =>
 			writeFile(
 				new URL("../.cache/commands/package.json", import.meta.url),
-				'{"version":"0.0.0"}',
+				'{"version":"0.0.0","type":"module"}',
 			),
 		)
 		.then(() => undefined)

@@ -33,7 +33,7 @@ export const validate = (listeners: ReadonlyArray<Description>) => {
 	)
 		return Effect.fail(
 			CapabilityCombinationError.make({
-				detail: "A stdio listener must be the only listener in serve",
+				detail: "A stdio listener must be the only listener in the runner",
 			}),
 		)
 	const issuers = HashSet.fromIterable(

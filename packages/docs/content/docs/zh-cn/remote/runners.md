@@ -1,6 +1,6 @@
 ---
 title: Runner
-description: 用 `graft-remote serve` 在另一台机器上运行插件。
+description: 用 `graft start runner.yml` 在另一台机器上运行插件。
 ---
 
 **runner**
@@ -9,11 +9,11 @@ description: 用 `graft-remote serve` 在另一台机器上运行插件。
 ## 部署 runner
 
 1. **安装**
-   `@graftland/plugin-remote`、构建好的插件包及其依赖，放进某个安装目录的
+   `@graftland/cli`、`@graftland/plugin-remote`、构建好的插件包及其依赖，放进某个安装目录的
    `node_modules`；系统为 Linux 或 macOS，Node.js 22.22 或更高。通过包的
    `exports` 暴露每个契约，例如 `my-plugin/contract`，并在宿主上也安装同一个包。
 2. **编写**只含一个 `remote/runner` 条目的 `runner.yml`。
-3. **启动** runner：`graft-remote serve --config runner.yml`。
+3. **启动** runner：`graft start runner.yml`。
 4. **让**宿主的 `remote` 条目指向它，然后运行 `graft start host.yml`。
 
 ```yaml title="runner.yml"
@@ -64,8 +64,8 @@ description: 用 `graft-remote serve` 在另一台机器上运行插件。
 | **安装目录**          | runner 运行期间保持不变。部署新版本时，先安装新包，再在宿主上重启该条目。                                    |
 | **状态目录**          | 放在本地文件系统上，同一时间只给一个 runner 用，重启后保留。第二个 runner 会以 `StateDirectoryLocked` 失败。 |
 | **全新状态**          | 身份仍在别处使用时，不要换一个空的状态目录：generation 会从头开始。                                          |
-| **`serve`**           | 只接受 `--config`。文件只读一次，改动需重启生效。日志写到标准错误。                                          |
-| **启动**              | 所有 listener 都就绪才算启动完成。失败时关闭已打开的部分，以 `StartupError` 非零退出。                       |
+| **启动命令**          | `graft start runner.yml`，日志写到标准错误。只有单个 stdio listener 时才加 `--stdio`。                       |
+| **启动**              | 所有 listener 都就绪才算启动完成。失败时关闭已打开的部分，以 原始错误 非零退出。                             |
 | **listener 稍后失败** | runner 记录 `Remote listener failed`，其他 listener 和插件继续运行。                                         |
 | **服务管理器**        | 在一个会停止 runner 所有后代进程的服务管理器下运行，例如设置了 `KillMode=control-group` 的 systemd。         |
 
@@ -133,7 +133,7 @@ runner 通过标准输入输出通信，宿主可以用 SSH 之类的命令连�
 连接：
 
 ```text
-restrict,command="/usr/local/bin/graft-remote serve --config /srv/graft/stdio.yml" ssh-ed25519 AAAA... billing-host
+restrict,command="/usr/local/bin/graft start /srv/graft/stdio.yml --stdio" ssh-ed25519 AAAA... billing-host
 ```
 
 ```yaml
@@ -141,11 +141,11 @@ connect:
   command: [ssh, -T, billing@runner.example]
 ```
 
-| 规则              | 说明                                                                                                  |
-| ----------------- | ----------------------------------------------------------------------------------------------------- |
-| **不写 `auth`**   | `command` 和 `stdio` 都不接受 `auth`，`none` 也不行。`identity` 只是给宿主起名。                      |
-| **唯一 listener** | `stdio` listener 是它所在 runner 唯一的 listener。                                                    |
-| **独立状态目录**  | 每个 SSH 身份用自己的状态目录。同一时间在同一目录上的第二个会话会被拒绝。                             |
-| **会话结束**      | 输入结束时，`serve` 停止插件、确认它已退出、释放状态目录，然后以 0 退出；失败时以非零退出并给出原因。 |
-| **干净的输出**    | 标准输出承载协议字节。使用 `-T`，不要打印 banner。                                                    |
-| **退出证明**      | SSH 退出不能证明插件已经停止，只有 runner 的确认才能。                                                |
+| 规则              | 说明                                                                                                        |
+| ----------------- | ----------------------------------------------------------------------------------------------------------- |
+| **不写 `auth`**   | `command` 和 `stdio` 都不接受 `auth`，`none` 也不行。`identity` 只是给宿主起名。                            |
+| **唯一 listener** | `stdio` listener 是它所在 runner 唯一的 listener。                                                          |
+| **独立状态目录**  | 每个 SSH 身份用自己的状态目录。同一时间在同一目录上的第二个会话会被拒绝。                                   |
+| **会话结束**      | 输入结束时，`graft start` 停止插件、确认它已退出、释放状态目录，然后以 0 退出；失败时以非零退出并给出原因。 |
+| **干净的输出**    | 标准输出承载协议字节。使用 `-T`，不要打印 banner。                                                          |
+| **退出证明**      | SSH 退出不能证明插件已经停止，只有 runner 的确认才能。                                                      |

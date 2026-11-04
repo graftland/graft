@@ -77,7 +77,7 @@ const greeter = Contract.service(Greeter, api, {
 
 | `connect` 形式                | 插件运行在                             | 其他字段                                                                          |
 | ----------------------------- | -------------------------------------- | --------------------------------------------------------------------------------- |
-| `local: {}`                   | 宿主上的子进程。                       | `local.command` 替换自带的 `graft-remote`，如 `[node, /path/to/bin.js]`。         |
+| `local: {}`                   | 宿主上的子进程。                       | `local.command` 替换自带的 内部 child 入口，如 `[node, /path/to/childMain.js]`。  |
 | `worker: {}`                  | 宿主进程中的 Node worker。             | `worker.execArgv`：传给 worker 的 Node 选项。                                     |
 | `url: wss://…` 或 `ws://…`    | runner 的 WebSocket listener。         | `ca`：代替 Node 内置 CA 的信任 CA 文件。`servername`：代替 URL 主机名的校验名称。 |
 | `unix: path`                  | runner 的 Unix 套接字。                | —                                                                                 |

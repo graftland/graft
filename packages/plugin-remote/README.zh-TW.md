@@ -22,7 +22,7 @@ Remote 隔離的是執行，不是權限。需要權限邊界時，請把 runner
 - [宿主設定項目](https://graftland.github.io/graft/zh-tw/remote/hosts/)：契約、`remote`
   設定項目、服務與錯誤。
 - [Runner](https://graftland.github.io/graft/zh-tw/remote/runners/)：用
-  `graft-remote serve` 在另一台機器上執行外掛。
+  `graft start runner.yml` 在另一台機器上執行外掛。
 - [傳輸與驗證](https://graftland.github.io/graft/zh-tw/remote/transport-auth/)
 - [替換與停止](https://graftland.github.io/graft/zh-tw/remote/lifecycle/)
 - [能力外掛](https://graftland.github.io/graft/zh-tw/remote/capabilities/)

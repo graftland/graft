@@ -25,9 +25,17 @@
 			"source": "./src/index.ts",
 			"default": "./dist/index.js"
 		},
+		"./Application": {
+			"source": "./src/Application.ts",
+			"default": "./dist/Application.js"
+		},
 		"./bin": {
 			"source": "./src/bin.ts",
 			"default": "./dist/bin.js"
+		},
+		"./Commands": {
+			"source": "./src/Commands.ts",
+			"default": "./dist/Commands.js"
 		},
 		"./internal/configSchema": {
 			"source": "./src/internal/configSchema.ts",
@@ -53,7 +61,8 @@
 		"@graftland/hmr": "workspace:*",
 		"@graftland/create": "workspace:*",
 		"@graftland/package-manager": "workspace:*",
-		"@effect/platform-node": "4.1.2"
+		"@effect/platform-node": "4.1.2",
+		"yaml": "2.9.1"
 	},
 	"bin": {
 		"graft": "./dist/bin.js"
@@ -61,7 +70,9 @@
 	"publishConfig": {
 		"exports": {
 			".": "./dist/index.js",
+			"./Application": "./dist/Application.js",
 			"./bin": "./dist/bin.js",
+			"./Commands": "./dist/Commands.js",
 			"./internal/configSchema": "./dist/internal/configSchema.js",
 			"./package.json": "./package.json"
 		}

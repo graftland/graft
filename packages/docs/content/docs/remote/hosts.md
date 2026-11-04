@@ -78,14 +78,14 @@ Replace the plugin's entry with a `remote` entry. `name: remote` loads
 | `connect`  | Where the plugin runs. One of the forms below.                                                                        |
 | `config`   | The plugin's config in encoded JSON form, checked against the contract's schema before anything starts. Default `{}`. |
 
-| `connect` form                | Runs the plugin                                 | Other fields                                                                                    |
-| ----------------------------- | ----------------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| `local: {}`                   | In a child process on the host.                 | `local.command` replaces the bundled `graft-remote`, such as `[node, /path/to/bin.js]`.         |
-| `worker: {}`                  | In a Node worker in the host process.           | `worker.execArgv`: Node options for the worker.                                                 |
-| `url: wss://…` or `ws://…`    | On a runner's WebSocket listener.               | `ca`: CA file to trust instead of Node's. `servername`: name to verify instead of the URL host. |
-| `unix: path`                  | On a runner's Unix socket.                      | —                                                                                               |
-| `command: [program, args…]`   | On a runner started by a command, such as SSH.  | `cwd`, `env`.                                                                                   |
-| `transport: { name, config }` | Through a [custom connector](../capabilities/). | —                                                                                               |
+| `connect` form                | Runs the plugin                                 | Other fields                                                                                            |
+| ----------------------------- | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `local: {}`                   | In a child process on the host.                 | `local.command` replaces the bundled the internal child entry, such as `[node, /path/to/childMain.js]`. |
+| `worker: {}`                  | In a Node worker in the host process.           | `worker.execArgv`: Node options for the worker.                                                         |
+| `url: wss://…` or `ws://…`    | On a runner's WebSocket listener.               | `ca`: CA file to trust instead of Node's. `servername`: name to verify instead of the URL host.         |
+| `unix: path`                  | On a runner's Unix socket.                      | —                                                                                                       |
+| `command: [program, args…]`   | On a runner started by a command, such as SSH.  | `cwd`, `env`.                                                                                           |
+| `transport: { name, config }` | Through a [custom connector](../capabilities/). | —                                                                                                       |
 
 - `local` and `worker` take no other fields: no `auth`, `instance`, `lease`,
   `margin` or `expect`.

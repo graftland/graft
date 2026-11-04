@@ -86,15 +86,15 @@ Graft 的外掛模型借鑑自
 
 ## 套件
 
-| 套件                                                     | 作用                                                                   |
-| -------------------------------------------------------- | ---------------------------------------------------------------------- |
-| [`@graftland/graft`](packages/core)                      | 以 Effect 打造的外掛框架：外掛、fork、服務、隔離、事件和日誌。         |
-| [`@graftland/loader`](packages/loader)                   | 從條目清單或 YAML 設定檔載入外掛。                                     |
-| [`@graftland/hmr`](packages/hmr)                         | 在 Node.js 上重載外掛模組，不需重新啟動行程。                          |
-| [`@graftland/cli`](packages/cli)                         | `graft` 命令：`start`、`create`、`add` 和 `remove`。                   |
-| [`@graftland/create`](packages/create)                   | 產生新的 Graft 專案。`graft create` 使用它。                           |
-| [`@graftland/package-manager`](packages/package-manager) | 用 npm、pnpm 或 Yarn 安裝相依套件，失敗時還原。                        |
-| [`@graftland/plugin-remote`](packages/remote)            | 讓外掛在子行程、worker 或另一台機器上執行；提供 `graft-remote serve`。 |
+| 套件                                                     | 作用                                                                       |
+| -------------------------------------------------------- | -------------------------------------------------------------------------- |
+| [`@graftland/graft`](packages/core)                      | 以 Effect 打造的外掛框架：外掛、fork、服務、隔離、事件和日誌。             |
+| [`@graftland/loader`](packages/loader)                   | 從條目清單或 YAML 設定檔載入外掛。                                         |
+| [`@graftland/hmr`](packages/hmr)                         | 在 Node.js 上重載外掛模組，不需重新啟動行程。                              |
+| [`@graftland/cli`](packages/cli)                         | `graft` 命令：`start`、`create`、`add` 和 `remove`。                       |
+| [`@graftland/create`](packages/create)                   | 產生新的 Graft 專案。`graft create` 使用它。                               |
+| [`@graftland/package-manager`](packages/package-manager) | 用 npm、pnpm 或 Yarn 安裝相依套件，失敗時還原。                            |
+| [`@graftland/plugin-remote`](packages/plugin-remote)     | 讓外掛在子行程、worker 或另一台機器上執行；提供 `graft start runner.yml`。 |
 
 所有套件以相同版本一起發布。它們都需要 `effect` 4.1.x。
 

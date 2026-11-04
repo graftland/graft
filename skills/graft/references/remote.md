@@ -7,13 +7,13 @@ changes. Exact behavior: `https://graftland.github.io/graft/remote/overview/`.
 
 ## When to reach for it
 
-| The user wants…                                                    | Use                                                          |
-| ------------------------------------------------------------------ | ------------------------------------------------------------ |
-| A crash, leak or blocked event loop in one plugin to spare the app | `connect: { local: {} }`, a child process                    |
-| CPU-bound work on another thread                                   | `connect: { worker: {} }`, a Node worker                     |
-| A plugin next to data, hardware or a network on another machine    | A runner (`graft-remote serve`) and `url`, `unix`, `command` |
-| Separate instances or settings inside one process                  | Not Remote: a [realm](realms.md) or an intercept             |
-| A permission or security boundary                                  | Not Remote alone: run the runner in a container or a VM      |
+| The user wants…                                                    | Use                                                              |
+| ------------------------------------------------------------------ | ---------------------------------------------------------------- |
+| A crash, leak or blocked event loop in one plugin to spare the app | `connect: { local: {} }`, a child process                        |
+| CPU-bound work on another thread                                   | `connect: { worker: {} }`, a Node worker                         |
+| A plugin next to data, hardware or a network on another machine    | A runner (`graft start runner.yml`) and `url`, `unix`, `command` |
+| Separate instances or settings inside one process                  | Not Remote: a [realm](realms.md) or an intercept                 |
+| A permission or security boundary                                  | Not Remote alone: run the runner in a container or a VM          |
 
 Remote isolates execution, not permissions. Every call becomes RPC, config must
 encode to JSON, and a call that fails because the connection broke is not
@@ -88,7 +88,7 @@ On the other machine, install the plugin package under the runner's `root` (the
 host never uploads code), write `runner.yml` and start it:
 
 ```yaml
-# runner.yml, started with: graft-remote serve --config runner.yml
+# runner.yml, started with: graft start runner.yml
 - id: runner
   name: remote/runner
   config:
@@ -105,8 +105,10 @@ The host's `connect` becomes `url: wss://runner:7443` with
 `auth: { bearer: { token: { file: ./token } } }`, plus `ca` for a private CA;
 `contract` must then be a package name. `connect` also takes `unix` or `command`
 (such as SSH), and `auth` takes `mtls`, `bearer`, `jwt` or `none`; leaving
-`auth` out means none. The entry's `id` names the runner instance.
-`graft-remote serve` has no flag other than `--config`.
+`auth` out means none. The entry's `id` names the runner instance. Use
+`graft start runner.yml`; a stdio runner requires `--stdio`, which reserves
+stdout for protocol bytes. Enable certificate commands with
+`graft add --plugin remote`, then run `graft remote certificates`.
 
 ## What changes for the app
 

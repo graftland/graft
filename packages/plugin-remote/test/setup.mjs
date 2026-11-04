@@ -8,16 +8,28 @@ const common = {
 	platform: "node",
 	dts: false,
 	deps: {
-		alwaysBundle: ["@graftland/graft", "@graftland/loader"],
+		alwaysBundle: ["@graftland/graft", "@graftland/loader", "@graftland/cli"],
 		neverBundle: [/^effect(?:\/|$)/, /^@effect\//],
 	},
 	inputOptions: { resolve: { conditionNames: ["source", "import", "node"] } },
 }
 export default async function setup(project) {
 	await build({
+		config: false,
+		entry: [new URL("../../cli/src/bin.ts", import.meta.url).pathname],
+		outDir: new URL("../../cli/dist", import.meta.url).pathname,
+		format: "esm",
+		platform: "node",
+		fixedExtension: false,
+		dts: false,
+		unbundle: true,
+		deps: { neverBundle: true },
+	})
+	await build({
 		...common,
 		entry: [
-			"bin",
+			"cli",
+			"internal/childMain",
 			"index",
 			"runner/index",
 			"Contract",
@@ -87,11 +99,20 @@ export default async function setup(project) {
 		entry: [new URL("./certificates.ts", import.meta.url).pathname],
 		outDir: new URL("../.cache/certificates-helper", import.meta.url).pathname,
 	})
+	const commandApp = new URL("../.cache/commands-app", import.meta.url).pathname
+	await mkdir(commandApp, { recursive: true })
+	await writeFile(
+		commandApp + "/graft.yml",
+		JSON.stringify([
+			{ name: new URL("../dist/cli.js", import.meta.url).href, cli: true },
+		]),
+	)
 	const { certificates } =
 		await import("../.cache/certificates-helper/certificates.js")
 	const directory = await certificates(
 		new URL("../.cache/certificates", import.meta.url).pathname,
-		new URL("../dist/bin.js", import.meta.url).pathname,
+		new URL("../../cli/dist/bin.js", import.meta.url).pathname,
+		new URL("../.cache/commands-app", import.meta.url).pathname,
 	)
 	project.provide("remoteTls", directory)
 	return () => rm(directory, { recursive: true, force: true })

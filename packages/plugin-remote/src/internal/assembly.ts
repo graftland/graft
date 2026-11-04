@@ -28,7 +28,7 @@ import { AuthenticationFailed } from "../Errors"
 import { Supervisor } from "./Supervisor"
 import { follow } from "./follow"
 import { connectionEnded, closedNormally } from "./runner/connectionEnded"
-import { ServeLifecycle } from "./ServeLifecycle"
+import { RunnerLifecycle } from "./RunnerLifecycle"
 
 export class ListenerConfigError extends Schema.TaggedError<
 	ListenerConfigError,
@@ -282,13 +282,13 @@ export const makeListenerConsumer = (
 			Listener,
 			Authenticator,
 			Supervisor,
-			Plugin.optional(ServeLifecycle),
+			Plugin.optional(RunnerLifecycle),
 		],
 		apply: Effect.fnUntraced(function* () {
 			const listener = yield* Listener
 			const auth = yield* Authenticator
 			const supervisor = yield* Supervisor
-			const lifecycle = yield* Effect.serviceOption(ServeLifecycle)
+			const lifecycle = yield* Effect.serviceOption(RunnerLifecycle)
 			yield* prepare(listener.properties, auth)
 			yield* compatible(listener.properties, kind(auth)).pipe(
 				Effect.mapError((error) =>

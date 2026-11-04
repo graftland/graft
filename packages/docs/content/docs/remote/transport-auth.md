@@ -43,10 +43,16 @@ or `key`, and a `wss` listener needs both.
   match the name hosts connect to. Rotating a certificate with the same identity
   keeps the host's instances.
 
-`graft-remote certificates` issues a private CA and certificates:
+`graft remote certificates` issues a private CA and certificates:
+
+Enable the command plugin once in the project or user configuration:
 
 ```sh
-graft-remote certificates --out certs --server runner.example --identity billing
+graft add --plugin remote
+```
+
+```sh
+graft remote certificates --out certs --server runner.example --identity billing
 ```
 
 | Flag         | Default | Meaning                                                                  |

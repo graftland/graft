@@ -13,20 +13,44 @@ Node 适配器的要求一致。
 | `graft add <package...>`    | 添加依赖并安装。           | [graft add](#graft-add)       |
 | `graft remove <package...>` | 移除依赖。                 | [graft remove](#graft-remove) |
 
-`graft start` 无需额外设置就能运行
-[`remote` 条目](../remote/hosts/)。要在另一台机器上运行这些条目的插件，`@graftland/plugin-remote`
-还提供第二个命令
-[`graft-remote serve --config runner.yml`](../remote/runners/#部署-runner)，用来在那台机器上启动 runner。
+`graft start` 同时支持 [remote 宿主](../remote/hosts/)和
+[runner](../remote/runners/)。命令插件可以添加 `graft remote certificates`
+这样的子命令，只有显式启用后才会加载。
+
+## 命令插件
+
+```sh
+graft add --plugin remote
+graft remote certificates --out ./certs --server localhost
+graft add --plugin remote --global
+```
+
+`add --plugin` 安装 `@graftland/plugin-<name>`，并启用它的 `/cli`
+条目。第三方包可以写完整包名。`--global`
+将包和条目放进[用户级配置](../config-file/#命令插件)。
+
+已启用的命令会出现在 `--help` 和 `--completions bash`
+中。内置命令名和别名不能占用；重名会阻止启动。每次调用（包括帮助）只加载一次命令插件。`--no-plugins`
+跳过发现，方便修复有问题的声明。发现命令时不会运行普通应用条目。
+
+`start --watch`
+遇到无效的项目配置时，暂不加载其中的命令插件，记录原因后由应用监听器等待有效文件；要加载修正后的命令条目，请重新启动 CLI。
 
 ## graft start
 
 ```sh
-graft start [config] [--watch] [--env-file <path>]
+graft start [config] [--watch] [--env-file <path>] [--stdio]
 ```
 
 运行[配置文件](../config-file/)中描述的应用。`config` 默认为
 `graft.yml`。进程会持续运行，直到收到 <kbd>Ctrl</kbd>+<kbd>C</kbd> 或
 `SIGTERM`，随后按顺序卸载所有插件。
+
+### 协议输出
+
+只有一个 stdio listener 的 runner 使用
+`graft start runner.yml --stdio`。加载插件、处理帮助和版本参数之前，stdout 就已保留给协议字节。日志、帮助、版本和错误都写入 stderr；此模式不提供交互向导和补全输出。runner 会拒绝不匹配的 listener 配置。stdin
+EOF 后，runner 停止执行单元，确认退出后结束进程；启动或清理失败时返回非零退出码。
 
 ### 选项
 
@@ -138,6 +162,7 @@ graft create <directory> [--name <name>] [--install]
 
 ```sh
 graft add <package...>
+graft add --plugin <name> [--global]
 ```
 
 为当前目录中的项目添加依赖并安装。每个包可以指定版本范围，例如

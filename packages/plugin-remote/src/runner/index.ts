@@ -1,8 +1,20 @@
-import { Graft, Plugin } from "@graftland/graft"
+import { Application, ProtocolOutput } from "@graftland/cli/Application"
+import * as Lifecycle from "../internal/RunnerLifecycle"
+import { cleanupCause } from "../internal/cleanup"
+import { Graft, Plugin, type Fork } from "@graftland/graft"
 import { SecureRandom } from "effect/crypto"
 import { Path } from "effect"
 import { ModuleResolver } from "@graftland/loader"
-import { Deferred, Effect, Schema, Stream } from "effect"
+import {
+	Cause,
+	Deferred,
+	Effect,
+	Exit,
+	Option,
+	Schema,
+	Stream,
+	Array,
+} from "effect"
 import * as Configuration from "../internal/entryConfig"
 import { boundary, resolve } from "../internal/entry"
 import * as Assembly from "../internal/assembly"
@@ -61,6 +73,17 @@ const owner = Plugin.make({
 			{ concurrency: "unbounded" },
 		)
 		yield* Startup.validate(descriptions)
+		const protocol = yield* ProtocolOutput
+		if (
+			Array.some(
+				descriptions,
+				(description) => description.properties.protocol === "stdio",
+			) !== protocol
+		)
+			return yield* Lifecycle.StartupError.make({
+				detail:
+					"A stdio runner requires graft start --stdio and exactly one stdio listener",
+			})
 		yield* Deferred.succeed(begin, undefined)
 		yield* Effect.forEach(
 			listeners,
@@ -85,13 +108,70 @@ const owner = Plugin.make({
 		)
 	}),
 })
+const shutdown = Effect.fnUntraced(function* (
+	fork: Fork.Fork,
+	lifecycle: typeof Lifecycle.RunnerLifecycle.Service,
+) {
+	const disposed = yield* Effect.exit(fork.dispose)
+	const result = yield* Deferred.poll(lifecycle.released)
+	const released = Option.isSome(result)
+		? yield* Effect.exit(result.value)
+		: Exit.void
+	const cause = Cause.combine(
+		Exit.isFailure(disposed) ? disposed.cause : Cause.empty,
+		Exit.isFailure(released) ? released.cause : Cause.empty,
+	)
+	if (cause.reasons.length > 0)
+		return yield* Effect.failCause(cleanupCause(cause))
+})
+
 export default Plugin.make({
 	name: "remote-server",
-	config: Configuration.Runner,
-	apply: Effect.fnUntraced(function* (config) {
+	config: Schema.Unknown,
+	inject: [Plugin.optional(Application)],
+	apply: Effect.fnUntraced(function* (input) {
+		const application = yield* Effect.serviceOption(Application)
+		const config = yield* Schema.decodeUnknownEffect(Configuration.Runner)(
+			input,
+		).pipe(
+			Effect.tapError((error) =>
+				Option.isSome(application)
+					? application.value.finish(Exit.fail(error))
+					: Effect.void,
+			),
+		)
+		const lifecycle = yield* Lifecycle.make
 		const encoded = yield* Schema.encodeEffect(Configuration.Runner)(config)
-		const fork = yield* Graft.plugin(owner, encoded, { isolate: [Supervisor] })
+		const assembly = Plugin.make({
+			name: "remote-runner-runtime",
+			apply: Effect.fnUntraced(function* () {
+				yield* Graft.provide(Lifecycle.RunnerLifecycle, lifecycle)
+				const fork = yield* Graft.plugin(owner, encoded)
+				const fail = yield* boundary("runner")
+				yield* follow(fork, fail)
+			}),
+		})
+		const fork = yield* Graft.plugin(assembly, undefined, {
+			isolate: [Supervisor, Lifecycle.RunnerLifecycle],
+		})
+		if (Option.isSome(application)) {
+			yield* application.value.onExit(shutdown(fork, lifecycle))
+			yield* Plugin.fork(
+				Deferred.await(lifecycle.ended).pipe(
+					Effect.matchCauseEffect({
+						onSuccess: () => application.value.finish(Exit.void),
+						onFailure: (cause) =>
+							application.value.finish(Exit.failCause(cause)),
+					}),
+				),
+			)
+		}
 		const fail = yield* boundary("runner")
-		yield* follow(fork, fail)
+		yield* follow(fork, (cause) =>
+			(Option.isSome(application) && !Cause.hasInterruptsOnly(cause)
+				? application.value.finish(Exit.failCause(cause))
+				: Effect.void
+			).pipe(Effect.andThen(fail(cause))),
+		)
 	}),
 })

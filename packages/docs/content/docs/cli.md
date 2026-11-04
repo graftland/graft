@@ -13,22 +13,50 @@ The `@graftland/cli` package provides the `graft` command. It needs Node.js
 | `graft add <package...>`    | Adds dependencies and installs them.          | [graft add](#graft-add)       |
 | `graft remove <package...>` | Removes dependencies.                         | [graft remove](#graft-remove) |
 
-`graft start` also runs [`remote` entries](../remote/hosts/) with no extra
-setup. To run plugins for those entries on another machine,
-`@graftland/plugin-remote` installs a second command,
-[`graft-remote serve --config runner.yml`](../remote/runners/#set-up-a-runner),
-which starts a runner there.
+`graft start` runs both [remote hosts](../remote/hosts/) and
+[runners](../remote/runners/). Command plugins add subcommands such as
+`graft remote certificates`; they run only when explicitly enabled.
+
+## Command plugins
+
+```sh
+graft add --plugin remote
+graft remote certificates --out ./certs --server localhost
+graft add --plugin remote --global
+```
+
+`add --plugin` installs `@graftland/plugin-<name>` and enables its `/cli` entry.
+Use a full package name for third-party packages. `--global` installs and
+enables it in the [user configuration](../config-file/#command-plugins).
+
+Enabled commands appear in `--help` and `--completions bash`. Built-in command
+names and aliases are reserved; duplicates stop startup. Commands are loaded
+once per invocation, including help. `--no-plugins` skips discovery so you can
+repair a broken declaration. Business entries do not run during discovery.
+
+With `start --watch`, an invalid project config temporarily contributes no
+command plugins. The CLI logs the cause and the application watcher waits for a
+valid file; restart the CLI to load its command entries.
 
 ## graft start
 
 ```sh
-graft start [config] [--watch] [--env-file <path>]
+graft start [config] [--watch] [--env-file <path>] [--stdio]
 ```
 
 Runs the application that a [config file](../config-file/) describes. `config`
 defaults to `graft.yml`. The process runs until it gets
 <kbd>Ctrl</kbd>+<kbd>C</kbd> or `SIGTERM`. Then it unloads every plugin in
 order.
+
+### Protocol output
+
+Use `graft start runner.yml --stdio` for a runner with one stdio listener. The
+flag reserves stdout for protocol bytes before loading plugins or parsing help
+and version flags. Logs, help, version and errors go to stderr; interactive
+wizard and completion output are unavailable in this mode. The runner rejects a
+mismatched listener configuration. At stdin EOF it stops its execution units,
+confirms termination and exits; startup or cleanup failure gives a nonzero exit.
 
 ### Options
 
@@ -157,6 +185,7 @@ With `--install`, Graft installs the project's dependencies afterwards.
 
 ```sh
 graft add <package...>
+graft add --plugin <name> [--global]
 ```
 
 Adds dependencies to the project in the current directory, and installs them.

@@ -50,7 +50,7 @@ connector 和 listener 声明一组属性。Remote 照单全收，用它们拒�
 
 1. **绑定**，使用 authenticator 给出的 TLS 策略；只有 mTLS 有这样的策略。TLS 设置（包括请求客户端证书）都来自这个策略。
 2. **服务**，传入一个 `accept` 函数。Remote 等待
-   `ready`（表示 accept 循环已经在运行），同时监视 `serve`
+   `ready`（表示 accept 循环已经在运行），同时监视 `graft start`
    是否失败。所有 listener 都就绪后 runner 才算启动；之后的失败只影响那一个 listener。
 3. **接受**每条连接：在任何 HTTP 升级之前，用宿主出示的内容调用 `accept`。遇到
    `AuthenticationFailed` 时，HTTP listener 返回 401，并把错误的 `challenge`
@@ -59,7 +59,7 @@ connector 和 listener 声明一组属性。Remote 照单全收，用它们拒�
 
 - 每个会话的 fiber 和资源都要归属于某个 scope。
 - `stdio` 式的 listener 在输入结束时结束
-  `serve`；网络 listener 会一直接受连接，直到被中断。
+  `graft start`；网络 listener 会一直接受连接，直到被中断。
 - `AuthenticationFailed.reason` 是 `"missing"` 或
   `"invalid"`。内置的 bearer 和 JWT 使用的 challenge 分别是 `Bearer` 和
   `Bearer error="invalid_token"`。
@@ -102,7 +102,7 @@ it.live("preserves bytes", () =>
 
 失败时报
 `ConformanceError`。另外还要测试错误的凭证、cause 是否保留、scope 取消、在
-`bind` 时应用 TLS、`serve` 在 `ready`
+`bind` 时应用 TLS、`graft start` 在 `ready`
 之前失败，以及两份配置不同的副本同时运行，可参考[内置的测试 fixture](https://github.com/graftland/graft/blob/main/packages/plugin-remote/test/capabilities.test.ts)。
 
 ## 内置模块
@@ -115,6 +115,5 @@ it.live("preserves bytes", () =>
 | runner listener      | `runner/websocket`、`runner/unix`、`runner/stdio`                               |
 | runner authenticator | `runner/auth/mtls`、`runner/auth/bearer`、`runner/auth/jwt`、`runner/auth/none` |
 
-`/internal/bin`、`/internal/worker` 和 `/internal/watchdog`
-供 Remote 找到自己的可执行文件。它们不是公开 API；`graft-remote` 除 `serve` 和
-`certificates` 之外的命令也不是。
+`/internal/child`、`/internal/worker` 和 `/internal/watchdog`
+供 Remote 启动自己的运行时，不是公开 API。

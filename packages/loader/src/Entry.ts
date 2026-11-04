@@ -79,6 +79,12 @@ export const Entry = Schema.StructWithRest(Fields, [
 
 export type Entry = typeof Entry.Type
 
+/** Selects entries for this loader subtree; excluded entries remain in the store. */
+export const Select = Context.Reference<(entry: Entry) => boolean>(
+	"@graftland/loader/Entry/Select",
+	{ defaultValue: () => () => true },
+)
+
 export class CyclicConfig extends Schema.TaggedError<
 	CyclicConfig,
 	{ readonly brand: unique symbol }

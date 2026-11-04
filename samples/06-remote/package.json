@@ -10,7 +10,7 @@
 	"scripts": {
 		"build": "tsdown && node scripts/install.mjs",
 		"start": "graft start --watch",
-		"runner": "graft-remote serve --config runner.yml",
+		"runner": "graft start runner.yml",
 		"test": "vitest run"
 	},
 	"dependencies": {

@@ -7,15 +7,20 @@ import { WebCrypto } from "effect/crypto"
 import { Buffer } from "node:buffer"
 import * as pki from "pkijs"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
-import { command } from "../src/internal/runner/command"
+import { cliCommand as command, cliDirectory } from "./application"
 
-const invoke = (args: ReadonlyArray<string>) =>
+const invoke = (args: ReadonlyArray<string>, internal = false) =>
 	Effect.gen(function* () {
 		const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
-		const argv = yield* command()
+		const argv = internal
+			? [
+					process.execPath,
+					new URL("../dist/internal/childMain.js", import.meta.url).pathname,
+				]
+			: yield* command
 		const child = yield* spawner.spawn(
 			ChildProcess.make(argv[0], [...argv.slice(1), ...args], {
-				cwd: new URL("..", import.meta.url).pathname,
+				cwd: cliDirectory,
 				stdout: "pipe",
 				stderr: "pipe",
 			}),
@@ -30,21 +35,19 @@ const invoke = (args: ReadonlyArray<string>) =>
 		)
 	})
 describe("remote command line", () => {
-	it.live(
-		"requires a config file and rejects removed serve shorthand flags",
-		() =>
-			Effect.gen(function* () {
-				for (const args of [
-					["serve"],
-					["serve", "--config", "missing.yml", "--listen", "ws://localhost:0"],
-					["serve", "--stdio"],
-				]) {
-					const result = yield* invoke(args)
-					assert.notEqual(result.code, 0)
-					assert.include(result.stdout + result.stderr, "USAGE")
-					assert.notInclude(result.stdout + result.stderr, "ENOENT")
-				}
-			}).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+	it.live("rejects unsupported start flags", () =>
+		Effect.gen(function* () {
+			for (const args of [
+				["start", "--unknown"],
+				["start", "missing.yml", "--listen", "ws://localhost:0"],
+				["start", "--config", "missing.yml"],
+			]) {
+				const result = yield* invoke(args)
+				assert.notEqual(result.code, 0)
+				assert.include(result.stdout + result.stderr, "USAGE")
+				assert.notInclude(result.stdout + result.stderr, "ENOENT")
+			}
+		}).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 	)
 	it.live(
 		"reports listener startup failures before claiming a configured runner is ready",
@@ -64,7 +67,7 @@ describe("remote command line", () => {
 					],
 					{ root: inject("remoteRoot") },
 				)
-				const result = yield* invoke(["serve", "--config", file])
+				const result = yield* invoke(["start", file])
 				assert.notEqual(result.code, 0)
 				assert.include(
 					result.stdout + result.stderr,
@@ -90,19 +93,32 @@ describe("remote command line", () => {
 					],
 					{ root: inject("remoteRoot") },
 				)
-				const result = yield* invoke(["serve", "--config", config])
+				const result = yield* invoke(["start", config])
 				assert.notEqual(result.code, 0)
 				assert.include(result.stderr, "missing-tokens.json")
 				assert.notInclude(result.stdout, '"event":"Listening"')
 			}).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 	)
 
-	it.live("describes the child and serve subcommands", () =>
+	it.live("exits when runner configuration cannot be decoded", () =>
 		Effect.gen(function* () {
-			const result = yield* invoke(["--help"])
+			const fs = yield* FileSystem.FileSystem
+			const directory = yield* fs.makeTempDirectoryScoped()
+			const file = yield* runnerConfig(directory + "/state", [], {
+				root: inject("remoteRoot"),
+				lease: "not-a-duration",
+			})
+			const result = yield* invoke(["start", file])
+			assert.notEqual(result.code, 0)
+			assert.include(result.stderr, "lease")
+			assert.notInclude(result.stdout, '"event":"Listening"')
+		}).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+	)
+
+	it.live("describes the remote certificates command", () =>
+		Effect.gen(function* () {
+			const result = yield* invoke(["remote", "--help"])
 			assert.equal(result.code, 0)
-			assert.include(result.stdout, "child")
-			assert.include(result.stdout, "serve")
 			assert.include(result.stdout, "certificates")
 		}).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 	)
@@ -112,7 +128,7 @@ describe("remote command line", () => {
 			Effect.gen(function* () {
 				const fs = yield* FileSystem.FileSystem
 				const directory = yield* fs.makeTempDirectoryScoped()
-				const args = ["certificates", "--out", directory]
+				const args = ["remote", "certificates", "--out", directory]
 				const initial = yield* invoke([
 					...args,
 					"--server",
@@ -213,6 +229,7 @@ describe("remote command line", () => {
 		Effect.gen(function* () {
 			for (const days of ["0", "-1", "1.5", "tomorrow"]) {
 				const result = yield* invoke([
+					"remote",
 					"certificates",
 					"--out",
 					"unused-certificates",
@@ -227,12 +244,10 @@ describe("remote command line", () => {
 
 	it.live("validates the supervised bootstrap before starting a watchdog", () =>
 		Effect.gen(function* () {
-			const result = yield* invoke([
-				"child",
-				"unused-contract",
-				"session",
-				"not-json",
-			])
+			const result = yield* invoke(
+				["child", "unused-contract", "session", "not-json"],
+				true,
+			)
 			assert.notEqual(result.code, 0)
 			assert.include(result.stdout + result.stderr, "bootstrap")
 			assert.notInclude(result.stdout + result.stderr, "watchdog failed")

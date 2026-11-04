@@ -51,6 +51,34 @@ entry loading. Child plugins forked by the plugin inherit it; it is not a new id
 for every fork. Include persists generated ids in YAML, so they survive host
 restarts.
 
+## Command plugins
+
+Declare command plugins as top-level entries:
+
+```yaml
+- name: remote/cli
+  cli: true
+```
+
+These entries configure CLI commands, not application plugins. `graft start`
+leaves them out of the application tree. Their `config` is passed to the command
+plugin; `disabled: true` disables them. Restart the command to apply changes.
+Command entries read `!env` from the process environment; `start --env-file`
+applies to application entries.
+
+| Source            | Rule                                                                                                                                |
+| ----------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| Project           | `graft.yml` in the current directory; no ancestor search.                                                                           |
+| User              | `~/.graft/graft.yml`, with packages installed in `~/.graft/node_modules`.                                                           |
+| Override          | `GRAFT_HOME` replaces `~/.graft`, including both config and packages.                                                               |
+| Merge             | Exact `name` matches use the project entry, including `disabled`; other entries are combined. Conflicting command names are errors. |
+| Outside a project | User commands still work; a missing file contributes no entries.                                                                    |
+| Paths             | Modules resolve from the declaring file’s directory. Plugins can use `ConfigDirectory` for their configuration paths.               |
+
+Only explicitly declared modules run; Graft does not scan installed
+dependencies. Use [`graft add --plugin`](../cli/#graft-add) to install and
+enable one.
+
 ## Entry fields
 
 | Field       | What it does                                                                                  |

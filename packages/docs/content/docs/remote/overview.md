@@ -9,13 +9,13 @@ process, in a Node worker, or on a **runner**, a service on another machine that
 starts plugins for hosts. The application, the **host**, still sees the plugin's
 [services](../../services/), and the plugins that inject them do not change.
 
-|                    | Direct: `local`, `worker`               | Runner                                                      |
-| ------------------ | --------------------------------------- | ----------------------------------------------------------- |
-| Where it runs      | A child process or a worker on the host | A process the runner starts, usually on another machine     |
-| What you install   | Nothing beyond the built plugin         | The plugin package and `graft-remote serve` on the runner   |
-| Connection         | Private to the host                     | `ws`/`wss`, a Unix socket, or a command such as SSH         |
-| Authentication     | None                                    | mTLS, a bearer token, a JWT, or the command's own           |
-| Replacing a plugin | Each start is a fresh process           | The old process must exit first; each start is a generation |
+|                    | Direct: `local`, `worker`               | Runner                                                        |
+| ------------------ | --------------------------------------- | ------------------------------------------------------------- |
+| Where it runs      | A child process or a worker on the host | A process the runner starts, usually on another machine       |
+| What you install   | Nothing beyond the built plugin         | The plugin package and `graft start runner.yml` on the runner |
+| Connection         | Private to the host                     | `ws`/`wss`, a Unix socket, or a command such as SSH           |
+| Authentication     | None                                    | mTLS, a bearer token, a JWT, or the command's own             |
+| Replacing a plugin | Each start is a fresh process           | The old process must exit first; each start is a generation   |
 
 Each loaded `remote` entry has its own plugin process. Stopping the entry stops
 it, and restarting the entry replaces it. Moving a plugin has limits:

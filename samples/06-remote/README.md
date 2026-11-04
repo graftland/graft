@@ -81,7 +81,7 @@ In a second terminal, from this directory:
 
 ```sh
 devenv shell -- pnpm runner
-# Runs: graft-remote serve --config runner.yml
+# Runs: graft start runner.yml
 ```
 
 The build has copied this sample package into `.cache/installation`, the

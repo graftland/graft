@@ -1,6 +1,6 @@
 ---
 title: Runner
-description: 用 `graft-remote serve` 在另一台機器上執行外掛。
+description: 用 `graft start runner.yml` 在另一台機器上執行外掛。
 ---
 
 **runner**
@@ -9,11 +9,11 @@ description: 用 `graft-remote serve` 在另一台機器上執行外掛。
 ## 架設 runner
 
 1. **安裝**：在 Linux 或 macOS 上、Node.js 22.22 以上，把
-   `@graftland/plugin-remote`、建置好的外掛套件及其相依安裝到某個安裝目錄的
+   `@graftland/cli`、`@graftland/plugin-remote`、建置好的外掛套件及其相依安裝到某個安裝目錄的
    `node_modules`。透過套件的 `exports` 公開每份契約，例如
    `my-plugin/contract`，並在宿主上安裝同一個套件。
 2. **撰寫** `runner.yml`，其中只有一個 `remote/runner` 設定項目。
-3. **啟動** runner：`graft-remote serve --config runner.yml`。
+3. **啟動** runner：`graft start runner.yml`。
 4. **指向** runner：讓宿主的 `remote` 設定項目指向它，再執行
    `graft start host.yml`。
 
@@ -65,8 +65,8 @@ description: 用 `graft-remote serve` 在另一台機器上執行外掛。
 | **安裝目錄**          | runner 執行期間保持不變。部署時先安裝新套件，再在宿主上重新啟動該設定項目。                                        |
 | **狀態目錄**          | 放在本機檔案系統上，同一時間只給一個 runner 使用，重新啟動後保留。第二個 runner 會以 `StateDirectoryLocked` 失敗。 |
 | **全新狀態**          | 若某些身分仍在別處使用，不要改用空的狀態目錄：generation 會從頭開始。                                              |
-| **`serve`**           | 只接受 `--config`。設定檔只讀一次，修改後要重新啟動。日誌寫到標準錯誤。                                            |
-| **啟動**              | 所有 listener 就緒才算啟動完成。失敗時會關閉已開啟的部分，以 `StartupError` 用非零狀態退出。                       |
+| **啟動命令**          | `graft start runner.yml`，日誌寫到標準錯誤。只有單一 stdio listener 時才加 `--stdio`。                             |
+| **啟動**              | 所有 listener 就緒才算啟動完成。失敗時會關閉已開啟的部分，以 原始錯誤 用非零狀態退出。                             |
 | **listener 之後失敗** | runner 記錄 `Remote listener failed`，其他 listener 與外掛繼續執行。                                               |
 | **服務管理器**        | 用會停止所有後代行程的服務管理器執行 runner，例如設定 `KillMode=control-group` 的 systemd。                        |
 
@@ -134,7 +134,7 @@ runner 透過標準輸入輸出溝通，所以宿主可以用 SSH 這類命令�
 連線：
 
 ```text
-restrict,command="/usr/local/bin/graft-remote serve --config /srv/graft/stdio.yml" ssh-ed25519 AAAA... billing-host
+restrict,command="/usr/local/bin/graft start /srv/graft/stdio.yml --stdio" ssh-ed25519 AAAA... billing-host
 ```
 
 ```yaml
@@ -142,11 +142,11 @@ connect:
   command: [ssh, -T, billing@runner.example]
 ```
 
-| 規則               | 說明                                                                                                  |
-| ------------------ | ----------------------------------------------------------------------------------------------------- |
-| **沒有 `auth`**    | `command` 與 `stdio` 都不接受 `auth`，`none` 也不行。`identity` 只是替宿主命名。                      |
-| **唯一 listener**  | `stdio` listener 必須是其 runner 唯一的 listener。                                                    |
-| **各自的狀態目錄** | 每個 SSH 身分用自己的狀態目錄。同一時間對同一目錄的第二個工作階段會被拒絕。                           |
-| **工作階段結束**   | 輸入結束時，`serve` 停止外掛、確認它已退出、釋放狀態目錄並以 0 退出；失敗時以非零狀態退出並回報原因。 |
-| **乾淨的輸出**     | 標準輸出承載協定位元組。使用 `-T`，不要印出 banner。                                                  |
-| **退出證明**       | SSH 退出不能證明外掛已停止，只有 runner 的確認可以。                                                  |
+| 規則               | 說明                                                                                                        |
+| ------------------ | ----------------------------------------------------------------------------------------------------------- |
+| **沒有 `auth`**    | `command` 與 `stdio` 都不接受 `auth`，`none` 也不行。`identity` 只是替宿主命名。                            |
+| **唯一 listener**  | `stdio` listener 必須是其 runner 唯一的 listener。                                                          |
+| **各自的狀態目錄** | 每個 SSH 身分用自己的狀態目錄。同一時間對同一目錄的第二個工作階段會被拒絕。                                 |
+| **工作階段結束**   | 輸入結束時，`graft start` 停止外掛、確認它已退出、釋放狀態目錄並以 0 退出；失敗時以非零狀態退出並回報原因。 |
+| **乾淨的輸出**     | 標準輸出承載協定位元組。使用 `-T`，不要印出 banner。                                                        |
+| **退出證明**       | SSH 退出不能證明外掛已停止，只有 runner 的確認可以。                                                        |

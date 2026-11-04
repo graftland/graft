@@ -27,7 +27,7 @@ import * as Multiplex from "../src/internal/runner/Multiplex"
 import * as Framing from "../src/internal/runner/Framing"
 import * as Wire from "../src/internal/runner/Wire"
 import { childOf, defaults } from "../src/internal/runner/model"
-import { command } from "../src/internal/runner/command"
+import { cliCommand as command } from "./application"
 import * as Lock from "../src/internal/runner/Lock"
 import { TransportError } from "../src/Errors"
 import { ChildApi, HostApi, contract } from "./fixtures/services-contract"
@@ -36,7 +36,7 @@ const platform = Layer.merge(NodeServices.layer, SecureRandom.layerWebCrypto)
 const runtime = Graft.layer.pipe(Layer.provideMerge(platform))
 const spawn = Effect.fnUntraced(function* (args: ReadonlyArray<string>) {
 	const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
-	const argv = yield* command()
+	const argv = yield* command
 	const child = yield* spawner.spawn(
 		ChildProcess.make(argv[0], [...Array.drop(argv, 1), ...args], {
 			cwd: new URL("..", import.meta.url).pathname,
@@ -55,7 +55,7 @@ const spawn = Effect.fnUntraced(function* (args: ReadonlyArray<string>) {
 })
 const args = (state: string) =>
 	runnerConfig(state, [{ stdio: true }], { root: inject("remoteRoot") }).pipe(
-		Effect.map((config) => ["serve", "--config", config]),
+		Effect.map((config) => ["start", config, "--stdio"]),
 	)
 const gone = (pid: number) =>
 	Effect.sync(() => {
@@ -165,7 +165,7 @@ describe("runner stream transports", () => {
 							[{ unix: path, auth: { none: {} } }],
 							{ root: inject("remoteRoot") },
 						)
-						const { child } = yield* spawn(["serve", "--config", file])
+						const { child } = yield* spawn(["start", file])
 						const line = yield* child.stdout.pipe(
 							Stream.decodeText(),
 							Stream.splitLines,
@@ -231,7 +231,7 @@ describe("runner stream transports", () => {
 			Effect.gen(function* () {
 				const fs = yield* FileSystem.FileSystem
 				const directory = yield* fs.makeTempDirectoryScoped()
-				const argv = yield* command()
+				const argv = yield* command
 				const invocation = yield* args(directory + "/state")
 				yield* proxy(
 					{
@@ -270,7 +270,7 @@ describe("runner stream transports", () => {
 						],
 						{ root: inject("remoteRoot") },
 					)
-					const { child, stderr } = yield* spawn(["serve", "--config", file])
+					const { child, stderr } = yield* spawn(["start", file, "--stdio"])
 					const stdout = yield* child.stdout.pipe(
 						Stream.runCollect,
 						Effect.forkScoped,
@@ -281,7 +281,7 @@ describe("runner stream transports", () => {
 					assert.include(errors, "must be the only listener")
 					const output = yield* Fiber.join(stdout)
 					assert.lengthOf(output, 0)
-					// Startup may acquire the lock; the failed serve must release it.
+					// Startup may acquire the lock; the failed application must release it.
 					yield* Lock.acquire(directory + "/state").pipe(Effect.scoped)
 				}
 			}).pipe(Effect.scoped, Effect.provide(platform)),

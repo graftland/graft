@@ -78,7 +78,7 @@ worker 了。worker 与宿主共享进程，隔离执行，**不隔离权限**�
 
 ```sh
 devenv shell -- pnpm runner
-# Runs: graft-remote serve --config runner.yml
+# Runs: graft start runner.yml
 ```
 
 构建时已把本例的包复制到 `.cache/installation`，供 [`runner.yml`](runner.yml)

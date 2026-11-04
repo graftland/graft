@@ -38,10 +38,16 @@ listener 两者都需要。
   名称的证书都能以该身份连接。客户端证书必须恰好有一个 `graft://`
   URI，可以另有其他 URI。服务器证书必须与宿主连接时用的名称一致。轮换证书时保持身份不变，宿主的实例也就保持不变。
 
-`graft-remote certificates` 签发一个私有 CA 和证书：
+`graft remote certificates` 签发一个私有 CA 和证书：
+
+先在项目或用户级配置里启用命令插件：
 
 ```sh
-graft-remote certificates --out certs --server runner.example --identity billing
+graft add --plugin remote
+```
+
+```sh
+graft remote certificates --out certs --server runner.example --identity billing
 ```
 
 | 参数         | 默认值 | 含义                                                                 |

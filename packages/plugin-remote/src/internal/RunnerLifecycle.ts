@@ -14,13 +14,13 @@ export class StartupError extends Schema.TaggedError<
 	}
 }
 
-export class ServeLifecycle extends Context.Service<
-	ServeLifecycle,
+export class RunnerLifecycle extends Context.Service<
+	RunnerLifecycle,
 	{
 		readonly ended: Deferred.Deferred<void, TransportError>
 		readonly released: Deferred.Deferred<void, StartupError>
 	}
->()("@graftland/plugin-remote/internal/ServeLifecycle") {}
+>()("@graftland/plugin-remote/internal/RunnerLifecycle") {}
 
 export const make = Effect.all({
 	ended: Deferred.make<void, TransportError>(),
@@ -29,7 +29,7 @@ export const make = Effect.all({
 
 /** Observe shutdown independently of the loader, which logs child cleanup failures. */
 export const resources = Effect.fnUntraced(function* (
-	lifecycle: Option.Option<typeof ServeLifecycle.Service>,
+	lifecycle: Option.Option<typeof RunnerLifecycle.Service>,
 ) {
 	return yield* Effect.acquireRelease(Scope.make(), (scope, exit) =>
 		Release.close(scope, exit).pipe(

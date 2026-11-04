@@ -127,3 +127,10 @@ export const runnerConfig = Effect.fnUntraced(function* (
 	yield* fs.writeFileString(file, contents)
 	return file
 })
+
+export const cliCommand = Effect.succeed<readonly [string, ...string[]]>([
+	process.execPath,
+	new URL("../../cli/dist/bin.js", import.meta.url).pathname,
+])
+export const cliDirectory = new URL("../.cache/commands-app/", import.meta.url)
+	.pathname

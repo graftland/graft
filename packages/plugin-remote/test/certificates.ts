@@ -6,7 +6,7 @@ import process from "node:process"
 import * as Certificates from "../src/internal/Certificates"
 
 /** Exercise the deployment command for ordinary certificates; only invalid identities bypass it. */
-export const certificates = (base: string, bin: string) =>
+export const certificates = (base: string, bin: string, cwd: string) =>
 	Effect.runPromise(
 		Effect.gen(function* () {
 			const fs = yield* FileSystem.FileSystem
@@ -23,6 +23,7 @@ export const certificates = (base: string, bin: string) =>
 							process.execPath,
 							[
 								bin,
+								"remote",
 								"certificates",
 								"--out",
 								directory,
@@ -41,7 +42,7 @@ export const certificates = (base: string, bin: string) =>
 								"--days",
 								"2",
 							],
-							{ stdout: "ignore", stderr: "inherit" },
+							{ cwd, stdout: "ignore", stderr: "inherit" },
 						),
 					)
 					if (code !== 0)

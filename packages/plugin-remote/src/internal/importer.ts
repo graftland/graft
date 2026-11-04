@@ -8,7 +8,7 @@ export const make = Effect.fnUntraced(function* (directory: string) {
 	const base = yield* path.toFileUrl(path.join(directory, "graft.yml"))
 	const random = yield* SecureRandom.SecureRandom
 	const id = yield* random.uuidV4()
-	const prefix = `graft-remote-${id}:`
+	const prefix = `graft-module-${id}:`
 	yield* Effect.acquireRelease(
 		Effect.sync(() =>
 			registerHooks({

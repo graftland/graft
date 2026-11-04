@@ -39,10 +39,16 @@ listener兩者都需要。
   名稱的憑證都能以該身分連線。用戶端憑證必須恰好有一個 `graft://`
   URI，可以同時有其他 URI。伺服器憑證必須符合宿主連線使用的名稱。以相同身分輪替憑證，宿主會保有原來的實例。
 
-`graft-remote certificates` 會簽發私有 CA 與憑證：
+`graft remote certificates` 會簽發私有 CA 與憑證：
+
+先在專案或使用者設定中啟用命令外掛：
 
 ```sh
-graft-remote certificates --out certs --server runner.example --identity billing
+graft add --plugin remote
+```
+
+```sh
+graft remote certificates --out certs --server runner.example --identity billing
 ```
 
 | 旗標         | 預設值 | 意義                                                                 |

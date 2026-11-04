@@ -2,12 +2,27 @@
  * Runs a Graft application from its config file.
  */
 import { NodeServices } from "@effect/platform-node"
-import { SecureRandom } from "effect/crypto"
+import { Application, ApplicationError, platform } from "./Application"
 import { Graft, Plugin } from "@graftland/graft"
 import * as Hmr from "@graftland/hmr"
-import { Include, Loader, ModuleResolver, type Tree } from "@graftland/loader"
+import {
+	Entry,
+	Include,
+	Loader,
+	ModuleResolver,
+	type Tree,
+} from "@graftland/loader"
 import type { PlatformError, Schema } from "effect"
-import { Effect, FileSystem, Layer, Logger, Path } from "effect"
+import {
+	Deferred,
+	Exit,
+	Effect,
+	FileSystem,
+	Layer,
+	Logger,
+	Path,
+	Scope,
+} from "effect"
 import { EnvFile, layer as env, watchEnvFile } from "./internal/env"
 import { layer as intercepts } from "./internal/intercepts"
 import { watchModules } from "./internal/watch"
@@ -32,7 +47,8 @@ export interface Options {
 export const run = (
 	options: Options,
 ): Effect.Effect<
-	never,
+	void,
+	| ApplicationError
 	| Graft.ServiceConflict
 	| PlatformError.BadArgument
 	| PlatformError.PlatformError
@@ -41,6 +57,18 @@ export const run = (
 	| Tree.InvalidOperation
 > =>
 	Effect.gen(function* () {
+		const scope = yield* Effect.scope
+		const done = yield* Deferred.make<void, ApplicationError>()
+		yield* Graft.provide(Application, {
+			finish: (exit) =>
+				Deferred.done(
+					done,
+					Exit.isFailure(exit)
+						? Exit.fail(ApplicationError.make({ cause: exit.cause }))
+						: Exit.void,
+				).pipe(Effect.asVoid),
+			onExit: (release) => Scope.addFinalizer(scope, release),
+		})
 		const path = yield* Path.Path
 		const file = path.resolve(options.config)
 		const directory = path.dirname(file)
@@ -87,16 +115,16 @@ export const run = (
 		yield* Effect.logInfo(
 			`Running ${path.relative(process.cwd(), file) || file}`,
 		)
-		return yield* Effect.never
+		return yield* Deferred.await(done)
 	}).pipe(
 		Effect.scoped,
+		Effect.provideService(Entry.Select, (entry) => entry["cli"] !== true),
 		// @effect-diagnostics-next-line strictEffectProvide:off -- this runs the whole application, so it is an entry point
 		Effect.provide(
 			Layer.provideMerge(
 				Graft.layer,
 				Layer.mergeAll(
-					SecureRandom.layerWebCrypto,
-					NodeServices.layer,
+					platform,
 					intercepts,
 					env(options.envFile).pipe(Layer.provide(NodeServices.layer)),
 					Logger.layer([Logger.consolePretty()]),

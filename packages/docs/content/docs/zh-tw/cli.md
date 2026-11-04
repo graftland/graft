@@ -13,20 +13,44 @@ description: graft 命令及其子命令。
 | `graft add <package...>`    | 新增相依套件並安裝。         | [graft add](#graft-add)       |
 | `graft remove <package...>` | 移除相依套件。               | [graft remove](#graft-remove) |
 
-`graft start` 不需額外設定就能執行
-[`remote` 設定項目](../remote/hosts/)。要在另一台機器上執行這些項目的外掛，`@graftland/plugin-remote`
-還提供第二個命令
-[`graft-remote serve --config runner.yml`](../remote/runners/#架設-runner)，用來在那台機器上啟動 runner。
+`graft start` 同時支援 [remote 宿主](../remote/hosts/)與
+[runner](../remote/runners/)。命令外掛可以加入 `graft remote certificates`
+這樣的子命令，只有明確啟用後才會載入。
+
+## 命令外掛
+
+```sh
+graft add --plugin remote
+graft remote certificates --out ./certs --server localhost
+graft add --plugin remote --global
+```
+
+`add --plugin` 安裝 `@graftland/plugin-<name>`，並啟用它的 `/cli`
+項目。第三方套件可以寫完整名稱。`--global`
+將套件與項目放進[使用者設定](../config-file/#命令外掛)。
+
+已啟用的命令會出現在 `--help` 與 `--completions bash`
+中。內建命令名稱與別名不能占用；重名會阻止啟動。每次呼叫（包含說明）只載入一次命令外掛。`--no-plugins`
+跳過探索，方便修正有問題的宣告。探索命令時不會執行一般應用程式項目。
+
+`start --watch`
+遇到無效的專案設定時，暫不載入其中的命令外掛，記錄原因後由應用程式監看器等待有效檔案；要載入修正後的命令項目，請重新啟動 CLI。
 
 ## graft start
 
 ```sh
-graft start [config] [--watch] [--env-file <path>]
+graft start [config] [--watch] [--env-file <path>] [--stdio]
 ```
 
 執行[設定檔](../config-file/)所描述的應用程式。`config` 預設為
 `graft.yml`。行程會一直執行，直到收到 <kbd>Ctrl</kbd>+<kbd>C</kbd> 或
 `SIGTERM`，然後依序卸載所有外掛。
+
+### 協定輸出
+
+只有一個 stdio listener 的 runner 使用
+`graft start runner.yml --stdio`。載入外掛、處理說明與版本參數之前，stdout 就已保留給協定位元組。日誌、說明、版本與錯誤都寫入 stderr；此模式不提供互動精靈與補全輸出。runner 會拒絕不相符的 listener 設定。stdin
+EOF 後，runner 停止執行單元，確認結束後退出行程；啟動或清理失敗時回傳非零結束碼。
 
 ### 選項
 
@@ -137,6 +161,7 @@ graft create <directory> [--name <name>] [--install]
 
 ```sh
 graft add <package...>
+graft add --plugin <name> [--global]
 ```
 
 將相依套件新增到目前目錄的專案並安裝。每個套件都可以附帶版本範圍，例如

@@ -7,7 +7,7 @@
 	"repository": {
 		"type": "git",
 		"url": "git+https://github.com/graftland/graft.git",
-		"directory": "packages/remote"
+		"directory": "packages/plugin-remote"
 	},
 	"files": [
 		"dist",
@@ -24,6 +24,10 @@
 		"./Auth": {
 			"source": "./src/Auth.ts",
 			"default": "./dist/Auth.js"
+		},
+		"./cli": {
+			"source": "./src/cli.ts",
+			"default": "./dist/cli.js"
 		},
 		"./Contract": {
 			"source": "./src/Contract.ts",
@@ -110,7 +114,7 @@
 			"default": "./dist/Transport.js"
 		},
 		"./package.json": "./package.json",
-		"./internal/bin": "./dist/bin.js",
+		"./internal/child": "./dist/internal/childMain.js",
 		"./internal/watchdog": "./dist/internal/watchdogMain.js",
 		"./internal/worker": "./dist/internal/workerMain.js"
 	},
@@ -127,7 +131,8 @@
 		"@graftland/loader": "workspace:*",
 		"pkijs": "4.0.1",
 		"asn1js": "4.0.0",
-		"ws": "8.22.1"
+		"ws": "8.22.1",
+		"@graftland/cli": "workspace:*"
 	},
 	"devDependencies": {
 		"@effect/vitest": "4.1.2",
@@ -139,6 +144,7 @@
 		"exports": {
 			".": "./dist/index.js",
 			"./Auth": "./dist/Auth.js",
+			"./cli": "./dist/cli.js",
 			"./Contract": "./dist/Contract.js",
 			"./Errors": "./dist/Errors.js",
 			"./host/auth/bearer": "./dist/host/auth/bearer.js",
@@ -161,12 +167,9 @@
 			"./Testing": "./dist/Testing.js",
 			"./Transport": "./dist/Transport.js",
 			"./package.json": "./package.json",
-			"./internal/bin": "./dist/bin.js",
+			"./internal/child": "./dist/internal/childMain.js",
 			"./internal/watchdog": "./dist/internal/watchdogMain.js",
 			"./internal/worker": "./dist/internal/workerMain.js"
 		}
-	},
-	"bin": {
-		"graft-remote": "./dist/bin.js"
 	}
 }

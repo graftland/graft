@@ -289,7 +289,9 @@ describe("local remote hardening", () => {
 						ChildProcess.make(
 							process.execPath,
 							[
-								fileURLToPath(new URL("../dist/bin.js", import.meta.url)),
+								fileURLToPath(
+									new URL("../dist/internal/childMain.js", import.meta.url),
+								),
 								contractModule,
 							],
 							{
