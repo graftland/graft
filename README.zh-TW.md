@@ -59,7 +59,8 @@ cd my-app
 npx graft start --watch
 ```
 
-閱讀[文件](https://graftland.github.io/graft/zh-tw/)。
+閱讀[文件](https://graftland.github.io/graft/zh-tw/)。和程式設計代理一起開發？[`graft` skill](skills/graft)
+教它用外掛化、Effect 化的方式拆解應用程式，再撰寫、測試和執行：`npx skills add graftland/graft`。
 
 Graft 的外掛模型借鑑自
 [cordis](https://github.com/cordiverse/cordis)。cordis 在時空中組合，Graft 只照料自己的園子。請看

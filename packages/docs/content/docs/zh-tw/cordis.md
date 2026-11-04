@@ -50,9 +50,10 @@ Graft 沿用 [cordis](https://github.com/cordiverse/cordis)
 
 ## 讓程式設計代理遷移
 
-儲存庫提供兩個[代理 skill](https://github.com/graftland/graft/tree/main/skills)，引導代理完成遷移。`migrate-cordis-plugin`
+儲存庫提供[代理 skill](https://github.com/graftland/graft/tree/main/skills)，引導代理完成遷移。`migrate-cordis-plugin`
 改寫外掛、服務及其測試；`migrate-cordis-app` 遷移
-`cordis.yml`、外掛清單和主程式。用下面的指令安裝：
+`cordis.yml`、外掛清單和主程式；`graft`
+負責遷移之後的事：設計新外掛、測試和執行。用下面的指令全部安裝：
 
 ```sh
 npx skills add graftland/graft

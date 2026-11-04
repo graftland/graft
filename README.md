@@ -69,7 +69,10 @@ npx graft start --watch
 
 Read the [documentation](https://graftland.github.io/graft/) (also in
 [简体中文](https://graftland.github.io/graft/zh-cn/) and
-[繁體中文](https://graftland.github.io/graft/zh-tw/)).
+[繁體中文](https://graftland.github.io/graft/zh-tw/)). Working with a coding
+agent? The [`graft` skill](skills/graft) teaches it to design an application as
+plugins and Effects, then write, test and run them:
+`npx skills add graftland/graft`.
 
 Graft draws its plugin model from
 [cordis](https://github.com/cordiverse/cordis). Where cordis composes across

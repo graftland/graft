@@ -50,9 +50,10 @@ Graft 参考了 [cordis](https://github.com/cordiverse/cordis)
 
 ## 让编程智能体迁移
 
-仓库提供两个[智能体 skill](https://github.com/graftland/graft/tree/main/skills)，引导智能体完成迁移。`migrate-cordis-plugin`
+仓库提供[智能体 skill](https://github.com/graftland/graft/tree/main/skills)，引导智能体完成迁移。`migrate-cordis-plugin`
 改写插件、服务及其测试；`migrate-cordis-app` 迁移
-`cordis.yml`、插件列表和宿主程序。用下面的命令安装：
+`cordis.yml`、插件列表和宿主程序；`graft`
+负责迁移之后的事：设计新插件、测试和运行。用下面的命令全部安装：
 
 ```sh
 npx skills add graftland/graft

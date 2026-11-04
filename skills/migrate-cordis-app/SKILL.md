@@ -12,7 +12,8 @@ description:
 An application is the config file, the plugins it names, and the host that
 starts them. This skill moves all three. Porting an individual plugin's source
 is the [`migrate-cordis-plugin`](../migrate-cordis-plugin/SKILL.md) skill; reach
-for it from step 2 whenever a plugin has no Graft version.
+for it from step 2 whenever a plugin has no Graft version. Running and debugging
+the migrated app is the [`graft`](../graft/SKILL.md) skill.
 
 ## Version gate
 
