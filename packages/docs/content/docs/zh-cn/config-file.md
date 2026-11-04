@@ -270,8 +270,13 @@ Code（装有 YAML 扩展）等编辑器就能补全和检查配置项字段：
 - 把 `1.2.3` 换成项目中 `@graftland/cli`
   的版本，升级 Graft 时一并更新。`graft create` 会用自己的版本写入这一行。
 - 包里也带有这个 Schema，路径为 `@graftland/cli/schema.json`。
-- 它检查配置项字段，以及 `graft start` 登记的 intercept。它不检查插件的
-  `config`，因为只有插件自己的 Schema 知道它的结构。
+- 它检查配置项字段、已登记的 intercept，以及 `remote`、`remote/runner` 和
+  `remote/cli`
+  的配置，包括 group 内的条目。业务配置和自定义能力的配置保持开放，在启动时由各自的 schema 检查。
+
+要生成应用自己的编辑器 Schema，用 `@graftland/loader` 的 `ConfigSchema.make`
+组合明确登记的插件配置。Remote 通过 `@graftland/plugin-remote/Config`
+发布自己的登记项。生成 Schema 不会加载插件。
 
 language server 可能会把 `!env` 标为错误。需要在编辑器设置中声明这个标签，以 VS
 Code 为例：

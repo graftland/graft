@@ -40,6 +40,10 @@
 			"source": "./src/Plugin.ts",
 			"default": "./dist/Plugin.js"
 		},
+		"./Release": {
+			"source": "./src/Release.ts",
+			"default": "./dist/Release.js"
+		},
 		"./package.json": "./package.json"
 	},
 	"scripts": {
@@ -61,6 +65,7 @@
 			"./Fork": "./dist/Fork.js",
 			"./Graft": "./dist/Graft.js",
 			"./Plugin": "./dist/Plugin.js",
+			"./Release": "./dist/Release.js",
 			"./package.json": "./package.json"
 		}
 	}

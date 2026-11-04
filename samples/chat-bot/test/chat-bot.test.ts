@@ -88,8 +88,8 @@ describe("chat-bot", () => {
 							import.meta.url,
 						).href,
 						connect: { local: {} },
-						config: { units: "celsius" },
 					}),
+					{ units: "celsius" },
 				)
 				yield* provider.await
 				yield* reach(weatherFork, "Active")

@@ -9,7 +9,7 @@ import {
 	Ref,
 	Schema,
 } from "effect"
-import * as Release from "../src/internal/release"
+import * as Release from "../src/Release"
 
 for (const mode of ["masked", "interruptible", "self", "joined", "mixed"]) {
 	for (const timing of ["body", "release"]) {

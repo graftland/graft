@@ -98,19 +98,25 @@ const greeter = Contract.service(Greeter, api, {
 `Remote.plugin` 在代码中构建同样的插件，交给 `Graft.plugin`：
 
 ```ts title="src/entry.ts"
-export default Remote.plugin(contract, {
+const greeter = Remote.plugin(contract, {
 	contractModule: new URL("./contract.js", import.meta.url).href,
 	connect: { local: {} },
-	config: { greeting: "Hello" },
 	shutdownTimeout: "5 seconds",
 })
+
+const fork = yield * Graft.plugin(greeter, { greeting: "Hello" })
+yield * fork.await
+yield * fork.update({ greeting: "Hi" })
+yield * fork.await
 ```
+
+工厂只固定部署选项。业务配置传给 `Graft.plugin`；调用 `fork.update`
+会先停止旧执行单元，再用新配置启动一个新的执行单元。
 
 | 选项              | 含义                                                               |
 | ----------------- | ------------------------------------------------------------------ |
 | `contractModule`  | 插件进程从哪里导入契约。不是契约自己的 `module`。                  |
 | `connect`         | 与 YAML 相同，另外支持[凭证 Effect](../transport-auth/#凭证来源)。 |
-| `config`          | 插件自己的配置，采用编码后的形式。                                 |
 | `shutdownTimeout` | 优雅停止的时限，默认 `5 seconds`。                                 |
 | `retry`           | 插件失败后重启所用的 `Schedule`。调用本身从不重试。                |
 
@@ -145,7 +151,8 @@ export default Remote.plugin(contract, {
 | `MissingInstance`            | runner 连接既没有 `connect.instance`，也没有条目 id。                      | 设置 `connect.instance`。                                                                                                                    |
 | `RemoteEntryError`           | YAML 条目无效，`entry`、`directory` 和 `field` 指出位置。                  | 修正该 `field`：`contract`、`config`、`connect`、`connect.transport`、`connect.auth`，或 runner 的 `listen[n].transport`、`listen[n].auth`。 |
 
-缺陷仍然是缺陷。`RemoteError` 中可能出现：
+上表的公开错误都从包根导出。缺陷仍然是缺陷。下面这些嵌套标签是
+`RemoteError.cause` 携带的诊断信息：
 
 | 错误                         | 含义                                                      | 怎么办                                  |
 | ---------------------------- | --------------------------------------------------------- | --------------------------------------- |
@@ -168,8 +175,11 @@ export default Remote.plugin(contract, {
 
 ## 配置变更与热重载
 
-| 你修改了                     | 结果                                                                         |
-| ---------------------------- | ---------------------------------------------------------------------------- |
-| 条目的 `config` 或 `connect` | 插件进程重启。远程插件从不[原地更新](../../plugins/#原地更新)。              |
-| 实现                         | 不参与热重载。重新构建它，或把它安装到 runner 的 `root` 下，然后重启该条目。 |
-| 契约                         | 不参与热重载。重新构建并重启宿主。                                           |
+| 修改内容                                               | 结果                                                                                                   |
+| ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------ |
+| 通过 `fork.update` 或 YAML 修改业务配置                | 执行单元重启，不会原地更新。                                                                           |
+| YAML 中的 `connect`                                    | 先停止旧执行单元，再建立新连接。                                                                       |
+| `graft start --watch` 下 local/worker 的契约或实现文件 | 对应的远程 fork 用新代码重启，也会观察契约导入的依赖。入口指向构建后的 JavaScript 时，需要先重新构建。 |
+| 网络 runner 上的实现                                   | 宿主不观察它。在 runner 上安装新代码，再重启条目。                                                     |
+
+未启用 `--watch` 时，重新构建契约后需要重启宿主。

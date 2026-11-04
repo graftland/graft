@@ -107,6 +107,13 @@ Typed replacements keep the same input type. They may only narrow the original
 error bound, including decoding errors. Definitions keep that contract across
 aliases. Dynamically loaded `Plugin<any>` values explicitly erase it.
 
+## Resource release
+
+Use `Release.scoped` when interrupted finalizers must remain visible through
+enclosing cancellation. `Release.close` does the same for an existing scope. A
+finalizer’s own interruption becomes a `ReleaseInterrupted` defect carrying the
+original cause; expected external cancellation remains an Interrupt.
+
 ## Documentation
 
 - [Plugins](https://graftland.github.io/graft/plugins/)

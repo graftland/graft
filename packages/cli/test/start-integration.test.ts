@@ -465,9 +465,9 @@ syncBuiltinESMExports();
 	}).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 )
 
-it.live(
-	"loads a remote entry whose contract module does not export a plugin",
-	() =>
+it.live.each(["local", "worker"])(
+	"reloads contract and implementation files for remote %s entries",
+	(target) =>
 		Effect.gen(function* () {
 			const fs = yield* FileSystem.FileSystem
 			const directory = yield* fs.makeTempDirectoryScoped()
@@ -483,12 +483,13 @@ it.live(
 			yield* fs.makeDirectory(installation, { recursive: true })
 			yield* fs.writeFileString(
 				`${installation}/package.json`,
-				'{"type":"module","exports":{".":"./index.mjs","./host/local":"./local.mjs"}}',
+				'{"type":"module","exports":{".":"./index.mjs","./host/local":"./local.mjs","./host/worker":"./worker.mjs"}}',
 			)
 			yield* Effect.forEach(
 				[
 					{ file: "index", source: "index" },
 					{ file: "local", source: "host/local" },
+					{ file: "worker", source: "host/worker" },
 				],
 				({ file, source }) =>
 					quote(new URL(`${source}.js`, remote).href).pipe(
@@ -509,15 +510,16 @@ export const contract = make({ name: 'cli-remote', config: Schema.String,
 module: new URL('./implementation.mjs', import.meta.url).href });
 `,
 			)
-			yield* fs.writeFileString(
-				`${directory}/implementation.mjs`,
-				`
+			const implementation = (marker: string) => `
 import { Plugin } from ${plugin};
 import { Effect, Schema } from ${effect};
 export default Plugin.make({ name: 'remote-implementation', config: Schema.String,
-apply: (value) => Effect.acquireRelease(Effect.logInfo('REMOTE_STARTED ' + value),
+apply: (value) => Effect.acquireRelease(Effect.logInfo('${marker} ' + value),
 () => Effect.logInfo('REMOTE_STOPPED')) });
-`,
+`
+			yield* fs.writeFileString(
+				`${directory}/implementation.mjs`,
+				implementation("REMOTE_STARTED"),
 			)
 			const executable = yield* quote(process.execPath)
 			const bin = yield* quote(
@@ -531,8 +533,7 @@ apply: (value) => Effect.acquireRelease(Effect.logInfo('REMOTE_STARTED ' + value
   config:
     contract: ./contract.mjs
     connect:
-      local:
-        command: [${executable}, ${bin}]
+      ${target === "local" ? `local: { command: [${executable}, ${bin}] }` : "worker: { execArgv: [] }"}
     config: hello
 `,
 			)
@@ -547,9 +548,11 @@ Start.run({ config: ${config}, watch: true }).pipe(NodeRuntime.runMain);`,
 				]),
 			)
 			const started = yield* Deferred.make<void>()
+			const messages = yield* Queue.unbounded<string>()
 			const output = yield* child.all.pipe(
 				Stream.decodeText(),
 				Stream.splitLines,
+				Stream.tap((line) => Queue.offer(messages, line)),
 				Stream.tap((line) =>
 					String.includes("REMOTE_STARTED hello")(line)
 						? Deferred.succeed(started, undefined)
@@ -570,9 +573,38 @@ Start.run({ config: ${config}, watch: true }).pipe(NodeRuntime.runMain);`,
 					),
 				),
 			)
+			const waitFor = (marker: string) =>
+				Queue.take(messages).pipe(
+					Effect.repeat({ until: (line) => String.includes(marker)(line) }),
+					Effect.raceFirst(
+						Fiber.join(output).pipe(Effect.flatMap((text) => Effect.die(text))),
+					),
+				)
+			yield* fs.writeFileString(
+				`${directory}/implementation.mjs`,
+				implementation("REMOTE_UPDATED"),
+			)
+			yield* waitFor("REMOTE_UPDATED hello")
+			yield* fs.writeFileString(
+				`${directory}/next.mjs`,
+				implementation("CONTRACT_UPDATED"),
+			)
+			const original = yield* fs.readFileString(`${directory}/contract.mjs`)
+			yield* fs.writeFileString(
+				`${directory}/contract.mjs`,
+				String.replace("./implementation.mjs", "./next.mjs")(original),
+			)
+			yield* waitFor("CONTRACT_UPDATED hello")
+			yield* fs.writeFileString(
+				`${directory}/next.mjs`,
+				implementation("NEXT_UPDATED"),
+			)
+			yield* waitFor("NEXT_UPDATED hello")
+
 			yield* child.kill()
 			const text = yield* Fiber.join(output)
 			assert.include(text, "REMOTE_STARTED hello")
 			assert.include(text, "REMOTE_STOPPED")
+			assert.notInclude(text, "Remote source watcher stopped")
 		}).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 )

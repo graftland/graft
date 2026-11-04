@@ -22,6 +22,9 @@ import {
 	Logger,
 	Path,
 	Scope,
+	Stream,
+	Option,
+	Array,
 } from "effect"
 import { EnvFile, layer as env, watchEnvFile } from "./internal/env"
 import { layer as intercepts } from "./internal/intercepts"
@@ -80,16 +83,32 @@ export const run = (
 		})
 		const modules = yield* ModuleResolver.make({
 			base: directory,
-			importer: hmr.importModule,
+			importer: options.watch ? hmr.importModuleScoped : hmr.importModule,
 		})
 		yield* Graft.provide(ModuleResolver.ModuleResolver, {
 			resolve: resolver.resolve,
 			importModule: modules.importModule,
 		})
+		const fs = yield* FileSystem.FileSystem
+		const observe = (files: ReadonlyArray<string>) =>
+			hmr.observe(files).pipe(
+				Stream.provideService(FileSystem.FileSystem, fs),
+				Stream.mapError((cause) =>
+					ModuleResolver.ModuleInvalid.make({
+						specifier: Array.join(files, ", "),
+						cause,
+					}),
+				),
+			)
 		const included = yield* Graft.plugin(Include.Include, {
 			path: file,
 			watch: options.watch,
-		})
+		}).pipe(
+			Effect.provideService(
+				ModuleResolver.Watch,
+				options.watch ? Option.some(observe) : Option.none(),
+			),
+		)
 		yield* included.await
 		if (options.watch) {
 			const { reload } = yield* EnvFile

@@ -12,7 +12,7 @@ import {
 	Schema,
 	TxRef,
 } from "effect"
-import * as Release from "./release"
+import * as Release from "@graftland/graft/Release"
 
 type State<E> = Data.TaggedEnum<{
 	Open: {}

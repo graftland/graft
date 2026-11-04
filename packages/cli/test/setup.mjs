@@ -39,7 +39,14 @@ export default function setup() {
 		.then(() =>
 			build({
 				config: false,
-				entry: ["index", "Contract", "internal/childMain", "host/local"].map(
+				entry: [
+					"index",
+					"Contract",
+					"internal/childMain",
+					"internal/workerMain",
+					"host/local",
+					"host/worker",
+				].map(
 					(name) =>
 						new URL(`../../plugin-remote/src/${name}.ts`, import.meta.url)
 							.pathname,
@@ -83,6 +90,16 @@ export default function setup() {
 			writeFile(
 				new URL("../.cache/commands/package.json", import.meta.url),
 				'{"version":"0.0.0","type":"module"}',
+			),
+		)
+		.then(() =>
+			writeFile(
+				new URL("../.cache/remote/package.json", import.meta.url),
+				JSON.stringify({
+					name: "@graftland/plugin-remote",
+					type: "module",
+					exports: { "./internal/worker": "./internal/workerMain.js" },
+				}),
 			),
 		)
 		.then(() => undefined)

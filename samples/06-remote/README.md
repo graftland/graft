@@ -108,8 +108,9 @@ authentication when deploying it. See
 [Transport and authentication](../../packages/docs/content/docs/remote/transport-auth.md).
 
 Press **Ctrl+C** in the host terminal first, then the runner terminal. Edit
-business config or `connect` while running; after editing the contract, rebuild
-and restart the host.
+business config or `connect` while running. With local/worker and `--watch`,
+rebuilding a changed contract or implementation restarts its execution unit. For
+a network runner, install the new implementation and restart the entry.
 
 ## Next
 

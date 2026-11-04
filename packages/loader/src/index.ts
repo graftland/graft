@@ -10,3 +10,4 @@ export * as ModuleResolver from "./ModuleResolver"
 export * as Tree from "./Tree"
 
 export { ConfigDirectory } from "./ConfigDirectory"
+export * as ConfigSchema from "./ConfigSchema"

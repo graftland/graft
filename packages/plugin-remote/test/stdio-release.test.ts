@@ -16,7 +16,7 @@ import {
 import { Listener, type Channel } from "../src/Transport"
 import { Peer } from "../src/internal/Peer"
 import { accept } from "../src/internal/runner/accept"
-import { ReleaseInterrupted } from "../src/internal/release"
+import { ReleaseInterrupted } from "@graftland/graft/Release"
 import stdio from "../src/runner/stdio"
 
 const unexpected = Effect.die("Unexpected session request")

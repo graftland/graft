@@ -55,8 +55,8 @@ const setup = (fail = false) =>
 			Remote.plugin(contract, {
 				contractModule,
 				connect: { local: {} },
-				config: { directory, fail },
 			}),
+			{ directory, fail },
 		)
 		yield* proxy.await
 		const service = yield* Deferred.make<ChildApi["Service"]>()
@@ -228,8 +228,8 @@ describe("cross-process services", () => {
 				Remote.plugin(contract, {
 					contractModule,
 					connect: { local: {} },
-					config: { directory, fail: false },
 				}),
+				{ directory, fail: false },
 			)
 			const exit = yield* Effect.exit(proxy.await)
 			assert.isTrue(Exit.isFailure(exit))
@@ -276,8 +276,8 @@ describe("cross-process services", () => {
 					Remote.plugin(contract, {
 						contractModule,
 						connect: { local: {} },
-						config: { directory, fail: false },
 					}),
+					{ directory, fail: false },
 				)
 				const active = yield* Effect.forkScoped(proxy.await)
 				yield* waitFile(`${directory}/awaiting-export`)
@@ -309,8 +309,8 @@ describe("cross-process services", () => {
 					Remote.plugin(contract, {
 						contractModule,
 						connect: { local: {} },
-						config: { directory, fail: false },
 					}),
+					{ directory, fail: false },
 				)
 				const exit = yield* Effect.exit(
 					proxy.await.pipe(Effect.timeout("3 seconds")),

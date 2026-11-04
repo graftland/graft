@@ -21,6 +21,7 @@ export default defineConfig({
 		"src/index.ts",
 		"src/runner/index.ts",
 		"src/Contract.ts",
+		"src/Config.ts",
 
 		"src/cli.ts",
 		"src/internal/childMain.ts",

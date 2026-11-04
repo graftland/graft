@@ -100,7 +100,8 @@ connect:
 不驗證呼叫端身分。本例只在回環位址上體驗流程；部署時請使用 wss 與驗證。詳見[傳輸與驗證](../../packages/docs/content/docs/zh-tw/remote/transport-auth.md)。
 
 結束時先在宿主終端機按 **Ctrl+C**，再停止 runner。執行中可以改業務設定與
-`connect`；修改契約後，需要重新建置並重新啟動宿主。
+`connect`。local/worker 配合 `--watch`
+時，重新建置修改後的契約或實作會重新啟動執行單元；使用網路 runner 時，需安裝新實作並重新啟動設定項目。
 
 ## 下一步
 

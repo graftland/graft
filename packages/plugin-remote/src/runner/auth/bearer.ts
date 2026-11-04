@@ -17,7 +17,8 @@ import { Authenticator } from "../../Auth"
 import { ConfigDirectory } from "@graftland/loader"
 import * as Token from "../../internal/auth/token"
 
-export const Config = Schema.Struct({ tokens: Schema.String })
+import { Bearer as Config } from "../../internal/auth/config"
+export { Config }
 const Tokens = Schema.fromJsonString(
 	Schema.Record(
 		Schema.String.check(Schema.isPattern(/^[0-9a-fA-F]{64}$/)),

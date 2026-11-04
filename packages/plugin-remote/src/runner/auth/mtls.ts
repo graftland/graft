@@ -1,10 +1,11 @@
 import { Graft, Plugin } from "@graftland/graft"
-import { Effect, FileSystem, Option, Path, Schema } from "effect"
+import { Effect, FileSystem, Option, Path } from "effect"
 import { Authenticator, type AuthenticatorApi } from "../../Auth"
 import { ConfigDirectory } from "@graftland/loader"
 import { identityFromSubjectAltName } from "../../internal/auth/mtls"
 
-export const Config = Schema.Struct({ ca: Schema.String })
+import { Mtls as Config } from "../../internal/auth/config"
+export { Config }
 const read = Effect.fnUntraced(function* (ca: string) {
 	const fs = yield* FileSystem.FileSystem
 	const path = yield* Path.Path

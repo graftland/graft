@@ -148,11 +148,10 @@ import { contract } from "./contract.js"
 const greeter = Remote.plugin(contract, {
 	contractModule: new URL("./contract.js", import.meta.url).href,
 	connect: { local: {} },
-	config: { greeting: "Hello" },
 })
 
 const program = Effect.gen(function* () {
-	yield* Graft.plugin(greeter)
+	yield* Graft.plugin(greeter, { greeting: "Hello" })
 	yield* Graft.plugin(hello)
 	return yield* Effect.never
 })

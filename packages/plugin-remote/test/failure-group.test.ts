@@ -1,8 +1,8 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Cause, Schema, Deferred, Effect, Exit, Fiber, TxRef } from "effect"
 import * as FailureGroup from "../src/internal/FailureGroup"
-import * as Release from "../src/internal/release"
-import { ReleaseInterrupted } from "../src/internal/release"
+import * as Release from "@graftland/graft/Release"
+import { ReleaseInterrupted } from "@graftland/graft/Release"
 
 class Failed extends Schema.TaggedError<
 	Failed,

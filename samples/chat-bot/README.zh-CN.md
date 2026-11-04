@@ -67,7 +67,7 @@ devenv shell -- pnpm --filter @graftland/sample-chat-bot start
 ## 给天气集成一个独立进程
 
 第 3 步用
-`Remote.plugin(contract, { contractModule, connect: { local: {} }, config })`
+`Graft.plugin(Remote.plugin(contract, { contractModule, connect: { local: {} } }), config)`
 加载普通的 forecasts 插件。天气 SDK 阻塞或退出时，只影响它自己的进程；骰子和审核仍在宿主里运行。天气命令照常注入
 `Forecasts`；RPC 失败会转成
 `ForecastUnavailable`，命令回复一句暂时不可用。撤回提供者时，只移除依赖它的命令。

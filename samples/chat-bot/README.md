@@ -75,9 +75,9 @@ these claims.
 ## Keep the weather integration in its own process
 
 Step 3 uses
-`Remote.plugin(contract, { contractModule, connect: { local: {} }, config })` to
-load the ordinary forecasts plugin. A weather SDK that blocks or exits takes its
-own process down, while dice and moderation stay in the host. The weather
+`Graft.plugin(Remote.plugin(contract, { contractModule, connect: { local: {} } }), config)`
+to load the ordinary forecasts plugin. A weather SDK that blocks or exits takes
+its own process down, while dice and moderation stay in the host. The weather
 command still injects `Forecasts`; RPC failures become `ForecastUnavailable`,
 which the command answers with a short unavailable message. Withdrawing the
 provider removes only commands that depend on it.

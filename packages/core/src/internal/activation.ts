@@ -38,7 +38,7 @@ import {
 	Scope,
 	TxRef,
 } from "effect"
-import * as Release from "./release"
+import * as Release from "../Release"
 import { Graft, ServiceConflict } from "../Graft"
 import { ForkState } from "../Fork"
 import { isOptional, type Update } from "../Plugin"

@@ -10,7 +10,7 @@ import {
 	Scope,
 } from "effect"
 import { Event, Fork, Graft, Plugin } from "../src/index.ts"
-import { ReleaseInterrupted } from "../src/internal/release.ts"
+import { ReleaseInterrupted } from "../src/Release.ts"
 import { run } from "./utils.ts"
 
 for (const shape of ["emit", "parallel", "next", "last", "task"]) {

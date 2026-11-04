@@ -30,8 +30,8 @@ describe("06 · Remote", () => {
 								import.meta.url,
 							).href,
 							connect,
-							config: { greeting: "Hello" },
 						}),
+						{ greeting: "Hello" },
 					)
 					yield* provider.await
 					const caller = yield* Graft.plugin(consumer)

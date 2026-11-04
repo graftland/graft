@@ -9,5 +9,6 @@ export default defineConfig({
 		"src/Plugin.ts",
 		"src/Event.ts",
 		"src/Fork.ts",
+		"src/Release.ts",
 	],
 })

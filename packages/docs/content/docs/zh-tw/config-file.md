@@ -270,8 +270,13 @@ Code（搭配 YAML 擴充功能）等編輯器就能自動補全並檢查設定�
 - 請把 `1.2.3` 換成專案中 `@graftland/cli`
   的版本，並在升級 Graft 時一併更新。`graft create` 會以自己的版本寫入這一行。
 - Schema 也包含在套件中，路徑為 `@graftland/cli/schema.json`。
-- 它檢查設定項目欄位以及 `graft start` 登記的 intercept，但不檢查外掛的
-  `config`，因為只有外掛自己的 Schema 知道它的結構。
+- 它檢查設定項目欄位、已登記的 intercept，以及 `remote`、`remote/runner` 與
+  `remote/cli`
+  的設定，包括 group 內的項目。業務設定與自訂能力的設定保持開放，在啟動時由各自的 schema 檢查。
+
+要產生應用程式自己的編輯器 Schema，用 `@graftland/loader` 的 `ConfigSchema.make`
+組合明確登記的外掛設定。Remote 透過 `@graftland/plugin-remote/Config`
+發布自己的登記項目。產生 Schema 不會載入外掛。
 
 language server 可能會標記 `!env`。請在編輯器設定中宣告這個標籤。以 VS
 Code 為例：

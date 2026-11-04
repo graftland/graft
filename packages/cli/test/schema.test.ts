@@ -1,5 +1,6 @@
 import { assert, describe, it } from "@effect/vitest"
-import { Array, Effect, LogLevel, Record, Schema } from "effect"
+import { NodeServices } from "@effect/platform-node"
+import { Array, Effect, FileSystem, LogLevel, Record, Schema } from "effect"
 import { make } from "../src/internal/configSchema"
 import { registrations } from "../src/internal/intercepts"
 
@@ -64,3 +65,38 @@ describe("config file schema", () => {
 		}),
 	)
 })
+
+it.effect(
+	"composes the published remote configurations into the CLI editor schema",
+	() =>
+		Effect.gen(function* () {
+			const fs = yield* FileSystem.FileSystem
+			const text = yield* fs.readFileString(
+				new URL("../../plugin-remote/schema.json", import.meta.url).pathname,
+			)
+			const entries = yield* Schema.decodeEffect(
+				Schema.fromJsonString(
+					Schema.Array(
+						Schema.Struct({
+							names: Schema.Array(Schema.String),
+							schema: Schema.Record(Schema.String, Schema.Unknown),
+							required: Schema.optionalKey(Schema.Boolean),
+						}),
+					),
+				),
+			)(text)
+			const document = make(entries)
+			assert.deepEqual(
+				Array.map(
+					document.definitions.Entry.allOf ?? [],
+					(constraint) => constraint.if.properties.name.enum,
+				),
+				[
+					["remote", "@graftland/plugin-remote"],
+					["remote/runner", "@graftland/plugin-remote/runner"],
+					["remote/cli", "@graftland/plugin-remote/cli"],
+				],
+			)
+			assert.equal(document.definitions.Entry.allOf?.length, 3)
+		}).pipe(Effect.provide(NodeServices.layer)),
+)

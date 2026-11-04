@@ -22,7 +22,7 @@ import {
 	Semaphore,
 	SynchronizedRef,
 } from "effect"
-import * as Release from "../release"
+import * as Release from "@graftland/graft/Release"
 import { SecureRandom } from "effect/crypto"
 import * as Retention from "./Retention"
 import { cleanupCause } from "../cleanup"

@@ -26,12 +26,14 @@ import {
 	Scope,
 } from "effect"
 import type { Duration, PlatformError } from "effect"
+import { digest } from "./internal/digest"
 import { changes } from "./internal/changes"
 import {
 	isMissingEntry,
 	modules,
 	RestartRequired,
 	type Attempt,
+	type FileVersion,
 } from "./internal/modules"
 
 export class HmrError extends Schema.TaggedError<
@@ -84,6 +86,14 @@ export interface Hmr {
 	readonly importer: (specifier: string) => Promise<unknown>
 	/** Uses the application context and Node cache, without watching or replacing the module. */
 	readonly importModule: (specifier: string) => Effect.Effect<unknown, HmrError>
+	/** Imports a fresh non-plugin module graph and retains it for the caller's scope. */
+	readonly importModuleScoped: (
+		specifier: string,
+	) => Effect.Effect<unknown, HmrError, Scope.Scope>
+	/** Observes file URLs and dependencies of leased modules without importing the other files. */
+	readonly observe: (
+		files: ReadonlyArray<string>,
+	) => Stream.Stream<void, PlatformError.PlatformError, FileSystem.FileSystem>
 	/** Registers an observation lease in observationScope, or the caller's scope when omitted. */
 	readonly importerScoped: (
 		specifier: string,
@@ -431,6 +441,83 @@ export const make = (
 				),
 			)
 
+		const importModuleScoped: Hmr["importModuleScoped"] = (specifier) =>
+			Effect.acquireRelease(
+				serial(
+					Effect.gen(function* () {
+						yield* checkOpen
+						const generation = hooks.prepare()
+						hooks.start(generation)
+						const token: symbol = Symbol()
+						const exit = yield* Effect.exit(
+							Effect.tryPromise({
+								try: () => import(/* @vite-ignore */ hooks.request(specifier)),
+								catch: (cause) =>
+									HmrError.make({ stage: "import", specifier, cause }),
+							}),
+						)
+						const attempt = Option.map(hooks.resolved(), (url) => ({
+							url,
+							generation,
+						}))
+						yield* Ref.update(
+							owners,
+							HashMap.set(token, {
+								active: Exit.isSuccess(exit) ? attempt : Option.none(),
+								pending: Exit.isFailure(exit) ? attempt : Option.none(),
+							}),
+						)
+						return { token, exit }
+					}).pipe(Effect.ensuring(Effect.sync(hooks.discard))),
+				),
+				({ token }) =>
+					serial(
+						Ref.update(owners, HashMap.remove(token)).pipe(
+							Effect.ensuring(collect),
+						),
+					),
+			).pipe(
+				Effect.flatMap(({ exit }) => exit),
+				preserveExit,
+			)
+
+		const observe: Hmr["observe"] = (files) =>
+			Stream.unwrap(
+				Effect.gen(function* () {
+					const fs = yield* FileSystem.FileSystem
+					const observed = yield* Effect.forEach(files, (url) =>
+						fs
+							.readFile(fileURLToPath(url))
+							.pipe(
+								Effect.map((bytes): readonly [string, FileVersion] => [
+									url,
+									{ generation: -1, content: digest(bytes) },
+								]),
+							),
+					)
+					const baseline = HashMap.fromIterable(observed)
+					const snapshot = yield* observations.pipe(
+						Effect.map((attempts) =>
+							HashMap.union(
+								baseline,
+								hooks.files(
+									Array.filter(attempts, (attempt) =>
+										Array.contains(files, attempt.url),
+									),
+								),
+							),
+						),
+						semaphore.withPermits(1),
+					)
+					return changes(
+						(use) => use(snapshot),
+						Array.map(Array.fromIterable(HashMap.keys(snapshot)), (url) =>
+							fileURLToPath(url),
+						),
+					).pipe(Stream.as(undefined))
+				}),
+			)
+
 		const importerScoped: Hmr["importerScoped"] = (specifier, options) =>
 			options === undefined
 				? importWithLease(specifier)
@@ -706,6 +793,8 @@ export const make = (
 			importer,
 			importerScoped,
 			importModule,
+			importModuleScoped,
+			observe,
 			reload: reloadChanged(),
 			watch: (paths, watchOptions) =>
 				paths.length === 0

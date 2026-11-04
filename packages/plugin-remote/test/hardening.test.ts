@@ -104,8 +104,8 @@ describe("local remote hardening", () => {
 						Remote.plugin(contract, {
 							contractModule,
 							connect: { local: {} },
-							config: { directory: "unused", mode: "normal", value: 1 },
 						}),
+						{ directory: "unused", mode: "normal", value: 1 },
 					)
 					return yield* Effect.exit(fork.await)
 				}).pipe(Effect.scoped, Effect.provide(layer))
@@ -141,8 +141,8 @@ describe("local remote hardening", () => {
 						Remote.plugin(refined, {
 							contractModule,
 							connect: { local: {} },
-							config: "-1",
 						}),
+						"-1",
 					)
 					return yield* Effect.exit(fork.await)
 				}).pipe(Effect.scoped, Effect.provide(layer))
@@ -203,8 +203,8 @@ describe("local remote hardening", () => {
 							import.meta.url,
 						).href,
 						connect: { local: {} },
-						config: { directory, mode: "normal", value: 3 },
 					}),
+					{ directory, mode: "normal", value: 3 },
 				)
 				yield* fork.await
 				yield* fork.dispose
@@ -224,8 +224,8 @@ describe("local remote hardening", () => {
 					Remote.plugin(contract, {
 						contractModule: "node:path",
 						connect: { local: {} },
-						config: { directory, mode: "normal", value: 1 },
 					}),
+					{ directory, mode: "normal", value: 1 },
 				)
 				const exit = yield* Effect.exit(fork.await)
 				assert.isTrue(Exit.isFailure(exit))
@@ -254,8 +254,8 @@ describe("local remote hardening", () => {
 					Remote.plugin(contract, {
 						contractModule,
 						connect: { local: {} },
-						config: { directory, mode: "flood", value: 1 },
 					}),
+					{ directory, mode: "flood", value: 1 },
 				)
 				yield* fork.await
 				yield* fork.dispose.pipe(Effect.timeout("5 seconds"))

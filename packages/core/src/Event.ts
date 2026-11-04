@@ -19,7 +19,7 @@ import {
 	TxRef,
 } from "effect"
 import { Graft } from "./Graft"
-import * as Release from "./internal/release"
+import * as Release from "./Release"
 import { Realms, realmOf, type Handler } from "./internal/runtime"
 
 const TypeId = "~@graftland/graft/Event"

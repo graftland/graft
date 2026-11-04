@@ -300,9 +300,15 @@ check the entry fields:
   update it when you upgrade Graft. `graft create` writes this line with its own
   version.
 - The schema is also in the package as `@graftland/cli/schema.json`.
-- It checks the entry fields and the intercepts that `graft start` registers. It
-  does not check a plugin's `config`, because only the plugin's own schema knows
-  its shape.
+- It checks entry fields, registered intercepts, and the config of `remote`,
+  `remote/runner` and `remote/cli`, including entries nested in groups. Business
+  config and custom capability config remain open; their own schemas check them
+  at startup.
+
+For an application's editor schema, combine explicit plugin registrations with
+`ConfigSchema.make` from `@graftland/loader`. Remote publishes its registrations
+through `@graftland/plugin-remote/Config`. Generating a schema does not load
+plugins.
 
 The language server may flag `!env`. Declare the tag in the editor settings. For
 VS Code:

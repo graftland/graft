@@ -101,19 +101,26 @@ Replace the plugin's entry with a `remote` entry. `name: remote` loads
 `Remote.plugin` builds the same plugin in code, for `Graft.plugin`:
 
 ```ts title="src/entry.ts"
-export default Remote.plugin(contract, {
+const greeter = Remote.plugin(contract, {
 	contractModule: new URL("./contract.js", import.meta.url).href,
 	connect: { local: {} },
-	config: { greeting: "Hello" },
 	shutdownTimeout: "5 seconds",
 })
+
+const fork = yield * Graft.plugin(greeter, { greeting: "Hello" })
+yield * fork.await
+yield * fork.update({ greeting: "Hi" })
+yield * fork.await
 ```
+
+The factory fixes deployment options. Pass business config to `Graft.plugin`;
+`fork.update` stops the old execution unit and starts a new one with the next
+config.
 
 | Option            | Meaning                                                                                     |
 | ----------------- | ------------------------------------------------------------------------------------------- |
 | `contractModule`  | Where the plugin process imports the contract from. Not the contract's `module`.            |
 | `connect`         | As in YAML, plus [credential effects](../transport-auth/#credential-sources).               |
-| `config`          | The plugin's config in encoded form.                                                        |
 | `shutdownTimeout` | Bound for the graceful stop. Default `5 seconds`.                                           |
 | `retry`           | A `Schedule` for restarting the plugin after a failure. Calls themselves are never retried. |
 
@@ -147,7 +154,8 @@ Callers and `fork.await` see these:
 | `MissingInstance`            | A runner connection has neither `connect.instance` nor an entry id.                      | Set `connect.instance`.                                                                                                                          |
 | `RemoteEntryError`           | A YAML entry is invalid. `entry`, `directory` and `field` locate it.                     | Fix that `field`: `contract`, `config`, `connect`, `connect.transport`, `connect.auth`, or a runner's `listen[n].transport` or `listen[n].auth`. |
 
-Defects stay defects. Inside `RemoteError` you may find:
+Public errors above are exported from the package root. Defects stay defects.
+The following nested tags are diagnostics carried in `RemoteError.cause`:
 
 | Error                        | Meaning                                                                             | What to do                                           |
 | ---------------------------- | ----------------------------------------------------------------------------------- | ---------------------------------------------------- |
@@ -170,8 +178,11 @@ Defects stay defects. Inside `RemoteError` you may find:
 
 ## Config changes and hot reload
 
-| You change                        | What happens                                                                                              |
-| --------------------------------- | --------------------------------------------------------------------------------------------------------- |
-| The entry's `config` or `connect` | The plugin process restarts. A remote plugin is never [updated in place](../../plugins/#update-in-place). |
-| The implementation                | Not hot-reloaded. Rebuild it, or install it under the runner's `root`, then restart the entry.            |
-| The contract                      | Not hot-reloaded. Rebuild it and restart the host.                                                        |
+| You change                                                                 | What happens                                                                                                                                                 |
+| -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Business config through `fork.update` or YAML                              | The execution unit restarts. Remote never updates in place.                                                                                                  |
+| `connect` in YAML                                                          | The old execution unit stops, then the new connection starts.                                                                                                |
+| A local/worker contract or implementation file under `graft start --watch` | The matching remote fork restarts with fresh code. Imported contract dependencies are observed too. Rebuild first when the entry points at built JavaScript. |
+| A network runner's implementation                                          | The host does not watch it. Install the new code on the runner and restart the entry.                                                                        |
+
+Without `--watch`, restart the host after rebuilding its contract.

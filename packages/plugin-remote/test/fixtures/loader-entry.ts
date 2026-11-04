@@ -11,7 +11,6 @@ export default Plugin.make({
 		const fork = yield* Graft.plugin(
 			Remote.plugin(contract, {
 				contractModule: "remote-fixture",
-				config,
 				connect: {
 					url: `wss://${yield* Config.String("RUNNER_HOST")}:${yield* Config.Port("RUNNER_PORT")}`,
 					servername: yield* Config.String("RUNNER_SERVERNAME"),
@@ -24,6 +23,7 @@ export default Plugin.make({
 					},
 				},
 			}),
+			config,
 		)
 		yield* follow(fork, Effect.failCause)
 	}),

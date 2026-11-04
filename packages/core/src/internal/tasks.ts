@@ -1,5 +1,5 @@
 import { Cause, Deferred, Effect, Exit, FiberSet, Ref, Scope } from "effect"
-import * as Release from "./release"
+import * as Release from "../Release"
 
 // This requirement carries asynchronous errors to Plugin.make; it has no public service key.
 declare const TaskErrors: unique symbol

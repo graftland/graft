@@ -12,7 +12,7 @@ import {
 } from "effect"
 import { Listener, type Accept } from "../Transport"
 import { TransportError } from "../Errors"
-import * as Release from "../internal/release"
+import * as Release from "@graftland/graft/Release"
 
 export const Config = Schema.Struct({ auth: Schema.optionalKey(Schema.Never) })
 export default Plugin.make({

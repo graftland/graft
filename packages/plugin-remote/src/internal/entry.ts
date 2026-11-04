@@ -1,4 +1,4 @@
-import { Graft, Plugin, type Fork } from "@graftland/graft"
+import { Graft, Plugin, Release, type Fork } from "@graftland/graft"
 import { ConfigDirectory, Entry, ModuleResolver } from "@graftland/loader"
 import {
 	Cause,
@@ -9,6 +9,7 @@ import {
 	References,
 	Scope,
 	String,
+	Stream,
 } from "effect"
 import { ChildProcessSpawner } from "effect/process"
 import * as Contract from "../Contract"
@@ -78,7 +79,11 @@ export const loadContract = Effect.fnUntraced(function* (specifier: string) {
 /** Direct execution installs only its execution capability in a private realm. */
 export const direct = (
 	provider: Plugin.Plugin,
-	consumer: Plugin.Plugin,
+	consumer: Effect.Effect<
+		Plugin.Plugin,
+		ModuleResolver.ModuleInvalid,
+		Scope.Scope
+	>,
 	input: Schema.Json,
 	key: typeof LocalTransport | typeof WorkerTransport,
 ): Effect.Effect<Fork.Fork<never, unknown>, never, Graft.Graft | Scope.Scope> =>
@@ -90,7 +95,8 @@ export const direct = (
 				yield* follow(capability, (cause) =>
 					Effect.fail(Assembly.CapabilityFailed.make({ cause })),
 				)
-				const execution = yield* Graft.plugin(consumer, input)
+				const definition = yield* consumer
+				const execution = yield* Graft.plugin(definition, input)
 				yield* follow(execution, (cause) =>
 					Effect.fail(Assembly.CapabilityFailed.make({ cause })),
 				)
@@ -133,17 +139,69 @@ const directTarget = Effect.fnUntraced(function* <
 		},
 		"connect",
 	)
-	return yield* direct(
-		capability.plugin,
+
+	const watch = yield* ModuleResolver.Watch
+	const resolver = yield* Effect.serviceOption(ModuleResolver.ModuleResolver)
+	const current: Effect.Effect<
+		Contract.Contract<Contract.ConfigSchema, Contract.ErrorSchema>,
+		ModuleResolver.ModuleInvalid,
+		Scope.Scope
+	> = Option.isSome(watch) && Option.isSome(resolver)
+		? resolver.value.importModule(module).pipe(
+				Effect.flatMap((namespace) =>
+					Effect.fromOption(Contract.fromModule(namespace), () =>
+						ModuleResolver.ModuleInvalid.make({
+							specifier: module,
+							cause: "Expected a remote contract",
+						}),
+					),
+				),
+			)
+		: Effect.succeed(contract)
+	const consumer = Effect.map(current, (contract) =>
 		executionPlugin(
 			contract,
 			{ ...options, contractModule: module },
 			selected,
 			annotations,
 		),
+	)
+	const fork = yield* direct(
+		capability.plugin,
+		consumer,
 		input.config,
 		selected._tag === "Local" ? LocalTransport : WorkerTransport,
 	)
+	if (Option.isSome(watch)) {
+		const observe = watch.value
+		const changed = current.pipe(
+			Effect.flatMap((contract) =>
+				(String.startsWith("file:")(contract.module)
+					? Effect.succeed(contract.module)
+					: resolveEntry(directory, contract.module)
+				).pipe(
+					Effect.flatMap((implementation) =>
+						observe([module, implementation]).pipe(
+							Stream.take(1),
+							Stream.runDrain,
+						),
+					),
+				),
+			),
+			Release.scoped,
+		)
+		yield* changed.pipe(
+			Effect.andThen(fork.restart),
+			Effect.forever,
+			// Release.scoped distinguishes interrupted finalizers from cancellation of this watcher.
+			Effect.catchCauseIf(
+				(cause) => !Cause.hasInterruptsOnly(cause),
+				(cause) => Effect.logError("Remote source watcher stopped", cause),
+			),
+			Effect.forkScoped,
+		)
+	}
+	return fork
 })
 const runnerTarget = Effect.fnUntraced(function* <
 	S extends Schema.Top & {

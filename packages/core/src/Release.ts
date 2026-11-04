@@ -1,3 +1,4 @@
+/** Scoped resource release that preserves interrupted finalizers as defects. */
 import { Array, Cause, Effect, Exit, Result, Schema, Scope } from "effect"
 
 /** Resource release was interrupted, rather than successfully cancelled. */
@@ -12,7 +13,12 @@ export class ReleaseInterrupted extends Schema.TaggedError<
 	}
 }
 
-/** Keep a known release failure distinguishable from cancellation through enclosing scopes. */
+/**
+ * Closes a scope without losing interrupted finalizers through enclosing cancellation.
+ * Pending external cancellation remains an Interrupt. Interrupts produced by release
+ * itself become a ReleaseInterrupted defect carrying the original cause.
+ * Other failures are preserved unchanged.
+ */
 export const close = (
 	scope: Scope.Closeable,
 	exit: Exit.Exit<unknown, unknown>,
@@ -54,6 +60,10 @@ export const close = (
 		),
 	)
 
+/**
+ * Runs an effect in its own scope and closes it with close.
+ * Body and release failures are combined; a failed release never hides the body cause.
+ */
 export const scoped = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
 	Effect.uninterruptibleMask((restore) =>
 		Effect.gen(function* () {

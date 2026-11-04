@@ -1,5 +1,5 @@
 import { Cause, Deferred, Effect, Exit, Scope } from "effect"
-import * as Release from "./release"
+import * as Release from "../Release"
 
 /** Keep ownership until cleanup finishes, even if a dispose caller is cancelled. */
 export const ownedScope = Effect.fnUntraced(function* <E = never>(

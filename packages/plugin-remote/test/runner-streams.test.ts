@@ -122,8 +122,8 @@ const proxy = Effect.fnUntraced(function* (
 		Remote.plugin(contract, {
 			contractModule: "remote-fixture",
 			connect,
-			config: { directory, fail: false },
 		}),
+		{ directory, fail: false },
 	)
 	yield* remote.await
 	const found = yield* Deferred.make<typeof ChildApi.Service>()
@@ -309,8 +309,8 @@ describe("runner stream transports", () => {
 					Remote.plugin(contract, {
 						contractModule: "unused",
 						connect: { ...runtimeConnect, command: ["unused"] },
-						config: { directory: "unused", fail: false },
 					}),
+					{ directory: "unused", fail: false },
 				)
 				const error = yield* Effect.flip(fork.await)
 				assert.include(Cause.pretty(Cause.fail(error)), "do not accept auth")

@@ -22,6 +22,7 @@ import {
 	Schema,
 	Scope,
 	String,
+	Stream,
 } from "effect"
 
 export class ModuleNotFound extends Schema.TaggedError<
@@ -400,3 +401,13 @@ export const fromRecord = (
 				),
 			),
 	})
+
+/** Optional file invalidation supplied by a development host. It never imports an implementation. */
+export const Watch = Context.Reference(
+	"@graftland/loader/ModuleResolver/Watch",
+	{
+		defaultValue: (): Option.Option<
+			(files: ReadonlyArray<string>) => Stream.Stream<void, ModuleInvalid>
+		> => Option.none(),
+	},
+)

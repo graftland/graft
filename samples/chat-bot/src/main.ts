@@ -62,8 +62,8 @@ const program = Effect.gen(function* () {
 			contractModule: new URL("../dist/forecastContract.js", import.meta.url)
 				.href,
 			connect: { local: {} },
-			config: { units: "celsius" },
 		}),
+		{ units: "celsius" },
 	)
 	yield* reach(weatherFork, "Active")
 	yield* Effect.log(`weather is ${yield* state(weatherFork)}`)

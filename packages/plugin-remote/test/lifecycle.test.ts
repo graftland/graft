@@ -81,12 +81,12 @@ describe("local remote lifecycle", () => {
 				Remote.plugin(contract, {
 					contractModule,
 					connect: { local: {} },
-					config: {
-						directory,
-						mode: "wait",
-						value: 1,
-					},
 				}),
+				{
+					directory,
+					mode: "wait",
+					value: 1,
+				},
 			)
 			yield* waitFor(directory, "started-")
 			assert.equal(
@@ -109,12 +109,12 @@ describe("local remote lifecycle", () => {
 				Remote.plugin(contract, {
 					contractModule,
 					connect: { local: {} },
-					config: {
-						directory,
-						mode: "fail",
-						value: 7,
-					},
 				}),
+				{
+					directory,
+					mode: "fail",
+					value: 7,
+				},
 			)
 			const exit = yield* Effect.exit(fork.await)
 			assert.isTrue(Exit.isFailure(exit))
@@ -153,8 +153,8 @@ describe("local remote lifecycle", () => {
 					contractModule,
 					retry: Schedule.recurs(1),
 					connect: { local: {} },
-					config: { directory, mode: "retry", value: 1 },
 				}),
+				{ directory, mode: "retry", value: 1 },
 			)
 			const active = yield* Stream.runHead(
 				fork.state.pipe(Stream.filter((state) => state._tag === "Active")),
@@ -176,12 +176,12 @@ describe("local remote lifecycle", () => {
 				Remote.plugin(contract, {
 					contractModule,
 					connect: { local: {} },
-					config: {
-						directory,
-						mode: "crash",
-						value: 1,
-					},
 				}),
+				{
+					directory,
+					mode: "crash",
+					value: 1,
+				},
 			)
 			const exit = yield* Effect.exit(fork.await)
 			assert.isTrue(Exit.isFailure(exit))
@@ -208,12 +208,12 @@ describe("local remote lifecycle", () => {
 					Remote.plugin(contract, {
 						contractModule,
 						connect: { local: {} },
-						config: {
-							directory,
-							mode: "normal",
-							value: 1,
-						},
 					}),
+					{
+						directory,
+						mode: "normal",
+						value: 1,
+					},
 				)
 				yield* fork.await
 				const [pid] = yield* waitFor(directory, "started-")
@@ -235,12 +235,12 @@ describe("local remote lifecycle", () => {
 				Remote.plugin(contract, {
 					contractModule,
 					connect: { local: {} },
-					config: {
-						directory,
-						mode: "normal",
-						value: 1,
-					},
 				}),
+				{
+					directory,
+					mode: "normal",
+					value: 1,
+				},
 			).pipe(Scope.provide(scope))
 			yield* fork.await
 			const [pid] = yield* waitFor(directory, "started-")
@@ -257,12 +257,12 @@ describe("local remote lifecycle", () => {
 				Remote.plugin(contract, {
 					contractModule,
 					connect: { local: {} },
-					config: {
-						directory,
-						mode: "cleanup-fail",
-						value: 1,
-					},
 				}),
+				{
+					directory,
+					mode: "cleanup-fail",
+					value: 1,
+				},
 			)
 			yield* fork.await
 			const exit = yield* Effect.exit(fork.dispose)
@@ -294,12 +294,12 @@ describe("local remote lifecycle", () => {
 				Remote.plugin(contract, {
 					contractModule,
 					connect: { local: {} },
-					config: {
-						directory,
-						mode: "normal",
-						value: 9,
-					},
 				}),
+				{
+					directory,
+					mode: "normal",
+					value: 9,
+				},
 			)
 			yield* fork.await
 			const log = yield* Stream.runHead(
@@ -346,24 +346,17 @@ describe("local remote lifecycle", () => {
 				Remote.plugin(contract, {
 					contractModule,
 					connect: { local: {} },
-					config: {
-						directory,
-						mode: "normal",
-						value: 1,
-					},
 				}),
+				{
+					directory,
+					mode: "normal",
+					value: 1,
+				},
 			)
 			yield* fork.await
 			const [first] = yield* waitFor(directory, "started-")
-			yield* fork.dispose
-			const replacement = yield* Graft.plugin(
-				Remote.plugin(contract, {
-					contractModule,
-					connect: { local: {} },
-					config: { directory, mode: "normal", value: 2 },
-				}),
-			)
-			yield* replacement.await
+			yield* fork.update({ directory, mode: "normal", value: 2 })
+			yield* fork.await
 			const pids = yield* waitFor(directory, "started-", 2)
 			const second = Option.getOrThrow(
 				Array.findFirst(pids, (pid) => pid !== first),
@@ -371,7 +364,7 @@ describe("local remote lifecycle", () => {
 			const value = yield* fs.readFileString(`${directory}/started-${second}`)
 			assert.equal(value, "2")
 			yield* gone(first!)
-			yield* replacement.dispose
+			yield* fork.dispose
 			yield* gone(second)
 		}).pipe(run),
 	)
@@ -384,12 +377,12 @@ describe("local remote lifecycle", () => {
 					Remote.plugin(contract, {
 						contractModule,
 						connect: { local: {} },
-						config: {
-							directory,
-							mode: "normal",
-							value: 1,
-						},
 					}),
+					{
+						directory,
+						mode: "normal",
+						value: 1,
+					},
 				)
 				yield* fork.await
 				const [pid] = yield* waitFor(directory, "started-")
@@ -425,12 +418,12 @@ describe("local remote lifecycle", () => {
 					Remote.plugin(contract, {
 						contractModule,
 						connect: { local: {} },
-						config: {
-							directory,
-							mode: "background-fail",
-							value: 8,
-						},
 					}),
+					{
+						directory,
+						mode: "background-fail",
+						value: 8,
+					},
 				)
 				yield* fork.await
 				yield* fs.writeFileString(`${directory}/fail`, "fail")
@@ -463,8 +456,8 @@ describe("local remote lifecycle", () => {
 					contractModule,
 					shutdownTimeout: "100 millis",
 					connect: { local: {} },
-					config: { directory, mode: "normal", value: 1 },
 				}),
+				{ directory, mode: "normal", value: 1 },
 			)
 			yield* fork.await
 			const [pid] = yield* waitFor(directory, "started-")
@@ -482,12 +475,12 @@ describe("local remote lifecycle", () => {
 					Remote.plugin(contract, {
 						contractModule,
 						connect: { local: {} },
-						config: {
-							directory,
-							mode: "leaked-handle",
-							value: 1,
-						},
 					}),
+					{
+						directory,
+						mode: "leaked-handle",
+						value: 1,
+					},
 				)
 				yield* fork.await
 				const pid = yield* waitFor(directory, "started-").pipe(
@@ -537,12 +530,12 @@ describe("local remote lifecycle", () => {
 				Remote.plugin(contract, {
 					contractModule,
 					connect: { local: {} },
-					config: {
-						directory,
-						mode: "wait",
-						value: 1,
-					},
 				}),
+				{
+					directory,
+					mode: "wait",
+					value: 1,
+				},
 			)
 			const [pid] = yield* waitFor(directory, "started-")
 			yield* fork.dispose
@@ -553,32 +546,31 @@ describe("local remote lifecycle", () => {
 	)
 })
 
-it.live(
-	"preserves explicit null and defaults only omitted TypeScript config",
-	() =>
-		Effect.gen(function* () {
-			const explicit = yield* Graft.plugin(
-				Remote.plugin(nullContract, {
-					contractModule: new URL(
-						"../.cache/integration/null-config-contract.js",
-						import.meta.url,
-					).href,
-					connect: { local: {} },
-					config: null,
-				}),
-			)
-			yield* explicit.await
-			yield* explicit.dispose
-			const omitted = yield* Graft.plugin(
-				Remote.plugin(emptyContract, {
-					contractModule: new URL(
-						"../.cache/integration/empty-config-contract.js",
-						import.meta.url,
-					).href,
-					connect: { local: {} },
-				}),
-			)
-			yield* omitted.await
-			yield* omitted.dispose
-		}).pipe(run),
+it.live("accepts null and empty objects as plugin input", () =>
+	Effect.gen(function* () {
+		const explicit = yield* Graft.plugin(
+			Remote.plugin(nullContract, {
+				contractModule: new URL(
+					"../.cache/integration/null-config-contract.js",
+					import.meta.url,
+				).href,
+				connect: { local: {} },
+			}),
+			null,
+		)
+		yield* explicit.await
+		yield* explicit.dispose
+		const empty = yield* Graft.plugin(
+			Remote.plugin(emptyContract, {
+				contractModule: new URL(
+					"../.cache/integration/empty-config-contract.js",
+					import.meta.url,
+				).href,
+				connect: { local: {} },
+			}),
+			{},
+		)
+		yield* empty.await
+		yield* empty.dispose
+	}).pipe(run),
 )

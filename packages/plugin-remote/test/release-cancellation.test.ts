@@ -11,7 +11,7 @@ import {
 	Stream,
 	Schema,
 } from "effect"
-import * as Release from "../src/internal/release"
+import * as Release from "@graftland/graft/Release"
 import { Connector } from "../src/Transport"
 import { Credentials } from "../src/Auth"
 import * as Connection from "../src/internal/runner/Connection"

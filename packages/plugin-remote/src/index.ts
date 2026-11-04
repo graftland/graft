@@ -15,7 +15,7 @@ import * as Contract from "./Contract"
 export { Contract }
 export { Instance } from "./Instance"
 export { RemoteTerminationUnconfirmed } from "./internal/runner/model"
-export { RemoteError, RemoteWithdrawn, MissingInstance } from "./Errors"
+export * from "./Errors"
 export { UndeclaredFailure } from "./Contract"
 export type {
 	Connect,
@@ -30,7 +30,6 @@ export interface Options<
 	readonly connect: Credential.Connect<D>
 	/** Contract module resolved independently in each execution environment. */
 	readonly contractModule: string
-	readonly config?: Schema.Json
 	readonly retry?: Schedule.Schedule<unknown, unknown> | undefined
 	readonly shutdownTimeout?: Duration.Input | undefined
 }
@@ -60,6 +59,7 @@ const publicCause = <E extends Schema.Top>(
 		}),
 	)
 
+/** Fixes deployment options; business config is plugin input, and updates restart the execution unit. */
 export const plugin = <
 	S extends Schema.Top & {
 		readonly Encoded: Schema.Json
@@ -73,10 +73,10 @@ export const plugin = <
 	const D extends ReadonlyArray<Plugin.Dependency> = readonly [],
 >(
 	contract: Contract.Contract<S, E>,
-	options: Options<D> & { readonly config?: S["Encoded"] },
+	options: Options<D>,
 ): Plugin.Plugin<
-	void,
-	void,
+	S["Encoded"],
+	S["Encoded"],
 	| E["Type"]
 	| Contract.UndeclaredFailure
 	| RemoteError
@@ -92,12 +92,17 @@ export const plugin = <
 			ChildProcessSpawner.ChildProcessSpawner,
 		],
 		retry: options.retry,
-		apply: () =>
+		config: Schema.toEncoded(contract.config),
+		apply: (config) =>
 			Effect.gen(function* () {
+				const auth = Credential.invocation(options.connect)
 				const input = yield* Schema.decodeUnknownEffect(Configuration.Host)({
 					contract: options.contractModule,
-					connect: options.connect,
-					config: options.config === undefined ? {} : options.config,
+					connect:
+						auth === undefined
+							? options.connect
+							: { ...options.connect, auth: { name: "effect-credentials" } },
+					config,
 				})
 				yield* Schema.decodeEffect(contract.config)(input.config)
 				const child = yield* launch(
@@ -107,7 +112,7 @@ export const plugin = <
 						contractModule: options.contractModule,
 						shutdownTimeout: options.shutdownTimeout,
 					},
-					Credential.invocation(options.connect),
+					auth,
 				)
 				yield* follow(child, (cause) =>
 					Effect.failCause(publicCause(contract.error, cause)),

@@ -13,7 +13,8 @@
 		"dist",
 		"src",
 		"README.zh-CN.md",
-		"README.zh-TW.md"
+		"README.zh-TW.md",
+		"schema.json"
 	],
 	"sideEffects": false,
 	"exports": {
@@ -28,6 +29,10 @@
 		"./cli": {
 			"source": "./src/cli.ts",
 			"default": "./dist/cli.js"
+		},
+		"./Config": {
+			"source": "./src/Config.ts",
+			"default": "./dist/Config.js"
 		},
 		"./Contract": {
 			"source": "./src/Contract.ts",
@@ -119,7 +124,7 @@
 		"./internal/worker": "./dist/internal/workerMain.js"
 	},
 	"scripts": {
-		"build": "tsdown",
+		"build": "tsdown && node scripts/schema.mjs",
 		"test": "vitest run"
 	},
 	"peerDependencies": {
@@ -145,6 +150,7 @@
 			".": "./dist/index.js",
 			"./Auth": "./dist/Auth.js",
 			"./cli": "./dist/cli.js",
+			"./Config": "./dist/Config.js",
 			"./Contract": "./dist/Contract.js",
 			"./Errors": "./dist/Errors.js",
 			"./host/auth/bearer": "./dist/host/auth/bearer.js",

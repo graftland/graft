@@ -12,7 +12,7 @@ import {
 } from "effect"
 import { Event, Graft, Plugin } from "../src/index.ts"
 import { makeJournal, run } from "./utils.ts"
-import { ReleaseInterrupted } from "../src/internal/release.ts"
+import { ReleaseInterrupted } from "../src/Release.ts"
 
 const resource = (alive: Ref.Ref<boolean>) =>
 	Effect.acquireRelease(Ref.set(alive, true), () => Ref.set(alive, false))

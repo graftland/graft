@@ -12,7 +12,7 @@ import {
 	Stream,
 } from "effect"
 import { Graft, Plugin, Fork } from "../src/index.ts"
-import { ReleaseInterrupted } from "../src/internal/release.ts"
+import { ReleaseInterrupted } from "../src/Release.ts"
 
 const assertReleaseInterruption = <E>(cause: Cause.Cause<E>) => {
 	assert.isAbove(cause.reasons.length, 0)

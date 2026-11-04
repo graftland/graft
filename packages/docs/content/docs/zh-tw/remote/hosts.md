@@ -97,19 +97,25 @@ const greeter = Contract.service(Greeter, api, {
 `Remote.plugin` 在程式碼中建立同樣的外掛，交給 `Graft.plugin` 載入：
 
 ```ts title="src/entry.ts"
-export default Remote.plugin(contract, {
+const greeter = Remote.plugin(contract, {
 	contractModule: new URL("./contract.js", import.meta.url).href,
 	connect: { local: {} },
-	config: { greeting: "Hello" },
 	shutdownTimeout: "5 seconds",
 })
+
+const fork = yield * Graft.plugin(greeter, { greeting: "Hello" })
+yield * fork.await
+yield * fork.update({ greeting: "Hi" })
+yield * fork.await
 ```
+
+工廠只固定部署選項。業務設定傳給 `Graft.plugin`；呼叫 `fork.update`
+會先停止舊執行單元，再用新設定啟動新的執行單元。
 
 | 選項              | 意義                                                               |
 | ----------------- | ------------------------------------------------------------------ |
 | `contractModule`  | 外掛行程從哪裡匯入契約。不是契約自己的 `module`。                  |
 | `connect`         | 與 YAML 相同，另外可用[憑證 Effect](../transport-auth/#憑證來源)。 |
-| `config`          | 外掛自己的設定，採編碼後的形式。                                   |
 | `shutdownTimeout` | 優雅停止的時限，預設 `5 seconds`。                                 |
 | `retry`           | 外掛失敗後重新啟動用的 `Schedule`。呼叫本身從不重試。              |
 
@@ -144,7 +150,8 @@ export default Remote.plugin(contract, {
 | `MissingInstance`            | runner 連線既沒有 `connect.instance`，也沒有設定項目 id。                | 設定 `connect.instance`。                                                                                                                    |
 | `RemoteEntryError`           | YAML 設定項目無效。`entry`、`directory` 與 `field` 指出位置。            | 修正該 `field`：`contract`、`config`、`connect`、`connect.transport`、`connect.auth`，或 runner 的 `listen[n].transport`、`listen[n].auth`。 |
 
-defect 仍然是 defect。`RemoteError` 中可能出現：
+上表的公開錯誤都從套件根匯出。defect 仍然是 defect。以下巢狀標籤是
+`RemoteError.cause` 帶有的診斷資訊：
 
 | 錯誤                         | 意義                                                         | 該怎麼做                                  |
 | ---------------------------- | ------------------------------------------------------------ | ----------------------------------------- |
@@ -167,8 +174,11 @@ defect 仍然是 defect。`RemoteError` 中可能出現：
 
 ## 設定變更與熱重載
 
-| 你修改了                         | 會發生什麼                                                                   |
-| -------------------------------- | ---------------------------------------------------------------------------- |
-| 設定項目的 `config` 或 `connect` | 外掛行程重新啟動。遠端外掛從不[原地更新](../../plugins/#原地更新)。          |
-| 實作                             | 不參與熱重載。重新建置，或安裝到 runner 的 `root` 下，再重新啟動該設定項目。 |
-| 契約                             | 不參與熱重載。重新建置並重新啟動宿主。                                       |
+| 修改內容                                               | 結果                                                                                                             |
+| ------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------- |
+| 透過 `fork.update` 或 YAML 修改業務設定                | 執行單元重新啟動，不會原地更新。                                                                                 |
+| YAML 中的 `connect`                                    | 先停止舊執行單元，再建立新連線。                                                                                 |
+| `graft start --watch` 下 local/worker 的契約或實作檔案 | 對應的遠端 fork 以新程式碼重新啟動，也會觀察契約匯入的相依模組。入口指向建置後的 JavaScript 時，需要先重新建置。 |
+| 網路 runner 上的實作                                   | 宿主不觀察它。在 runner 安裝新程式碼，再重新啟動設定項目。                                                       |
+
+未啟用 `--watch` 時，重新建置契約後需要重新啟動宿主。

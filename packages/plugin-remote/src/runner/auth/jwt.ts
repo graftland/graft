@@ -1,14 +1,6 @@
 import { Option } from "effect"
 import { Graft, Plugin } from "@graftland/graft"
-import {
-	Cause,
-	Duration,
-	Effect,
-	FileSystem,
-	Layer,
-	Path,
-	Schema,
-} from "effect"
+import { Cause, Effect, FileSystem, Layer, Path, Schema } from "effect"
 import { Jwk, Jwks, Jwt } from "effect/jose"
 import { Signature } from "effect/crypto"
 import { HttpClient } from "effect/http"
@@ -17,34 +9,9 @@ import { ConfigDirectory } from "@graftland/loader"
 import { AuthenticationFailed } from "../../Errors"
 import * as Token from "../../internal/auth/token"
 
-export const ClockTolerance = Schema.DurationFromString.check(
-	Schema.makeFilter(
-		(duration) =>
-			Duration.isFinite(duration) && Duration.toMillis(duration) >= 0,
-		{ expected: "a finite, non-negative duration" },
-	),
-)
-export const Config = Schema.Struct({
-	issuer: Schema.NonEmptyString,
-	audience: Schema.NonEmptyArray(Schema.NonEmptyString),
-	algorithms: Schema.NonEmptyArray(Jwk.AsymmetricAlgorithm),
-	identityClaim: Schema.NonEmptyString.pipe(
-		Schema.withDecodingDefaultKey(Effect.succeed("sub")),
-	),
-	clockTolerance: ClockTolerance.pipe(
-		Schema.withDecodingDefaultKey(Effect.succeed("5 seconds")),
-	),
-	keys: Schema.Union([
-		Schema.Struct({
-			jwksUrl: Schema.String,
-			publicKey: Schema.optionalKey(Schema.Never),
-		}),
-		Schema.Struct({
-			publicKey: Schema.String,
-			jwksUrl: Schema.optionalKey(Schema.Never),
-		}),
-	]),
-})
+export { ClockTolerance } from "../../internal/auth/config"
+import { Jwt as Config } from "../../internal/auth/config"
+export { Config }
 const keys = Effect.fnUntraced(function* (config: typeof Config.Type) {
 	if (config.keys.jwksUrl !== undefined)
 		return Jwks.layerRemote({ url: config.keys.jwksUrl })

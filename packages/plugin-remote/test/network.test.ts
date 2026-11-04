@@ -196,8 +196,8 @@ const setup = (lease = 15000, partitionable = false) =>
 			Remote.plugin(contract, {
 				contractModule: "remote-fixture",
 				connect,
-				config: { directory, fail: false },
 			}),
+			{ directory, fail: false },
 		)
 		yield* proxy.await.pipe(Effect.timeout("30 seconds"))
 		const service = yield* Deferred.make<ChildApi["Service"]>()
@@ -702,8 +702,8 @@ describe("network runner end to end", () => {
 								}),
 							},
 						},
-						config: {},
 					}),
+					{},
 				)
 				const exit = yield* Effect.exit(proxy.await)
 				assert.isTrue(Exit.isFailure(exit))
@@ -1076,8 +1076,8 @@ describe("network runner end to end", () => {
 								auth: { mtls: Effect.succeed(certificate) },
 								...(expect === undefined ? {} : { expect }),
 							},
-							config: { directory, fail: false },
 						}),
+						{ directory, fail: false },
 					)
 					const failed = yield* Effect.exit(proxy.await)
 					assert.isTrue(Exit.isFailure(failed))

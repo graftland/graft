@@ -100,7 +100,8 @@ connect:
 不验证调用方身份。本例只在回环地址上体验流程；部署时请使用 wss 和认证。详见[传输与认证](../../packages/docs/content/docs/zh-cn/remote/transport-auth.md)。
 
 退出时先在宿主终端按 **Ctrl+C**，再停止 runner。运行中可以改业务配置和
-`connect`；修改契约后，需要重新构建并重启宿主。
+`connect`。local/worker 配合 `--watch`
+时，重新构建修改后的契约或实现会重启执行单元；使用网络 runner 时，需安装新实现并重启条目。
 
 ## 下一步
 

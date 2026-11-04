@@ -71,6 +71,13 @@ npm install @graftland/graft effect
 有型別的取代保持相同的輸入型別。它們只能收窄原有的錯誤上界，包括解碼錯誤。定義會在別名之間保持這一合約。動態載入的
 `Plugin<any>` 值會明確抹去這一合約。
 
+## 資源釋放
+
+需要讓 finalizer 自身的中斷在外層取消後仍可見時，使用
+`Release.scoped`。既有 Scope 可用 `Release.close`
+關閉。釋放過程自行產生的中斷會成為帶有原始 cause 的 `ReleaseInterrupted`
+defect；預期的外部取消仍是 Interrupt。
+
 ## 文件
 
 - [外掛](https://graftland.github.io/graft/zh-tw/plugins/)

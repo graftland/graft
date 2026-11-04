@@ -67,7 +67,6 @@ export const declaredError = Remote.Contract.make({
 export const remote = Remote.plugin(contract, {
 	connect: { local: {} },
 	contractModule: "./contract.js",
-	config: { greeting: "hello" },
 })
 export const loader = Loader.plugin
 export const include = Include.Include

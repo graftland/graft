@@ -513,8 +513,8 @@ describe("runner authentication", () => {
 					Remote.plugin(contract, {
 						connect,
 						contractModule: "unused",
-						config: { directory: "unused", mode: "normal", value: attempt },
 					}),
+					{ directory: "unused", mode: "normal", value: attempt },
 				)
 				yield* Effect.flip(fork.await)
 			}

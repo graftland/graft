@@ -1,18 +1,11 @@
 import { Plugin, Graft } from "@graftland/graft"
-import {
-	Cause,
-	Effect,
-	FileSystem,
-	Option,
-	Path,
-	Redacted,
-	Schema,
-} from "effect"
+import { Cause, Effect, FileSystem, Option, Path, Redacted } from "effect"
 import { CredentialsError } from "../../Errors"
 import { ConfigDirectory } from "@graftland/loader"
 import { Credentials, type Prepared } from "../../Auth"
 
-export const Config = Schema.Struct({ cert: Schema.String, key: Schema.String })
+import { Certificate as Config } from "../../internal/auth/config"
+export { Config }
 export default Plugin.make({
 	name: "remote-certificate-credentials",
 	config: Config,

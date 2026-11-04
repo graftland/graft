@@ -14,7 +14,7 @@ import {
 	Option,
 	Scope,
 } from "effect"
-import * as Release from "../release"
+import * as Release from "@graftland/graft/Release"
 import type { RpcClientError } from "effect/rpc"
 import type { Schema, PlatformError } from "effect"
 import type { RemoteTerminationUnconfirmed } from "./model"

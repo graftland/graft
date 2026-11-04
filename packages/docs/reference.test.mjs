@@ -27,7 +27,13 @@ test("preserves core exports, re-exports, overloads, and local Schema fields", a
 		excludeInternal: true,
 	})
 	const project = await app.convert()
-	assert.equal(project.children.length, 5)
+	assert.equal(project.children.length, 6)
+	const release = project.children.find((entry) => entry.name === "Release")
+	assert.deepEqual(release.children.map((child) => child.name).sort(), [
+		"ReleaseInterrupted",
+		"close",
+		"scoped",
+	])
 	const plugin = project.children.find((entry) => entry.name === "Plugin")
 	const make = plugin.children.find((child) => child.name === "make")
 	assert.equal(make.type.declaration.signatures.length, 2)
@@ -63,6 +69,7 @@ test("preserves core exports, re-exports, overloads, and local Schema fields", a
 		"Fork",
 		"Graft",
 		"Plugin",
+		"Release",
 	])
 	assert.ok(
 		index.children.every((child) => child.kindOf(ReflectionKind.Reference)),
