@@ -1,6 +1,7 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Cause, Schema, Deferred, Effect, Exit, Fiber, TxRef } from "effect"
 import * as FailureGroup from "../src/internal/FailureGroup"
+import * as Release from "../src/internal/release"
 import { ReleaseInterrupted } from "../src/internal/release"
 
 class Failed extends Schema.TaggedError<
@@ -172,4 +173,59 @@ for (const nested of [false, true]) {
 				}),
 		)
 	}
+}
+
+for (const finalizer of ["masked", "interruptible", "self", "die"]) {
+	it.effect(
+		`classifies ${finalizer} release when a scoped failure group closes`,
+		() =>
+			Effect.gen(function* () {
+				const defect = new Error("worker release failed")
+				const cleanup =
+					finalizer === "masked"
+						? Effect.void
+						: finalizer === "interruptible"
+							? Effect.interruptible(Effect.void)
+							: finalizer === "self"
+								? Effect.interrupt
+								: Effect.die(defect)
+				const result = yield* Effect.gen(function* () {
+					const group = yield* FailureGroup.make<never>()
+					const ready = yield* Deferred.make<void>()
+					const worker = yield* group.run(
+						Effect.addFinalizer(() => cleanup).pipe(
+							Effect.andThen(Deferred.succeed(ready, undefined)),
+							Effect.andThen(Effect.never),
+						),
+					)
+					yield* Deferred.await(ready)
+					const closed = yield* Effect.exit(group.close)
+					const cause = yield* group.cause
+					const stopped = yield* Fiber.await(worker)
+					assert(Exit.isFailure(stopped))
+					if (finalizer === "masked" || finalizer === "interruptible") {
+						assert.deepStrictEqual(closed, Exit.void)
+						assert.deepStrictEqual(cause, Cause.empty)
+						assert.isTrue(Cause.hasInterruptsOnly(stopped.cause))
+					} else {
+						assert(Exit.isFailure(closed))
+						assert.deepStrictEqual(cause, closed.cause)
+						const released = Cause.squash(closed.cause)
+						if (finalizer === "self") {
+							assert(Schema.is(ReleaseInterrupted)(released))
+							assert.isTrue(Cause.hasInterruptsOnly(released.cause))
+						} else assert.strictEqual(released, defect)
+					}
+				}).pipe(Release.scoped, Effect.exit)
+				if (finalizer === "masked" || finalizer === "interruptible")
+					assert.deepStrictEqual(result, Exit.void)
+				else {
+					assert(Exit.isFailure(result))
+					const released = Cause.squash(result.cause)
+					if (finalizer === "self")
+						assert(Schema.is(ReleaseInterrupted)(released))
+					else assert.strictEqual(released, defect)
+				}
+			}),
+	)
 }

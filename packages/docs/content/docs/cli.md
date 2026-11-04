@@ -41,6 +41,15 @@ order.
 | With `--watch` | Saving the file reads it again and retries the loader, so entries whose values changed are updated. If the file cannot be read, the previous values stay in effect. |
 | Scope          | The file feeds Effect's `ConfigProvider`, so both `!env` and any `Config` a plugin reads use it. It does not change `process.env`.                                  |
 
+With `--watch`, `.env` files also use polling and watcher recovery:
+
+| Item                | Behavior                                                                                                                                                                          |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `.env` path polling | The requested path is reread every second, resolving symbolic links again. This detects saves to targets outside the config directory, link retargeting and missed notifications. |
+| Changed contents    | Only changed contents retry the loader.                                                                                                                                           |
+| Read failures       | Keep the last values and are logged; polling continues.                                                                                                                           |
+| Watcher failures    | Logged. The watcher is installed again after one second.                                                                                                                          |
+
 ### Invalid first configuration
 
 | Mode              | Behavior                                                                                                                                                                                                                          |
@@ -77,15 +86,14 @@ How the CLI drives reload:
 3. Reload and retry failures are logged with their complete `Cause`, and
    watching goes on.
 
-Polling and failure handling:
+YAML and module watchers use native filesystem notifications, without polling.
+The YAML watcher rereads the file after installation to catch changes during
+setup. If either watcher backend fails, the failure is logged; that watcher is
+not reinstalled.
 
-| Item                | Behavior                                                                                                                                                                          |
-| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Config path polling | The requested path is reread every second, resolving symbolic links again. This detects saves to targets outside the config directory, link retargeting and missed notifications. |
-| Changed contents    | Only changed contents retry the loader.                                                                                                                                           |
-| Read failures       | Keep the last values and are logged; polling continues.                                                                                                                           |
-| Watcher failures    | Logged. The watcher is installed again after one second.                                                                                                                          |
-| Shutdown failures   | Logged with their complete `Cause`. A cause combining interruption with an error or defect is logged in full; pure interruption is normal cancellation.                           |
+Shutdown failures are logged with their complete `Cause`. A cause combining
+interruption with an error or defect is logged in full; pure interruption is
+normal cancellation.
 
 For how changes are detected, see [Hot reload](../hot-reload/#change-detection).
 

@@ -91,9 +91,11 @@ export const make = <E>(): Effect.Effect<FailureGroup<E>, never, Scope.Scope> =>
 						)
 					const bodyCause =
 						Exit.isFailure(body) && !expected ? body.cause : Cause.empty
-					const releaseCause = Exit.isFailure(closed)
-						? closed.cause
-						: Cause.empty
+					// Release.close marks independent interruptions; an unmarked one is pending cancellation.
+					const releaseCause =
+						Exit.isFailure(closed) && !Cause.hasInterruptsOnly(closed.cause)
+							? closed.cause
+							: Cause.empty
 					const failure = Cause.combine(bodyCause, releaseCause)
 					// Body cleanup may carry either an interruption or a release defect from an inner group.
 					const closing = Cause.combine(

@@ -545,10 +545,15 @@ export const supervise = Effect.fnUntraced(function* (
 				withdraw(runtime, running.activation),
 			)
 			// Leased services may need these workers during consumer finalization.
-			const tasksClosed = yield* Effect.exit(
-				Release.close(running.tasks.scope, exit),
+			// Release.close marks independent interruptions; a pure interruption is pending cancellation.
+			const tasksClosed = yield* Release.close(running.tasks.scope, exit).pipe(
+				Effect.catchCauseIf(Cause.hasInterruptsOnly, () => Effect.void),
+				Effect.exit,
 			)
-			const closed = yield* Effect.exit(Release.close(running.scope, exit))
+			const closed = yield* Release.close(running.scope, exit).pipe(
+				Effect.catchCauseIf(Cause.hasInterruptsOnly, () => Effect.void),
+				Effect.exit,
+			)
 			const released = yield* Effect.exit(
 				Effect.tx(
 					Effect.gen(function* () {
@@ -563,7 +568,7 @@ export const supervise = Effect.fnUntraced(function* (
 			)
 			const tasks = yield* Ref.get(running.tasks.failures)
 			const updates = yield* Ref.get(running.updateCleanup)
-			// Only stopping apply is expected to interrupt. Resource release must finish.
+			// Only the closer's cancellation of apply is expected here.
 			const stoppedCause =
 				Exit.isFailure(stopped) && !interruptedBy(stopped.cause, closer)
 					? stopped.cause
