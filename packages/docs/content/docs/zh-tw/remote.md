@@ -175,8 +175,12 @@ loader 會把產生的項目 id 儲存到 YAML，保留它就能在宿主重新�
 `@graftland/remote`、編譯後的外掛套件及其依賴。網路 target 的 `contractModule`
 是從該目錄解析的套件名稱或套件子路徑；宿主不會上傳程式碼。執行期間不要修改已安裝的套件。
 
-用**專用 CA**
-簽發伺服器和用戶端憑證。TLS 驗證伺服器主機名稱，並要求用戶端憑證。用戶端憑證必須恰好包含一個
+用**專用 CA** 簽發伺服器和用戶端憑證。可以用
+`graft-remote certificates --out certs --server runner.example --identity billing`，也可以用任何符合以下要求的工具。`ca.key`
+由維運人員保管；將 `server.crt` / `server.key`
+部署到 runner，`client-billing.crt` / `client-billing.key`
+部署到宿主，兩邊都放一份
+`ca.crt`。TLS 驗證伺服器主機名稱，並要求用戶端憑證。用戶端憑證必須恰好包含一個
 `graft://` SAN URI，例如 `graft://billing`；允許同時包含其他 SAN
 URI。這個身分擁有一個實例命名空間；簽發相同 URI 的憑證，就授予相同存取權。續簽時保留 URI，就能繼續存取原來的實例。
 

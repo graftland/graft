@@ -175,8 +175,11 @@ loader 会把生成的条目 id 保存到 YAML，保留它就能在宿主重启�
 `@graftland/remote`、编译后的插件包及其依赖。网络 target 的 `contractModule`
 是从该目录解析的包名或包的子路径；宿主不会上传代码。运行期间不要修改已安装的包。
 
-用**专用 CA**
-签发服务端和客户端证书。TLS 验证服务端主机名，并要求客户端证书。客户端证书必须恰好包含一个
+用**专用 CA** 签发服务端和客户端证书。可以用
+`graft-remote certificates --out certs --server runner.example --identity billing`，也可以用任何满足以下要求的工具。`ca.key`
+由运维保管；将 `server.crt` / `server.key` 部署到 runner，`client-billing.crt` /
+`client-billing.key` 部署到宿主，两边都放一份
+`ca.crt`。TLS 验证服务端主机名，并要求客户端证书。客户端证书必须恰好包含一个
 `graft://` SAN URI，例如 `graft://billing`；允许同时包含其他 SAN
 URI。这个身份拥有一个实例命名空间；签发相同 URI 的证书，就授予相同访问权。续签时保留 URI，就能继续访问原来的实例。
 

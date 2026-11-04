@@ -14,8 +14,7 @@ writes from older ones.
 
 ## Run it
 
-Use Node.js 22.22 or later on Linux or macOS, with `openssl` installed. From the
-repository root:
+Use Node.js 22.22 or later on Linux or macOS. From the repository root:
 
 ```sh
 devenv shell -- pnpm build
@@ -23,9 +22,10 @@ devenv shell -- pnpm --filter @graftland/sample-remote-runner start
 devenv shell -- pnpm --filter @graftland/sample-remote-runner test
 ```
 
-Everything runs on this machine. `src/lab.ts` plays the runner machine. It
-creates certificates, installs the built packages under `.cache/lab/install`,
-and starts `graft-remote serve` on 127.0.0.1. The program prints:
+Everything runs on this machine. `src/lab.ts` plays the runner machine. It uses
+the installed `graft-remote` to create certificates, installs the built plugin
+under `.cache/lab/install`, and starts `graft-remote serve` on 127.0.0.1. The
+program prints:
 
 ```text
 Runner listening on port 52341
@@ -69,7 +69,6 @@ checks the generations, the process exits, and the rejection.
 | `src/ledger.ts`              | A host plugin that stands in for an external system and checks generations. |
 | `src/host.ts`                | Loads `graft.yml` in a fresh host runtime twice and tells the story.        |
 | `src/lab.ts`                 | Plays the runner machine: certificates, installation, `graft-remote serve`. |
-| `scripts/certificates.sh`    | Creates a dedicated CA plus runner and host certificates with `openssl`.    |
 | `test/remote-runner.test.ts` | Runs the story against a real runner.                                       |
 
 The runner promises that the old process has exited before the new one starts.
@@ -80,16 +79,24 @@ earlier, and does not make calls happen exactly once.
 
 ## Use a real runner machine
 
-Create certificates for the runner's hostname. The host's identity becomes
-`graft://billing`:
+With `@graftland/remote` installed, create certificates for the runner's
+hostname. The host's identity becomes `graft://billing`:
 
 ```sh
-sh scripts/certificates.sh certs runner.example billing
+graft-remote certificates --out certs --server runner.example --identity billing
 ```
 
+Repeat `--server` to add DNS names or IP addresses to the runner certificate;
+repeat `--identity` to issue certificates for more hosts. Certificates default
+to 365 days; use `--days N` to change the lifetime. An existing P-256 `ca.crt` /
+`ca.key` pair is reused. To renew a leaf certificate, rerun its command with
+`--force`; the CA stays unchanged, including its expiry. Client files are named
+`client-<identity>.crt` and `.key` (names are URI-encoded). Private keys are
+unencrypted PKCS#8 PEM files, written with mode 0600.
+
 Copy `ca.crt`, `server.crt`, and `server.key` to the runner. Keep `ca.crt`,
-`client.crt`, and `client.key` on the host. Keep `ca.key` on neither: it can
-sign new certificates.
+`client-billing.crt`, and `client-billing.key` on the host. Keep `ca.key` on
+neither: it can sign new certificates.
 
 On the runner, make an installation root with its own `package.json`. Install
 `@graftland/remote` and this built package there, with their dependencies, so
@@ -109,7 +116,7 @@ On the host, from this directory, set the variables that `src/exporter.ts` and
 
 ```sh
 RUNNER_HOST=runner.example RUNNER_PORT=7443 RUNNER_SERVERNAME=runner.example \
-RUNNER_CA=certs/ca.crt RUNNER_CERT=certs/client.crt RUNNER_KEY=certs/client.key \
+RUNNER_CA=certs/ca.crt RUNNER_CERT=certs/client-billing.crt RUNNER_KEY=certs/client-billing.key \
 LEDGER_FILE=ledger.json pnpm exec graft start
 ```
 

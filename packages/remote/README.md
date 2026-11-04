@@ -23,8 +23,9 @@ with `Graft.plugin` or `graft.yml`. A custom host provides `NodeServices.layer`
 and `SecureRandom.layerWebCrypto` (from `effect/crypto`) to its Graft runtime.
 
 Use `Remote.runner(...)` for an authenticated network runner. Install plugin
-packages on that machine and provision certificates from a dedicated CA. With
-`graft.yml`, the saved entry id names the instance by default.
+packages on that machine and provision certificates from a dedicated CA using
+`graft-remote certificates` or your usual certificate tooling. With `graft.yml`,
+the saved entry id names the instance by default.
 
 - [Remote plugins](https://graftland.github.io/graft/remote/): contracts,
   services, configuration, deployment, and stopping.

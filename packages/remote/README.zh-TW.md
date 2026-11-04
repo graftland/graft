@@ -20,8 +20,9 @@ export default Remote.plugin(contract, {
 `NodeServices.layer` 和 `effect/crypto` 的 `SecureRandom.layerWebCrypto`。
 
 連線到網路 runner 時使用
-`Remote.runner(...)`。在 runner 機器上預先安裝外掛套件，並準備專用 CA 簽發的憑證。使用
-`graft.yml` 時，預設以儲存的項目 id 命名實例。
+`Remote.runner(...)`。在 runner 機器上預先安裝外掛套件，並用
+`graft-remote certificates` 或現有工具準備專用 CA 簽發的憑證。使用 `graft.yml`
+時，預設以儲存的項目 id 命名實例。
 
 - [遠端外掛文件](https://graftland.github.io/graft/zh-tw/remote/)：契約、服務、設定、部署與停止行為。
 - [可執行範例](../../samples/remote-worker/README.zh-TW.md)：呼叫子行程服務，並確認關閉後行程退出。

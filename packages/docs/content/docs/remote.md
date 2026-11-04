@@ -206,12 +206,16 @@ root. Network `contractModule` values are package specifiers resolved there. The
 host does not upload code. Keep installed packages unchanged while they are
 running.
 
-Provision server and client certificates from a **dedicated CA**. TLS checks the
-server hostname and requires a client certificate. Each client certificate needs
-exactly one `graft://` SAN URI, such as `graft://billing`; other SAN URIs may
-also be present. That identity owns an instance namespace: issuing another
-certificate with the same URI grants the same access. Renewing a certificate
-with the same URI keeps that namespace.
+Provision server and client certificates from a **dedicated CA**. Use
+`graft-remote certificates --out certs --server runner.example --identity billing`,
+or any other tool that produces certificates meeting these requirements. Keep
+`ca.key` with the operator; deploy `server.crt` / `server.key` to the runner and
+`client-billing.crt` / `client-billing.key` to the host, with `ca.crt` on both.
+TLS checks the server hostname and requires a client certificate. Each client
+certificate needs exactly one `graft://` SAN URI, such as `graft://billing`;
+other SAN URIs may also be present. That identity owns an instance namespace:
+issuing another certificate with the same URI grants the same access. Renewing a
+certificate with the same URI keeps that namespace.
 
 ```sh
 graft-remote serve --host 0.0.0.0 --port 7443 \

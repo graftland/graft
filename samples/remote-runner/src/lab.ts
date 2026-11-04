@@ -34,7 +34,8 @@ export interface Package {
 export interface Options {
 	/** Recreated on every start. Must sit inside this sample, so installed packages resolve `effect`. */
 	readonly directory: string
-	readonly certificates: string
+	/** The graft-remote executable. It may sit inside one of `packages`, which are installed first. */
+	readonly runner: string
 	readonly packages: ReadonlyArray<Package>
 }
 
@@ -57,16 +58,6 @@ export const start = Effect.fn("Lab.start")(function* (options: Options) {
 	yield* fs.remove(options.directory, { recursive: true, force: true })
 
 	const certificates = path.join(options.directory, "certificates")
-	const code = yield* spawner.exitCode(
-		ChildProcess.make("sh", [options.certificates, certificates], {
-			stdout: "inherit",
-			stderr: "inherit",
-		}),
-	)
-	if (code !== 0)
-		return yield* LabFailed.make({
-			reason: `The certificate script exited with ${code}`,
-		})
 
 	const root = path.join(options.directory, "install")
 	// The root's own manifest keeps Node from resolving this sample's package
@@ -91,10 +82,33 @@ export const start = Effect.fn("Lab.start")(function* (options: Options) {
 		}),
 	)
 
+	const code = yield* spawner.exitCode(
+		ChildProcess.make(
+			process.execPath,
+			[
+				options.runner,
+				"certificates",
+				"--out",
+				certificates,
+				"--server",
+				"localhost",
+				"--server",
+				"127.0.0.1",
+				"--identity",
+				"billing",
+			],
+			{ stdout: "inherit", stderr: "inherit" },
+		),
+	)
+	if (code !== 0)
+		return yield* LabFailed.make({
+			reason: `The certificate command exited with ${code}`,
+		})
+
 	const runner = yield* ChildProcess.make(
 		process.execPath,
 		[
-			path.join(root, "node_modules/@graftland/remote/dist/bin.js"),
+			options.runner,
 			"serve",
 			...["--host", "127.0.0.1", "--port", "0"],
 			...["--root", root, "--state", path.join(options.directory, "state")],
@@ -138,8 +152,8 @@ export const start = Effect.fn("Lab.start")(function* (options: Options) {
 		RUNNER_PORT: `${port}`,
 		RUNNER_SERVERNAME: "localhost",
 		RUNNER_CA: path.join(certificates, "ca.crt"),
-		RUNNER_CERT: path.join(certificates, "client.crt"),
-		RUNNER_KEY: path.join(certificates, "client.key"),
+		RUNNER_CERT: path.join(certificates, "client-billing.crt"),
+		RUNNER_KEY: path.join(certificates, "client-billing.key"),
 		LEDGER_FILE: path.join(options.directory, "ledger.json"),
 	}
 })

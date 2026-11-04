@@ -9,8 +9,7 @@ _generation_。账本记录见过的最新 generation，拒绝来自更旧 gener
 
 ## 运行
 
-使用 Linux 或 macOS、Node.js 22.22 或更高版本，并安装
-`openssl`。在仓库根目录执行：
+使用 Linux 或 macOS、Node.js 22.22 或更高版本。在仓库根目录执行：
 
 ```sh
 devenv shell -- pnpm build
@@ -61,7 +60,6 @@ A late write from generation 1 was rejected: the ledger has seen 2
 | `src/ledger.ts`              | 宿主插件，代表一个外部系统，负责检查 generation。        |
 | `src/host.ts`                | 两次在全新的宿主运行时里加载 `graft.yml`，讲完整个流程。 |
 | `src/lab.ts`                 | 扮演 runner 机器：证书、安装、`graft-remote serve`。     |
-| `scripts/certificates.sh`    | 用 `openssl` 生成专用 CA，以及 runner 和宿主的证书。     |
 | `test/remote-runner.test.ts` | 用真实 runner 跑一遍流程。                               |
 
 runner 保证新进程启动前旧进程已经退出。generation 用来处理这个保证覆盖不到的情况：已经在路上的写入，以及 Graft 之外的系统。这些系统必须自己检查 generation，就像
@@ -70,14 +68,22 @@ runner 保证新进程启动前旧进程已经退出。generation 用来处理�
 
 ## 使用真正的 runner 机器
 
-为 runner 的主机名生成证书，宿主身份为 `graft://billing`：
+安装 `@graftland/remote` 后，为 runner 的主机名生成证书，宿主身份为
+`graft://billing`：
 
 ```sh
-sh scripts/certificates.sh certs runner.example billing
+graft-remote certificates --out certs --server runner.example --identity billing
 ```
 
-把 `ca.crt`、`server.crt` 和 `server.key` 复制到 runner；`ca.crt`、`client.crt`
-和 `client.key` 留在宿主上。`ca.key` 两边都不要放，它能签发新证书。
+重复 `--server` 可以给 runner 证书添加多个 DNS 名或 IP 地址；重复 `--identity`
+可以为多个宿主签发证书。有效期默认 365 天，用 `--days N` 修改。目录里已有的
+`P-256` `ca.crt` / `ca.key` 会继续复用。续签叶证书时，给原命令加上
+`--force`；CA 及其到期时间不变。宿主文件名为 `client-<identity>.crt` 和 `.key`
+（名称做 URI 编码）。私钥使用未加密的 PKCS#8 PEM，文件权限为 0600。
+
+把 `ca.crt`、`server.crt` 和 `server.key`
+复制到 runner；`ca.crt`、`client-billing.crt` 和 `client-billing.key`
+留在宿主上。`ca.key` 两边都不要放，它能签发新证书。
 
 在 runner 上建立一个带有自己 `package.json` 的安装目录，把 `@graftland/remote`
 和构建好的本示例包连同依赖安装进去，确保存在
@@ -94,7 +100,7 @@ graft-remote serve --host 0.0.0.0 --port 7443 \
 
 ```sh
 RUNNER_HOST=runner.example RUNNER_PORT=7443 RUNNER_SERVERNAME=runner.example \
-RUNNER_CA=certs/ca.crt RUNNER_CERT=certs/client.crt RUNNER_KEY=certs/client.key \
+RUNNER_CA=certs/ca.crt RUNNER_CERT=certs/client-billing.crt RUNNER_KEY=certs/client-billing.key \
 LEDGER_FILE=ledger.json pnpm exec graft start
 ```
 

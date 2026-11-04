@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/** The executable owns either a local child, a supervised child, or a TLS supervisor. */
+/** Runs local children and TLS supervisors, and issues their deployment certificates. */
 import { Graft } from "@graftland/graft"
 import { NodeRuntime, NodeServices } from "@effect/platform-node"
 import {
@@ -23,6 +23,7 @@ import { load, run } from "./Runner"
 import { Bootstrap } from "./internal/runner/Bootstrap"
 import * as Watchdog from "./internal/runner/Watchdog"
 import * as Server from "./internal/runner/Server"
+import * as Certificates from "./internal/Certificates"
 
 const duration = (name: string, fallback: string) =>
 	Flag.String(name).pipe(
@@ -83,6 +84,46 @@ const serve = Command.make(
 			return yield* Fiber.join(server.server)
 		}),
 )
+const certificates = Command.make(
+	"certificates",
+	{
+		out: Flag.String("out").pipe(
+			Flag.withDescription("Directory for the CA and issued certificates"),
+		),
+		server: Flag.String("server").pipe(
+			Flag.atLeast(0),
+			Flag.withDescription(
+				"Runner DNS name or IP address; repeat for additional SANs",
+			),
+		),
+		identity: Flag.String("identity").pipe(
+			Flag.atLeast(0),
+			Flag.withDescription(
+				"Host identity; repeat to issue multiple client certificates",
+			),
+		),
+		days: Flag.Int("days").pipe(
+			Flag.withDefault(365),
+			Flag.filter(
+				(days) => days > 0,
+				() => "Days must be a positive integer",
+			),
+		),
+		force: Flag.Boolean("force").pipe(
+			Flag.withDefault(false),
+			Flag.withDescription(
+				"Replace requested leaf certificates, keeping the existing CA",
+			),
+		),
+	},
+	(options) =>
+		Certificates.generate(options).pipe(
+			Effect.andThen(Console.log(`Certificates written to ${options.out}`)),
+			Effect.catchTag("CertificateExists", (error) =>
+				CliError.UserError.make({ cause: error, userMessage: error.message }),
+			),
+		),
+)
 const child = Command.make(
 	"child",
 	{
@@ -122,12 +163,12 @@ const cli = Command.make(
 				return yield* CliError.UserError.make({
 					cause: "Missing contract module",
 					userMessage:
-						"A contract module or the child/serve subcommand is required",
+						"A contract module or the child/serve/certificates subcommand is required",
 				})
 			const definition = yield* load(contract.value)
 			return yield* run(definition, session)
 		}),
-).pipe(Command.withSubcommands([child, serve]))
+).pipe(Command.withSubcommands([child, serve, certificates]))
 
 NodeRuntime.runMain(
 	Effect.scoped(

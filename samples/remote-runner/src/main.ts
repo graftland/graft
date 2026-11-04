@@ -12,19 +12,8 @@ NodeRuntime.runMain(
 		Effect.gen(function* () {
 			const environment = yield* Lab.start({
 				directory: local("../.cache/lab"),
-				certificates: local("../scripts/certificates.sh"),
+				runner: fileURLToPath(import.meta.resolve("@graftland/remote/bin")),
 				packages: [
-					{
-						name: "@graftland/remote",
-						dist: fileURLToPath(
-							new URL(".", import.meta.resolve("@graftland/remote")),
-						),
-						exports: {
-							".": "./dist/index.js",
-							"./bin": "./dist/bin.js",
-							"./watchdog": "./dist/watchdog.js",
-						},
-					},
 					{
 						name: "@graftland/sample-remote-runner",
 						dist: local("."),

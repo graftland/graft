@@ -1,6 +1,5 @@
 import { build } from "tsdown"
 import { rm, cp, mkdir, writeFile } from "node:fs/promises"
-import { certificates } from "./certificates.mjs"
 
 const common = {
 	config: false,
@@ -55,8 +54,16 @@ export default async function setup(project) {
 		}),
 	)
 	project.provide("remoteRoot", installation)
+	await build({
+		...common,
+		entry: [new URL("./certificates.ts", import.meta.url).pathname],
+		outDir: new URL("../.cache/certificates-helper", import.meta.url).pathname,
+	})
+	const { certificates } =
+		await import("../.cache/certificates-helper/certificates.js")
 	const directory = await certificates(
 		new URL("../.cache/certificates", import.meta.url).pathname,
+		new URL("../dist/bin.js", import.meta.url).pathname,
 	)
 	project.provide("remoteTls", directory)
 	return () => rm(directory, { recursive: true, force: true })

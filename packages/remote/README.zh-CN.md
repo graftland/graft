@@ -19,9 +19,9 @@ export default Remote.plugin(contract, {
 `Graft.plugin` 或 `graft.yml` 加载入口。自行嵌入 Graft 时，为宿主运行环境提供
 `NodeServices.layer` 和 `effect/crypto` 的 `SecureRandom.layerWebCrypto`。
 
-连接网络 runner 时使用
-`Remote.runner(...)`。在 runner 机器上预装插件包，并准备专用 CA 签发的证书。使用
-`graft.yml` 时，默认以保存的条目 id 命名实例。
+连接网络 runner 时使用 `Remote.runner(...)`。在 runner 机器上预装插件包，并用
+`graft-remote certificates` 或现有工具准备专用 CA 签发的证书。使用 `graft.yml`
+时，默认以保存的条目 id 命名实例。
 
 - [远程插件文档](https://graftland.github.io/graft/zh-cn/remote/)：契约、服务、配置、部署和停止行为。
 - [可运行示例](../../samples/remote-worker/README.zh-CN.md)：调用子进程服务，并验证关闭后进程退出。

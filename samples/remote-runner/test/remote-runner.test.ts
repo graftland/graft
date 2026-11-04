@@ -16,7 +16,11 @@ describe("remote runner", () => {
 			Effect.gen(function* () {
 				const environment = yield* Lab.start({
 					directory: local("../.cache/test-lab"),
-					certificates: local("../scripts/certificates.sh"),
+					// Run the installed copy of this test's own build, so its children
+					// resolve the same executable instead of the package's dist output.
+					runner: local(
+						"../.cache/test-lab/install/node_modules/@graftland/remote/dist/bin.js",
+					),
 					packages: [
 						{
 							name: "@graftland/remote",

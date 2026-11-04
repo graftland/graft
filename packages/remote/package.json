@@ -28,7 +28,9 @@
 	"dependencies": {
 		"@graftland/graft": "workspace:*",
 		"@effect/platform-node": "4.1.2",
-		"@graftland/loader": "workspace:*"
+		"@graftland/loader": "workspace:*",
+		"pkijs": "4.0.1",
+		"asn1js": "4.0.0"
 	},
 	"devDependencies": {
 		"@effect/vitest": "4.1.2",
