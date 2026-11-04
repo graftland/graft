@@ -1,14 +1,27 @@
 ---
-title: 撰寫能力外掛
-description: 實作第三方傳輸或驗證外掛時看這一頁。
+title: 編寫自己的傳輸或驗證
+description: 撰寫外掛，以內建選項以外的方式連線、監聽、提供憑證或驗證，並用共用檢查測試它。
 ---
 
-實作第三方傳輸或驗證外掛時看這一頁。以下介面與共用測試是 Connector、Listener、Credentials、Authenticator 的公開契約。
+本頁面向需要 Remote 未內建之連線或驗證方式的外掛作者，例如另一種網路協定，或來自公司身分服務的憑證。這裡先說明概念，再提供能執行的最小範例與測試方式。確切的簽名請見 API 參考中的
+[`Transport`](../../reference/plugin-remote/transport/readme/) 與
+[`Auth`](../../reference/plugin-remote/auth/readme/)。
 
-能力是帶有 default 匯出的一般 Graft 外掛，在 `apply`
-發布約定的服務鍵。Remote 透過應用程式的模組解析器讀取
-`{ name, config }`，在私有 assembly 啟動提供者；父 realm 的業務服務仍然可見。不必自訂服務鍵，也不用在 remote
-entry 旁另外安裝能力提供者。
+## 概念
+
+每個內建選項，例如 `url`、`unix`、`bearer` 或
+`mtls`，都是某個普通 Graft 外掛的簡寫。Remote 把這些外掛稱為**能力**。每個能力恰好發布以下四種服務之一：
+
+| 服務            | 所在側 | 職責                                                     | 模組                                 |
+| --------------- | ------ | -------------------------------------------------------- | ------------------------------------ |
+| `Connector`     | 宿主   | 開啟一條通往 runner 的位元組通道。                       | `@graftland/plugin-remote/Transport` |
+| `Credentials`   | 宿主   | 讀取宿主要出示的內容：什麼都沒有、一個標頭值或一張憑證。 | `@graftland/plugin-remote/Auth`      |
+| `Listener`      | runner | 接受來自宿主的位元組通道。                               | `@graftland/plugin-remote/Transport` |
+| `Authenticator` | runner | 把宿主出示的內容轉換為身分。                             | `@graftland/plugin-remote/Auth`      |
+
+這些模組只包含服務定義，不含 Node 實作。
+
+要使用自己的能力，以它的模組名稱取代簡寫。在宿主上：
 
 ```yaml
 connect:
@@ -20,124 +33,71 @@ connect:
     config: { account: billing }
 ```
 
-runner 的 `listen`
-元素也使用這種引用，只是選擇 Listener 與 Authenticator 外掛。相對檔案路徑應以 loader 的
-`ConfigDirectory`
-為準。設定由外掛的 Schema 解碼；I/O 在啟用時執行，不可在模組匯入時執行。
+在 runner 上，同樣的 `transport` 與 `auth` 寫在 `listen`
+元素中，指向 listener 與 authenticator。名稱的解析方式與其他[外掛名稱](../../config-file/#外掛名稱)相同。
 
-## 四個契約
+你不需要自己載入能力，也從不需要挑選服務鍵。Remote 會為引用某個能力的項目單獨啟動它。兩個項目可以用不同設定使用同一個能力而互不干擾，你的能力也仍然能注入應用程式的一般服務。
 
-`@graftland/plugin-remote/Auth` 匯出
-`Credentials`、`Authenticator`；`/Transport` 匯出
-`Connector`、`Listener`。這些模組只有契約，不含 Node
-listener 實作。下列簽名只省略服務鍵宣告和匯入限定名稱：
+## 每個能力都要遵守的規則
 
-```ts
-interface ClientCertificate {
-	cert: string
-	key: Redacted<string>
-}
-interface VerifiedCertificate {
-	der: Uint8Array
-	subjectAltName: Option<string>
-}
-interface TlsPolicy {
-	ca: ReadonlyArray<string>
-	minVersion: "TLSv1.3"
-	requestCert: true
-	rejectUnauthorized: true
-}
-type Prepared =
-	| { _tag: "None" }
-	| { _tag: "Authorization"; value: Redacted<string> }
-	| { _tag: "Certificate"; value: ClientCertificate }
-type CredentialsApi = {
-	[K in Prepared["_tag"]]: {
-		kind: K
-		read: Effect<Extract<Prepared, { _tag: K }>, CredentialsError, Scope>
-	}
-}[Prepared["_tag"]]
-type AuthenticatorApi =
-	| { _tag: "None"; identity: string }
-	| {
-			_tag: "Header"
-			issuer?: string
-			authenticate: (
-				header: Option<Redacted<string>>,
-			) => Effect<string, AuthenticationFailed>
-	  }
-	| {
-			_tag: "Mtls"
-			tls: TlsPolicy
-			authenticate: (
-				certificate: VerifiedCertificate,
-			) => Effect<string, AuthenticationFailed>
-	  }
+- **預設匯出。** 模組以預設匯出的形式匯出外掛。
+- **以 schema 解析設定。** 用外掛的 `config` schema 解碼 `config`。
+- **啟用時才做 I/O。** 工作放在 `apply` 裡，絕不在匯入模組時進行。
+- **相對路徑。** 像內建能力一樣，相對於 loader 的 `ConfigDirectory`
+  解析設定中的檔案路徑，讓它們相對於設定檔。
+- **發布服務。** 能力進入啟用狀態卻沒有發布服務，會以 `CapabilityContractError`
+  失敗。等待缺少的應用程式服務的能力只會停留在 `Pending`。
+- **保留 cause。** 傳輸失敗回報為 `TransportError`，憑證失敗回報為
+  `CredentialsError`，原始失敗放在 `cause` 中。
+- **絕不記錄機密。** 不要把 Authorization 的值寫進日誌。
 
-interface Properties {
-	protocol: string
-	encrypted: boolean
-	network: boolean
-	carries: ReadonlyArray<"header" | "certificate">
-}
-interface Channel {
-	input: Stream<Uint8Array, TransportError>
-	output: Sink<unknown, Uint8Array, unknown, TransportError>
-}
-interface Handshake {
-	authorization: Option<Redacted<string>>
-	certificate: Option<VerifiedCertificate>
-}
-type Session = (channel: Channel) => Effect<void, TransportError, Scope>
-type Accept = (handshake: Handshake) => Effect<Session, AuthenticationFailed>
-interface Serving {
-	ready: Effect<void>
-	serve: (accept: Accept) => Effect<void, TransportError, Scope>
-}
-interface ConnectorApi {
-	properties: Properties
-	connect: (credentials: Prepared) => Effect<Channel, TransportError, Scope>
-}
-interface ListenerApi {
-	properties: Properties
-	bind: (tls: Option<TlsPolicy>) => Effect<Serving, TransportError, Scope>
-}
-```
+能力程式碼和其他外掛一樣受到信任，包括它對自身的宣告。
 
-`read` 每次連線執行一次，回傳宣告的 kind；讀取失敗保留在
-`CredentialsError.cause`。`authenticate`
-回傳穩定身分，不是工作階段 id。只有以簽發者為基礎的驗證宣告 `issuer`，bearer
-token 檔案沒有簽發者。一個 runner 不允許多個不同 issuer。第三方能力程式碼與屬性宣告和其他外掛一樣，都是受信任的。
+## 描述傳輸
 
-`AuthenticationFailed` 有 `reason: "missing" | "invalid"`，以及選填的
-`challenge`、`cause`。HTTP listener 在 upgrade 前轉成 401，將 challenge 寫入
-`WWW-Authenticate`。Bearer 缺少時是 `Bearer`，無效時是
-`Bearer error="invalid_token"`。不要記錄 Authorization 內容。傳輸失敗用
-`TransportError`，並保留原始 cause。
+connector 與 listener 會宣告四個**屬性**。Remote 用它們拒絕不安全的組合，並決定記錄哪些警告：
 
-## 屬性與生命週期
+| 屬性        | 意義                                                 | Remote 如何使用                                                                                      |
+| ----------- | ---------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `protocol`  | 簡短的名稱，如 `wss` 或 `unix`。                     | mTLS 要求 `wss`。`stdio` 必須是 runner 唯一的 listener。`stdio` 與 `command` 拒絕任何明確的 `auth`。 |
+| `encrypted` | 傳輸是否保障流量的機密性。                           | mTLS 要求為 `true`。未加密的網路傳輸會記錄警告。                                                     |
+| `network`   | 是否可透過網路存取，而非僅限本機。                   | 未加密或未驗證的網路傳輸會記錄[選擇傳輸與驗證](../transport-auth/#警告的含義)中列出的警告。          |
+| `carries`   | 交握能攜帶哪些憑據：`header`、`certificate` 或兩者。 | 以標頭為基礎的驗證（bearer、JWT）要求 `header`；mTLS 要求 `certificate`。                            |
 
-- `protocol` 描述傳輸。`stdio` 獨占；`stdio` 和 `command`
-  不接受明確指定的 auth；mTLS 要求 `wss`。
-- `encrypted` 描述是否加密，mTLS 要求 true。
-- `network`
-  區分網路暴露與本機通道。未加密的網路傳輸在 runner 啟動、宿主連線時 WARN；header 憑證會明確提示明文傳輸。網路 listener 使用 none 時，啟動與每次連線都 WARN。unix 不 WARN。
-- `carries` 描述握手證據。header 驗證要求 `header`，mTLS 要求
-  `certificate`。這是宣告，不是安全證明。
+這些是宣告，不是證明：Remote 照單全收。
 
-Remote 從驗證器取得 TLS 策略，呼叫 `bind(tls)`，啟動 `serve(accept)`，再等
-`ready`，同時與 serve 失敗競速。ready 表示接納迴圈已註冊，不只是連接埠綁定成功。runner 所有必要 listener 就緒才算啟動成功；執行期間的失敗只影響本 assembly。
+**通道**雙向承載有序、可靠的位元組。區塊的邊界沒有意義，通道結束也不能證明外掛行程已經結束。
 
-Listener 必須在**接受 HTTP upgrade 之前**呼叫
-`accept(handshake)`。TLS 驗證與客戶端憑證請求使用 bind 收到的策略，不可等 WebSocket 建立後才驗證。成功後將通道交給回傳的
-`Session`，Remote 會在內部把驗證身分交給 supervisor。工作階段 fiber 與資源都必須有 scope 歸屬。stdio 的 serve 在 EOF 結束，網路 listener 則持續監聽直到中斷。
+## listener 如何執行
 
-Channel 是有序可靠的位元組串流，chunk 邊界沒有意義；EOF 不是行程退出確認。WebSocket
-adapter 必須拒絕文字、限制大小，每則二進位訊息恰好承載一個完整影格，並重組拆開的輸出 chunk。內建 adapter 已實作這些規則。
+Remote 依固定順序驅動 listener：
 
-## 最小提供者
+1. 從 authenticator 取得 TLS 政策（只有 mTLS 有），然後呼叫
+   `bind`。TLS設定，包括要求用戶端憑證，都來自這份政策，而不是連線開啟後的某個步驟。
+2. 以一個 `accept` 函式呼叫 `serve`，在等待 `ready` 的同時留意 `serve`
+   是否失敗。`ready`
+   表示接受迴圈已經在執行，而不只是位址已經綁定。runner 要等所有 listener 就緒才會啟動；之後失敗的 listener 只影響它自己。
+3. 對每一條傳入連線，listener 在接受 HTTP upgrade **之前**，以宿主出示的內容呼叫
+   `accept`。如果 `accept` 以 `AuthenticationFailed` 失敗，HTTP
+   listener 回覆 401，並把錯誤的 `challenge` 作為 `WWW-Authenticate`
+   送出。如果成功，listener 就用這條通道執行回傳的工作階段。經過驗證的身分由 Remote 自己附加。
 
-本機可信通道的驗證器可以直接指定設定的身分。這個範例刻意不驗證憑證，邊界與 none 相同：
+每個工作階段的 fiber 及其資源都要歸屬於某個 scope。`stdio`
+這類 listener 在輸入結束時完成
+`serve`；網路 listener 會持續接受連線，直到被中斷。
+
+`AuthenticationFailed` 的 `reason` 為 `"missing"` 或
+`"invalid"`。內建的 bearer 與 JWT authenticator 使用的 challenge 分別是
+`Bearer`（缺少）與
+`Bearer error="invalid_token"`（無效）。authenticator 回傳的是穩定的身分，而不是工作階段 id。只有以簽發者為基礎的 authenticator 才宣告
+`issuer`，runner 會拒絕簽發者不同的多個 listener。
+
+WebSocket 轉接器還有額外的責任：拒絕文字訊息、限制訊框大小、每則二進位訊息恰好接受一個完整的協定訊框，並重新組合分成多塊的輸出。內建轉接器已經做到這些。
+
+## 最小範例
+
+一個用於受信任本機通道的 authenticator，可以直接給出一個設定好的身分。和 `none`
+一樣，它什麼都不檢查：
 
 ```ts title="authenticator.ts"
 import { Graft, Plugin } from "@graftland/graft"
@@ -152,8 +112,8 @@ export default Plugin.make({
 })
 ```
 
-Connector 可以適配既有的作用域通道服務。下例將 I/O 交給應用程式的 `Link`，由
-`Link.open` 在連線 scope 管理資源：
+connector 可以轉接應用程式既有的通道。這裡由應用程式服務 `Link`
+開啟通道，它的資源歸屬於連線的 scope：
 
 ```ts title="connector.ts"
 import { Graft, Plugin } from "@graftland/graft"
@@ -186,20 +146,25 @@ export default Plugin.make({
 })
 ```
 
-它僅支援 none，Remote 會在呼叫前拒絕 header 與憑證驗證。能力子樹全數 Active 卻未提供約定的鍵，會回報能力契約錯誤；缺少業務服務仍是 Pending。
+由於 `carries` 是空的，這個 connector 只支援 `none`。Remote 在呼叫 `connect`
+之前就會拒絕標頭與憑證類的憑據。
 
-## 執行共享測試
+憑證在每次連線時讀取一次，並帶有宣告的種類：`None`、`Authorization`（標頭值）或
+`Certificate`。
 
-匯入
-`@graftland/plugin-remote/Testing`，它不依賴測試框架。`transport(plugins, fixture)`
-回傳 `chunks` 與 `eof` 兩個 Effect。plugins 包含
-`connector`、`listener`、`credentials`、`authenticator`
-外掛定義。fixture 接收它們，在 Graft 啟用真實提供者與靜態 inject 的消費者，回傳連到 echo 工作階段的 Channel。設定、位址和平台 Layer 由 fixture 提供，不必啟動完整 runner。
+## 用共用檢查測試
+
+`@graftland/plugin-remote/Testing`
+包含內建能力都要通過的檢查。它不依賴任何測試框架，也不需要完整的 runner。
+
+`Testing.transport(plugins, fixture)`
+接收你的四個能力外掛（`connector`、`listener`、`credentials`、`authenticator`）與一個 fixture。fixture 在 Graft 中實際啟動它們以及一個消費者，並回傳一條連到 echo 工作階段的通道。設定、位址與平台 layer 都放在 fixture 裡。你會得到兩項檢查：
 
 ```ts
 import * as Testing from "@graftland/plugin-remote/Testing"
 
 const checks = Testing.transport(plugins, openEchoSession)
+
 it.live("preserves bytes", () =>
 	checks.chunks.pipe(Effect.scoped, Effect.provide(runtime)),
 )
@@ -208,26 +173,29 @@ it.live("closes cleanly", () =>
 )
 ```
 
-chunks 會拆開影格標頭，再把餘下部分與下一個影格合併；eof 檢查正常結束。`rejection(httpResponse, challenge?)`
-檢查 401、未 upgrade 與 challenge 正確；失敗是
-`ConformanceError`。也應測試錯誤憑證、cause 保留、scope 取消、TLS 在 bind 前傳入、ready 前 serve 失敗，以及兩個不同設定的 assembly 共存。[內建測試](https://github.com/graftland/graft/blob/main/packages/remote/test/capabilities.test.ts)展示 websocket/mTLS 與其他內建組合的用法。
+- `chunks`
+  把一個訊框標頭拆到兩塊中，再把剩餘部分與下一個訊框合成一塊，然後檢查位元組依序回傳。
+- `eof` 檢查關閉通道會乾淨地結束它。
+- `Testing.rejection(httpResponse, challenge?)`
+  檢查被拒絕的憑證收到 401、沒有 WebSocket upgrade，並帶有預期的 challenge。
 
-## 公開模組
+檢查失敗時以 `ConformanceError`
+失敗。共用檢查涵蓋不到的也要測：錯誤的憑證、cause 是否保留、scope 取消、在
+`bind` 時套用 TLS 設定、`serve` 在 `ready`
+之前失敗，以及兩份設定不同的能力副本同時執行。[內建測試 fixture](https://github.com/graftland/graft/blob/main/packages/remote/test/capabilities.test.ts)
+展示了 WebSocket 加 mTLS 以及其他所有內建組合的這些測試。
 
-套件根目錄匯出宿主 default、`plugin`、`Contract`、`Instance`、公開錯誤與型別。`/runner`
-是 runner default。`/Auth`、`/Transport`、`/Errors`、`/Contract` 和 `/Testing`
-是可重用 API。
+## 內建能力模組
 
-`@graftland/plugin-remote/` 下的能力路徑：
+簡寫會展開為 `@graftland/plugin-remote/` 下的這些模組。兩個執行模組支撐 `local`
+與 `worker`，其餘都是一般的能力。
 
-| 角色        | 路徑                                                                            |
-| ----------- | ------------------------------------------------------------------------------- |
-| 宿主執行    | `host/local`、`host/worker`                                                     |
-| 宿主連線    | `host/websocket`、`host/unix`、`host/command`                                   |
-| 宿主憑證    | `host/auth/mtls`、`host/auth/bearer`、`host/auth/jwt`、`host/auth/none`         |
-| runner 監聽 | `runner/websocket`、`runner/unix`、`runner/stdio`                               |
-| runner 驗證 | `runner/auth/mtls`、`runner/auth/bearer`、`runner/auth/jwt`、`runner/auth/none` |
+| 角色                 | 模組                                                                            |
+| -------------------- | ------------------------------------------------------------------------------- |
+| 宿主執行             | `host/local`、`host/worker`                                                     |
+| 宿主 connector       | `host/websocket`、`host/unix`、`host/command`                                   |
+| 宿主 credentials     | `host/auth/mtls`、`host/auth/bearer`、`host/auth/jwt`、`host/auth/none`         |
+| runner listener      | `runner/websocket`、`runner/unix`、`runner/stdio`                               |
+| runner authenticator | `runner/auth/mtls`、`runner/auth/bearer`、`runner/auth/jwt`、`runner/auth/none` |
 
-`/internal/bin`、`/internal/worker`、`/internal/watchdog`
-僅供執行階段定位執行檔，**不是公開 API**。Supervisor 與子行程執行階段也在內部。應用程式請使用
-[remote 指南](../overview/)中的兩個入口。
+[參考](../reference/#已發布模組)列出所有已發布的模組。

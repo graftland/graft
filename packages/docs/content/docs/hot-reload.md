@@ -19,9 +19,9 @@ services in its environment.
 | [Change detection](#change-detection)                         | How are changes found?                   |
 | [Leases and observation](#leases-and-observation)             | Which files are watched, and until when? |
 
-For [remote plugins](../remote/host/#hot-reload), reloading the host entry
-replaces the child execution; implementation modules installed on a runner are
-outside the host HMR graph.
+For [remote plugins](../remote/restarts/#redeploying-a-plugin), reloading the
+host entry replaces the child execution; implementation modules installed on a
+runner are outside the host HMR graph.
 
 ## What happens on a save
 

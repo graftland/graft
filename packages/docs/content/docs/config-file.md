@@ -39,8 +39,8 @@ entries, and each entry loads one plugin:
 | Editing entries from plugins or code      | [Loader API](../loader-api/)                    |
 
 To run an entry in a child process or on another machine, point it at a
-[remote plugin entry](../remote/host/). Its saved id can also name the runner
-instance.
+[remote plugin entry](../remote/getting-started/). Its saved id can also name
+the runner instance.
 
 Plugins loaded from an entry can read `yield* Entry.CurrentId`, importing
 `Entry` from `@graftland/loader`. This `Context.Reference<Option<string>>` holds
