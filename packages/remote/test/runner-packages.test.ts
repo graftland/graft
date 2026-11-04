@@ -1,6 +1,6 @@
 import { assert, describe, it } from "@effect/vitest"
 import { NodeServices } from "@effect/platform-node"
-import { Cause, Effect, Exit, FileSystem, Schema } from "effect"
+import { Cause, Effect, Exit, FileSystem, Ref, Schema } from "effect"
 import * as Packages from "../src/internal/runner/Packages"
 
 const setup = Effect.gen(function* () {
@@ -33,21 +33,47 @@ const setup = Effect.gen(function* () {
 })
 
 describe("runner installed packages", () => {
+	it.effect("only traverses package contents when a digest is requested", () =>
+		Effect.gen(function* () {
+			const { fs, root } = yield* setup
+			const reads = yield* Ref.make(0)
+			const observed = {
+				...fs,
+				readDirectory: (path: string) =>
+					Ref.update(reads, (n) => n + 1).pipe(
+						Effect.andThen(fs.readDirectory(path)),
+					),
+			}
+			const ordinary = yield* Packages.resolve(root, "remote-fixture").pipe(
+				Effect.provideService(FileSystem.FileSystem, observed),
+			)
+			assert.isUndefined(ordinary.identity.digest)
+			const before = yield* Ref.get(reads)
+			assert.equal(before, 0)
+			const pinned = yield* Packages.resolve(root, "remote-fixture", true).pipe(
+				Effect.provideService(FileSystem.FileSystem, observed),
+			)
+			assert.match(pinned.identity.digest ?? "", /^[a-f0-9]{64}$/)
+			const after = yield* Ref.get(reads)
+			assert.isAbove(after, 0)
+		}).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+	)
+
 	it.effect(
 		"resolves import exports in the runner installation without executing the contract",
 		() =>
 			Effect.gen(function* () {
 				const { fs, root, directory } = yield* setup
-				const resolved = yield* Packages.resolve(root, "remote-fixture")
+				const resolved = yield* Packages.resolve(root, "remote-fixture", true)
 				const entry = yield* fs.realPath(directory + "/contract.js")
 				assert.equal(resolved.entry, entry)
 				assert.equal(resolved.identity.name, "remote-fixture")
 				assert.equal(resolved.identity.version, "1.2.3")
-				assert.match(resolved.identity.digest, /^[a-f0-9]{64}$/)
+				assert.match(resolved.identity.digest ?? "", /^[a-f0-9]{64}$/)
 				const subpath = yield* Packages.resolve(
 					root,
 					"remote-fixture/contract",
-					resolved.identity,
+					true,
 				)
 				assert.deepEqual(subpath, resolved)
 			}).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
@@ -84,7 +110,7 @@ describe("runner installed packages", () => {
 			yield* fs.symlink(installed, directory)
 			yield* fs.writeFileString(root + "/shared.js", "shared")
 			yield* fs.symlink(root + "/shared.js", installed + "/linked.js")
-			const resolved = yield* Packages.resolve(root, "remote-fixture")
+			const resolved = yield* Packages.resolve(root, "remote-fixture", true)
 			const real = yield* fs.realPath(installed)
 			const digest = yield* Packages.digest(installed)
 			assert.equal(resolved.directory, real)
@@ -102,7 +128,15 @@ describe("runner installed packages", () => {
 					{ digest: "incorrect" },
 				]) {
 					const result = yield* Effect.exit(
-						Packages.resolve(root, "remote-fixture", expected),
+						Packages.resolve(
+							root,
+							"remote-fixture",
+							expected.digest !== undefined,
+						).pipe(
+							Effect.flatMap((resolved) =>
+								Packages.verify(resolved.identity, expected),
+							),
+						),
 					)
 					assert.isTrue(Exit.isFailure(result))
 					if (Exit.isFailure(result))

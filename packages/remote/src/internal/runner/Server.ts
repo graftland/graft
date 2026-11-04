@@ -81,7 +81,7 @@ export const serve = (options: Options) =>
 								...(leaseMillis === undefined ? {} : { lease: leaseMillis }),
 								limits,
 							}),
-						Load: ({ handle, specifier }) =>
+						Load: ({ handle, ...request }) =>
 							Effect.gen(function* () {
 								yield* authorize(handle)
 								const attachment = yield* Ref.get(attached)
@@ -92,7 +92,7 @@ export const serve = (options: Options) =>
 									return yield* SessionConflict.make({
 										detail: "A connection can attach only one execution",
 									})
-								const code = yield* supervisor.load(handle, { specifier })
+								const code = yield* supervisor.load(handle, request)
 								if (Option.isNone(attachment)) {
 									const child = yield* execution
 										.peer(handle.token)

@@ -37,6 +37,13 @@ To run an entry in a child process or on another machine, point it at a
 [remote plugin entry](../remote/). Its saved id can also name the runner
 instance.
 
+Plugins loaded from an entry can read `yield* Entry.CurrentId`, importing
+`Entry` from `@graftland/loader`. This `Context.Reference<Option<string>>` holds
+that entry's id, including inside nested groups, and defaults to `None` outside
+entry loading. Child plugins forked by the plugin inherit it; it is not a new id
+for every fork. Include persists generated ids in YAML, so they survive host
+restarts.
+
 ## Entry fields
 
 | Field       | What it does                                                                                  |

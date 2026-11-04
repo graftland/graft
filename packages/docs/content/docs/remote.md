@@ -27,12 +27,13 @@ import { Contract } from "@graftland/remote"
 import { Schema } from "effect"
 
 export const config = Schema.Struct({ greeting: Schema.String })
-export const contract = Contract.make({
-	name: "greeter",
-	config,
-	error: Schema.Never,
-	module: new URL("./worker.js", import.meta.url).href,
-})
+export const contract: Contract.Contract<typeof config, typeof Schema.Never> =
+	Contract.make({
+		name: "greeter",
+		config,
+		error: Schema.Never,
+		module: new URL("./worker.js", import.meta.url).href,
+	})
 ```
 
 ```ts title="worker.ts"
@@ -69,9 +70,10 @@ export default Remote.plugin(contract, {
 ```
 
 Load this entry with `Graft.plugin(entry, { greeting: "Hello" })` or through
-[graft.yml](../config-file/). A custom host must provide Node platform services,
-for example `Layer.provideMerge(Graft.layer, NodeServices.layer)`. The installed
-or built `@graftland/remote` executable starts the child for you.
+[graft.yml](../config-file/). A custom host supplies `NodeServices.layer` and
+`SecureRandom.layerWebCrypto` (from `effect/crypto`) in the environment where
+`Graft.layer` is built. The CLI supplies both. The installed or built
+`@graftland/remote` executable starts the child for you.
 
 Each activation gets a fresh process. Config changes restart it. Child failures
 fail the host proxy; any retry policy belongs on that proxy. Retrying creates
@@ -167,15 +169,31 @@ export default Remote.plugin(contract, {
 ```
 
 Replace `my-plugin/contract` with your package's contract export. Install
-matching contract versions on host and runner. The three certificate variables
-are file paths on the host. `RUNNER_SERVERNAME` must match the runner's server
+matching contract versions on host and runner. Set `expect: { version, digest }`
+to require a particular package version and content digest before the plugin
+starts; either check can be used alone. The three certificate variables are file
+paths on the host. `RUNNER_SERVERNAME` must match the runner's server
 certificate. Config and files are read when the plugin activates, not when the
 module is imported.
 
-Without an explicit `instance`, the runner target uses the loader entry's id.
-The loader saves generated ids in YAML. Keep that id to address the same
-instance after a host restart. An explicit `instance` overrides it. Outside the
-loader, omitting `instance` fails activation with `MissingInstance`.
+Set these options inside `Remote.runner({ ... })`, alongside `host`, `port`, and
+`tls`:
+
+| Option     | Default and meaning                                                                                                                                                                                                   |
+| ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `instance` | The loader entry id. An explicit string overrides it. Without either, activation fails with `MissingInstance`.                                                                                                        |
+| `lease`    | The runner's `--lease` value, 15 seconds by default. A host value such as `"30 seconds"` overrides that runner default for this instance.                                                                             |
+| `margin`   | `"5 seconds"`. Extra time beyond the lease for the host to wait for termination confirmation.                                                                                                                         |
+| `expect`   | No checks. `{ version, digest }` pins the installed package; either field is optional. The digest is only computed when requested. It covers the package's own files, excluding `node_modules`, not its dependencies. |
+
+The loader saves generated entry ids in YAML. Keep the saved id to address the
+same instance after a host restart. `Entry.CurrentId` from `@graftland/loader`
+is an `Option<string>` reference, inherited by child plugins forked inside that
+entry. Two runner proxies forked from one entry without explicit `instance`
+values therefore replace each other. Give them distinct names. Directly embedded
+`Group.Group` only requires sibling ids to be unique, so ids from different
+groups can collide too. Multiple hosts using the same certificate identity and
+the same instance name also address the same instance.
 
 ## Prepare a runner
 
@@ -187,9 +205,10 @@ running.
 
 Provision server and client certificates from a **dedicated CA**. TLS checks the
 server hostname and requires a client certificate. Each client certificate needs
-exactly one SAN URI such as `graft://billing`. That identity owns an instance
-namespace: issuing another certificate with the same URI grants the same access.
-Renewing a certificate with the same URI keeps that namespace.
+exactly one `graft://` SAN URI, such as `graft://billing`; other SAN URIs may
+also be present. That identity owns an instance namespace: issuing another
+certificate with the same URI grants the same access. Renewing a certificate
+with the same URI keeps that namespace.
 
 ```sh
 graft-remote serve --host 0.0.0.0 --port 7443 \
@@ -197,6 +216,11 @@ graft-remote serve --host 0.0.0.0 --port 7443 \
   --cert /run/secrets/server.crt --key /run/secrets/server.key \
   --ca /run/secrets/clients-ca.crt --lease "15 seconds" --grace "5 seconds"
 ```
+
+`--grace` defaults to five seconds: after the runner requests interruption, it
+waits that long before escalating to a forced kill. This is separate from the
+host's `margin`, which extends the wait for exit confirmation; it does not give
+plugin finalizers more time.
 
 A `Listening` line reports the bound port. Give one runner exclusive ownership
 of its state directory on a local filesystem. Preserve that directory across
@@ -230,20 +254,48 @@ make calls exactly once, and they are not coordinated across independent
 runners. Local children get a new id and generation 1 each time, not a
 persistent fencing token.
 
-Normal stopping waits for finalizers, final logs, and process exit. Cleanup has
-a five-second default deadline. Network stopping has three observable results:
+Normal stopping first waits for plugin finalizers and final logs. The proxy's
+`shutdownTimeout` defaults to five seconds and bounds this graceful Dispose step
+only. Process termination follows it:
 
-| Result                         | What you can rely on                                                                                                 |
-| ------------------------------ | -------------------------------------------------------------------------------------------------------------------- |
-| `Exited`                       | Process exit was confirmed after the normal stop path.                                                               |
-| `Killed`                       | Forced termination was confirmed; finalizers may not have finished.                                                  |
-| `RemoteTerminationUnconfirmed` | The connection was lost and exit could not be confirmed after the lease plus margin. A timeout is not proof of exit. |
+- A local child gets one more second to finish output and exit naturally. If it
+  stays alive, cleanup reports the exit timeout and terminates it. The process
+  spawner escalates to SIGKILL after another second and confirms exit.
+- A network host waits at most the negotiated lease plus `margin` for
+  termination confirmation. The runner uses its separate `--grace` window before
+  forced killing.
+
+Network stopping has three observable results:
+
+| Result                         | What you can rely on                                                                                                                                             |
+| ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Exited`                       | Process exit was confirmed after the normal stop path.                                                                                                           |
+| `Killed`                       | Forced termination was confirmed; finalizers may not have finished.                                                                                              |
+| `RemoteTerminationUnconfirmed` | Exit could not be confirmed within the lease plus margin, whether contact was lost or the connected runner could not confirm it. A timeout is not proof of exit. |
 
 The first two appear as `remote.termination` in host logs, with
-`remote.instance` and `remote.generation`. The third appears in cleanup failure.
-The default margin is five seconds. Cleanup errors remain errors even if the
-process was subsequently stopped. Logs may be dropped under overload; the host
-reports the loss count.
+`remote.instance` and `remote.generation`. The third appears in cleanup failure;
+`Remote.RemoteTerminationUnconfirmed` is exported so you can recognize it there.
+Cleanup errors remain errors even if the process was subsequently stopped. Logs
+may be dropped under overload; the host reports the loss count.
+
+## Handle failures
+
+The proxy exposes the contract's declared errors, plus:
+
+- `Remote.Contract.UndeclaredFailure`: the implementation failed with an error
+  outside its contract; `original` retains its diagnostic value.
+- `Remote.RemoteWithdrawn`: the child withdrew an exported service, so host
+  consumers must stop.
+- `Remote.RemoteError`: startup or infrastructure failed; `cause` retains the
+  underlying reasons.
+- `Remote.MissingInstance`: neither an explicit instance nor a loader entry id
+  was available.
+
+These are activation or background failures. Explicit disposal reports
+`Fork.CleanupError`; inspect its `cause` for cleanup and termination errors,
+including `Remote.RemoteTerminationUnconfirmed`. Unexpected defects remain
+defects. A timeout never turns cleanup into success.
 
 ## Hot reload
 

@@ -16,6 +16,11 @@ npm install @graftland/loader effect
 - `Loader` 在运行时编辑条目。
 - `ModuleResolver` 把条目名称转换为插件。
 
+从条目加载的插件可从 `@graftland/loader` 导入 `Entry`，读取
+`yield* Entry.CurrentId`。它是
+`Context.Reference<Option<string>>`，值为当前条目的 id，嵌套 group 中也一样；不经过条目加载时默认为
+`None`。插件内部 fork 的子插件会继承它，不会为每个 fork 生成新 id。Include 会把生成的 id 保存到 YAML，供宿主重启后继续使用。
+
 ## 自定义存储
 
 自定义存储需要实现 `Loader.Store`：

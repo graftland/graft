@@ -6,6 +6,7 @@ import {
 	Deferred,
 	Effect,
 	Ref,
+	Option,
 	Schema,
 	Scope,
 	Stream,
@@ -21,8 +22,9 @@ type ErrorSchema = Schema.Top & {
 	readonly DecodingServices: never
 	readonly EncodingServices: never
 }
-type ControlGroup<E extends ErrorSchema> = ReturnType<
-	typeof ContractModule.make<Schema.Codec<unknown, Schema.Json>, E>
+type ControlGroup<E extends ErrorSchema> = ContractModule.Contract<
+	Schema.Codec<unknown, Schema.Json>,
+	E
 >["control"]
 interface Contract<E extends ErrorSchema> {
 	readonly control: ControlGroup<E>
@@ -97,7 +99,9 @@ const forwardLogs = <E extends ErrorSchema>(
 						if (event.dropped > previous)
 							yield* Effect.logWarning("Remote logs were dropped").pipe(
 								Effect.annotateLogs({
-									"remote.pid": connection.pid,
+									...(Option.isSome(connection.pid)
+										? { "remote.pid": connection.pid.value }
+										: {}),
 									"remote.logs.dropped": event.dropped - previous,
 									"remote.logs.droppedTotal": event.dropped,
 								}),
@@ -119,7 +123,9 @@ const forwardLogs = <E extends ErrorSchema>(
 							cause,
 						).pipe(
 							Effect.annotateLogs({
-								"remote.pid": connection.pid,
+								...(Option.isSome(connection.pid)
+									? { "remote.pid": connection.pid.value }
+									: {}),
 								"remote.annotations": entry.annotations,
 							}),
 						)

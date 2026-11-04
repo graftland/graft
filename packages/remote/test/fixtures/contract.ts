@@ -9,6 +9,7 @@ export const config = Schema.Struct({
 	directory: Schema.String,
 	mode: Schema.Literals([
 		"normal",
+		"leaked-handle",
 		"wait",
 		"fail",
 		"crash",

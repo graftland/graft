@@ -21,12 +21,13 @@ import { Contract } from "@graftland/remote"
 import { Schema } from "effect"
 
 export const config = Schema.Struct({ greeting: Schema.String })
-export const contract = Contract.make({
-	name: "greeter",
-	config,
-	error: Schema.Never,
-	module: new URL("./worker.js", import.meta.url).href,
-})
+export const contract: Contract.Contract<typeof config, typeof Schema.Never> =
+	Contract.make({
+		name: "greeter",
+		config,
+		error: Schema.Never,
+		module: new URL("./worker.js", import.meta.url).href,
+	})
 ```
 
 ```ts title="worker.ts"
@@ -62,8 +63,9 @@ export default Remote.plugin(contract, {
 ```
 
 用 `Graft.plugin(entry, { greeting: "Hello" })` 或 [graft.yml](../config-file/)
-載入入口。自行嵌入 Graft 時，宿主要提供 Node 平台服務，例如
-`Layer.provideMerge(Graft.layer, NodeServices.layer)`。已安裝或建置好的
+載入入口。自行嵌入 Graft 時，在建置 `Graft.layer` 的環境中提供
+`NodeServices.layer` 和 `effect/crypto` 的
+`SecureRandom.layerWebCrypto`；CLI 已提供這兩項服務。已安裝或建置好的
 `@graftland/remote` 執行檔會負責啟動子行程。
 
 每次啟用都有新的行程，設定變更也會重新啟動它。子行程失敗會讓宿主代理失敗；重試策略設在代理上，每次重試重新啟動行程。Effect 日誌會轉送到宿主，並帶上
@@ -145,13 +147,25 @@ export default Remote.plugin(contract, {
 ```
 
 把 `my-plugin/contract`
-換成你的套件匯出的契約，宿主和 runner 安裝相符的版本。三個憑證變數都是宿主上的檔案路徑，`RUNNER_SERVERNAME`
+換成你的套件匯出的契約，宿主和 runner 安裝相符的版本。設定
+`expect: { version, digest }`
+可以在外掛啟動前強制檢查套件版本和內容摘要，兩項也可單獨使用。三個憑證變數都是宿主上的檔案路徑，`RUNNER_SERVERNAME`
 必須與 runner 的伺服器憑證相符。設定和檔案在啟用時讀取，匯入模組時不會執行 I/O。
 
-不傳 `instance` 時，runner
-target 使用 loader 項目的 id。loader 會把產生的 id 儲存到 YAML；保留它，宿主重新啟動後就仍然對應同一個實例。明確指定的
-`instance` 優先。不經過 loader 又沒傳 `instance` 時，啟用會以型別化錯誤
-`MissingInstance` 失敗。
+這些選項都寫在 `Remote.runner({ ... })` 中，與 `host`、`port`、`tls` 同層：
+
+| 選項       | 預設值與用途                                                                                                                                                |
+| ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `instance` | 預設使用 loader 項目 id，明確指定的字串優先。兩者都沒有時以 `MissingInstance` 失敗。                                                                        |
+| `lease`    | 預設採用 runner 的 `--lease`，其預設值為 15 秒。宿主傳入 `"30 seconds"` 等值會覆寫該實例的 runner 預設租約。                                                |
+| `margin`   | 預設 `"5 seconds"`。宿主等待終止確認時，在租約之外額外保留的時間。                                                                                          |
+| `expect`   | 預設不檢查。`{ version, digest }` 可固定已安裝的套件，兩項都可省略；只有要求 digest 時才計算摘要。摘要涵蓋套件自身的檔案，排除 `node_modules`，不包含依賴。 |
+
+loader 會把產生的項目 id 儲存到 YAML，保留它就能在宿主重新啟動後繼續對應同一個實例。
+`@graftland/loader` 的 `Entry.CurrentId` 是一個值為 `Option<string>`
+的 Reference；項目內 fork 的子外掛會繼承它。因此，從同一項目 fork 兩個 runner 代理、又都不寫
+`instance`，就會互相替換，請為它們指定不同名稱。直接嵌入 `Group.Group`
+時，id 只要求在兄弟項目之間唯一，不同 group 的 id 也可能衝突。多個宿主共用同一憑證身分、手動指定相同的實例名稱時，同樣會指向同一個實例。
 
 ## 準備 runner
 
@@ -160,9 +174,9 @@ target 使用 loader 項目的 id。loader 會把產生的 id 儲存到 YAML；�
 是從該目錄解析的套件名稱或套件子路徑；宿主不會上傳程式碼。執行期間不要修改已安裝的套件。
 
 用**專用 CA**
-簽發伺服器和用戶端憑證。TLS 驗證伺服器主機名稱，並要求用戶端憑證。用戶端憑證必須恰好包含一個 SAN
-URI，例如
-`graft://billing`。這個身分擁有一個實例命名空間；簽發相同 URI 的憑證，就授予相同存取權。續簽時保留 URI，就能繼續存取原來的實例。
+簽發伺服器和用戶端憑證。TLS 驗證伺服器主機名稱，並要求用戶端憑證。用戶端憑證必須恰好包含一個
+`graft://` SAN URI，例如 `graft://billing`；允許同時包含其他 SAN
+URI。這個身分擁有一個實例命名空間；簽發相同 URI 的憑證，就授予相同存取權。續簽時保留 URI，就能繼續存取原來的實例。
 
 ```sh
 graft-remote serve --host 0.0.0.0 --port 7443 \
@@ -170,6 +184,10 @@ graft-remote serve --host 0.0.0.0 --port 7443 \
   --cert /run/secrets/server.crt --key /run/secrets/server.key \
   --ca /run/secrets/clients-ca.crt --lease "15 seconds" --grace "5 seconds"
 ```
+
+`--grace` 預設五秒，是 runner 請求中斷後、升級為強制終止前的等待窗口。它與宿主的
+`margin`
+不同：後者延長的是等待退出確認的時間，不會給外掛 finalizer 增加清理時間。
 
 看到 `Listening`
 日誌即表示開始監聽，其中帶有實際連接埠。狀態目錄須位於本機檔案系統，由一個 runner 獨佔。重新啟動時保留它，它記錄了實例世代和未結束的執行。不要讓仍在使用的部署身分改用空的狀態目錄。
@@ -187,16 +205,39 @@ graft-remote serve --host 0.0.0.0 --port 7443 \
 `{ id, generation }`。外部系統可以用 generation 拒絕舊實例的寫入，也就是 fencing，但必須由外部系統執行檢查。它不能撤銷已經發生的寫入，也不保證呼叫恰好執行一次；不同 runner 之間不協調 generation。本機子行程每次取得新的 id 和 generation
 1，不能把它當作持久化的 fencing token。
 
-正常停止會等待 finalizer、最後的日誌和行程退出。清理期限預設五秒。網路實例有三種可觀察的停止結果：
+正常停止先等待外掛 finalizer 和最後的日誌。代理的 `shutdownTimeout`
+預設五秒，只約束這一步優雅 Dispose。之後才是行程終止：
 
-| 結果                           | 意義                                                           |
-| ------------------------------ | -------------------------------------------------------------- |
-| `Exited`                       | 走正常停止流程，並已確認行程退出。                             |
-| `Killed`                       | 已確認強制終止；finalizer 不一定執行完。                       |
-| `RemoteTerminationUnconfirmed` | 連線中斷，等過租約加餘裕後仍無法確認退出。逾時不等於已經退出。 |
+- 本機子行程還有一秒完成輸出並自然退出。仍不退出時，清理會回報退出逾時並終止它；行程啟動器再等一秒後升級為 SIGKILL，並確認退出。
+- 網路宿主最多等待協商後的租約加 `margin`
+  來確認終止。runner 在強制終止之前使用自己獨立的 `--grace` 窗口。
+
+網路實例有三種可觀察的停止結果：
+
+| 結果                           | 意義                                                                                                   |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------ |
+| `Exited`                       | 走正常停止流程，並已確認行程退出。                                                                     |
+| `Killed`                       | 已確認強制終止；finalizer 不一定執行完。                                                               |
+| `RemoteTerminationUnconfirmed` | 等過租約加餘裕後仍無法確認退出；既可能是斷線，也可能是連線仍在但 runner 無法確認。逾時不等於已經退出。 |
 
 前兩種記錄在宿主日誌的 `remote.termination` 中，同時帶有 `remote.instance` 和
-`remote.generation`；第三種出現在清理失敗中。餘裕預設五秒。即使最後行程停止了，清理錯誤仍會保留。過載時日誌可能遺失，宿主會回報遺失數量。
+`remote.generation`；第三種出現在清理失敗中，可用匯出的
+`Remote.RemoteTerminationUnconfirmed`
+辨識。即使最後行程停止了，清理錯誤仍會保留。過載時日誌可能遺失，宿主會回報遺失數量。
+
+## 處理失敗
+
+代理除了暴露契約中宣告的錯誤，還可能回報：
+
+- `Remote.Contract.UndeclaredFailure`：實作拋出了契約之外的錯誤，`original`
+  保留診斷值。
+- `Remote.RemoteWithdrawn`：子行程撤回了匯出的服務，宿主的服務使用者需要停止。
+- `Remote.RemoteError`：啟動或基礎設施失敗，`cause` 保留具體原因。
+- `Remote.MissingInstance`：既沒有明確指定實例名稱，也沒有 loader 項目 id。
+
+這些屬於啟用或背景失敗。明確呼叫 dispose 則回報 `Fork.CleanupError`；在它的
+`cause` 裡檢查清理與終止錯誤，包括
+`Remote.RemoteTerminationUnconfirmed`。非預期 defect 仍是 defect，逾時不會把清理變成成功。
 
 ## 熱重載
 

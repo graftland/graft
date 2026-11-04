@@ -1,16 +1,16 @@
-import { Schema } from "effect"
+import { Option, Schema } from "effect"
 
 export class ProcessExited extends Schema.TaggedError<
 	ProcessExited,
 	{ readonly brand: unique symbol }
 >()("ProcessExited", {
-	pid: Schema.Int,
+	pid: Schema.Option(Schema.Int),
 	exitCode: Schema.NullOr(Schema.Int),
 	stderr: Schema.String,
 	statusCause: Schema.Cause(Schema.Unknown, Schema.Unknown),
 }) {
 	override get message() {
-		return `Remote process ${this.pid} exited unexpectedly (${this.exitCode ?? "signal"})`
+		return `Remote process${Option.isSome(this.pid) ? ` ${this.pid.value}` : ""} exited unexpectedly (${this.exitCode ?? "signal"})`
 	}
 }
 export class TransportError extends Schema.TaggedError<
@@ -43,5 +43,15 @@ export class MissingInstance extends Schema.TaggedError<
 >()("MissingInstance", {}) {
 	override get message() {
 		return "Remote.runner requires an instance or a loader entry id; set target.instance when loading without Loader."
+	}
+}
+
+/** Dispose completed, but Node still owns live handles; process-scope cleanup must terminate it. */
+export class LocalTerminationTimeout extends Schema.TaggedError<
+	LocalTerminationTimeout,
+	{ readonly brand: unique symbol }
+>()("LocalTerminationTimeout", { pid: Schema.Int }) {
+	override get message() {
+		return `Remote process ${this.pid} did not exit within one second after Dispose; terminating it`
 	}
 }

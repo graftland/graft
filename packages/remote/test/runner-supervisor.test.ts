@@ -692,6 +692,46 @@ layer(SecureRandom.layerWebCrypto)("runner session supervisor", (it) => {
 					assert.include(Cause.pretty(scopeExit.cause), "Shutdown sentinel")
 			}).pipe(Effect.scoped),
 	)
+	it.effect("keeps one termination deadline when confirmation fails late", () =>
+		Effect.gen(function* () {
+			const observed = yield* Ref.make(false)
+			const waiting = yield* awaitTermination(
+				orphan.handle,
+				Effect.fail(
+					ExecutionError.make({ detail: "Late connection loss" }),
+				).pipe(Effect.delay("10 seconds")),
+				15000,
+				2000,
+			).pipe(
+				Effect.exit,
+				Effect.tap(() => Ref.set(observed, true)),
+				Effect.forkScoped,
+			)
+			yield* TestClock.adjust("17 seconds")
+			const completed = yield* Ref.get(observed)
+			assert.isTrue(completed)
+			const result = yield* Fiber.join(waiting)
+
+			assert.isTrue(Exit.isFailure(result))
+			if (Exit.isFailure(result)) {
+				assert.isTrue(
+					Array.some(
+						result.cause.reasons,
+						(r) =>
+							r._tag === "Fail" &&
+							Schema.is(RemoteTerminationUnconfirmed)(r.error),
+					),
+				)
+				assert.isTrue(
+					Array.some(
+						result.cause.reasons,
+						(r) => r._tag === "Fail" && Schema.is(ExecutionError)(r.error),
+					),
+				)
+			}
+		}).pipe(Effect.scoped),
+	)
+
 	it.effect(
 		"bounds termination confirmation even when the transport never reports failure",
 		() =>

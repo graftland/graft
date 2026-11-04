@@ -46,8 +46,8 @@ files. The package exports `@graftland/sample-remote-worker/contract`. Install
 is assumed. Use matching contract versions on the host and runner.
 
 Prepare server and client certificates from a dedicated CA. The server
-certificate must match the hostname, and the client needs exactly one SAN URI
-such as `graft://demo`. Then run the installed executable:
+certificate must match the hostname, and the client needs exactly one `graft://`
+SAN URI such as `graft://demo`. Then run the installed executable:
 
 ```sh
 graft-remote serve --host 0.0.0.0 --port 7443 \

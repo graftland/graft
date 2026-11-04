@@ -24,6 +24,7 @@ import { RemoteWithdrawn, RemoteError, MissingInstance } from "./Errors"
 import * as Contract from "./Contract"
 import * as Control from "./internal/control"
 export { Contract }
+export { RemoteTerminationUnconfirmed } from "./internal/runner/model"
 export { RemoteError, RemoteWithdrawn, MissingInstance } from "./Errors"
 
 export interface Options {
@@ -53,7 +54,7 @@ export const plugin = <
 		readonly EncodingServices: never
 	},
 >(
-	contract: ReturnType<typeof Contract.make<S, E>>,
+	contract: Contract.Contract<S, E>,
 	options: Options,
 ): Plugin.Plugin<
 	S["Encoded"],
@@ -67,6 +68,7 @@ export const plugin = <
 	Plugin.make({
 		name: contract.name,
 		inject: [
+			SecureRandom.SecureRandom,
 			...(Effect.isEffect(options.target) ? [FileSystem.FileSystem] : []),
 			...(!Effect.isEffect(options.target) && options.target?._tag !== "Runner"
 				? [ChildProcessSpawner.ChildProcessSpawner]
@@ -77,9 +79,8 @@ export const plugin = <
 		retry: options.retry,
 		apply: (input) =>
 			Effect.gen(function* () {
-				const session = yield* SecureRandom.make((size) =>
-					globalThis.crypto.getRandomValues(new Uint8Array(size)),
-				).uuidV4()
+				const random = yield* SecureRandom.SecureRandom
+				const session = yield* random.uuidV4()
 				yield* Schema.decodeEffect(contract.config)(input)
 				const target = yield* resolveTarget(options.target)
 				const active = yield* Connection.acquire(

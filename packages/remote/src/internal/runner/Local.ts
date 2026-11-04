@@ -1,8 +1,12 @@
-import { Cause, Effect, Fiber, Sink, Stream } from "effect"
+import { Cause, Effect, Fiber, Option, Sink, Stream } from "effect"
 import * as ProcessObservation from "./ProcessObservation"
 import * as FailureGroup from "../FailureGroup"
 import type { ChildProcessSpawner } from "effect/process"
-import { ProcessExited, TransportError } from "../../Errors"
+import {
+	LocalTerminationTimeout,
+	ProcessExited,
+	TransportError,
+} from "../../Errors"
 import * as Port from "../port"
 
 /** Process observers stay alive until exit, including forced cleanup. */
@@ -16,7 +20,7 @@ export const connect = Effect.fnUntraced(function* (
 			onFailure: (error) => TransportError.make({ cause: Cause.fail(error) }),
 			onSuccess: (status) =>
 				ProcessExited.make({
-					pid: child.pid,
+					pid: Option.some(child.pid),
 					exitCode: status.code,
 					stderr: status.stderr,
 					statusCause: status.cause,
@@ -71,7 +75,7 @@ export const connect = Effect.fnUntraced(function* (
 
 	return {
 		...peer,
-		pid: child.pid,
+		pid: Option.some(child.pid),
 		exited,
 		resources: yield* Effect.scope,
 		transport: { ...peer, failure: failures.await, report },
@@ -81,8 +85,15 @@ export const connect = Effect.fnUntraced(function* (
 				// Stop observation before intentionally ending stdin or killing the process.
 				yield* failures.close
 				if (!graceful) return
-				yield* peer.end
-				const status = yield* Fiber.join(exited)
+				// If this fails, the enclosing process scope signals, escalates, and waits for exit.
+				const status = yield* peer.end.pipe(
+					Effect.andThen(Fiber.join(exited)),
+					Effect.interruptible,
+					Effect.timeoutOrElse({
+						duration: "1 second",
+						orElse: () => LocalTerminationTimeout.make({ pid: child.pid }),
+					}),
+				)
 				if (status.exitCode !== 0 || status.statusCause.reasons.length > 0)
 					return yield* status
 			}),

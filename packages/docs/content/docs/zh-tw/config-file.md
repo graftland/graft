@@ -31,6 +31,11 @@ description: 用 graft.yml 描述應用程式，並在執行期間修改設定�
 
 要讓設定項目在子行程或另一台機器上執行，可將它指向[遠端外掛入口](../remote/)；儲存的項目 id 也可以作為 runner 實例名稱。
 
+從項目載入的外掛可從 `@graftland/loader` 匯入 `Entry`，讀取
+`yield* Entry.CurrentId`。它是
+`Context.Reference<Option<string>>`，值為目前項目的 id，巢狀 group 中也一樣；不經過項目載入時預設為
+`None`。外掛內部 fork 的子外掛會繼承它，不會為每個 fork 產生新 id。Include 會把產生的 id 儲存到 YAML，供宿主重新啟動後繼續使用。
+
 ## 設定項目欄位
 
 | 欄位        | 作用                                                                            |

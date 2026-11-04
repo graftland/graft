@@ -17,6 +17,11 @@ npm install @graftland/loader effect
 - `Loader` 在執行時編輯項目。
 - `ModuleResolver` 把項目名稱轉換為外掛。
 
+從項目載入的外掛可從 `@graftland/loader` 匯入 `Entry`，讀取
+`yield* Entry.CurrentId`。它是
+`Context.Reference<Option<string>>`，值為目前項目的 id，巢狀 group 中也一樣；不經過項目載入時預設為
+`None`。外掛內部 fork 的子外掛會繼承它，不會為每個 fork 產生新 id。Include 會把產生的 id 儲存到 YAML，供宿主重新啟動後繼續使用。
+
 ## 自訂儲存
 
 自訂儲存需要實作 `Loader.Store`：

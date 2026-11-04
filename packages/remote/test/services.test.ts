@@ -1,3 +1,4 @@
+import { SecureRandom } from "effect/crypto"
 import { underlying } from "./errors"
 import { assert, describe, it } from "@effect/vitest"
 import { NodeServices } from "@effect/platform-node"
@@ -31,7 +32,12 @@ const contractModule = new URL(
 const run = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
 	effect.pipe(
 		Effect.scoped,
-		Effect.provide(Layer.provideMerge(Graft.layer, NodeServices.layer)),
+		Effect.provide(
+			Layer.provideMerge(
+				Graft.layer,
+				Layer.merge(NodeServices.layer, SecureRandom.layerWebCrypto),
+			),
+		),
 	)
 const setup = Effect.gen(function* () {
 	const fs = yield* FileSystem.FileSystem

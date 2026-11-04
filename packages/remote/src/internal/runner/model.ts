@@ -1,6 +1,15 @@
 import { Limits, PositiveInt } from "../Limits"
 export { Limits, PositiveInt, PositiveFinite, defaults } from "../Limits"
-import { Array, Cause, Context, Data, Effect, Option, Schema } from "effect"
+import {
+	Array,
+	Cause,
+	Context,
+	Data,
+	Duration,
+	Effect,
+	Option,
+	Schema,
+} from "effect"
 import type { Scope } from "effect"
 
 const diagnosticCause = Schema.Cause(
@@ -172,10 +181,13 @@ export type ExitStatus = typeof ExitStatus.Type
 export const CodeIdentity = Schema.Struct({
 	name: Schema.String,
 	version: Schema.String,
-	digest: Schema.String,
+	digest: Schema.optionalKey(Schema.String),
 })
 export type CodeIdentity = typeof CodeIdentity.Type
-export const Load = Schema.Struct({ specifier: Schema.String })
+export const Load = Schema.Struct({
+	specifier: Schema.String,
+	digest: Schema.optionalKey(Schema.Boolean),
+})
 export type Load = typeof Load.Type
 export const Termination = Schema.Struct({
 	kind: Schema.Literals(["Exited", "Killed"]),
@@ -342,14 +354,17 @@ export const awaitTermination = <E, R>(
 	marginMillis: number,
 ) =>
 	Effect.gen(function* () {
-		const result = yield* Effect.exit(
+		const [elapsed, result] = yield* Effect.exit(
 			Effect.timeoutOption(confirmation, leaseMillis + marginMillis),
-		)
+		).pipe(Effect.timed)
 		if (result._tag === "Success") {
 			if (Option.isSome(result.value)) return result.value.value
 			return yield* RemoteTerminationUnconfirmed.make({ handle })
 		}
-		yield* Effect.sleep(leaseMillis + marginMillis)
+		// Confirmation and the disconnected wait share one deadline.
+		yield* Effect.sleep(
+			Math.max(0, leaseMillis + marginMillis - Duration.toMillis(elapsed)),
+		)
 		return yield* Effect.failCause(
 			Cause.combine(
 				result.cause,

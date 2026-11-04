@@ -1,3 +1,4 @@
+import { SecureRandom } from "effect/crypto"
 import { assert, describe, it } from "@effect/vitest"
 import { NodeServices } from "@effect/platform-node"
 import { Graft } from "@graftland/graft"
@@ -21,7 +22,12 @@ describe("remote worker", () => {
 					target: Remote.local({ command: [process.execPath, bin] }),
 				}).pipe(
 					Effect.scoped,
-					Effect.provide(Layer.provideMerge(Graft.layer, NodeServices.layer)),
+					Effect.provide(
+						Layer.provideMerge(
+							Graft.layer,
+							Layer.merge(NodeServices.layer, SecureRandom.layerWebCrypto),
+						),
+					),
 				)
 				assert.equal(reply.text, "Worker: HELLO")
 				assert.notEqual(reply.pid, process.pid)

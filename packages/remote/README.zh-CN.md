@@ -17,7 +17,7 @@ export default Remote.plugin(contract, {
 把共享的 `Contract.make(...)`
 契约与实现模块分开，宿主只导入契约。先将契约和实现编译成 JavaScript，再用
 `Graft.plugin` 或 `graft.yml` 加载入口。自行嵌入 Graft 时，为宿主运行环境提供
-`NodeServices.layer`。
+`NodeServices.layer` 和 `effect/crypto` 的 `SecureRandom.layerWebCrypto`。
 
 连接网络 runner 时使用
 `Remote.runner(...)`。在 runner 机器上预装插件包，并准备专用 CA 签发的证书。使用

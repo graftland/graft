@@ -6,7 +6,10 @@ type State<E> = Data.TaggedEnum<{
 	Failed: { readonly cause: Cause.Cause<E> }
 	Closed: {}
 }>
-const State = Data.taggedEnum<State<never>>()
+interface StateDefinition extends Data.TaggedEnum.WithGenerics<1> {
+	readonly taggedEnum: State<this["A"]>
+}
+const State = Data.taggedEnum<StateDefinition>()
 export interface FailureGroup<E> {
 	readonly await: Effect.Effect<never, E>
 	readonly check: Effect.Effect<void, E>
@@ -43,7 +46,7 @@ export const make = <E>(): Effect.Effect<FailureGroup<E>, never, Scope.Scope> =>
 		)
 		const publish = (cause: Cause.Cause<E>) =>
 			TxRef.update(state, (s): State<E> =>
-				s._tag === "Open" ? { _tag: "Failed", cause } : s,
+				s._tag === "Open" ? State.Failed({ cause }) : s,
 			)
 		yield* FiberSet.join(fibers).pipe(
 			Effect.catchCause((cause) =>

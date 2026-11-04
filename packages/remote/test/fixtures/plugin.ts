@@ -2,6 +2,7 @@ import { Plugin } from "@graftland/graft"
 import { Cause, Console, Effect, FileSystem, Schedule } from "effect"
 import { config, Rejected } from "./contract"
 import process from "node:process"
+import { MessageChannel } from "node:worker_threads"
 
 export default Plugin.make({
 	name: "fixture-implementation",
@@ -45,6 +46,12 @@ export default Plugin.make({
 				for (let index = 0; index < 4096; index++)
 					yield* Effect.logInfo("Startup flood", index)
 			}
+			if (mode === "leaked-handle")
+				yield* Effect.sync(() => {
+					// Deliberately leak a referenced Node handle after all plugin finalizers finish.
+					const channel = new MessageChannel()
+					channel.port1.on("message", () => {})
+				})
 			if (mode === "wait")
 				yield* fs.exists(`${directory}/activate`).pipe(
 					Effect.repeat({

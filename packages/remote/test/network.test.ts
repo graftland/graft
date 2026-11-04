@@ -1,3 +1,4 @@
+import { SecureRandom } from "effect/crypto"
 import { Entry, Include, Loader, ModuleResolver } from "@graftland/loader"
 import { assert, describe, it } from "@effect/vitest"
 import { inject } from "vitest"
@@ -53,7 +54,10 @@ const credentials = (name: string) =>
 			servername: "localhost",
 		}
 	})
-const runtime = Layer.provideMerge(Graft.layer, NodeServices.layer)
+const runtime = Layer.provideMerge(
+	Graft.layer,
+	Layer.merge(NodeServices.layer, SecureRandom.layerWebCrypto),
+)
 const startRunner = (state: string, lease = 15000) =>
 	Effect.gen(function* () {
 		const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
@@ -268,6 +272,7 @@ const latestRecord = (state: string) =>
 const loadYamlHost = (directory: string, port: number) => {
 	const certificates = inject("remoteTls")
 	const environment = Layer.mergeAll(
+		SecureRandom.layerWebCrypto,
 		NodeServices.layer,
 		ModuleResolver.layer({
 			base: directory,
@@ -417,7 +422,12 @@ describe("network runner end to end", () => {
 					)
 					assert.include(Cause.pretty(exit.cause), "set target.instance")
 				}
-			}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
+			}).pipe(
+				Effect.scoped,
+				Effect.provide(
+					Layer.provideMerge(Graft.layer, SecureRandom.layerWebCrypto),
+				),
+			),
 	)
 
 	it.live(

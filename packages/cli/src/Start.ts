@@ -2,6 +2,7 @@
  * Runs a Graft application from its config file.
  */
 import { NodeServices } from "@effect/platform-node"
+import { SecureRandom } from "effect/crypto"
 import { Graft, Plugin } from "@graftland/graft"
 import * as Hmr from "@graftland/hmr"
 import { Include, Loader, ModuleResolver, type Tree } from "@graftland/loader"
@@ -87,6 +88,7 @@ export const run = (
 			Layer.provideMerge(
 				Graft.layer,
 				Layer.mergeAll(
+					SecureRandom.layerWebCrypto,
 					NodeServices.layer,
 					intercepts,
 					env(options.envFile).pipe(Layer.provide(NodeServices.layer)),

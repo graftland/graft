@@ -1,3 +1,4 @@
+import { SecureRandom } from "effect/crypto"
 import { AlreadyLoaded } from "../src/internal/childErrors"
 import { underlying } from "./errors"
 import { ProcessExited } from "../src/Errors"
@@ -37,7 +38,10 @@ const contractModule = new URL(
 	"../.cache/integration/contract.js",
 	import.meta.url,
 ).href
-const runtime = Layer.provideMerge(Graft.layer, NodeServices.layer)
+const runtime = Layer.provideMerge(
+	Graft.layer,
+	Layer.merge(NodeServices.layer, SecureRandom.layerWebCrypto),
+)
 const setup = Effect.gen(function* () {
 	const fs = yield* FileSystem.FileSystem
 	const directory = yield* fs.makeTempDirectoryScoped()
@@ -46,22 +50,41 @@ const setup = Effect.gen(function* () {
 })
 const spy = Effect.gen(function* () {
 	const calls = yield* Ref.make(0)
+	const session = yield* Ref.make(Option.none<string>())
 	const error = PlatformError.badArgument({
 		module: "RemoteTest",
 		method: "spawn",
 		description: "Host spawner sentinel",
 	})
-	const spawner = ChildProcessSpawner.make(() =>
-		Ref.update(calls, (n) => n + 1).pipe(Effect.andThen(Effect.fail(error))),
+	const spawner = ChildProcessSpawner.make((command) =>
+		Ref.update(calls, (n) => n + 1).pipe(
+			Effect.andThen(
+				Ref.set(
+					session,
+					command._tag === "StandardCommand"
+						? Array.last(command.args).pipe(
+								Option.filter(
+									(word): word is string => typeof word === "string",
+								),
+							)
+						: Option.none(),
+				),
+			),
+			Effect.andThen(Effect.fail(error)),
+		),
 	)
 	const layer = Layer.provideMerge(
 		Graft.layer,
-		Layer.merge(
+		Layer.mergeAll(
+			Layer.succeed(
+				SecureRandom.SecureRandom,
+				SecureRandom.make((size) => new Uint8Array(size)),
+			),
 			NodeServices.layer,
 			Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, spawner),
 		),
 	)
-	return { calls, error, layer }
+	return { calls, session, error, layer }
 })
 
 class Marker extends Context.Service<Marker, string>()(
@@ -69,27 +92,34 @@ class Marker extends Context.Service<Marker, string>()(
 ) {}
 
 describe("local remote hardening", () => {
-	it.live("uses the spawner supplied to the host Graft layer", () =>
-		Effect.gen(function* () {
-			const { calls, error, layer } = yield* spy
-			const exit = yield* Effect.gen(function* () {
-				const fork = yield* Graft.plugin(
-					Remote.plugin(contract, { contractModule }),
-					{ directory: "unused", mode: "normal", value: 1 },
+	it.live(
+		"uses the spawner and secure random supplied to the host Graft layer",
+		() =>
+			Effect.gen(function* () {
+				const { calls, session, error, layer } = yield* spy
+				const exit = yield* Effect.gen(function* () {
+					const fork = yield* Graft.plugin(
+						Remote.plugin(contract, { contractModule }),
+						{ directory: "unused", mode: "normal", value: 1 },
+					)
+					return yield* Effect.exit(fork.await)
+				}).pipe(Effect.scoped, Effect.provide(layer))
+				assert.isTrue(Exit.isFailure(exit))
+				if (Exit.isFailure(exit))
+					assert.isTrue(
+						Array.some(
+							underlying(exit.cause).reasons,
+							(reason) => reason._tag === "Fail" && reason.error === error,
+						),
+					)
+				const count = yield* Ref.get(calls)
+				assert.equal(count, 1)
+				const sessionId = yield* Ref.get(session)
+				assert.deepEqual(
+					sessionId,
+					Option.some("00000000-0000-4000-8000-000000000000"),
 				)
-				return yield* Effect.exit(fork.await)
-			}).pipe(Effect.scoped, Effect.provide(layer))
-			assert.isTrue(Exit.isFailure(exit))
-			if (Exit.isFailure(exit))
-				assert.isTrue(
-					Array.some(
-						underlying(exit.cause).reasons,
-						(reason) => reason._tag === "Fail" && reason.error === error,
-					),
-				)
-			const count = yield* Ref.get(calls)
-			assert.equal(count, 1)
-		}),
+			}),
 	)
 
 	it.live(

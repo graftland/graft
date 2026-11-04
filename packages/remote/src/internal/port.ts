@@ -584,7 +584,8 @@ export const make = Effect.fnUntraced(function* (
 	options: Options,
 ): Effect.fn.Return<Port, never, import("effect").Scope.Scope> {
 	const state = yield* initialize(bytes, options)
-	// Disconnect publication must finish even when the connection owner starts closing its scope.
+	// The same failure remains observable through Port.await and client requests.
+	// This observer only publishes disconnects, even while the owner closes its scope.
 	yield* state.workers.await.pipe(
 		Effect.catchCause(() =>
 			Effect.uninterruptible(

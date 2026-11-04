@@ -17,7 +17,7 @@ export default Remote.plugin(contract, {
 把共用的 `Contract.make(...)`
 契約與實作模組分開，宿主只匯入契約。先將契約和實作編譯成 JavaScript，再用
 `Graft.plugin` 或 `graft.yml` 載入入口。自行嵌入 Graft 時，為宿主執行環境提供
-`NodeServices.layer`。
+`NodeServices.layer` 和 `effect/crypto` 的 `SecureRandom.layerWebCrypto`。
 
 連線到網路 runner 時使用
 `Remote.runner(...)`。在 runner 機器上預先安裝外掛套件，並準備專用 CA 簽發的憑證。使用

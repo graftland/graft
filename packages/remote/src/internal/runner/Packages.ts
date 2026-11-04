@@ -87,7 +87,7 @@ export const digest = Effect.fnUntraced(function* (directory: string) {
  * The installation directory and its package exports are trusted.
  */
 export const resolve = Effect.fnUntraced(
-	function* (root: string, specifier: string, expected: Expected = {}) {
+	function* (root: string, specifier: string, includeDigest: boolean = false) {
 		const segments = String.split(specifier, "/")
 		const scoped = String.startsWith("@")(specifier)
 		const name = Array.join(Array.take(segments, scoped ? 2 : 1), "/")
@@ -150,9 +150,8 @@ export const resolve = Effect.fnUntraced(
 		const entry = yield* fs.realPath(filename)
 		const identity: CodeIdentity = {
 			...manifest,
-			digest: yield* digest(directory),
+			...(includeDigest ? { digest: yield* digest(directory) } : {}),
 		}
-		yield* verify(identity, expected)
 		return { directory, entry, identity }
 	},
 	Effect.catchTags({

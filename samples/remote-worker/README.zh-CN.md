@@ -38,8 +38,8 @@ devenv shell -- pnpm --filter @graftland/sample-remote-worker test
 文件。包导出了 `@graftland/sample-remote-worker/contract`。同时安装
 `@graftland/remote`。这些都是工作区包，不以已发布到 registry 为前提。宿主和 runner 使用相匹配的契约版本。
 
-准备专用 CA 签发的服务端和客户端证书。服务端证书必须匹配主机名，客户端证书恰好包含一个 SAN
-URI，例如 `graft://demo`。然后运行已安装的可执行文件：
+准备专用 CA 签发的服务端和客户端证书。服务端证书必须匹配主机名，客户端证书恰好包含一个
+`graft://` SAN URI，例如 `graft://demo`。然后运行已安装的可执行文件：
 
 ```sh
 graft-remote serve --host 0.0.0.0 --port 7443 \

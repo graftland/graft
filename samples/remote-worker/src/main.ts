@@ -1,3 +1,4 @@
+import { SecureRandom } from "effect/crypto"
 import { NodeRuntime, NodeServices } from "@effect/platform-node"
 import * as Remote from "@graftland/remote"
 import { Graft } from "@graftland/graft"
@@ -9,7 +10,10 @@ NodeRuntime.runMain(
 	Effect.scoped(
 		Effect.gen(function* () {
 			const context = yield* Layer.build(
-				Layer.provideMerge(Graft.layer, NodeServices.layer),
+				Layer.provideMerge(
+					Graft.layer,
+					Layer.merge(NodeServices.layer, SecureRandom.layerWebCrypto),
+				),
 			)
 			const reply = yield* formatInChild({
 				contractModule: new URL("./contract.js", import.meta.url).href,

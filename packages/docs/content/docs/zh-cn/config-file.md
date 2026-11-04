@@ -34,6 +34,11 @@ Loader/Include 要求整棵条目树的 ID 唯一，包括禁用项。直接嵌�
 
 要让配置项在子进程或另一台机器上运行，可将它指向[远程插件入口](../remote/)；保存的条目 id 也可以作为 runner 实例名。
 
+从条目加载的插件可从 `@graftland/loader` 导入 `Entry`，读取
+`yield* Entry.CurrentId`。它是
+`Context.Reference<Option<string>>`，值为当前条目的 id，嵌套 group 中也一样；不经过条目加载时默认为
+`None`。插件内部 fork 的子插件会继承它，不会为每个 fork 生成新 id。Include 会把生成的 id 保存到 YAML，供宿主重启后继续使用。
+
 ## 配置项字段
 
 | 字段        | 作用                                                                            |

@@ -17,6 +17,13 @@ npm install @graftland/loader effect
 - `Loader` edits entries at run time.
 - `ModuleResolver` turns entry names into plugins.
 
+Plugins loaded from an entry can read `yield* Entry.CurrentId`, importing
+`Entry` from `@graftland/loader`. This `Context.Reference<Option<string>>` holds
+that entry's id, including inside nested groups, and defaults to `None` outside
+entry loading. Child plugins forked by the plugin inherit it; it is not a new id
+for every fork. Include persists generated ids in YAML, so they survive host
+restarts.
+
 ## Custom stores
 
 A custom store implements `Loader.Store`:

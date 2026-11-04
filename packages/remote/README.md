@@ -20,7 +20,7 @@ Keep the shared `Contract.make(...)` definition separate from the
 implementation. The host imports only the contract. Build the contract and
 implementation to JavaScript before starting the child, then load this entry
 with `Graft.plugin` or `graft.yml`. A custom host provides `NodeServices.layer`
-to its Graft runtime.
+and `SecureRandom.layerWebCrypto` (from `effect/crypto`) to its Graft runtime.
 
 Use `Remote.runner(...)` for an authenticated network runner. Install plugin
 packages on that machine and provision certificates from a dedicated CA. With

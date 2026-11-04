@@ -40,12 +40,11 @@ const formatter = Contract.service(Formatter, api, {
 	}),
 })
 export const config = Schema.Struct({ prefix: Schema.String })
-export const contract: ReturnType<
-	typeof Contract.make<typeof config, typeof Schema.Never>
-> = Contract.make({
-	name: "remote-worker",
-	config,
-	error: Schema.Never,
-	module: new URL("./worker.js", import.meta.url).href,
-	provides: [formatter],
-})
+export const contract: Contract.Contract<typeof config, typeof Schema.Never> =
+	Contract.make({
+		name: "remote-worker",
+		config,
+		error: Schema.Never,
+		module: new URL("./worker.js", import.meta.url).href,
+		provides: [formatter],
+	})

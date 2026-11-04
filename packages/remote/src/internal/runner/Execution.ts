@@ -62,7 +62,11 @@ export const make = (root: string) =>
 				Processes.recover(child).pipe(Effect.provideContext(platform)),
 			spawn: (handle, request, limits) =>
 				Effect.gen(function* () {
-					const resolved = yield* Packages.resolve(root, request.specifier)
+					const resolved = yield* Packages.resolve(
+						root,
+						request.specifier,
+						request.digest,
+					)
 					const argv = yield* command()
 					const child = yield* spawner.spawn(
 						ChildProcess.make(

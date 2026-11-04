@@ -21,12 +21,13 @@ import { Contract } from "@graftland/remote"
 import { Schema } from "effect"
 
 export const config = Schema.Struct({ greeting: Schema.String })
-export const contract = Contract.make({
-	name: "greeter",
-	config,
-	error: Schema.Never,
-	module: new URL("./worker.js", import.meta.url).href,
-})
+export const contract: Contract.Contract<typeof config, typeof Schema.Never> =
+	Contract.make({
+		name: "greeter",
+		config,
+		error: Schema.Never,
+		module: new URL("./worker.js", import.meta.url).href,
+	})
 ```
 
 ```ts title="worker.ts"
@@ -62,8 +63,9 @@ export default Remote.plugin(contract, {
 ```
 
 用 `Graft.plugin(entry, { greeting: "Hello" })` 或 [graft.yml](../config-file/)
-加载入口。自行嵌入 Graft 时，宿主要提供 Node 平台服务，例如
-`Layer.provideMerge(Graft.layer, NodeServices.layer)`。已安装或构建好的
+加载入口。自行嵌入 Graft 时，在构建 `Graft.layer` 的环境中提供
+`NodeServices.layer` 和 `effect/crypto` 的
+`SecureRandom.layerWebCrypto`；CLI 已提供这两项服务。已安装或构建好的
 `@graftland/remote` 可执行文件会负责启动子进程。
 
 每次激活都有新的进程，配置变化也会重启它。子进程失败会使宿主代理失败；重试策略设在代理上，每次重试重新启动进程。Effect 日志会转发到宿主，并带上
@@ -145,13 +147,25 @@ export default Remote.plugin(contract, {
 ```
 
 把 `my-plugin/contract`
-换成你的包导出的契约，宿主和 runner 安装相匹配的版本。三个证书变量都是宿主上的文件路径，`RUNNER_SERVERNAME`
+换成你的包导出的契约，宿主和 runner 安装相匹配的版本。设置
+`expect: { version, digest }`
+可以在插件启动前强制检查包版本和内容摘要，两项也可单独使用。三个证书变量都是宿主上的文件路径，`RUNNER_SERVERNAME`
 必须与 runner 的服务端证书匹配。配置和文件在激活时读取，导入模块时不会执行 I/O。
 
-不传 `instance` 时，runner
-target 使用 loader 条目的 id。loader 会把生成的 id 保存到 YAML；保留它，宿主重启后就仍然对应同一个实例。显式
-`instance` 优先。不经过 loader 又没传 `instance` 时，激活会以类型化错误
-`MissingInstance` 失败。
+这些选项都写在 `Remote.runner({ ... })` 中，与 `host`、`port`、`tls` 同级：
+
+| 选项       | 默认值和作用                                                                                                                                            |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `instance` | 默认使用 loader 条目 id，显式字符串优先。两者都没有时以 `MissingInstance` 失败。                                                                        |
+| `lease`    | 默认采用 runner 的 `--lease`，其默认值为 15 秒。宿主传入 `"30 seconds"` 等值会覆盖该实例的 runner 默认租约。                                            |
+| `margin`   | 默认 `"5 seconds"`。宿主等待终止确认时，在租约之外额外留出的时间。                                                                                      |
+| `expect`   | 默认不检查。`{ version, digest }` 可固定已安装的包，两项都可省略；只有请求 digest 时才计算摘要。摘要覆盖包自身的文件，排除 `node_modules`，不包含依赖。 |
+
+loader 会把生成的条目 id 保存到 YAML，保留它就能在宿主重启后继续对应同一个实例。
+`@graftland/loader` 的 `Entry.CurrentId` 是一个值为 `Option<string>`
+的 Reference；条目内 fork 的子插件会继承它。因此，从同一条目 fork 两个 runner 代理、又都不写
+`instance`，就会互相替换，请为它们指定不同名字。直接嵌入 `Group.Group`
+时，id 只要求在兄弟条目之间唯一，不同 group 的 id 也可能冲突。多个宿主共用同一证书身份、手写相同的实例名时，同样会指向同一个实例。
 
 ## 准备 runner
 
@@ -160,9 +174,9 @@ target 使用 loader 条目的 id。loader 会把生成的 id 保存到 YAML；�
 是从该目录解析的包名或包的子路径；宿主不会上传代码。运行期间不要修改已安装的包。
 
 用**专用 CA**
-签发服务端和客户端证书。TLS 验证服务端主机名，并要求客户端证书。客户端证书必须恰好包含一个 SAN
-URI，例如
-`graft://billing`。这个身份拥有一个实例命名空间；签发相同 URI 的证书，就授予相同访问权。续签时保留 URI，就能继续访问原来的实例。
+签发服务端和客户端证书。TLS 验证服务端主机名，并要求客户端证书。客户端证书必须恰好包含一个
+`graft://` SAN URI，例如 `graft://billing`；允许同时包含其他 SAN
+URI。这个身份拥有一个实例命名空间；签发相同 URI 的证书，就授予相同访问权。续签时保留 URI，就能继续访问原来的实例。
 
 ```sh
 graft-remote serve --host 0.0.0.0 --port 7443 \
@@ -170,6 +184,10 @@ graft-remote serve --host 0.0.0.0 --port 7443 \
   --cert /run/secrets/server.crt --key /run/secrets/server.key \
   --ca /run/secrets/clients-ca.crt --lease "15 seconds" --grace "5 seconds"
 ```
+
+`--grace` 默认五秒，是 runner 请求中断后、升级为强制终止前的等待窗口。它与宿主的
+`margin`
+不同：后者延长的是等待退出确认的时间，不会给插件 finalizer 增加清理时间。
 
 看到 `Listening`
 日志即表示开始监听，其中带有实际端口。状态目录须位于本地文件系统，由一个 runner 独占。重启时保留它，它记录了实例代数和未结束的执行。不要给仍在使用的部署身份换一个空状态目录。
@@ -187,16 +205,39 @@ graft-remote serve --host 0.0.0.0 --port 7443 \
 `{ id, generation }`。外部系统可以用 generation 拒绝旧实例的写入，也就是 fencing，但必须由外部系统执行检查。它不能撤销已经发生的写入，也不保证调用恰好执行一次；不同 runner 之间不协调 generation。本机子进程每次得到新的 id 和 generation
 1，不能把它当作持久化的 fencing token。
 
-正常停止会等待 finalizer、最后的日志和进程退出。清理期限默认五秒。网络实例有三种可观察的停止结果：
+正常停止先等待插件 finalizer 和最后的日志。代理的 `shutdownTimeout`
+默认五秒，只约束这一步优雅 Dispose。之后才是进程终止：
 
-| 结果                           | 含义                                                           |
-| ------------------------------ | -------------------------------------------------------------- |
-| `Exited`                       | 走正常停止流程，并已确认进程退出。                             |
-| `Killed`                       | 已确认强制终止；finalizer 不一定执行完。                       |
-| `RemoteTerminationUnconfirmed` | 连接丢失，等过租约加余量后仍无法确认退出。超时不等于已经退出。 |
+- 本机子进程还有一秒完成输出并自然退出。仍不退出时，清理会报告退出超时并终止它；进程启动器再等一秒后升级为 SIGKILL，并确认退出。
+- 网络宿主最多等待协商后的租约加 `margin`
+  来确认终止。runner 在强杀之前使用自己独立的 `--grace` 窗口。
+
+网络实例有三种可观察的停止结果：
+
+| 结果                           | 含义                                                                                                   |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------ |
+| `Exited`                       | 走正常停止流程，并已确认进程退出。                                                                     |
+| `Killed`                       | 已确认强制终止；finalizer 不一定执行完。                                                               |
+| `RemoteTerminationUnconfirmed` | 等过租约加余量后仍无法确认退出；既可能是断连，也可能是连接仍在但 runner 无法确认。超时不等于已经退出。 |
 
 前两种记录在宿主日志的 `remote.termination` 中，同时带有 `remote.instance` 和
-`remote.generation`；第三种出现在清理失败中。余量默认五秒。即使最终进程停止了，清理错误仍会保留。过载时日志可能丢失，宿主会报告丢失数量。
+`remote.generation`；第三种出现在清理失败中，可用导出的
+`Remote.RemoteTerminationUnconfirmed`
+识别。即使最终进程停止了，清理错误仍会保留。过载时日志可能丢失，宿主会报告丢失数量。
+
+## 处理失败
+
+代理除了暴露契约中声明的错误，还可能报告：
+
+- `Remote.Contract.UndeclaredFailure`：实现抛出了契约之外的错误，`original`
+  保留诊断值。
+- `Remote.RemoteWithdrawn`：子进程撤回了导出的服务，宿主消费者需要停止。
+- `Remote.RemoteError`：启动或基础设施失败，`cause` 保留具体原因。
+- `Remote.MissingInstance`：既没有显式实例名，也没有 loader 条目 id。
+
+这些属于激活或后台失败。显式 dispose 则报告 `Fork.CleanupError`；在它的 `cause`
+里检查清理与终止错误，包括
+`Remote.RemoteTerminationUnconfirmed`。意外 defect 仍是 defect，超时不会把清理变成成功。
 
 ## 热重载
 

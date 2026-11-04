@@ -1,5 +1,6 @@
+import { SecureRandom } from "effect/crypto"
 import { underlying } from "./errors"
-import { ProcessExited } from "../src/Errors"
+import { LocalTerminationTimeout, ProcessExited } from "../src/Errors"
 import { assert, describe, it } from "@effect/vitest"
 import { NodeServices } from "@effect/platform-node"
 import { Graft } from "@graftland/graft"
@@ -31,7 +32,12 @@ const contractModule = new URL(
 const run = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
 	effect.pipe(
 		Effect.scoped,
-		Effect.provide(Layer.provideMerge(Graft.layer, NodeServices.layer)),
+		Effect.provide(
+			Layer.provideMerge(
+				Graft.layer,
+				Layer.merge(NodeServices.layer, SecureRandom.layerWebCrypto),
+			),
+		),
 	)
 const setup = Effect.gen(function* () {
 	const fs = yield* FileSystem.FileSystem
@@ -423,6 +429,60 @@ describe("local remote lifecycle", () => {
 			yield* gone(pid!)
 		}).pipe(run),
 	)
+	it.live(
+		"bounds process exit after successful Dispose when a plugin leaks a Node handle",
+		() =>
+			Effect.gen(function* () {
+				const { fs, directory } = yield* setup
+				const fork = yield* Graft.plugin(
+					Remote.plugin(contract, { contractModule }),
+					{
+						directory,
+						mode: "leaked-handle",
+						value: 1,
+					},
+				)
+				yield* fork.await
+				const pid = yield* waitFor(directory, "started-").pipe(
+					Effect.flatMap((pids) => Effect.fromOption(Array.head(pids))),
+				)
+				const disposing = yield* Effect.forkScoped(fork.dispose)
+				const result = yield* Fiber.await(disposing).pipe(
+					Effect.timeoutOption("5 seconds"),
+				)
+				// Release the reproducer too if the graceful exit wait regresses to an unbounded join.
+				if (Option.isNone(result)) {
+					yield* Effect.sync(() => process.kill(pid, "SIGKILL"))
+					yield* Fiber.await(disposing)
+				}
+				assert.isTrue(
+					Option.isSome(result),
+					"Dispose must finish without help from the test",
+				)
+				if (Option.isSome(result)) {
+					assert.isTrue(Exit.isFailure(result.value))
+					if (Exit.isFailure(result.value))
+						assert.isTrue(
+							Array.some(
+								result.value.cause.reasons,
+								(reason) =>
+									reason._tag === "Fail" &&
+									Array.some(
+										reason.error.cause.reasons,
+										(inner) =>
+											inner._tag === "Die" &&
+											Schema.is(LocalTerminationTimeout)(inner.defect) &&
+											inner.defect.pid === pid,
+									),
+							),
+						)
+				}
+				const finalized = yield* fs.exists(`${directory}/finalized-${pid}`)
+				assert.isTrue(finalized)
+				yield* gone(pid)
+			}).pipe(run),
+	)
+
 	it.live("disposes an instance while its apply is still waiting", () =>
 		Effect.gen(function* () {
 			const { fs, directory } = yield* setup

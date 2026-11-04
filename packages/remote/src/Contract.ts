@@ -67,6 +67,19 @@ export const make = <
 	}
 }
 
+/** The shared config, error codecs, and service declarations for one remote plugin. */
+export type Contract<
+	S extends Schema.Top & {
+		readonly Encoded: Schema.Json
+		readonly DecodingServices: never
+		readonly EncodingServices: never
+	},
+	E extends Schema.Top & {
+		readonly DecodingServices: never
+		readonly EncodingServices: never
+	},
+> = ReturnType<typeof make<S, E>>
+
 /** Dynamic imports retain the control server and cause normalization; hosts retain the declared error type. */
 export interface RunnerContract {
 	readonly [TypeId]: string

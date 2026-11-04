@@ -58,7 +58,11 @@ export const Session = RpcGroup.make(
 		error: SessionError,
 	}),
 	Rpc.make("Load", {
-		payload: { handle: Handle, specifier: Schema.NonEmptyString },
+		payload: {
+			handle: Handle,
+			specifier: Schema.NonEmptyString,
+			digest: Schema.optionalKey(Schema.Boolean),
+		},
 		success: CodeIdentity,
 		error: SessionError,
 	}),

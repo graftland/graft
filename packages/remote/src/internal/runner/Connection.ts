@@ -19,7 +19,11 @@ import type {
 	Local as LocalTarget,
 	Runner as RunnerOptions,
 } from "../../Targets"
-import { ProcessExited, TransportError } from "../../Errors"
+import {
+	LocalTerminationTimeout,
+	ProcessExited,
+	TransportError,
+} from "../../Errors"
 import { cleanupCause } from "../cleanup"
 import * as Port from "../port"
 import * as LocalProcess from "./Local"
@@ -36,13 +40,14 @@ export type Target = LocalTarget | RunnerTarget
 type Peer = Port.Port
 export interface Connected {
 	readonly resources: Scope.Scope
-	readonly pid: number
+	readonly pid: Option.Option<number>
 	readonly diagnostics: Effect.Effect<Cause.Cause<unknown>>
 	readonly terminate: (
 		graceful: boolean,
 	) => Effect.Effect<
 		void,
 		| ProcessExited
+		| LocalTerminationTimeout
 		| TransportError
 		| Schema.SchemaError
 		| Wire.SessionError
@@ -175,6 +180,7 @@ export const Runner = (
 		const code = yield* session.Load({
 			handle: record.handle,
 			specifier: contractModule,
+			digest: target.expect?.digest !== undefined,
 		})
 		yield* Packages.verify(code, target.expect)
 		const loaded = yield* session.Status(record.handle)
@@ -213,7 +219,7 @@ export const Runner = (
 									cause,
 									Cause.fail(
 										ProcessExited.make({
-											pid: Option.getOrUndefined(childOf(loaded))?.pid ?? 0,
+											pid: Option.map(childOf(loaded), (child) => child.pid),
 											exitCode: exit.code,
 											stderr: exit.stderr ?? "",
 											statusCause: exit.cause ?? Cause.empty,
@@ -233,7 +239,7 @@ export const Runner = (
 		)
 		return connected({
 			resources,
-			pid: Option.getOrUndefined(childOf(loaded))?.pid ?? 0,
+			pid: Option.map(childOf(loaded), (child) => child.pid),
 			diagnostics: failures.cause,
 			terminate: () =>
 				Effect.gen(function* () {
@@ -301,6 +307,7 @@ export const acquire = <A, E, R, D, DR>(
 			(connection, exit) =>
 				Effect.gen(function* () {
 					const process = yield* Effect.exit(Scope.close(owned.process, exit))
+					// Wait for exit while readers are alive; collect their final cause after resources close.
 					yield* connection.diagnostics
 					const resources = yield* Effect.exit(
 						Scope.close(owned.resources, exit),
