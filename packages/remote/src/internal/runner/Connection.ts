@@ -152,7 +152,15 @@ export const Runner = (
 					record.leaseMillis,
 					margin,
 				)
-				yield* Effect.logInfo("Remote execution terminated", result.exit).pipe(
+				const { code, signal, stderr, cause } = result.exit
+				yield* Effect.logInfo("Remote execution terminated", {
+					code,
+					...(signal === null ? {} : { signal }),
+					...(stderr === undefined || stderr === "" ? {} : { stderr }),
+					...(cause === undefined || cause.reasons.length === 0
+						? {}
+						: { cause }),
+				}).pipe(
 					Effect.annotateLogs({
 						"remote.instance": record.handle.key.instance,
 						"remote.generation": record.handle.generation,

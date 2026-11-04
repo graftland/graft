@@ -99,6 +99,7 @@ const startRunner = (state: string, lease = 15000) =>
 		const readers = yield* FiberSet.make<void, never>()
 		const ready = yield* Deferred.make<number>()
 		const stderr = yield* Ref.make("")
+		const stdout = yield* Ref.make("")
 		yield* child.stderr.pipe(
 			Stream.decodeText(),
 			Stream.runForEach((text) =>
@@ -112,6 +113,9 @@ const startRunner = (state: string, lease = 15000) =>
 		)
 		yield* child.stdout.pipe(
 			Stream.decodeText(),
+			Stream.tap((text) =>
+				Ref.update(stdout, (tail) => String.takeRight(tail + text, 8192)),
+			),
 			Stream.splitLines,
 			Stream.runForEach((line) =>
 				String.startsWith("{")(line)
@@ -154,7 +158,13 @@ const startRunner = (state: string, lease = 15000) =>
 			),
 			Effect.timeout("30 seconds"),
 		)
-		return { child, port, stderr }
+		return {
+			child,
+			port,
+			stderr,
+			stdout,
+			outputEnded: FiberSet.awaitEmpty(readers),
+		}
 	})
 const setup = (lease = 15000, partitionable = false) =>
 	Effect.gen(function* () {
@@ -335,6 +345,85 @@ const loadYamlHost = (directory: string, port: number) => {
 }
 
 describe("network runner end to end", () => {
+	it.live(
+		"ends a graceful host session without runner errors or empty termination details",
+		() =>
+			Effect.gen(function* () {
+				const { api, proxy, child, stdout, stderr, outputEnded } =
+					yield* setup()
+				const reply = yield* api.call(20)
+				assert.equal(reply.value, 41)
+				yield* proxy.dispose
+				yield* gone(reply.pid)
+				const termination = yield* Graft.logs.pipe(
+					Stream.filter(
+						(entry) => entry.annotations["remote.termination"] === "Exited",
+					),
+					Stream.runHead,
+					Effect.flatMap(Effect.fromOption),
+				)
+				// Stop the daemon and drain both output streams before asserting on its complete log tail.
+				yield* child.kill()
+				yield* child.exitCode
+				yield* outputEnded
+				const output = (yield* Ref.get(stdout)) + (yield* Ref.get(stderr))
+				assert.notInclude(output, "Unhandled error")
+				assert.notInclude(output, "Remote host connection failed")
+				assert.notMatch(output, /\bERROR\b/)
+				assert.deepEqual(termination.message, [
+					"Remote execution terminated",
+					{ code: 0 },
+				])
+				assert.equal(termination.annotations["remote.instance"], "worker")
+				assert.equal(termination.annotations["remote.generation"], 1)
+			}).pipe(Effect.scoped, Effect.provide(runtime)),
+		30000,
+	)
+
+	it.live(
+		"reports a malformed host frame with its cause and identity without failing the listener",
+		() =>
+			Effect.gen(function* () {
+				const fs = yield* FileSystem.FileSystem
+				const directory = yield* fs.makeTempDirectoryScoped()
+				const { port, child, stdout, stderr, outputEnded } = yield* startRunner(
+					directory + "/state",
+				)
+				yield* Effect.gen(function* () {
+					const socket = yield* Tls.connect({
+						host: "127.0.0.1",
+						port,
+						servername: "localhost",
+						tls: yield* credentials("client"),
+					})
+					yield* socket.reader
+					const writer = yield* socket.writer
+					yield* writer.write(new Uint8Array(8))
+					yield* until(
+						Ref.get(stdout),
+						String.includes("Remote host connection failed"),
+					)
+				}).pipe(Effect.scoped)
+				// A failed connection leaves the listener available for the next host.
+				yield* Effect.gen(function* () {
+					const client = yield* control(port)
+					const generation = yield* client.HighWater({ instance: "worker" })
+					assert.isNull(generation)
+				}).pipe(Effect.scoped)
+				yield* child.kill()
+				yield* child.exitCode
+				yield* outputEnded
+				const output = (yield* Ref.get(stdout)) + (yield* Ref.get(stderr))
+				assert.match(output, /\bWARN\b/)
+				assert.include(output, "Invalid runner frame header or payload length")
+				assert.include(output, "remote.peer")
+				assert.include(output, "graft://test-host")
+				assert.notInclude(output, "Unhandled error")
+				assert.notMatch(output, /\bERROR\b/)
+			}).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+		30000,
+	)
+
 	it.live(
 		"uses a persisted YAML entry id across fresh host runtimes and confirms exit before its next generation",
 		() =>

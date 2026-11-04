@@ -1,5 +1,7 @@
 import { TransportError } from "../../Errors"
 import {
+	Array,
+	Schema,
 	Context,
 	Cause,
 	Effect,
@@ -10,6 +12,7 @@ import {
 	Layer,
 } from "effect"
 import { RpcServer } from "effect/rpc"
+import { Socket } from "effect/socket"
 import * as Port from "../port"
 import * as ExecutionAdapter from "./Execution"
 import * as Lock from "./Lock"
@@ -19,6 +22,28 @@ import * as Supervisor from "./Supervisor"
 import * as Tls from "./Tls"
 import * as Wire from "./Wire"
 import { SessionAccessDenied, SessionConflict, type Handle } from "./model"
+
+// Multiplex preserves the socket reason inside TransportError; only an entirely normal close is silent.
+const closedNormally = (cause: Cause.Cause<unknown>): boolean =>
+	cause.reasons.length > 0 &&
+	Array.every(
+		cause.reasons,
+		(reason) =>
+			reason._tag === "Fail" &&
+			(Schema.is(TransportError)(reason.error)
+				? closedNormally(reason.error.cause)
+				: Socket.isSocketError(reason.error) &&
+					reason.error.reason._tag === "SocketCloseError" &&
+					reason.error.reason.code === 1000),
+	)
+const connectionEnded = (cause: Cause.Cause<unknown>) =>
+	Cause.hasInterruptsOnly(cause) || closedNormally(cause)
+		? Effect.void
+		: Effect.flatMap(Tls.Peer, (identity) =>
+				Effect.logWarning("Remote host connection failed", cause).pipe(
+					Effect.annotateLogs({ "remote.peer": identity }),
+				),
+			)
 
 export interface Options extends Tls.ListenOptions {
 	readonly root: string
@@ -143,7 +168,7 @@ export const serve = (options: Options) =>
 						),
 						Effect.raceFirst(mux.await),
 					)
-				}),
+				}).pipe(Effect.catchCause(connectionEnded)),
 			)
 			.pipe(Effect.raceFirst(supervisor.await), Effect.forkScoped)
 		return { address: listener.address, supervisor, server }
