@@ -90,8 +90,9 @@ export const changes = (
 		Effect.gen(function* () {
 			if (paths.length === 0) return Stream.empty
 			const fs = yield* FileSystem.FileSystem
-			const roots = yield* Effect.forEach(paths, (path) =>
-				Effect.gen(function* () {
+			const roots = yield* Effect.forEach(
+				paths,
+				Effect.fnUntraced(function* (path: string) {
 					const canonical = yield* fs.realPath(path)
 					const info = yield* fs.stat(canonical)
 					return {
@@ -137,10 +138,10 @@ export const changes = (
 				)
 			// Watch only graph directories, never recursively traverse an application root.
 			// Missing descendants use their nearest existing ancestor until they appear.
-			const existingDirectory = (
+			const existingDirectory: (
 				path: string,
-			): Effect.Effect<string, import("effect").PlatformError.PlatformError> =>
-				Effect.gen(function* () {
+			) => Effect.Effect<string, import("effect").PlatformError.PlatformError> =
+				Effect.fnUntraced(function* (path: string) {
 					const info = yield* missing(fs.stat(path))
 					return info?.type === "Directory" || dirname(path) === path
 						? path
@@ -188,105 +189,106 @@ export const changes = (
 				readonly checked: number
 			}
 			const observed = yield* Ref.make(HashMap.empty<string, Observation>())
-			const scan = (events: HashSet.HashSet<string> | undefined) =>
-				Effect.gen(function* () {
-					const loaded = yield* files
-					const before = yield* Ref.get(observed)
-					const now = yield* Clock.currentTimeMillis
-					const selected = Array.filter(
-						Array.fromIterable(loaded),
-						([url]) =>
-							events === undefined ||
-							Array.some(Array.fromIterable(events), (path) => {
-								const file = fileURLToPath(url)
-								return file === path || String.startsWith(`${path}/`)(file)
-							}),
-					)
-					const checked = yield* Effect.forEach(
-						selected,
-						([url, baseline]) =>
-							Effect.gen(function* () {
-								const path = fileURLToPath(url)
-								const previous = Option.getOrUndefined(HashMap.get(before, url))
-								const info = yield* missing(fs.stat(path))
-								const stat =
-									info === undefined
-										? "missing"
-										: `${info.size}:${Option.getOrUndefined(info.mtime)?.getTime()}:${Option.getOrUndefined(info.ino)}`
-								const resolution =
-									baseline.resolution === undefined
-										? undefined
-										: yield* missing(fs.realPath(path)).pipe(
-												Effect.map((path) =>
-													path === undefined
-														? undefined
-														: pathToFileURL(path).href,
-												),
-											)
-								const audit =
-									events !== undefined ||
-									previous === undefined ||
-									!sameVersion(previous.baseline, baseline) ||
-									previous.stat !== stat ||
-									now - previous.checked >= 10000
-								const content = audit
-									? yield* missing(fs.readFile(path)).pipe(
-											Effect.map((bytes) =>
-												bytes === undefined ? undefined : digest(bytes),
-											),
-										)
-									: previous.content
-								const expected =
-									previous === undefined
-										? baseline
-										: {
-												content:
-													baseline.content === undefined ||
-													sameVersion(previous.baseline, baseline)
-														? previous.content
-														: baseline.content,
-												resolution: sameVersion(previous.baseline, baseline)
-													? previous.resolution
-													: baseline.resolution,
-											}
-								return {
-									url,
-									observation: {
-										baseline,
-										content,
-										resolution,
-										stat,
-										checked: audit ? now : previous.checked,
-									},
-									changed:
-										expected.content !== content ||
-										expected.resolution !== resolution,
-								}
-							}),
-						{ concurrency: 8 },
-					)
-					// The immutable snapshot keeps its bytes alive while owners can be released.
-					// A stale result cannot acknowledge a newer import, even when bytes coincide.
-					return yield* withFiles((current) =>
-						Ref.modify(observed, (seen) => {
-							let next = HashMap.filter(seen, (_, url) =>
-								HashMap.has(current, url),
-							)
-							let changed = HashSet.empty<string>()
-							for (const { url, observation, changed: differs } of checked) {
-								if (
-									!Option.exists(HashMap.get(current, url), (version) =>
-										sameVersion(version, observation.baseline),
-									)
-								)
-									continue
-								next = HashMap.set(next, url, observation)
-								if (differs) changed = HashSet.add(changed, url)
-							}
-							return [changed, next]
+			const scan = Effect.fnUntraced(function* (
+				events: HashSet.HashSet<string> | undefined,
+			) {
+				const loaded = yield* files
+				const before = yield* Ref.get(observed)
+				const now = yield* Clock.currentTimeMillis
+				const selected = Array.filter(
+					Array.fromIterable(loaded),
+					([url]) =>
+						events === undefined ||
+						Array.some(Array.fromIterable(events), (path) => {
+							const file = fileURLToPath(url)
+							return file === path || String.startsWith(`${path}/`)(file)
 						}),
-					)
-				})
+				)
+				const checked = yield* Effect.forEach(
+					selected,
+					Effect.fnUntraced(function* ([
+						url,
+						baseline,
+					]: (typeof selected)[number]) {
+						const path = fileURLToPath(url)
+						const previous = Option.getOrUndefined(HashMap.get(before, url))
+						const info = yield* missing(fs.stat(path))
+						const stat =
+							info === undefined
+								? "missing"
+								: `${info.size}:${Option.getOrUndefined(info.mtime)?.getTime()}:${Option.getOrUndefined(info.ino)}`
+						const resolution =
+							baseline.resolution === undefined
+								? undefined
+								: yield* missing(fs.realPath(path)).pipe(
+										Effect.map((path) =>
+											path === undefined ? undefined : pathToFileURL(path).href,
+										),
+									)
+						const audit =
+							events !== undefined ||
+							previous === undefined ||
+							!sameVersion(previous.baseline, baseline) ||
+							previous.stat !== stat ||
+							now - previous.checked >= 10000
+						const content = audit
+							? yield* missing(fs.readFile(path)).pipe(
+									Effect.map((bytes) =>
+										bytes === undefined ? undefined : digest(bytes),
+									),
+								)
+							: previous.content
+						const expected =
+							previous === undefined
+								? baseline
+								: {
+										content:
+											baseline.content === undefined ||
+											sameVersion(previous.baseline, baseline)
+												? previous.content
+												: baseline.content,
+										resolution: sameVersion(previous.baseline, baseline)
+											? previous.resolution
+											: baseline.resolution,
+									}
+						return {
+							url,
+							observation: {
+								baseline,
+								content,
+								resolution,
+								stat,
+								checked: audit ? now : previous.checked,
+							},
+							changed:
+								expected.content !== content ||
+								expected.resolution !== resolution,
+						}
+					}),
+					{ concurrency: 8 },
+				)
+				// The immutable snapshot keeps its bytes alive while owners can be released.
+				// A stale result cannot acknowledge a newer import, even when bytes coincide.
+				return yield* withFiles((current) =>
+					Ref.modify(observed, (seen) => {
+						let next = HashMap.filter(seen, (_, url) =>
+							HashMap.has(current, url),
+						)
+						let changed = HashSet.empty<string>()
+						for (const { url, observation, changed: differs } of checked) {
+							if (
+								!Option.exists(HashMap.get(current, url), (version) =>
+									sameVersion(version, observation.baseline),
+								)
+							)
+								continue
+							next = HashMap.set(next, url, observation)
+							if (differs) changed = HashSet.add(changed, url)
+						}
+						return [changed, next]
+					}),
+				)
+			})
 			return Stream.merge(
 				native,
 				Stream.tick("1 second").pipe(

@@ -110,10 +110,10 @@ export interface Hmr {
  * Installs Node module hooks until the enclosing scope closes. Module evaluation
  * must be side-effect free. Versioned ESM cache entries are not reclaimed.
  */
-export const make = (
+export const make: (
 	options: Options,
-): Effect.Effect<Hmr, never, Graft.Graft | Scope.Scope> =>
-	Effect.gen(function* () {
+) => Effect.Effect<Hmr, never, Graft.Graft | Scope.Scope> = Effect.fnUntraced(
+	function* (options: Options) {
 		const graft = yield* Graft.Graft
 		const semaphore = yield* Semaphore.make(1)
 		// A lease owns both the running graph and its latest uncommitted attempt.
@@ -130,30 +130,30 @@ export const make = (
 		const session = yield* Effect.scope
 		// Transfer the complete Exit before restoring interruption. Effect may replace
 		// a failed masked operation with pending interruption at that boundary.
-		const preserveExit = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
-			Effect.gen(function* () {
-				const completed = yield* Deferred.make<Exit.Exit<A, E>>()
-				return yield* effect.pipe(
-					Effect.exit,
-					Effect.tap((exit) => Deferred.succeed(completed, exit)),
-					Effect.uninterruptible,
-					Effect.flatten,
-					Effect.onExit((exit) =>
-						Effect.gen(function* () {
-							if (Exit.isSuccess(exit) || !Cause.hasInterrupts(exit.cause))
-								return
-							const saved = yield* Deferred.poll(completed)
-							if (Option.isNone(saved)) return
-							const original = yield* saved.value
-							if (Exit.isFailure(original))
-								yield* Effect.logError(
-									"HMR operation failed during cancellation",
-									original.cause,
-								)
-						}),
-					),
-				)
-			})
+		const preserveExit = Effect.fnUntraced(function* <A, E, R>(
+			effect: Effect.Effect<A, E, R>,
+		): Effect.fn.Return<A, E, R> {
+			const completed = yield* Deferred.make<Exit.Exit<A, E>>()
+			return yield* effect.pipe(
+				Effect.exit,
+				Effect.tap((exit) => Deferred.succeed(completed, exit)),
+				Effect.uninterruptible,
+				Effect.flatten,
+				Effect.onExit(
+					Effect.fnUntraced(function* (exit: Exit.Exit<A, E>) {
+						if (Exit.isSuccess(exit) || !Cause.hasInterrupts(exit.cause)) return
+						const saved = yield* Deferred.poll(completed)
+						if (Option.isNone(saved)) return
+						const original = yield* saved.value
+						if (Exit.isFailure(original))
+							yield* Effect.logError(
+								"HMR operation failed during cancellation",
+								original.cause,
+							)
+					}),
+				),
+			)
+		})
 		// Native imports cannot be cancelled: keep the lock until their promises settle.
 		const serial = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
 			effect.pipe(preserveExit, semaphore.withPermits(1))
@@ -310,7 +310,11 @@ export const make = (
 		const load = Effect.fnUntraced(function* (specifier: string) {
 			const namespace = yield* Effect.tryPromise({
 				try: () => import(/* @vite-ignore */ hooks.request(specifier)),
-				catch: (cause) => HmrError.make({ stage: "import", specifier, cause }),
+				// The module hooks throw RestartRequired through import(); keep its tag.
+				catch: (cause) =>
+					Schema.is(RestartRequired)(cause)
+						? cause
+						: HmrError.make({ stage: "import", specifier, cause }),
 			})
 			const plugin = Plugin.fromModule(namespace)
 			if (Option.isNone(plugin))
@@ -334,87 +338,87 @@ export const make = (
 			}
 			const changed = yield* changedResolution(attempt)
 			if (Option.isSome(changed))
-				return yield* HmrError.make({
-					stage: "import",
-					specifier,
-					cause: RestartRequired.make({ url: changed.value }),
-				})
+				return yield* RestartRequired.make({ url: changed.value })
 			return { namespace, plugin: plugin.value, url }
 		})
+		const acquireLease = Effect.fnUntraced(
+			function* (specifier: string) {
+				yield* checkOpen
+				const current = yield* Ref.get(state)
+				hooks.start(current.generation)
+				// Acquire an owner for either Exit. Rethrow only after its finalizer
+				// is registered, so failed imports remain available for scoped retry.
+				const exit = yield* Effect.exit(load(specifier))
+				const token: symbol = Symbol()
+				const root = Option.orElse(hooks.resolved(), () =>
+					String.startsWith("file:")(specifier)
+						? Option.some(specifier)
+						: Option.none(),
+				)
+				const attempt = Option.map(root, (url) => ({
+					url,
+					generation: current.generation,
+					...Option.match(hooks.fileRequest(specifier), {
+						onNone: () => ({}),
+						onSome: (request) => ({ request }),
+					}),
+				}))
+				if (Option.isSome(attempt))
+					yield* Ref.update(
+						cached,
+						HashMap.set(attempt.value.url, attempt.value),
+					)
+				yield* Ref.update(
+					owners,
+					HashMap.set(token, {
+						active: Exit.isSuccess(exit) ? attempt : Option.none(),
+						pending: Exit.isFailure(exit) ? attempt : Option.none(),
+					}),
+				)
+				if (Exit.isSuccess(exit)) {
+					const entry = exit.value
+					const previous = HashMap.get(current.entries, entry.url)
+					const leases = Option.match(previous, {
+						onNone: () => HashSet.empty<symbol>(),
+						onSome: (entry) => entry.leases,
+					})
+					yield* Ref.set(state, {
+						...current,
+						entries: HashMap.set(current.entries, entry.url, {
+							plugin: entry.plugin,
+							leases: HashSet.add(leases, token),
+						}),
+					})
+				}
+				return { token, exit: Exit.map(exit, (entry) => entry.namespace) }
+			},
+			Effect.ensuring(Effect.sync(hooks.discard)),
+			Effect.ensuring(collect),
+			serial,
+		)
+		const releaseLease = Effect.fnUntraced(
+			function* ({ token }: { readonly token: symbol }) {
+				yield* Ref.update(owners, HashMap.remove(token))
+				yield* Ref.update(state, (current) => ({
+					...current,
+					entries: HashMap.filterMap(current.entries, (entry) => {
+						const leases = HashSet.remove(entry.leases, token)
+						return HashSet.size(leases) === 0
+							? Result.fail(undefined)
+							: Result.succeed({ ...entry, leases })
+					}),
+				}))
+			},
+			Effect.ensuring(collect),
+			serial,
+		)
 		const importWithLease = (specifier: string) =>
-			Effect.acquireRelease(
-				serial(
-					Effect.gen(function* () {
-						yield* checkOpen
-						const current = yield* Ref.get(state)
-						hooks.start(current.generation)
-						// Acquire an owner for either Exit. Rethrow only after its finalizer
-						// is registered, so failed imports remain available for scoped retry.
-						const exit = yield* Effect.exit(load(specifier))
-						const token: symbol = Symbol()
-						const root = Option.orElse(hooks.resolved(), () =>
-							String.startsWith("file:")(specifier)
-								? Option.some(specifier)
-								: Option.none(),
-						)
-						const attempt = Option.map(root, (url) => ({
-							url,
-							generation: current.generation,
-							...Option.match(hooks.fileRequest(specifier), {
-								onNone: () => ({}),
-								onSome: (request) => ({ request }),
-							}),
-						}))
-						if (Option.isSome(attempt))
-							yield* Ref.update(
-								cached,
-								HashMap.set(attempt.value.url, attempt.value),
-							)
-						yield* Ref.update(
-							owners,
-							HashMap.set(token, {
-								active: Exit.isSuccess(exit) ? attempt : Option.none(),
-								pending: Exit.isFailure(exit) ? attempt : Option.none(),
-							}),
-						)
-						if (Exit.isSuccess(exit)) {
-							const entry = exit.value
-							const previous = HashMap.get(current.entries, entry.url)
-							const leases = Option.match(previous, {
-								onNone: () => HashSet.empty<symbol>(),
-								onSome: (entry) => entry.leases,
-							})
-							yield* Ref.set(state, {
-								...current,
-								entries: HashMap.set(current.entries, entry.url, {
-									plugin: entry.plugin,
-									leases: HashSet.add(leases, token),
-								}),
-							})
-						}
-						return { token, exit: Exit.map(exit, (entry) => entry.namespace) }
-					}).pipe(
-						Effect.ensuring(Effect.sync(hooks.discard)),
-						Effect.ensuring(collect),
-					),
-				),
-				({ token }) =>
-					serial(
-						Effect.gen(function* () {
-							yield* Ref.update(owners, HashMap.remove(token))
-							yield* Ref.update(state, (current) => ({
-								...current,
-								entries: HashMap.filterMap(current.entries, (entry) => {
-									const leases = HashSet.remove(entry.leases, token)
-									return HashSet.size(leases) === 0
-										? Result.fail(undefined)
-										: Result.succeed({ ...entry, leases })
-								}),
-							}))
-						}).pipe(Effect.ensuring(collect)),
-					),
-			).pipe(
+			Effect.acquireRelease(acquireLease(specifier), releaseLease).pipe(
 				Effect.flatMap(({ exit }) => exit),
+				// Importers cannot act on a restart; reloadChanged handles it by tag.
+				Effect.catchTag("RestartRequired", (cause) =>
+					Effect.fail(HmrError.make({ stage: "import", specifier, cause })),
+				),
 				preserveExit,
 			)
 
@@ -465,248 +469,236 @@ export const make = (
 			),
 		)
 
-		const reloadChanged = (dirty?: HashSet.HashSet<string>) =>
-			serial(
-				Effect.gen(function* () {
-					yield* checkOpen
-					const fullRetry = yield* Ref.get(retryAll)
-					const force = dirty === undefined || fullRetry
-					const pendingDirty = yield* Ref.get(retryDirty)
-					const changedFiles =
-						dirty === undefined
-							? pendingDirty
-							: HashSet.union(pendingDirty, dirty)
-					yield* Ref.set(retryDirty, changedFiles)
-					yield* Ref.set(retryAll, force)
-					const changed = yield* changedResolutions
-					if (changed.length > 0)
-						return WatchResult.Skipped({
-							reason: "restart-required",
-							modules: changed,
-						})
-					const { entries } = yield* Ref.get(state)
-					const unsupported = yield* unsupportedModules
-					if (HashSet.size(unsupported) > 0)
-						return WatchResult.Skipped({
-							modules: Array.fromIterable(unsupported),
-							reason: "restart-required",
-						})
-					const owned = yield* Ref.get(owners)
-					const attempts = Array.flatMap(HashMap.toValues(owned), (owner) =>
-						Array.getSomes([owner.active, owner.pending]),
-					)
-					const active = Array.getSomes(
-						Array.map(HashMap.toValues(owned), (owner) => owner.active),
-					)
-					let selected = entries
-					let invalid = HashSet.empty<string>()
-					if (!force) {
-						let affected = changedFiles
-						// Plugin identity groups and importer closure can expand each other.
-						// Reach a fixed point before allocating any candidate instance.
-						while (true) {
-							invalid = hooks.invalidated(attempts, affected)
-							const plugins = HashSet.fromIterable(
-								Array.filterMap(Array.fromIterable(entries), ([url, entry]) =>
-									HashSet.has(affected, url) ||
-									Array.some(Array.fromIterable(entry.leases), (token) =>
-										Option.exists(HashMap.get(owned, token), (owner) =>
-											Array.some(
-												Array.getSomes([owner.active, owner.pending]),
-												(attempt) => hooks.affected(attempt, invalid),
-											),
-										),
-									)
-										? Result.succeed(entry.plugin)
-										: Result.fail(undefined),
-								),
-							)
-							selected = HashMap.filter(entries, (entry) =>
-								HashSet.has(plugins, entry.plugin),
-							)
-							const expanded = HashSet.union(
-								affected,
-								HashSet.fromIterable(HashMap.keys(selected)),
-							)
-							if (HashSet.size(expanded) === HashSet.size(affected)) break
-							affected = expanded
-						}
-					}
-					// Advance even without entries so retries bypass cached failed imports.
-					const candidate = force
-						? hooks.prepare()
-						: hooks.prepare(active, invalid)
-
-					hooks.start(candidate, true)
-					return yield* Effect.gen(function* () {
-						const loaded = yield* Effect.forEach(selected, ([url, previous]) =>
-							Ref.update(
-								owners,
-								HashMap.map((owner, token) =>
-									HashSet.has(previous.leases, token)
-										? {
-												...owner,
-												pending: Option.map(owner.active, (attempt) => ({
-													...attempt,
-													url,
-													generation: candidate,
-												})),
-											}
-										: owner,
-								),
-							).pipe(
-								Effect.andThen(load(url)),
-								Effect.map((entry) =>
-									Option.some({
-										url,
-										previous: previous.plugin,
-										leases: previous.leases,
-										plugin: entry.plugin,
-									}),
-								),
-								Effect.catchIf(
-									(error) =>
-										error.stage === "import" &&
-										isMissingEntry(url, error.cause),
-									() => Effect.succeedNone,
-								),
-							),
-						)
-						const candidates = Array.getSomes(loaded)
-						const alternatives = Array.reduce(
-							candidates,
-							HashMap.empty<Plugin.Plugin, HashSet.HashSet<Plugin.Plugin>>(),
-							(groups, { previous, plugin }) =>
-								HashMap.set(
-									groups,
-									previous,
-									HashSet.add(
-										Option.getOrElse(
-											HashMap.get(groups, previous),
-											HashSet.empty<Plugin.Plugin>,
-										),
-										plugin,
+		const reloadChanged = Effect.fnUntraced(function* (
+			dirty: HashSet.HashSet<string> | undefined,
+		) {
+			yield* checkOpen
+			const fullRetry = yield* Ref.get(retryAll)
+			const force = dirty === undefined || fullRetry
+			const pendingDirty = yield* Ref.get(retryDirty)
+			const changedFiles =
+				dirty === undefined ? pendingDirty : HashSet.union(pendingDirty, dirty)
+			yield* Ref.set(retryDirty, changedFiles)
+			yield* Ref.set(retryAll, force)
+			const changed = yield* changedResolutions
+			if (changed.length > 0)
+				return WatchResult.Skipped({
+					reason: "restart-required",
+					modules: changed,
+				})
+			const { entries } = yield* Ref.get(state)
+			const unsupported = yield* unsupportedModules
+			if (HashSet.size(unsupported) > 0)
+				return WatchResult.Skipped({
+					modules: Array.fromIterable(unsupported),
+					reason: "restart-required",
+				})
+			const owned = yield* Ref.get(owners)
+			const attempts = Array.flatMap(HashMap.toValues(owned), (owner) =>
+				Array.getSomes([owner.active, owner.pending]),
+			)
+			const active = Array.getSomes(
+				Array.map(HashMap.toValues(owned), (owner) => owner.active),
+			)
+			let selected = entries
+			let invalid = HashSet.empty<string>()
+			if (!force) {
+				let affected = changedFiles
+				// Plugin identity groups and importer closure can expand each other.
+				// Reach a fixed point before allocating any candidate instance.
+				while (true) {
+					invalid = hooks.invalidated(attempts, affected)
+					const plugins = HashSet.fromIterable(
+						Array.filterMap(Array.fromIterable(entries), ([url, entry]) =>
+							HashSet.has(affected, url) ||
+							Array.some(Array.fromIterable(entry.leases), (token) =>
+								Option.exists(HashMap.get(owned, token), (owner) =>
+									Array.some(
+										Array.getSomes([owner.active, owner.pending]),
+										(attempt) => hooks.affected(attempt, invalid),
 									),
 								),
-						)
-						const ambiguous = Array.filter(candidates, ({ previous }) =>
-							Option.exists(
-								HashMap.get(alternatives, previous),
-								(plugins) => HashSet.size(plugins) > 1,
-							),
-						)
-						if (ambiguous.length > 0)
-							return WatchResult.Skipped({
-								reason: "ambiguous-exports",
-								modules: Array.map(ambiguous, ({ url }) => url),
-							})
-						const replacements = HashMap.fromIterable(
-							Array.map(
-								candidates,
-								({ url, plugin, leases }) => [url, { plugin, leases }] as const,
-							),
-						)
-						// A missing entry still owns its running plugin until the last lease closes.
-						const next = HashMap.union(entries, replacements)
-
-						const pairs = Array.map(
-							candidates,
-							({ previous, plugin }) => [previous, plugin] as const,
-						)
-						const changed = yield* changedResolutions
-						if (changed.length > 0)
-							return WatchResult.Skipped({
-								reason: "restart-required",
-								modules: changed,
-							})
-						// A reused instance can acquire a native loading capability while the
-						// candidate imports. Observe it without throwing into concurrent old code.
-						const unsafe = unsupportedAttempts(
-							Array.map(active, (attempt) =>
-								HashMap.has(replacements, attempt.url)
-									? { ...attempt, generation: candidate }
-									: attempt,
-							),
-						)
-						if (HashSet.size(unsafe) > 0)
-							return WatchResult.Skipped({
-								reason: "restart-required",
-								modules: Array.fromIterable(unsafe),
-							})
-
-						const replacement = yield* Graft.replace(pairs).pipe(
-							Effect.provideService(Graft.Graft, graft),
-							Effect.result,
-						)
-						if (Result.isFailure(replacement))
-							return WatchResult.Skipped({
-								reason: "identity-conflict",
-								modules: Array.filterMap(candidates, ({ url }, index) =>
-									Array.contains(replacement.failure.indices, index)
-										? Result.succeed(url)
-										: Result.fail(undefined),
-								),
-							})
-						yield* Ref.update(owners, (owners) =>
-							Array.reduce(candidates, owners, (owners, { url, leases }) =>
-								HashMap.map(owners, (owner, token) =>
-									HashSet.has(leases, token)
-										? {
-												active: Option.map(owner.pending, (attempt) => ({
-													...attempt,
-													url,
-													generation: candidate,
-												})),
-												pending: Option.none(),
-											}
-										: owner,
-								),
-							),
-						)
-						yield* Ref.set(state, { entries: next, generation: candidate })
-						yield* Ref.update(cached, (cached) =>
-							HashMap.union(
-								HashMap.filter(cached, (_, url) => HashMap.has(next, url)),
-								HashMap.map(replacements, (_, url) => ({
-									url,
-									generation: candidate,
-								})),
-							),
-						)
-						yield* Ref.set(retryDirty, HashSet.empty())
-						yield* Ref.set(retryAll, false)
-						return WatchResult.Reloaded({
-							entries: Array.map(candidates, (candidate) => candidate.url),
-						})
-					}).pipe(
-						Effect.catchIf(
-							(
-								error,
-							): error is HmrError & { readonly cause: RestartRequired } =>
-								Schema.is(RestartRequired)(error.cause),
-							(error) =>
-								Effect.succeed(
-									WatchResult.Skipped({
-										modules: Array.fromIterable(
-											HashSet.add(
-												hooks.unsupported(candidate),
-												error.cause.url,
-											),
-										),
-										reason: "restart-required",
-									}),
-								),
+							)
+								? Result.succeed(entry.plugin)
+								: Result.fail(undefined),
 						),
-						Effect.ensuring(Effect.sync(hooks.discard)),
-						Effect.ensuring(collect),
 					)
-				}),
+					selected = HashMap.filter(entries, (entry) =>
+						HashSet.has(plugins, entry.plugin),
+					)
+					const expanded = HashSet.union(
+						affected,
+						HashSet.fromIterable(HashMap.keys(selected)),
+					)
+					if (HashSet.size(expanded) === HashSet.size(affected)) break
+					affected = expanded
+				}
+			}
+			// Advance even without entries so retries bypass cached failed imports.
+			const candidate = force ? hooks.prepare() : hooks.prepare(active, invalid)
+
+			hooks.start(candidate, true)
+			return yield* Effect.gen(function* () {
+				const loaded = yield* Effect.forEach(selected, ([url, previous]) =>
+					Ref.update(
+						owners,
+						HashMap.map((owner, token) =>
+							HashSet.has(previous.leases, token)
+								? {
+										...owner,
+										pending: Option.map(owner.active, (attempt) => ({
+											...attempt,
+											url,
+											generation: candidate,
+										})),
+									}
+								: owner,
+						),
+					).pipe(
+						Effect.andThen(load(url)),
+						Effect.map((entry) =>
+							Option.some({
+								url,
+								previous: previous.plugin,
+								leases: previous.leases,
+								plugin: entry.plugin,
+							}),
+						),
+						Effect.catchIf(
+							(error) =>
+								error._tag === "HmrError" &&
+								error.stage === "import" &&
+								isMissingEntry(url, error.cause),
+							() => Effect.succeedNone,
+						),
+					),
+				)
+				const candidates = Array.getSomes(loaded)
+				const alternatives = Array.reduce(
+					candidates,
+					HashMap.empty<Plugin.Plugin, HashSet.HashSet<Plugin.Plugin>>(),
+					(groups, { previous, plugin }) =>
+						HashMap.set(
+							groups,
+							previous,
+							HashSet.add(
+								Option.getOrElse(
+									HashMap.get(groups, previous),
+									HashSet.empty<Plugin.Plugin>,
+								),
+								plugin,
+							),
+						),
+				)
+				const ambiguous = Array.filter(candidates, ({ previous }) =>
+					Option.exists(
+						HashMap.get(alternatives, previous),
+						(plugins) => HashSet.size(plugins) > 1,
+					),
+				)
+				if (ambiguous.length > 0)
+					return WatchResult.Skipped({
+						reason: "ambiguous-exports",
+						modules: Array.map(ambiguous, ({ url }) => url),
+					})
+				const replacements = HashMap.fromIterable(
+					Array.map(
+						candidates,
+						({ url, plugin, leases }) => [url, { plugin, leases }] as const,
+					),
+				)
+				// A missing entry still owns its running plugin until the last lease closes.
+				const next = HashMap.union(entries, replacements)
+
+				const pairs = Array.map(
+					candidates,
+					({ previous, plugin }) => [previous, plugin] as const,
+				)
+				const changed = yield* changedResolutions
+				if (changed.length > 0)
+					return WatchResult.Skipped({
+						reason: "restart-required",
+						modules: changed,
+					})
+				// A reused instance can acquire a native loading capability while the
+				// candidate imports. Observe it without throwing into concurrent old code.
+				const unsafe = unsupportedAttempts(
+					Array.map(active, (attempt) =>
+						HashMap.has(replacements, attempt.url)
+							? { ...attempt, generation: candidate }
+							: attempt,
+					),
+				)
+				if (HashSet.size(unsafe) > 0)
+					return WatchResult.Skipped({
+						reason: "restart-required",
+						modules: Array.fromIterable(unsafe),
+					})
+
+				const replacement = yield* Graft.replace(pairs).pipe(
+					Effect.provideService(Graft.Graft, graft),
+					Effect.result,
+				)
+				if (Result.isFailure(replacement))
+					return WatchResult.Skipped({
+						reason: "identity-conflict",
+						modules: Array.filterMap(candidates, ({ url }, index) =>
+							Array.contains(replacement.failure.indices, index)
+								? Result.succeed(url)
+								: Result.fail(undefined),
+						),
+					})
+				yield* Ref.update(owners, (owners) =>
+					Array.reduce(candidates, owners, (owners, { url, leases }) =>
+						HashMap.map(owners, (owner, token) =>
+							HashSet.has(leases, token)
+								? {
+										active: Option.map(owner.pending, (attempt) => ({
+											...attempt,
+											url,
+											generation: candidate,
+										})),
+										pending: Option.none(),
+									}
+								: owner,
+						),
+					),
+				)
+				yield* Ref.set(state, { entries: next, generation: candidate })
+				yield* Ref.update(cached, (cached) =>
+					HashMap.union(
+						HashMap.filter(cached, (_, url) => HashMap.has(next, url)),
+						HashMap.map(replacements, (_, url) => ({
+							url,
+							generation: candidate,
+						})),
+					),
+				)
+				yield* Ref.set(retryDirty, HashSet.empty())
+				yield* Ref.set(retryAll, false)
+				return WatchResult.Reloaded({
+					entries: Array.map(candidates, (candidate) => candidate.url),
+				})
+			}).pipe(
+				Effect.catchTag("RestartRequired", (error) =>
+					Effect.succeed(
+						WatchResult.Skipped({
+							modules: Array.fromIterable(
+								HashSet.add(hooks.unsupported(candidate), error.url),
+							),
+							reason: "restart-required",
+						}),
+					),
+				),
+				Effect.ensuring(Effect.sync(hooks.discard)),
+				Effect.ensuring(collect),
 			)
+		}, serial)
 		return {
 			importer,
 			importerScoped,
 			importModule,
-			reload: reloadChanged(),
+			reload: reloadChanged(undefined),
 			watch: (paths, watchOptions) =>
 				paths.length === 0
 					? Stream.empty
@@ -765,4 +757,5 @@ export const make = (
 							),
 						),
 		}
-	})
+	},
+)
