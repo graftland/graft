@@ -39,9 +39,10 @@ export default function setup() {
 				config: false,
 				entry: ["index", "Contract", "bin", "host/local"].map(
 					(name) =>
-						new URL(`../../remote/src/${name}.ts`, import.meta.url).pathname,
+						new URL(`../../plugin-remote/src/${name}.ts`, import.meta.url)
+							.pathname,
 				),
-				root: new URL("../../remote/src", import.meta.url).pathname,
+				root: new URL("../../plugin-remote/src", import.meta.url).pathname,
 				outDir: new URL("../.cache/remote", import.meta.url).pathname,
 				format: "esm",
 				fixedExtension: false,

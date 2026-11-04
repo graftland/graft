@@ -182,7 +182,7 @@ it.live("closes cleanly", () =>
 檢查失敗時以 `ConformanceError`
 失敗。共用檢查涵蓋不到的也要測：錯誤的憑證、cause 是否保留、scope 取消、在
 `bind` 時套用 TLS 設定、`serve` 在 `ready`
-之前失敗，以及兩份設定不同的能力副本同時執行。[內建測試 fixture](https://github.com/graftland/graft/blob/main/packages/remote/test/capabilities.test.ts)
+之前失敗，以及兩份設定不同的能力副本同時執行。[內建測試 fixture](https://github.com/graftland/graft/blob/main/packages/plugin-remote/test/capabilities.test.ts)
 展示了 WebSocket 加 mTLS 以及其他所有內建組合的這些測試。
 
 ## 內建能力模組

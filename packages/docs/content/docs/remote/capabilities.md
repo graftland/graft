@@ -214,7 +214,7 @@ Failed checks fail with `ConformanceError`. Also test what the shared checks do
 not cover: wrong credentials, preserved causes, scope cancellation, TLS settings
 applied at `bind`, `serve` failing before `ready`, and two differently
 configured copies of your capability running at once. The
-[built-in test fixtures](https://github.com/graftland/graft/blob/main/packages/remote/test/capabilities.test.ts)
+[built-in test fixtures](https://github.com/graftland/graft/blob/main/packages/plugin-remote/test/capabilities.test.ts)
 show all of this for WebSocket with mTLS and every other built-in combination.
 
 ## Built-in capability modules

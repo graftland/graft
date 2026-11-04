@@ -11,7 +11,7 @@
 			"path": "../../packages/core"
 		},
 		{
-			"path": "../../packages/remote"
+			"path": "../../packages/plugin-remote"
 		}
 	]
 }
