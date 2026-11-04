@@ -1,4 +1,5 @@
 import { Context, Deferred, Effect, Exit, Option, Schema, Scope } from "effect"
+import * as Release from "./release"
 import type { TransportError } from "../Errors"
 
 export class StartupError extends Schema.TaggedError<
@@ -31,7 +32,7 @@ export const resources = Effect.fnUntraced(function* (
 	lifecycle: Option.Option<typeof ServeLifecycle.Service>,
 ) {
 	return yield* Effect.acquireRelease(Scope.make(), (scope, exit) =>
-		Scope.close(scope, exit).pipe(
+		Release.close(scope, exit).pipe(
 			Effect.onExit((released) =>
 				Option.isNone(lifecycle)
 					? Effect.void

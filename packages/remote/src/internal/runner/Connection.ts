@@ -14,6 +14,7 @@ import {
 	Option,
 	Scope,
 } from "effect"
+import * as Release from "../release"
 import type { RpcClientError } from "effect/rpc"
 import type { Schema, PlatformError } from "effect"
 import type { RemoteTerminationUnconfirmed } from "./model"
@@ -113,8 +114,10 @@ const scopes = Effect.acquireRelease(
 	Effect.all({ resources: Scope.make(), process: Scope.make() }),
 	(scopes, exit) =>
 		Effect.gen(function* () {
-			const process = yield* Effect.exit(Scope.close(scopes.process, exit))
-			const resources = yield* Effect.exit(Scope.close(scopes.resources, exit))
+			const process = yield* Effect.exit(Release.close(scopes.process, exit))
+			const resources = yield* Effect.exit(
+				Release.close(scopes.resources, exit),
+			)
 			yield* finish([reason(process), reason(resources)])
 		}),
 )
@@ -150,11 +153,11 @@ export const acquire = <A, E, R, D, DR>(
 			}).pipe(Effect.interruptible),
 			(connection, exit) =>
 				Effect.gen(function* () {
-					const process = yield* Effect.exit(Scope.close(owned.process, exit))
+					const process = yield* Effect.exit(Release.close(owned.process, exit))
 					// Wait for exit while readers are alive; collect their final cause after resources close.
 					yield* connection.diagnostics
 					const resources = yield* Effect.exit(
-						Scope.close(owned.resources, exit),
+						Release.close(owned.resources, exit),
 					)
 					const diagnostics = yield* connection.diagnostics
 					yield* finish([reason(process), reason(resources), diagnostics])

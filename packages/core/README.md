@@ -22,7 +22,7 @@ Use `Plugin.fork(effect)` for background work that a plugin owns.
 - If a worker fails or has a defect and nobody handles it, the activation fails.
   The failure carries its complete Cause. The activation then follows its retry
   schedule.
-- Pure interruption does not fail the activation.
+- Pure interruption of a worker body does not fail the activation.
 - After a plugin is withdrawn, healthy workers keep serving existing consumers.
   They stop only after those consumers release their leases. This happens before
   the activation resources close.
@@ -35,7 +35,11 @@ Use `Plugin.fork(effect)` for background work that a plugin owns.
 `fork.dispose` has type `Effect<void, Fork.CleanupError>`.
 
 - Concurrent and repeated callers share the same cleanup result.
-- `CleanupError.cause` keeps all the original failure reasons.
+- `CleanupError.cause` keeps all the original failure reasons. If release of a
+  framework-owned Scope is interrupted, Graft reports a `ReleaseInterrupted`
+  defect whose `cause` retains the original interruption. This keeps release
+  failures visible through nested events and background tasks; ordinary
+  cancellation remains an interruption.
 - Cleanup continues through resource release and dependency lease release, even
   when a finalizer fails.
 - Activation failures also include cleanup failures in `Failed.cause`.

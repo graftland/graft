@@ -9,8 +9,10 @@ import {
 	FiberSet,
 	Ref,
 	Scope,
+	Schema,
 	TxRef,
 } from "effect"
+import * as Release from "./release"
 
 type State<E> = Data.TaggedEnum<{
 	Open: {}
@@ -77,7 +79,7 @@ export const make = <E>(): Effect.Effect<FailureGroup<E>, never, Scope.Scope> =>
 					const waiting = yield* Effect.exit(restore(Fiber.await(worker)))
 					if (Exit.isFailure(waiting)) yield* Fiber.interrupt(worker)
 					const body = yield* Fiber.await(worker)
-					const closed = yield* Effect.exit(Scope.close(scope, body))
+					const closed = yield* Effect.exit(Release.close(scope, body))
 					// Forwarding this exact cancellation from a finalizer is indistinguishable from acknowledging it.
 					const expected =
 						Exit.isFailure(waiting) &&
@@ -93,9 +95,17 @@ export const make = <E>(): Effect.Effect<FailureGroup<E>, never, Scope.Scope> =>
 						? closed.cause
 						: Cause.empty
 					const failure = Cause.combine(bodyCause, releaseCause)
-					// Ensuring/stream finalizers can already be part of the body's interrupted Exit.
+					// Body cleanup may carry either an interruption or a release defect from an inner group.
 					const closing = Cause.combine(
-						Cause.hasInterrupts(bodyCause) ? bodyCause : Cause.empty,
+						Cause.hasInterrupts(bodyCause) ||
+							Array.some(
+								bodyCause.reasons,
+								(reason) =>
+									reason._tag === "Die" &&
+									Schema.is(Release.ReleaseInterrupted)(reason.defect),
+							)
+							? bodyCause
+							: Cause.empty,
 						releaseCause,
 					)
 					yield* Ref.update(cleanup, (cause) => Cause.combine(cause, closing))

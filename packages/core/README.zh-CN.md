@@ -17,7 +17,7 @@ npm install @graftland/graft effect
 用 `Plugin.fork(effect)` 运行由插件持有的后台任务。
 
 - 如果 worker 失败或出现 defect 且无人处理，activation 就会失败。失败会携带完整的 Cause。之后 activation 按其重试计划重试。
-- 纯中断不会使 activation 失败。
+- worker 主体的纯中断不会使 activation 失败。
 - 插件被撤回后，健康的 worker 继续为已有消费者服务。只有这些消费者释放 lease 之后，worker 才会停止。这发生在 activation 资源关闭之前。
 - worker 的错误类型通过 `Plugin.Tasks<E>` 成为插件契约的一部分。
 - 请在 fork 之前，在 worker 内部处理可恢复的错误。
@@ -26,7 +26,10 @@ npm install @graftland/graft effect
 `fork.dispose` 的类型是 `Effect<void, Fork.CleanupError>`。
 
 - 并发调用和重复调用共享同一个清理结果。
-- `CleanupError.cause` 保留所有原始失败原因。
+- `CleanupError.cause`
+  保留所有原始失败原因。框架管理的 Scope 在释放时发生纯中断，会以
+  `ReleaseInterrupted` defect 报告，原始中断保存在它的 `cause`
+  中。这样，释放失败经过嵌套事件或后台任务仍能传到调用方；正常取消仍按中断处理。
 - 即使某个 finalizer 失败，清理仍会继续完成资源释放和依赖 lease 的释放。
 - activation 失败时，`Failed.cause` 也包含清理失败。
 - 父 Scope 自动关闭时，Graft 把清理错误作为 defect 报告。该 defect 保留原始 Cause。

@@ -22,6 +22,7 @@ import {
 	Semaphore,
 	SynchronizedRef,
 } from "effect"
+import * as Release from "../release"
 import { SecureRandom } from "effect/crypto"
 import * as Retention from "./Retention"
 import { cleanupCause } from "../cleanup"
@@ -466,7 +467,9 @@ const operations = (runtime: Runtime) => {
 		Effect.gen(function* () {
 			yield* FiberHandle.clear(entry.loading)
 			const result = yield* terminate(state.execution, grace, confirmation)
-			const closed = yield* Effect.exit(Scope.close(entry.unitScope, Exit.void))
+			const closed = yield* Effect.exit(
+				Release.close(entry.unitScope, Exit.void),
+			)
 			const termination: Termination = {
 				...result,
 				cause: Cause.combine(result.cause, exitCause(closed)),
@@ -804,7 +807,7 @@ const protocol = (runtime: Runtime, actions: Operations) =>
 												] as const,
 										)
 										for (const [, retired] of old)
-											yield* Scope.close(retired.scope, Exit.void)
+											yield* Release.close(retired.scope, Exit.void)
 										yield* scheduleLease(entry, deadline)
 										return record
 									}),

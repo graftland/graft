@@ -1,6 +1,7 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Cause, Schema, Deferred, Effect, Exit, Fiber, TxRef } from "effect"
 import * as FailureGroup from "../src/internal/FailureGroup"
+import { ReleaseInterrupted } from "../src/internal/release"
 
 class Failed extends Schema.TaggedError<
 	Failed,
@@ -133,3 +134,42 @@ it.effect("retains explicitly reported interruption as a failure", () =>
 		assert.isTrue(Cause.hasInterruptsOnly(exit.cause))
 	}),
 )
+
+for (const nested of [false, true]) {
+	for (const cancelled of [false, true]) {
+		it.effect(
+			`preserves release defects through ${nested ? "nested" : "direct"} groups with cancellation ${cancelled}`,
+			() =>
+				Effect.gen(function* () {
+					const exit = yield* Effect.gen(function* () {
+						const group = yield* FailureGroup.make<never>()
+						const ready = yield* Deferred.make<void>()
+						const work = Effect.addFinalizer(() => Effect.interrupt).pipe(
+							Effect.andThen(Deferred.succeed(ready, undefined)),
+							Effect.andThen(cancelled ? Effect.never : Effect.void),
+						)
+						const worker = yield* group.run(
+							nested
+								? Effect.scoped(
+										Effect.gen(function* () {
+											const inner = yield* FailureGroup.make<never>()
+											const child = yield* inner.run(work)
+											return yield* Fiber.join(child)
+										}),
+									)
+								: work,
+						)
+						yield* Deferred.await(ready)
+						if (!cancelled) yield* Fiber.await(worker)
+						const closed = yield* Effect.exit(group.close)
+						assert(Exit.isFailure(closed))
+						const release = Cause.squash(closed.cause)
+						assert(Schema.is(ReleaseInterrupted)(release))
+						assert.isTrue(Cause.hasInterruptsOnly(release.cause))
+					}).pipe(Effect.scoped, Effect.exit)
+					assert(Exit.isFailure(exit))
+					assert(Schema.is(ReleaseInterrupted)(Cause.squash(exit.cause)))
+				}),
+		)
+	}
+}

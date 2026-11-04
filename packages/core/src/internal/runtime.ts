@@ -124,7 +124,7 @@ export interface Handler<
 	readonly scope: Scope.Closeable
 	/** Identifies the owner closer so normal dispatch can distinguish withdrawal from self-interruption. */
 	readonly closing: Deferred.Deferred<number>
-	readonly run: (args: Args, scope: Scope.Scope) => Effect.Effect<Out, E>
+	readonly run: (args: Args) => Effect.Effect<Out, E>
 }
 
 export interface Runtime {

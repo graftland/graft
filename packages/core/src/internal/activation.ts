@@ -38,6 +38,7 @@ import {
 	Scope,
 	TxRef,
 } from "effect"
+import * as Release from "./release"
 import { Graft, ServiceConflict } from "../Graft"
 import { ForkState } from "../Fork"
 import { isOptional, type Update } from "../Plugin"
@@ -545,9 +546,9 @@ export const supervise = Effect.fnUntraced(function* (
 			)
 			// Leased services may need these workers during consumer finalization.
 			const tasksClosed = yield* Effect.exit(
-				Scope.close(running.tasks.scope, exit),
+				Release.close(running.tasks.scope, exit),
 			)
-			const closed = yield* Effect.exit(Scope.close(running.scope, exit))
+			const closed = yield* Effect.exit(Release.close(running.scope, exit))
 			const released = yield* Effect.exit(
 				Effect.tx(
 					Effect.gen(function* () {

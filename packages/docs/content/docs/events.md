@@ -89,6 +89,11 @@ const status = Effect.gen(function* () {
 | A handler interrupts itself or is cancelled | Its full `Cause` goes through the dispatch, and so do cleanup defects.                                                                                  |
 | `Event.parallel` is cancelled               | It waits for the cleanup of every call, then combines the interruption with the failures and defects that already happened, including cleanup failures. |
 
+If release of a framework-owned Scope is interrupted, Graft reports a
+`ReleaseInterrupted` defect whose `cause` retains the original interruption.
+This keeps release failures visible through nested events and background tasks;
+ordinary cancellation remains an interruption.
+
 ## Middleware
 
 `Event.middleware` defines an event whose handlers wrap each other. Each handler

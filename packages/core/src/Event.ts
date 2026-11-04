@@ -14,11 +14,11 @@ import {
 	FiberSet,
 	HashMap,
 	Option,
-	Ref,
 	Scope,
 	TxRef,
 } from "effect"
 import { Graft } from "./Graft"
+import * as Release from "./internal/release"
 import { Realms, realmOf, type Handler } from "./internal/runtime"
 
 const TypeId = "~@graftland/graft/Event"
@@ -119,12 +119,10 @@ const register = <Args extends ReadonlyArray<unknown>, Out, E, R>(
 			fibers,
 			scope,
 			closing,
-			run: (args, invocationScope) =>
+			run: (args) =>
 				Effect.updateContext(
 					// Restore services first; the invocation then supplies its own Scope.
-					Scope.provide(invocationScope)(
-						Effect.suspend(() => handler(...args)),
-					),
+					Release.scoped(Effect.suspend(() => handler(...args))),
 					(_: Context.Context<never>) => context,
 				),
 		}
@@ -192,41 +190,6 @@ const handlersFor = <Args extends ReadonlyArray<unknown>, Out, E>(
 		)
 	})
 
-// The owner waits for both execution and release; cancellation cleanup observes release independently.
-const runInvocation = <Args extends ReadonlyArray<unknown>, Out, E>(
-	handler: Handler<Args, Out, E>,
-	args: Args,
-	released: Ref.Ref<Cause.Cause<never>>,
-) =>
-	Effect.uninterruptibleMask((restore) =>
-		Effect.gen(function* () {
-			const scope = yield* Scope.make()
-			// Nested scopes and ensuring belong to the body; only this invocation Scope has a separately observed release.
-			const body = yield* Effect.exit(restore(handler.run(args, scope)))
-			const closed = yield* Effect.exit(Scope.close(scope, body))
-			yield* Ref.set(
-				released,
-				Exit.isFailure(closed) ? closed.cause : Cause.empty,
-			)
-			if (Exit.isFailure(closed))
-				return yield* Effect.failCause(
-					Exit.isFailure(body)
-						? Cause.combine(body.cause, closed.cause)
-						: closed.cause,
-				)
-			return yield* body
-		}),
-	)
-
-// Bare body cancellation is quiet during teardown; the invocation Scope's release is never filtered.
-const cancellationCause = <A, E>(
-	exit: Exit.Exit<A, E>,
-	released: Ref.Ref<Cause.Cause<never>>,
-) =>
-	Exit.isFailure(exit) && !Cause.hasInterruptsOnly(exit.cause)
-		? Effect.succeed(exit.cause)
-		: Ref.get(released)
-
 /**
  * Runs one handler in its owner's fiber set. Resolves to `None` if the
  * handler was unregistered before it could run, or its owner was torn down
@@ -236,7 +199,6 @@ const invoke = <Args extends ReadonlyArray<unknown>, Out, E>(
 	event: Event<Args, Out, E>,
 	handler: Handler<Args, Out, E>,
 	args: Args,
-	releaseResult?: Ref.Ref<Cause.Cause<never>>,
 ): Effect.Effect<Option.Option<Out>, E, Graft> =>
 	Effect.uninterruptibleMask((restore) =>
 		Effect.gen(function* () {
@@ -265,8 +227,6 @@ const invoke = <Args extends ReadonlyArray<unknown>, Out, E>(
 			)
 			if (!claimed) return Option.none()
 			return yield* Effect.gen(function* () {
-				const released =
-					releaseResult ?? (yield* Ref.make<Cause.Cause<never>>(Cause.empty))
 				// Starting the handler and installing its cancellation cleanup are atomic.
 				const started = yield* Deferred.make<void>()
 				const fiber = yield* FiberSet.run(
@@ -278,7 +238,7 @@ const invoke = <Args extends ReadonlyArray<unknown>, Out, E>(
 							FiberSet.add(handler.fibers, self as Fiber.Fiber<Out, E>),
 						).pipe(
 							Effect.andThen(Deferred.succeed(started, undefined)),
-							Effect.andThen(restore(runInvocation(handler, args, released))),
+							Effect.andThen(restore(Effect.suspend(() => handler.run(args)))),
 						),
 					),
 					{ startImmediately: true },
@@ -289,9 +249,12 @@ const invoke = <Args extends ReadonlyArray<unknown>, Out, E>(
 						Effect.gen(function* () {
 							yield* Fiber.interrupt(fiber)
 							const stopped = yield* Fiber.await(fiber)
-							const cause = yield* cancellationCause(stopped, released)
-							if (cause.reasons.length > 0)
-								return yield* Effect.failCause(cause)
+							// Release interruptions are defects; only bare body cancellation is quiet.
+							if (
+								Exit.isFailure(stopped) &&
+								!Cause.hasInterruptsOnly(stopped.cause)
+							)
+								return yield* Effect.failCause(stopped.cause)
 						}),
 				)
 				if (exit._tag === "Success") return Option.some(exit.value)
@@ -303,10 +266,8 @@ const invoke = <Args extends ReadonlyArray<unknown>, Out, E>(
 					// A closed FiberSet can refuse to start the invocation.
 					if (!ran) return Option.none()
 					const closer = yield* Deferred.await(handler.closing)
-					const releaseCause = yield* Ref.get(released)
 					// Without dispatcher cancellation, only the owner's interruption permits skipping a handler.
 					if (
-						releaseCause.reasons.length === 0 &&
 						Array.every(
 							exit.cause.reasons,
 							(reason) =>
@@ -318,7 +279,7 @@ const invoke = <Args extends ReadonlyArray<unknown>, Out, E>(
 				return yield* Effect.failCause(exit.cause)
 			}).pipe(
 				Effect.onExit((exit) =>
-					handler.once ? Scope.close(handler.scope, exit) : Effect.void,
+					handler.once ? Release.close(handler.scope, exit) : Effect.void,
 				),
 			)
 		}),
@@ -344,16 +305,10 @@ export const parallel = <Args extends ReadonlyArray<unknown>, Out, E>(
 		const handlers = yield* handlersFor(event)
 		return yield* Effect.acquireUseRelease(
 			Effect.forEach(handlers, (handler) =>
-				Effect.gen(function* () {
-					const released = yield* Ref.make<Cause.Cause<never>>(Cause.empty)
-					const fiber = yield* Effect.forkScoped(
-						invoke(event, handler, args, released),
-					)
-					return { fiber, released }
-				}),
+				Effect.forkScoped(invoke(event, handler, args)),
 			),
 			(fibers) =>
-				Effect.forEach(fibers, ({ fiber }) => Fiber.await(fiber)).pipe(
+				Effect.forEach(fibers, Fiber.await).pipe(
 					Effect.map((exits) =>
 						Array.getSomes(
 							Array.map(
@@ -365,26 +320,20 @@ export const parallel = <Args extends ReadonlyArray<unknown>, Out, E>(
 				),
 			(fibers, used) =>
 				Effect.gen(function* () {
-					// Join every invocation before reading its release result, even when dispatch was cancelled.
-					yield* Fiber.interruptAll(Array.map(fibers, ({ fiber }) => fiber))
-					const causes = yield* Effect.forEach(fibers, ({ fiber, released }) =>
-						Effect.gen(function* () {
-							const exit = yield* Fiber.await(fiber)
-							return Exit.isFailure(used)
-								? yield* cancellationCause(exit, released)
-								: Exit.isFailure(exit)
-									? exit.cause
-									: Cause.empty
-						}),
-					)
+					// Wait for every invocation; marked release failures survive cancellation of this dispatch.
+					yield* Fiber.interruptAll(fibers)
+					const exits = yield* Effect.forEach(fibers, Fiber.await)
 					const empty: Cause.Cause<E> = Cause.empty
-					const cause = Array.reduce(causes, empty, (cause, next) =>
-						Cause.combine(cause, next),
+					const cause = Array.reduce(exits, empty, (cause, exit) =>
+						Exit.isFailure(exit) &&
+						(Exit.isSuccess(used) || !Cause.hasInterruptsOnly(exit.cause))
+							? Cause.combine(cause, exit.cause)
+							: cause,
 					)
 					if (cause.reasons.length > 0) return yield* Effect.failCause(cause)
 				}),
 		)
-	}).pipe(Effect.scoped)
+	}).pipe(Release.scoped)
 
 /** Calls handlers in order until one returns `Some`. */
 export const bail = <Args extends ReadonlyArray<unknown>, A, E>(
@@ -445,7 +394,7 @@ export const waterfall = <I, O, E, R>(
 				const handler = handlers[index]
 				if (handler === undefined)
 					return yield* Effect.suspend(() => last(input)).pipe(
-						Effect.scoped,
+						Release.scoped,
 						Effect.updateContext<never, Exclude<R, Scope.Scope>>(() => context),
 					)
 				const next = yield* shareNext((input: I) => step(index + 1, input))

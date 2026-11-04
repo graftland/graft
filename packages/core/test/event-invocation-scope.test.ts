@@ -8,9 +8,11 @@ import {
 	Exit,
 	Fiber,
 	Ref,
+	Schema,
 } from "effect"
 import { Event, Graft, Plugin } from "../src/index.ts"
 import { makeJournal, run } from "./utils.ts"
+import { ReleaseInterrupted } from "../src/internal/release.ts"
 
 const resource = (alive: Ref.Ref<boolean>) =>
 	Effect.acquireRelease(Ref.set(alive, true), () => Ref.set(alive, false))
@@ -275,9 +277,12 @@ for (const mode of ["emit", "parallel", "bail", "waterfall"]) {
 				yield* Fiber.interrupt(dispatch)
 				const exit = yield* Fiber.await(dispatch)
 				assert(Exit.isFailure(exit))
+				const interruption = Cause.squash(exit.cause)
+				assert(Schema.is(ReleaseInterrupted)(interruption))
+				assert.isTrue(Cause.hasInterruptsOnly(interruption.cause))
 				assert.isTrue(
 					Array.some(
-						exit.cause.reasons,
+						interruption.cause.reasons,
 						(reason) => reason._tag === "Interrupt" && reason.fiberId === id,
 					),
 				)

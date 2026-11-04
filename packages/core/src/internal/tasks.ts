@@ -1,4 +1,5 @@
 import { Cause, Deferred, Effect, Exit, FiberSet, Ref, Scope } from "effect"
+import * as Release from "./release"
 
 // This requirement carries asynchronous errors to Plugin.make; it has no public service key.
 declare const TaskErrors: unique symbol
@@ -25,7 +26,7 @@ export const run = <A, E, R>(group: Group, effect: Effect.Effect<A, E, R>) =>
 			Effect.gen(function* () {
 				const scope = yield* Scope.make()
 				const body = yield* Effect.exit(restore(Scope.provide(scope)(effect)))
-				const closed = yield* Effect.exit(Scope.close(scope, body))
+				const closed = yield* Effect.exit(Release.close(scope, body))
 				// Bare worker interruption is supported; nested scopes inside the body must report their own release failures, unlike the separately observed task scope.
 				const failure = Cause.combine(
 					Exit.isFailure(body) && !Cause.hasInterruptsOnly(body.cause)
@@ -37,7 +38,7 @@ export const run = <A, E, R>(group: Group, effect: Effect.Effect<A, E, R>) =>
 					yield* Ref.update(group.failures, (cause) =>
 						Cause.combine(cause, failure),
 					)
-					// FiberSet normally ignores pure interruption, including an interrupted finalizer.
+					// Publish only after the task's resource scope has finished closing.
 					yield* Deferred.failCause(group.fibers.deferred, failure)
 					yield* Effect.logError("The plugin's background task failed", failure)
 				}

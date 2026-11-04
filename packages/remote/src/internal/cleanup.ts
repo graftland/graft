@@ -1,5 +1,6 @@
 import { Fork } from "@graftland/graft"
 import { Array, Cause, Effect, Schema, Scope } from "effect"
+import * as Release from "./release"
 
 /** Finalizers have no typed failure channel. Keep reasons and their annotations flat. */
 export const cleanupCause = (cause: Cause.Cause<unknown>): Cause.Cause<never> =>
@@ -27,7 +28,7 @@ export const cleanupCause = (cause: Cause.Cause<unknown>): Cause.Cause<never> =>
 
 /** Assembly children close before the entry reports their cleanup as its own result. */
 export const children = Effect.acquireRelease(Scope.make(), (scope, exit) =>
-	Scope.close(scope, exit).pipe(
+	Release.close(scope, exit).pipe(
 		Effect.catchCause((cause) => Effect.failCause(cleanupCause(cause))),
 	),
 )

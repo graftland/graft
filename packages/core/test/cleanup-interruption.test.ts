@@ -12,6 +12,16 @@ import {
 	Stream,
 } from "effect"
 import { Graft, Plugin, Fork } from "../src/index.ts"
+import { ReleaseInterrupted } from "../src/internal/release.ts"
+
+const assertReleaseInterruption = <E>(cause: Cause.Cause<E>) => {
+	assert.isAbove(cause.reasons.length, 0)
+	for (const reason of cause.reasons) {
+		assert(reason._tag === "Die")
+		assert(Schema.is(ReleaseInterrupted)(reason.defect))
+		assert.isTrue(Cause.hasInterruptsOnly(reason.defect.cause))
+	}
+}
 
 for (const mode of ["self", "worker"]) {
 	it.effect(
@@ -45,7 +55,7 @@ for (const mode of ["self", "worker"]) {
 							`dispose ${attempt} must report unfinished cleanup`,
 						)
 						assert.strictEqual(result.failure._tag, "CleanupError")
-						assert.isTrue(Cause.hasInterruptsOnly(result.failure.cause))
+						assertReleaseInterruption(result.failure.cause)
 					}
 				}).pipe(Effect.scoped, Effect.provide(Graft.layer))
 				const finished = yield* Ref.get(completed)
@@ -70,7 +80,7 @@ it.effect("reports an interrupted finalizer when its owner scope closes", () =>
 		assert(Exit.isFailure(result))
 		const error = Cause.squash(result.cause)
 		assert(Schema.is(Fork.CleanupError)(error))
-		assert.isTrue(Cause.hasInterruptsOnly(error.cause))
+		assertReleaseInterruption(error.cause)
 	}),
 )
 
@@ -102,7 +112,7 @@ for (const finish of ["success", "cancel"]) {
 					Stream.runHead,
 				)
 				assert(Option.isSome(state) && state.value._tag === "Failed")
-				assert.isTrue(Cause.hasInterruptsOnly(state.value.cause))
+				assertReleaseInterruption(state.value.cause)
 			} else yield* fork.await
 			if (finish === "cancel") {
 				for (const attempt of [1, 2]) {
@@ -111,7 +121,7 @@ for (const finish of ["success", "cancel"]) {
 						result._tag === "Failure",
 						`dispose ${attempt} must retain worker cleanup`,
 					)
-					assert.isTrue(Cause.hasInterruptsOnly(result.failure.cause))
+					assertReleaseInterruption(result.failure.cause)
 				}
 			} else {
 				// Once supervision publishes Failed, it owns the completed attempt's cause.
@@ -146,7 +156,7 @@ it.effect("reports worker scope interruption on automatic disposal", () =>
 		assert(Exit.isFailure(result))
 		const error = Cause.squash(result.cause)
 		assert(Schema.is(Fork.CleanupError)(error))
-		assert.isTrue(Cause.hasInterruptsOnly(error.cause))
+		assertReleaseInterruption(error.cause)
 	}),
 )
 

@@ -83,6 +83,10 @@ const status = Effect.gen(function* () {
 | 處理函式主動中斷或被取消 | 它完整的 `Cause` 會透過派發傳遞，清理產生的 defect 也一樣。               |
 | 取消 `Event.parallel`    | 先等待所有呼叫清理完成，再將中斷與已經發生的失敗、defect 及清理失敗合併。 |
 
+框架管理的 Scope 若在釋放時發生純中斷，會以 `ReleaseInterrupted`
+defect 回報，原始中斷保存在它的 `cause`
+中。這樣，釋放失敗經過巢狀事件或背景工作仍能傳到呼叫端；正常取消仍按中斷處理。
+
 ## 中介軟體
 
 `Event.middleware` 定義一種事件，其處理函式可以逐層包裹。每個處理函式接收輸入和
