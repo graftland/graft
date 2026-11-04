@@ -1,9 +1,15 @@
+<img src="packages/docs/src/assets/graft-mark.svg" alt="" width="72" align="right">
+
 # Graft
+
+**園藝學 Effect 系統。** _放心修剪。_
 
 [English](README.md) | [简体中文](README.zh-CN.md) | 繁體中文
 
-以 [Effect](https://effect.website)
-打造的外掛框架。Graft 把應用程式當成一棵外掛樹來執行。外掛發布並使用服務。你可以在行程持續執行的同時載入、重新設定、取代和卸載它們。
+軟體不是造出來的，是長出來的。
+
+Graft 是以 [Effect](https://effect.website)
+打造的外掛框架。應用程式是一棵外掛樹：每個外掛嫁接在一個 scope 上，從周圍汲取服務，也發布自己的服務。你可以在行程持續執行的同時載入、重新設定、取代和卸載任意一枝。剪掉哪裡，樹的其餘部分都照常生長。
 
 ```ts
 import { Graft, Plugin } from "@graftland/graft"
@@ -32,6 +38,16 @@ const hello = Plugin.make({
 })
 ```
 
+## 為什麼選擇 Graft
+
+- **砧木。** 服務是 Effect 的 `Context` 鍵，由 `Layer` 或其他外掛提供。外掛在
+  `inject` 中宣告相依，由編譯器檢查。
+- **修剪。** 每個外掛都在自己的 `Scope`
+  中執行，它啟動的每個 fiber 都有歸屬。外掛消失時，相依於它的外掛先停止，然後執行它的 finalizer。不留殘枝，失敗也保留完整的
+  `Cause`。
+- **高接換種。** 不砍樹，只換品種。`graft start --watch`
+  只重新匯入受變更影響的部分，並在一次交易中取代相關外掛。新程式碼失敗時，舊外掛繼續執行。
+
 在 Node.js 上執行 Graft 需要 22.19 或更新版本。開發本工作區需要 Node.js
 22.22 或更新版本，其中包括用 Astro 建置文件。
 
@@ -43,7 +59,11 @@ cd my-app
 npx graft start --watch
 ```
 
-閱讀[文件](https://graftland.github.io/graft/zh-tw/)。熟悉 cordis 嗎？請看[它的概念如何對應到 Graft](https://graftland.github.io/graft/zh-tw/cordis/)。
+閱讀[文件](https://graftland.github.io/graft/zh-tw/)。
+
+Graft 的外掛模型借鑑自
+[cordis](https://github.com/cordiverse/cordis)。cordis 在時空中組合，Graft 只照料自己的園子。請看
+[cordis 的概念如何對應到 Graft](https://graftland.github.io/graft/zh-tw/cordis/)。
 
 ## 範例
 

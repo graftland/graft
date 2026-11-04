@@ -1,22 +1,64 @@
 ---
 title: Graft
 description:
-  A plugin framework built on Effect. Load, replace and unload plugins in a
-  running process.
+  Horticultural Effect Systems. A plugin framework for Effect that loads,
+  replaces and unloads plugins in a running process.
+template: splash
+hero:
+  title: Horticultural Effect Systems
+  tagline:
+    Graft grows your application as a tree of plugins on Effect. Load, replace
+    and unload any branch while the process keeps running. Prune fearlessly.
+  image:
+    alt: The Graft mark, a G whose crossbar is an arrow driven into its center
+    file: ../../src/assets/graft-mark.svg
+  actions:
+    - text: Plant your first plugin
+      link: quickstart/
+      icon: right-arrow
+    - text: Core concepts
+      link: concepts/
+      variant: minimal
 ---
 
 import { Card, CardGrid } from "@astrojs/starlight/components"
 
-Graft runs an application as a tree of plugins. Each plugin can publish services
-and use services from other plugins. A plugin can be loaded, reconfigured,
-replaced or unloaded while the process keeps running. When a plugin goes away,
-everything that depends on it stops first. Then Graft releases the plugin's own
-resources.
+<div class="graft-manifesto">
+	<p>
+		<strong>Software is not built. It is grown.</strong>
+	</p>
+	<p>
+		Plugins arrive, take root and bear fruit. Some are pruned; some are replaced
+		while the tree keeps standing. A good gardener never wonders where a branch
+		came from, or what happens when it is cut.
+	</p>
+	<p>
+		Graft gives you that certainty. Every plugin is grafted onto a scope. Every
+		fiber has an owner. Every failure is traced back to its root.
+	</p>
+</div>
 
-Graft is built on [Effect](https://effect.website). A plugin is an Effect that
-runs in a `Scope`. A service is an Effect `Context` key. A failure keeps its
-full `Cause`. Graft adds only what Effect does not have: services that come and
-go at run time, the plugin tree, events, config files and hot reload.
+## Three promises
+
+<CardGrid>
+	<Card title="Rootstock">
+		Services are Effect <code>Context</code> keys, provided by layers or by
+		other plugins. A plugin lists what it needs in <code>inject</code>, and the
+		compiler checks the list. See <a href="services/">services</a>.
+	</Card>
+	<Card title="Pruning">
+		Each plugin runs in its own <code>Scope</code>. When it goes away, its
+		dependents stop first, then its finalizers run. A failure keeps its full{" "}
+		<code>Cause</code>. See <a href="lifecycle/">lifecycle</a>.
+	</Card>
+	<Card title="Top-working">
+		Change the variety without felling the tree. Hot reload swaps only the
+		plugins your change affects, in one transaction, and keeps the old code if
+		the new code fails. See <a href="hot-reload/">hot reload</a>.
+	</Card>
+</CardGrid>
+
+## A first graft
 
 ```ts
 import { Graft, Plugin } from "@graftland/graft"
@@ -89,3 +131,8 @@ const hello = Plugin.make({
 
 All packages share one version number and are released together. They need
 `effect` 4.1.x.
+
+The garden is only on this page. In the rest of the documentation and in the
+code, a `Scope` is still a `Scope`. Graft draws its plugin model from
+[cordis](https://github.com/cordiverse/cordis). Where cordis composes across
+space and time, Graft keeps to the garden.

@@ -14,8 +14,31 @@ export default defineConfig({
 		starlight({
 			title: "Graft",
 			description:
-				"A plugin framework built on Effect: plugins, services and hot reload in a running process.",
+				"Horticultural Effect Systems. A plugin framework for Effect: load, replace and unload plugins in a running process.",
 			favicon: "/favicon.svg",
+			logo: { src: "./src/assets/graft-mark.svg" },
+			customCss: ["./src/styles/garden.css"],
+			head: [
+				{
+					tag: "link",
+					attrs: { rel: "preconnect", href: "https://fonts.googleapis.com" },
+				},
+				{
+					tag: "link",
+					attrs: {
+						rel: "preconnect",
+						href: "https://fonts.gstatic.com",
+						crossorigin: true,
+					},
+				},
+				{
+					tag: "link",
+					attrs: {
+						rel: "stylesheet",
+						href: "https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400..700&display=swap",
+					},
+				},
+			],
 			// English pages are at the root; translations are in a folder named
 			// after the locale.
 			defaultLocale: "root",
