@@ -10,6 +10,7 @@ import {
 	Exit,
 	Layer,
 	Logger,
+	MutableList,
 	Option,
 	Schema,
 	Stream,
@@ -214,7 +215,7 @@ it.effect(
 	() =>
 		Effect.gen(function* () {
 			const marker = new Error("forecast diagnostic")
-			const logs: Array<Logger.Options<unknown>> = []
+			const logs = MutableList.make<Logger.Options<unknown>>()
 			yield* Effect.gen(function* () {
 				yield* Graft.provide(Forecasts, {
 					today: () => Effect.fail(ForecastUnavailable.make({ cause: marker })),
@@ -229,13 +230,13 @@ it.effect(
 				Effect.provide(
 					Logger.layer([
 						Logger.make((log) => {
-							logs.push(log)
+							MutableList.append(logs, log)
 						}),
 					]),
 				),
 			)
 			assert.isTrue(
-				Array.some(logs, (log) =>
+				Array.some(MutableList.toArray(logs), (log) =>
 					Array.some(
 						log.cause.reasons,
 						(reason) =>

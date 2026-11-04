@@ -66,3 +66,26 @@ describe("failure group", () => {
 		}).pipe(Effect.scoped),
 	)
 })
+
+it.effect("hands off worker cleanup failure on active close", () =>
+	Effect.gen(function* () {
+		const result = yield* Effect.gen(function* () {
+			const group = yield* FailureGroup.make<never>()
+			const ready = yield* Deferred.make<void>()
+			yield* group.run(
+				Deferred.succeed(ready, undefined).pipe(
+					Effect.andThen(Effect.never),
+					Effect.ensuring(Effect.die("cleanup marker")),
+				),
+			)
+			yield* Deferred.await(ready)
+			const closed = yield* Effect.exit(group.close)
+			assert(Exit.isFailure(closed))
+			assert.include(Cause.pretty(closed.cause), "cleanup marker")
+			const cause = yield* group.cause
+			assert.include(Cause.pretty(cause), "cleanup marker")
+		}).pipe(Effect.scoped, Effect.exit)
+		assert(Exit.isFailure(result))
+		assert.include(Cause.pretty(result.cause), "cleanup marker")
+	}),
+)

@@ -50,6 +50,9 @@ export default async function setup(project) {
 		entry: [
 			"contract",
 			"default-contract",
+			"null-config-contract",
+			"empty-config-contract",
+			"empty-plugin",
 			"plugin",
 			"services-contract",
 			"services-plugin",

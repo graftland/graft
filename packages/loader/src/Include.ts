@@ -127,10 +127,7 @@ const flatten = (entries: ReadonlyArray<Entry>): ReadonlyArray<Entry> => {
 const normalizeGroups = (document: Document) => {
 	let changed = false
 	const materialize = (alias: Alias) => {
-		const node = document.createNode(alias.toJS(document))
-		if (alias.comment !== undefined) node.comment = alias.comment
-		if (alias.commentBefore !== undefined)
-			node.commentBefore = alias.commentBefore
+		const node = copyAlias(document, alias)
 		changed = true
 		return node
 	}

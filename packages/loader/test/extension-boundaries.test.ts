@@ -8,6 +8,7 @@ import {
 	Effect,
 	Exit,
 	Layer,
+	MutableList,
 	Option,
 	Queue,
 	Ref,
@@ -276,6 +277,28 @@ it.effect("defers bundled module getters until resolution runs", () =>
 			const exit = yield* Effect.exit(resolving)
 			assert(Exit.isFailure(exit))
 			assert.strictEqual(Cause.squash(exit.cause), defect)
+		}).pipe(Effect.scoped, Effect.provide(ModuleResolver.fromRecord(table)))
+	}),
+)
+
+it.effect("defers bundled raw module getters until import runs", () =>
+	Effect.gen(function* () {
+		const reads = MutableList.make<void>()
+		const defect = new Error("Raw module getter crashed")
+		const table: Readonly<Record<string, Plugin.Plugin>> = {
+			get bundled(): Plugin.Plugin {
+				MutableList.append(reads, undefined)
+				throw defect
+			},
+		}
+		yield* Effect.gen(function* () {
+			const resolver = yield* ModuleResolver.ModuleResolver
+			const importing = resolver.importModule("bundled")
+			assert.strictEqual(MutableList.toArray(reads).length, 0)
+			const exit = yield* Effect.exit(importing)
+			assert(Exit.isFailure(exit))
+			assert.strictEqual(Cause.squash(exit.cause), defect)
+			assert.strictEqual(MutableList.toArray(reads).length, 1)
 		}).pipe(Effect.scoped, Effect.provide(ModuleResolver.fromRecord(table)))
 	}),
 )

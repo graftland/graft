@@ -23,6 +23,8 @@ import {
 } from "effect"
 import process from "node:process"
 import * as Remote from "../src/index"
+import { contract as nullContract } from "./fixtures/null-config-contract"
+import { contract as emptyContract } from "./fixtures/empty-config-contract"
 import { contract, Rejected } from "./fixtures/contract"
 
 const contractModule = new URL(
@@ -550,3 +552,33 @@ describe("local remote lifecycle", () => {
 		}).pipe(run),
 	)
 })
+
+it.live(
+	"preserves explicit null and defaults only omitted TypeScript config",
+	() =>
+		Effect.gen(function* () {
+			const explicit = yield* Graft.plugin(
+				Remote.plugin(nullContract, {
+					contractModule: new URL(
+						"../.cache/integration/null-config-contract.js",
+						import.meta.url,
+					).href,
+					connect: { local: {} },
+					config: null,
+				}),
+			)
+			yield* explicit.await
+			yield* explicit.dispose
+			const omitted = yield* Graft.plugin(
+				Remote.plugin(emptyContract, {
+					contractModule: new URL(
+						"../.cache/integration/empty-config-contract.js",
+						import.meta.url,
+					).href,
+					connect: { local: {} },
+				}),
+			)
+			yield* omitted.await
+			yield* omitted.dispose
+		}).pipe(run),
+)

@@ -1,4 +1,4 @@
-import { Cause, Effect, Exit, FiberSet, Ref, Scope } from "effect"
+import { Cause, Deferred, Effect, Exit, FiberSet, Ref, Scope } from "effect"
 
 // This requirement carries asynchronous errors to Plugin.make; it has no public service key.
 declare const TaskErrors: unique symbol
@@ -21,21 +21,34 @@ export type Group = Effect.Success<typeof make>
 export const run = <A, E, R>(group: Group, effect: Effect.Effect<A, E, R>) =>
 	FiberSet.run(
 		group.fibers,
-		Effect.scoped(effect).pipe(
-			Effect.onExit((exit) =>
-				Exit.isFailure(exit) && !Cause.hasInterruptsOnly(exit.cause)
-					? Ref.update(group.failures, (cause) =>
-							Cause.combine(cause, exit.cause),
-						).pipe(
-							Effect.andThen(
-								Effect.logError(
-									"The plugin's background task failed",
-									exit.cause,
-								),
-							),
-						)
-					: Effect.void,
-			),
+		Effect.uninterruptibleMask((restore) =>
+			Effect.gen(function* () {
+				const scope = yield* Scope.make()
+				const body = yield* Effect.exit(restore(Scope.provide(scope)(effect)))
+				const closed = yield* Effect.exit(Scope.close(scope, body))
+				// Cancellation of the body is expected; interruption during resource release is not.
+				const failure = Cause.combine(
+					Exit.isFailure(body) && !Cause.hasInterruptsOnly(body.cause)
+						? body.cause
+						: Cause.empty,
+					Exit.isFailure(closed) ? closed.cause : Cause.empty,
+				)
+				if (failure.reasons.length > 0) {
+					yield* Ref.update(group.failures, (cause) =>
+						Cause.combine(cause, failure),
+					)
+					// FiberSet normally ignores pure interruption, including an interrupted finalizer.
+					yield* Deferred.failCause(group.fibers.deferred, failure)
+					yield* Effect.logError("The plugin's background task failed", failure)
+				}
+				if (Exit.isFailure(closed))
+					return yield* Effect.failCause(
+						Exit.isFailure(body)
+							? Cause.combine(body.cause, closed.cause)
+							: closed.cause,
+					)
+				return yield* body
+			}),
 		),
 		{ startImmediately: false },
 	)

@@ -8,6 +8,7 @@ import {
 	Exit,
 	FileSystem,
 	HashMap,
+	Match,
 	Option,
 	Path,
 	PlatformError,
@@ -128,8 +129,53 @@ const backupFiles = [
 	".pnp.cjs",
 	".pnp.loader.mjs",
 ]
-const executable = (agent: Agent) =>
-	String.startsWith("yarn")(agent) ? "yarn" : agent
+const strategy = (agent: Agent, operation: "install" | "recover") => {
+	const recovery = operation === "recover"
+	return Match.value(agent).pipe(
+		Match.when("npm", () => ({
+			executable: "npm",
+			args: [
+				"install",
+				"--no-audit",
+				"--no-fund",
+				...(recovery ? ["--prefer-offline"] : []),
+			],
+			env: { CI: "true" },
+			lockfiles: ["package-lock.json", "npm-shrinkwrap.json"],
+		})),
+		Match.when("pnpm", () => ({
+			executable: "pnpm",
+			args: [
+				"install",
+				recovery ? "--frozen-lockfile" : "--no-frozen-lockfile",
+				"--config.confirmModulesPurge=false",
+			],
+			env: { CI: "true" },
+			lockfiles: ["pnpm-lock.yaml"],
+		})),
+		Match.when("yarn-classic", () => ({
+			executable: "yarn",
+			args: [
+				"install",
+				"--non-interactive",
+				...(recovery ? ["--frozen-lockfile", "--prefer-offline"] : []),
+			],
+			env: { CI: "true" },
+			lockfiles: ["yarn.lock"],
+		})),
+		Match.when("yarn-berry", () => ({
+			executable: "yarn",
+			args: ["install", ...(recovery ? ["--immutable"] : [])],
+			env: {
+				CI: "true",
+				YARN_ENABLE_IMMUTABLE_INSTALLS: recovery ? "true" : "false",
+				YARN_NODE_LINKER: "node-modules",
+			},
+			lockfiles: ["yarn.lock"],
+		})),
+		Match.exhaustive,
+	)
+}
 
 const readSource = Effect.fnUntraced(function* (
 	fs: FileSystem.FileSystem,
@@ -399,35 +445,12 @@ export const make = (
 			forceKillAfter: "5 seconds",
 		}
 		const run = Effect.fnUntraced(function* (operation: "install" | "recover") {
-			const recovery = operation === "recover"
-			const args =
-				agent === "npm"
-					? [
-							"install",
-							"--no-audit",
-							"--no-fund",
-							...(recovery ? ["--prefer-offline"] : []),
-						]
-					: agent === "pnpm"
-						? [
-								"install",
-								recovery ? "--frozen-lockfile" : "--no-frozen-lockfile",
-								"--config.confirmModulesPurge=false",
-							]
-						: agent === "yarn-classic"
-							? [
-									"install",
-									"--non-interactive",
-									...(recovery
-										? ["--frozen-lockfile", "--prefer-offline"]
-										: []),
-								]
-							: ["install", ...(recovery ? ["--immutable"] : [])]
+			const command = strategy(agent, operation)
 			// Acquire and install the release handler atomically, then wait interruptibly.
 			return yield* Effect.acquireUseRelease(
 				spawner
 					.spawn(
-						ChildProcess.make(executable(agent), args, {
+						ChildProcess.make(command.executable, command.args, {
 							cwd: directory,
 							extendEnv: true,
 							stdin: "ignore",
@@ -435,17 +458,7 @@ export const make = (
 							stderr: "inherit",
 							detached: true,
 							...termination,
-							env: {
-								CI: "true",
-								...(agent === "yarn-berry"
-									? {
-											YARN_ENABLE_IMMUTABLE_INSTALLS: recovery
-												? "true"
-												: "false",
-											YARN_NODE_LINKER: "node-modules",
-										}
-									: {}),
-							},
+							env: command.env,
 						}),
 					)
 					.pipe(
@@ -464,7 +477,7 @@ export const make = (
 								orElse: () =>
 									PackageManagerError.make({
 										operation,
-										message: `${executable(agent)} ${operation} timed out`,
+										message: `${command.executable} ${operation} timed out`,
 									}),
 							}),
 						)
@@ -472,7 +485,7 @@ export const make = (
 							return yield* PackageManagerError.make({
 								operation,
 								exitCode: code,
-								message: `${executable(agent)} ${operation} exited with code ${code}`,
+								message: `${command.executable} ${operation} exited with code ${code}`,
 							})
 					}),
 				// The command owns its group; a stopped leader may leave live descendants.
@@ -551,12 +564,7 @@ export const make = (
 						original,
 					)
 
-					const agentLocks =
-						agent === "npm"
-							? ["package-lock.json", "npm-shrinkwrap.json"]
-							: agent === "pnpm"
-								? ["pnpm-lock.yaml"]
-								: ["yarn.lock"]
+					const agentLocks = strategy(agent, "install").lockfiles
 					const hasLock = Array.some(
 						backups,
 						({ name, contents }) =>

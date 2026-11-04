@@ -555,7 +555,7 @@ it.live(
 	() =>
 		Effect.gen(function* () {
 			const marker = new Error("JWKS unavailable")
-			const logs: Array<Logger.Options<unknown>> = []
+			const logs = MutableList.make<Logger.Options<unknown>>()
 			yield* Effect.gen(function* () {
 				yield* Graft.provide(Auth.Authenticator, {
 					_tag: "Header",
@@ -574,13 +574,13 @@ it.live(
 				Effect.provide(
 					Logger.layer([
 						Logger.make((log) => {
-							logs.push(log)
+							MutableList.append(logs, log)
 						}),
 					]),
 				),
 			)
 			assert.isTrue(
-				Array.some(logs, (log) =>
+				Array.some(MutableList.toArray(logs), (log) =>
 					Array.some(
 						log.cause.reasons,
 						(reason) => reason._tag === "Die" && reason.defect === marker,
@@ -588,7 +588,7 @@ it.live(
 				),
 			)
 			assert.isFalse(
-				Array.some(logs, (log) =>
+				Array.some(MutableList.toArray(logs), (log) =>
 					Str.includes("private-test-credential")(String(log.message)),
 				),
 			)

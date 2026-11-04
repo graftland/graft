@@ -95,7 +95,7 @@ export const plugin = <
 				const input = yield* Schema.decodeUnknownEffect(Configuration.Host)({
 					contract: options.contractModule,
 					connect: options.connect,
-					config: options.config ?? {},
+					config: options.config === undefined ? {} : options.config,
 				})
 				yield* Schema.decodeEffect(contract.config)(input.config)
 				const child = yield* launch(

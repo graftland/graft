@@ -59,6 +59,39 @@ import {
 	type Spec,
 } from "./runtime"
 
+/** Observe cancellation without losing the child's final Exit at an interruption boundary. */
+const cancelOnChange = <A, E, R, B, E2, R2>(
+	operation: Effect.Effect<A, E, R>,
+	changed: Effect.Effect<unknown>,
+	handoff: (
+		result: Exit.Exit<A, E>,
+		settled: Exit.Exit<boolean>,
+		restore: typeof Effect.interruptible,
+	) => Effect.Effect<B, E2, R2>,
+	observe: (result: Exit.Exit<A, E>) => Effect.Effect<void> = () => Effect.void,
+) =>
+	Effect.scoped(
+		Effect.uninterruptibleMask((restore) =>
+			Effect.gen(function* () {
+				const worker = yield* Effect.forkScoped(restore(operation))
+				const raced = yield* Effect.exit(
+					restore(
+						Effect.raceFirst(
+							Effect.as(changed, true),
+							Effect.as(Fiber.await(worker), false),
+						),
+					),
+				)
+				yield* Fiber.interrupt(worker)
+				const result = yield* Fiber.await(worker)
+				yield* observe(result)
+				// A stop can arrive during masked cleanup or observation. Handoff stays masked.
+				const settled = yield* Effect.exit(restore(raced))
+				return yield* handoff(result, settled, restore)
+			}),
+		),
+	)
+
 /** How long teardown waits for consumers before warning about a possible cycle. */
 const drainWarning = Duration.seconds(10)
 
@@ -451,26 +484,11 @@ export const supervise = Effect.fnUntraced(function* (
 				// @effect-diagnostics-next-line anyUnknownInErrorContext:off -- The activation supplies decoding requirements; the owned fiber retains its complete Exit.
 				spec.plugin.decode(candidate.input),
 			).pipe(Effect.flatMap(update), inActivation(running.context, spec))
-			const handled = yield* Effect.scoped(
-				Effect.uninterruptibleMask((restore) =>
+			const handled = yield* cancelOnChange(
+				operation,
+				waitChange({ ...resolution, spec: candidate }),
+				(result, settled) =>
 					Effect.gen(function* () {
-						// Race observations, not execution: cancellation must still join the update's complete Exit.
-						const updating = yield* Effect.forkScoped(restore(operation))
-						const raced = yield* Effect.exit(
-							restore(
-								Effect.raceFirst(
-									Effect.as(
-										waitChange({ ...resolution, spec: candidate }),
-										true,
-									),
-									Effect.as(Fiber.await(updating), false),
-								),
-							),
-						)
-						yield* Fiber.interrupt(updating)
-						const result = yield* Fiber.await(updating)
-						// A stop may arrive while cancellation cleanup is masked, just as in waitRetry.
-						const settled = yield* Effect.exit(restore(raced))
 						if (Exit.isFailure(result)) {
 							// Teardown owns failures during cancellation; ordinary update failures are logged before restarting.
 							if (
@@ -498,7 +516,6 @@ export const supervise = Effect.fnUntraced(function* (
 							return yield* Effect.failCause(settled.cause)
 						return !settled.value && Exit.isSuccess(result) && result.value
 					}),
-				),
 			)
 			if (!handled) return restart
 			spec = candidate
@@ -638,32 +655,11 @@ export const supervise = Effect.fnUntraced(function* (
 				Pull.catchDone(() => Effect.succeedNone),
 			)
 		})
-		return yield* Effect.scoped(
-			Effect.uninterruptibleMask((restore) =>
+		return yield* cancelOnChange(
+			operation,
+			changed,
+			(result, settled, restore) =>
 				Effect.gen(function* () {
-					// The child owns initialization and execution; always join it before handing off its result.
-					const fiber = yield* Effect.forkScoped(restore(operation))
-					const raced = yield* Effect.exit(
-						restore(
-							Effect.raceFirst(
-								Effect.as(changed, true),
-								Effect.as(Fiber.await(fiber), false),
-							),
-						),
-					)
-					yield* Fiber.interrupt(fiber)
-					const result = yield* Fiber.await(fiber)
-					yield* reportFailure(
-						"The plugin's retry schedule failed",
-						result,
-					).pipe(
-						Effect.annotateLogs({
-							"graft.fork": id,
-							"graft.plugin": spec.plugin.name,
-						}),
-					)
-					// Cancellation can arrive while the child's finalizers are masked.
-					const settled = yield* Effect.exit(restore(raced))
 					if (Exit.isFailure(settled)) {
 						// Disposal owns failures produced while cancelling the retry, not the already published startup failure.
 						if (
@@ -693,7 +689,13 @@ export const supervise = Effect.fnUntraced(function* (
 					yield* restore(changed)
 					return Option.none<Retry>()
 				}),
-			),
+			(result) =>
+				reportFailure("The plugin's retry schedule failed", result).pipe(
+					Effect.annotateLogs({
+						"graft.fork": id,
+						"graft.plugin": spec.plugin.name,
+					}),
+				),
 		)
 	})
 

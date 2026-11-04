@@ -769,6 +769,45 @@ describe("native HMR", () => {
 	)
 
 	it.live(
+		"checks the leased old graph after its entry disappears and returns",
+		() =>
+			Effect.gen(function* () {
+				const { hmr, fs, directory, write, entry } = yield* setup
+				yield* write("dependency.mjs", "export const value = 1")
+				yield* write(
+					"a.mjs",
+					`${entry("a")}; export const native = () => import('node:module')`,
+				)
+				const original = yield* hmr.importerScoped("./a.mjs")
+				assert(
+					Predicate.hasProperty(original, "native") &&
+						typeof original.native === "function",
+				)
+				const native = original.native
+				const fork = yield* Graft.plugin(
+					Option.getOrThrow(Plugin.fromModule(original)),
+					undefined,
+				)
+				yield* fork.state.pipe(
+					Stream.filter((state) => state._tag === "Active"),
+					Stream.runHead,
+				)
+				yield* fs.remove(`${directory}/a.mjs`)
+				assert.strictEqual((yield* hmr.reload)._tag, "Reloaded")
+				yield* Effect.promise((): Promise<unknown> => Promise.resolve(native()))
+				const expected = Hmr.WatchResult.Skipped({
+					reason: "restart-required",
+					modules: ["node:module"],
+				})
+				const missing = yield* hmr.reload
+				assert.deepStrictEqual(missing, expected)
+				yield* write("a.mjs", entry("restored"))
+				const restored = yield* hmr.reload
+				assert.deepStrictEqual(restored, expected)
+			}).pipe(run),
+	)
+
+	it.live(
 		"does not throw a candidate restart error into concurrent old module code",
 		() =>
 			Effect.gen(function* () {

@@ -4,6 +4,8 @@ import {
 	Array,
 	Cause,
 	Context,
+	Deferred,
+	Ref,
 	Effect,
 	Exit,
 	Queue,
@@ -104,3 +106,24 @@ for (const input of [
 			),
 	)
 }
+
+it.effect("retains writer cleanup failure after normal EOF", () =>
+	Effect.gen(function* () {
+		const started = yield* Deferred.make<void>()
+		const cleaned = yield* Ref.make(false)
+		const result = yield* Runtime.run(empty, {
+			input: Stream.fromEffect(Deferred.await(started)).pipe(Stream.drain),
+			output: Sink.unwrap(
+				Effect.acquireRelease(Deferred.succeed(started, undefined), () =>
+					Ref.set(cleaned, true).pipe(
+						Effect.andThen(Effect.die("writer-finalizer-failed")),
+					),
+				).pipe(Effect.as(Sink.drain)),
+			),
+		}).pipe(Effect.exit)
+		const released = yield* Ref.get(cleaned)
+		assert.isTrue(released)
+		assert(Exit.isFailure(result))
+		assert.include(Cause.pretty(result.cause), "writer-finalizer-failed")
+	}).pipe(Effect.provide(Graft.layer)),
+)

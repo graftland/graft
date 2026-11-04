@@ -1,3 +1,4 @@
+import { findSubtree, isSubtreeActive } from "./forkTree"
 import { Peer } from "./Peer"
 import { Graft, Plugin, type Fork } from "@graftland/graft"
 import {
@@ -76,15 +77,6 @@ const Input = Schema.Struct({
 })
 export type Input = typeof Input.Type
 
-const subtree = (
-	trees: ReadonlyArray<Fork.ForkTree>,
-	id: number,
-): Option.Option<Fork.ForkTree> =>
-	Array.findFirst(trees, (tree) =>
-		tree.id === id ? Option.some(tree) : subtree(tree.children, id),
-	)
-const active = (tree: Fork.ForkTree): boolean =>
-	tree.state._tag === "Active" && Array.every(tree.children, active)
 const failure = (tree: Fork.ForkTree): Effect.Effect<void, CapabilityFailed> =>
 	tree.state._tag === "Failed"
 		? Effect.fail(CapabilityFailed.make({ cause: tree.state.cause }))
@@ -110,11 +102,14 @@ const probe = (name: string, key: Context.Key<unknown, unknown>) =>
 const watch = (provider: Fork.Fork, key: Context.Key<unknown, unknown>) =>
 	Plugin.fork(
 		Graft.forks.pipe(
-			Stream.map((trees) => subtree(trees, provider.id)),
+			Stream.map((trees) => findSubtree(trees, provider.id)),
 			Stream.filter(Option.isSome),
 			Stream.map((tree) => tree.value),
 			Stream.tap(failure),
-			Stream.map((tree) => ({ name: tree.name, active: active(tree) })),
+			Stream.map((tree) => ({
+				name: tree.name,
+				active: isSubtreeActive(tree),
+			})),
 			Stream.changesWith((left, right) => left.active === right.active),
 			Stream.filter((tree) => tree.active),
 			Stream.runForEach((tree) =>

@@ -448,11 +448,19 @@ export const make = (
 						),
 					)
 
-		const unsupportedModules = Ref.get(state).pipe(
-			Effect.map(({ generation, entries }) =>
-				hooks.unsupported(
-					generation,
-					Array.fromIterable(HashMap.keys(entries)),
+		const unsupportedAttempts = (attempts: ReadonlyArray<Attempt>) =>
+			Array.reduce(attempts, HashSet.empty<string>(), (all, attempt) =>
+				HashSet.union(
+					all,
+					hooks.unsupported(attempt.generation, [attempt.url]),
+				),
+			)
+		const unsupportedModules = Ref.get(owners).pipe(
+			Effect.map((owned) =>
+				unsupportedAttempts(
+					Array.getSomes(
+						Array.map(HashMap.toValues(owned), (owner) => owner.active),
+					),
 				),
 			),
 		)
@@ -613,9 +621,12 @@ export const make = (
 							})
 						// A reused instance can acquire a native loading capability while the
 						// candidate imports. Observe it without throwing into concurrent old code.
-						const unsafe = hooks.unsupported(
-							candidate,
-							Array.fromIterable(HashMap.keys(next)),
+						const unsafe = unsupportedAttempts(
+							Array.map(active, (attempt) =>
+								HashMap.has(replacements, attempt.url)
+									? { ...attempt, generation: candidate }
+									: attempt,
+							),
 						)
 						if (HashSet.size(unsafe) > 0)
 							return WatchResult.Skipped({
@@ -653,9 +664,14 @@ export const make = (
 							),
 						)
 						yield* Ref.set(state, { entries: next, generation: candidate })
-						yield* Ref.set(
-							cached,
-							HashMap.map(next, (_, url) => ({ url, generation: candidate })),
+						yield* Ref.update(cached, (cached) =>
+							HashMap.union(
+								HashMap.filter(cached, (_, url) => HashMap.has(next, url)),
+								HashMap.map(replacements, (_, url) => ({
+									url,
+									generation: candidate,
+								})),
+							),
 						)
 						yield* Ref.set(retryDirty, HashSet.empty())
 						yield* Ref.set(retryAll, false)

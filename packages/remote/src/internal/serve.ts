@@ -1,3 +1,4 @@
+import { findSubtree, isSubtreeActive } from "./forkTree"
 import { Graft, Plugin, type Fork } from "@graftland/graft"
 import {
 	ConfigDirectory,
@@ -39,15 +40,6 @@ const check = (
 		},
 		{ discard: true },
 	)
-const subtree = (
-	trees: ReadonlyArray<Fork.ForkTree>,
-	id: number,
-): Option.Option<Fork.ForkTree> =>
-	Array.findFirst(trees, (tree) =>
-		tree.id === id ? Option.some(tree) : subtree(tree.children, id),
-	)
-const active = (tree: Fork.ForkTree): boolean =>
-	tree.state._tag === "Active" && Array.every(tree.children, active)
 const ready = Plugin.make({
 	name: "remote-ready",
 	inject: [Loader.Loader],
@@ -57,7 +49,7 @@ const ready = Plugin.make({
 		yield* loader.ready.pipe(
 			Effect.raceFirst(
 				Graft.forks.pipe(
-					Stream.map((trees) => subtree(trees, loader.root.id)),
+					Stream.map((trees) => findSubtree(trees, loader.root.id)),
 					Stream.filter(Option.isSome),
 					Stream.runForEach((tree) => check([tree.value])),
 				),
@@ -66,11 +58,11 @@ const ready = Plugin.make({
 		// Pending can still be reacting to a provider published during startup.
 		// Observe the loader's subtree, excluding this startup observer itself.
 		yield* Graft.forks.pipe(
-			Stream.map((trees) => subtree(trees, loader.root.id)),
+			Stream.map((trees) => findSubtree(trees, loader.root.id)),
 			Stream.filter(Option.isSome),
 			Stream.map((tree) => tree.value),
 			Stream.tap((tree) => check([tree])),
-			Stream.filter(active),
+			Stream.filter(isSubtreeActive),
 			Stream.runHead,
 		)
 	}),

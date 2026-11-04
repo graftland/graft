@@ -375,12 +375,14 @@ export const fromRecord = (
 ): Layer.Layer<ModuleResolver> =>
 	Layer.succeed(ModuleResolver, {
 		importModule: (specifier) =>
-			Effect.fromOption(Record.get(plugins, specifier), () =>
-				ModuleInvalid.make({
-					specifier,
-					cause: "it is not in the module table",
-				}),
-			).pipe(Effect.map((plugin) => ({ default: plugin }))),
+			Effect.suspend(() =>
+				Effect.fromOption(Record.get(plugins, specifier), () =>
+					ModuleInvalid.make({
+						specifier,
+						cause: "it is not in the module table",
+					}),
+				).pipe(Effect.map((plugin) => ({ default: plugin }))),
+			),
 		resolve: (name) =>
 			Effect.suspend(() =>
 				Effect.fromOption(Record.get(plugins, name), () =>

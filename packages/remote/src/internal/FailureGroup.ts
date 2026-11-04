@@ -1,5 +1,15 @@
-import { Cause, Data, Effect, FiberSet, TxRef } from "effect"
-import type { Fiber, Scope } from "effect"
+import {
+	Cause,
+	Data,
+	Deferred,
+	Effect,
+	Exit,
+	FiberSet,
+	Ref,
+	Scope,
+	TxRef,
+} from "effect"
+import type { Fiber } from "effect"
 
 type State<E> = Data.TaggedEnum<{
 	Open: {}
@@ -27,7 +37,7 @@ export interface FailureGroup<E> {
 		never,
 		R
 	>
-	readonly close: Effect.Effect<void>
+	readonly close: Effect.Effect<void, E>
 }
 
 /** One owner for first failure, transaction wakeups, and interruption of sibling work. */
@@ -35,6 +45,8 @@ export const make = <E>(): Effect.Effect<FailureGroup<E>, never, Scope.Scope> =>
 	Effect.gen(function* () {
 		const fibers = yield* FiberSet.make<unknown, E>()
 		const state = yield* TxRef.make<State<E>>(State.Open())
+		const failures = yield* Ref.make<Cause.Cause<E>>(Cause.empty)
+		const cleanup = yield* Ref.make<Cause.Cause<E>>(Cause.empty)
 		const check = TxRef.get(state).pipe(
 			Effect.flatMap((s) =>
 				s._tag === "Failed"
@@ -48,14 +60,49 @@ export const make = <E>(): Effect.Effect<FailureGroup<E>, never, Scope.Scope> =>
 			TxRef.update(state, (s): State<E> =>
 				s._tag === "Open" ? State.Failed({ cause }) : s,
 			)
+
+		const observe = <A, R>(effect: Effect.Effect<A, E, R>) =>
+			Effect.uninterruptibleMask((restore) =>
+				Effect.gen(function* () {
+					const scope = yield* Scope.make()
+					const body = yield* Effect.exit(restore(Scope.provide(scope)(effect)))
+					const closed = yield* Effect.exit(Scope.close(scope, body))
+					const bodyCause =
+						Exit.isFailure(body) && !Cause.hasInterruptsOnly(body.cause)
+							? body.cause
+							: Cause.empty
+					const releaseCause = Exit.isFailure(closed)
+						? closed.cause
+						: Cause.empty
+					const failure = Cause.combine(bodyCause, releaseCause)
+					// Ensuring/stream finalizers can already be part of the body's interrupted Exit.
+					const closing = Cause.combine(
+						Cause.hasInterrupts(bodyCause) ? bodyCause : Cause.empty,
+						releaseCause,
+					)
+					yield* Ref.update(cleanup, (cause) => Cause.combine(cause, closing))
+					if (failure.reasons.length > 0) {
+						yield* Ref.update(failures, (cause) =>
+							Cause.combine(cause, failure),
+						)
+						yield* publish(failure)
+						yield* Deferred.failCause(fibers.deferred, failure)
+					}
+					if (Exit.isFailure(closed))
+						return yield* Effect.failCause(
+							Exit.isFailure(body)
+								? Cause.combine(body.cause, closed.cause)
+								: closed.cause,
+						)
+					return yield* body
+				}),
+			)
 		yield* FiberSet.join(fibers).pipe(
 			Effect.catchCause((cause) =>
-				Cause.hasInterruptsOnly(cause)
-					? Effect.void
-					: publish(cause).pipe(
-							Effect.andThen(FiberSet.clear(fibers)),
-							Effect.uninterruptible,
-						),
+				publish(cause).pipe(
+					Effect.andThen(FiberSet.clear(fibers)),
+					Effect.uninterruptible,
+				),
 			),
 			Effect.forkScoped,
 		)
@@ -63,33 +110,38 @@ export const make = <E>(): Effect.Effect<FailureGroup<E>, never, Scope.Scope> =>
 		const failCause = (cause: Cause.Cause<E>) =>
 			Cause.hasInterruptsOnly(cause)
 				? Effect.void
-				: publish(cause).pipe(
-						Effect.andThen(FiberSet.run(fibers, Effect.failCause(cause))),
+				: FiberSet.run(fibers, observe(Effect.failCause(cause))).pipe(
 						Effect.asVoid,
 					)
+		const close = TxRef.update(state, (s) =>
+			s._tag === "Open" ? State.Closed() : s,
+		).pipe(
+			Effect.andThen(FiberSet.clear(fibers)),
+			Effect.andThen(Ref.get(cleanup)),
+			Effect.flatMap((cause) =>
+				cause.reasons.length > 0 ? Effect.failCause(cause) : Effect.void,
+			),
+			Effect.uninterruptible,
+		)
+		// Operational failure is delivered by await; release must also deliver sibling cleanup failures.
+		yield* Effect.addFinalizer(() => close.pipe(Effect.orDie))
 		return {
 			await: failure,
 			check,
-			cause: TxRef.get(state).pipe(
-				Effect.map((s) => (s._tag === "Failed" ? s.cause : Cause.empty)),
-			),
-			runtime: <R>() => FiberSet.runtime(fibers)<R>(),
-			run: (effect) =>
-				FiberSet.run(
-					fibers,
-					check.pipe(
-						Effect.andThen(effect),
-						Effect.tapCause((cause) =>
-							Cause.hasInterruptsOnly(cause) ? Effect.void : publish(cause),
-						),
+			cause: Ref.get(failures),
+			runtime: <R>() =>
+				FiberSet.runtime(fibers)<R>().pipe(
+					Effect.map(
+						(run) => (effect: Effect.Effect<unknown, E, R>) =>
+							run(observe(check.pipe(Effect.andThen(effect)))),
 					),
 				),
+			run: (effect) =>
+				FiberSet.run(fibers, observe(check.pipe(Effect.andThen(effect)))),
 			fail: (error) => failCause(Cause.fail(error)),
 			failCause,
 			race: (effect) =>
 				check.pipe(Effect.andThen(Effect.raceFirst(effect, failure))),
-			close: TxRef.update(state, (s) =>
-				s._tag === "Open" ? State.Closed() : s,
-			).pipe(Effect.andThen(FiberSet.clear(fibers))),
+			close,
 		}
 	})
