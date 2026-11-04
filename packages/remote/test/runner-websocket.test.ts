@@ -191,7 +191,7 @@ describe("runner WebSocket mutual TLS", () => {
 	it.live("rejects an environment URL using ws before dialing", () =>
 		Effect.gen(function* () {
 			const result = yield* Effect.exit(
-				WebsocketClient.connect(
+				WebsocketClient.open(
 					{
 						url: String("ws://localhost"),
 						tls: { ca: "unused" },

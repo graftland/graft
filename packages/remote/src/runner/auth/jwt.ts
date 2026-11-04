@@ -12,9 +12,9 @@ import {
 import { Jwk, Jwks, Jwt } from "effect/jose"
 import { Signature } from "effect/crypto"
 import { HttpClient } from "effect/http"
-import { JwtAuthenticator } from "../../Auth"
+import { Authenticator } from "../../Auth"
 import { ConfigDirectory } from "@graftland/loader"
-import { PeerAuthenticationError } from "../../internal/runner/model"
+import { AuthenticationFailed } from "../../Errors"
 import * as Token from "../../internal/auth/token"
 
 export const ClockTolerance = Schema.DurationFromString.check(
@@ -75,8 +75,9 @@ export default Plugin.make({
 		const keySet = yield* keys(config)
 		const services = yield* Layer.build(keySet)
 		const signature = yield* Signature.Signature
-		yield* Graft.provide(JwtAuthenticator, {
+		yield* Graft.provide(Authenticator, {
 			_tag: "Header",
+			issuer: config.issuer,
 			authenticate: (authorization) =>
 				Token.read(authorization).pipe(
 					Effect.flatMap((token) =>
@@ -97,9 +98,9 @@ export default Plugin.make({
 								),
 							),
 							Effect.mapError((error) =>
-								PeerAuthenticationError.make({
-									detail: "JWT authentication failed",
-									challenge: "invalid_token",
+								AuthenticationFailed.make({
+									reason: "invalid",
+									challenge: 'Bearer error="invalid_token"',
 									cause: Cause.fail(error),
 								}),
 							),

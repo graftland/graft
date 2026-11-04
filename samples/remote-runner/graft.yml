@@ -1,13 +1,6 @@
 # yaml-language-server: $schema=../../packages/cli/schema.json
 # The ledger runs on the host. The exporter runs on the runner; its instance
 # name on the runner is its entry id.
-# The WebSocket transport and JWT credentials plugins provide the host capabilities
-# used by the remote exporter.
-- id: websocket-transport
-  name: "@graftland/plugin-remote/internal/legacy/host/websocket"
-- id: jwt-credentials
-  name: "@graftland/plugin-remote/host/auth/jwt"
-
 - id: ledger
   name: ./src/ledger.ts
 

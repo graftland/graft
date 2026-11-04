@@ -1,23 +1,8 @@
 import type { Plugin } from "@graftland/graft"
 import { Cause, Effect, Schema } from "effect"
-import type { Context, Duration, Scope, Redacted } from "effect"
-import {
-	MtlsCredentials,
-	NoCredentials,
-	BearerCredentials,
-	JwtCredentials,
-	type ClientCertificate,
-} from "./Auth"
-import {
-	LocalTransport,
-	WorkerTransport,
-	UnixTransport,
-	CommandTransport,
-	type UnixOptions,
-	type CommandOptions,
-	WebsocketTransport,
-	type WebsocketOptions,
-} from "./Transport"
+import type { Duration, Scope, Redacted } from "effect"
+import type { ClientCertificate } from "./Auth"
+import type { UnixOptions, CommandOptions, WebsocketOptions } from "./Transport"
 import { RemoteError } from "./Errors"
 import type { Expected } from "./internal/runner/Packages"
 
@@ -191,31 +176,6 @@ export const runner = <
 ): Runner<D> => ({ _tag: "Runner", ...options })
 export type Target<D extends ReadonlyArray<Plugin.Dependency> = readonly []> =
 	Local | Worker | Runner<D>
-/** Credential construction checks requirements; Graft consumes the resulting runtime keys. */
-export const dependencies = <D extends ReadonlyArray<Plugin.Dependency>>(
-	target: Target<D>,
-): ReadonlyArray<
-	Context.Key<unknown, unknown> | Plugin.Optional<Context.Key<unknown, unknown>>
-> => {
-	if (target._tag === "Local") return [LocalTransport]
-	if (target._tag === "Worker") return [WorkerTransport]
-	if (target.transport._tag === "Command") return [CommandTransport]
-	const transport =
-		target.transport._tag === "Unix" ? UnixTransport : WebsocketTransport
-	const auth = target.auth
-	if (auth === undefined || auth._tag === "None")
-		return [transport, NoCredentials]
-	return [
-		transport,
-		auth._tag === "Mtls"
-			? MtlsCredentials
-			: auth._tag === "Bearer"
-				? BearerCredentials
-				: JwtCredentials,
-		...auth.inject,
-	]
-}
-
 export class InvalidTarget extends Schema.TaggedError<
 	InvalidTarget,
 	{ readonly brand: unique symbol }

@@ -1,10 +1,6 @@
 import { Graft, Plugin } from "@graftland/graft"
 import { Cause, Effect, FileSystem, Option, Path, Schema } from "effect"
-import {
-	Authenticator,
-	MtlsAuthenticator,
-	type AuthenticatorApi,
-} from "../../Auth"
+import { Authenticator, type AuthenticatorApi } from "../../Auth"
 import { AuthenticationFailed } from "../../Errors"
 import { ConfigDirectory } from "@graftland/loader"
 import { identityFromSubjectAltName } from "../../internal/auth/mtls"
@@ -45,23 +41,6 @@ export const capability = Plugin.make({
 	apply: ({ ca }) =>
 		read(ca).pipe(
 			Effect.flatMap((ca) => Graft.provide(Authenticator, make(ca))),
-		),
-})
-
-/** Transitional keyed provider for the existing runner entry. */
-export const legacy = Plugin.make({
-	name: "remote-mtls-authenticator",
-	config: Config,
-	inject: [FileSystem.FileSystem, Path.Path],
-	apply: ({ ca }) =>
-		read(ca).pipe(
-			Effect.flatMap((ca) =>
-				Graft.provide(MtlsAuthenticator, {
-					_tag: "Mtls",
-					ca,
-					authenticate: identityFromSubjectAltName,
-				}),
-			),
 		),
 })
 

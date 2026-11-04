@@ -31,12 +31,10 @@ export default async function setup() {
 		root: new URL("../../../packages/remote/src", import.meta.url).pathname,
 		entry: [
 			"bin",
+			"runner/index",
 			"watchdog",
 			"runner/supervisor",
 			"runner/websocket",
-			"internal/legacy/runner/websocket",
-			"internal/legacy/runner/auth/none",
-			"internal/legacy/runner/auth/mtls",
 			"runner/auth/jwt",
 		].map(
 			(name) =>

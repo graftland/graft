@@ -1,6 +1,6 @@
 import type { Plugin } from "@graftland/graft"
 import { assert } from "@effect/vitest"
-import { Array, Effect, Fiber, Stream, String } from "effect"
+import { Array, Deferred, Effect, Fiber, Stream, String } from "effect"
 import type { Channel } from "../src/Transport"
 import * as Framing from "../src/internal/runner/Framing"
 
@@ -31,11 +31,14 @@ export const transport = <E, R>(
 			combined.set(first)
 			combined.set(second, first.length)
 			// Split the header, then put the remainder and the next frame in one chunk.
+			const done = yield* Deferred.make<void>()
 			const sending = yield* Stream.make(
 				combined.subarray(0, 2),
 				combined.subarray(2),
 			).pipe(
-				Stream.concat(Stream.never),
+				Stream.concat(
+					Stream.fromEffect(Deferred.await(done)).pipe(Stream.drain),
+				),
 				Stream.run(channel.output),
 				Effect.forkScoped,
 			)
@@ -53,7 +56,8 @@ export const transport = <E, R>(
 					[4, 5],
 				],
 			)
-			yield* Fiber.interrupt(sending)
+			yield* Deferred.succeed(done, undefined)
+			yield* Fiber.join(sending)
 		}),
 		eof: Effect.gen(function* () {
 			const channel = yield* connect

@@ -74,19 +74,3 @@ export const properties = (url: URL): Properties => ({
 	network: true,
 	carries: url.protocol === "wss:" ? ["header", "certificate"] : ["header"],
 })
-
-/** Transitional connection entry; assemblies own warnings for the new contract. */
-export const connect = Effect.fnUntraced(function* (
-	options: WebsocketOptions,
-	credentials: PreparedCredentials = {},
-) {
-	const url = yield* Schema.decodeEffect(Url)(options.url)
-	if (url.protocol === "ws:")
-		yield* Effect.logWarning(
-			credentials.authorization === undefined
-				? "Remote ws:// connection is unencrypted"
-				: "Remote ws:// connection is unencrypted; credentials are transmitted in plaintext",
-		)
-
-	return yield* open(options, credentials)
-})

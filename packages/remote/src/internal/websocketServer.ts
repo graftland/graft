@@ -12,14 +12,8 @@ import {
 import { HttpServerRequest, HttpServerResponse } from "effect/http"
 import type { Socket } from "effect/socket"
 import { TLSSocket } from "node:tls"
-import { Peer } from "../Auth"
-import {
-	AuthenticationFailed,
-	TransportError,
-	type PeerAuthenticationError,
-} from "../Errors"
+import { AuthenticationFailed, TransportError } from "../Errors"
 import type { Accept, Handshake, Serving } from "../Transport"
-import { connectionEnded } from "./runner/connectionEnded"
 import * as Channel from "./socketChannel"
 import { path, protocol, payloadLimit } from "./websocket"
 
@@ -151,45 +145,4 @@ export const bind = Effect.fnUntraced(function* (
 					),
 				),
 	} satisfies Serving & { readonly address: typeof server.address }
-})
-
-/** Transitional socket entry for the existing listener and protocol tests. */
-export const listen = Effect.fnUntraced(function* (
-	createServer: Parameters<typeof NodeHttpServer.make>[0],
-	options: Pick<NodeHttpServer.Options, "host" | "port" | "path">,
-	authenticate: Effect.Effect<
-		string,
-		PeerAuthenticationError,
-		HttpServerRequest.HttpServerRequest
-	>,
-) {
-	const server = yield* open(createServer, options)
-	return {
-		address: server.address,
-		run: <A, E, R>(handle: (socket: Socket.Socket) => Effect.Effect<A, E, R>) =>
-			server.run(
-				authenticate.pipe(
-					Effect.mapBoth({
-						onFailure: (error) =>
-							AuthenticationFailed.make({
-								reason: error.challenge === "missing" ? "missing" : "invalid",
-								...(error.challenge === undefined
-									? {}
-									: {
-											challenge:
-												error.challenge === "missing"
-													? "Bearer"
-													: 'Bearer error="invalid_token"',
-										}),
-								cause: Cause.fail(error),
-							}),
-						onSuccess: (identity) => (socket: Socket.Socket) =>
-							handle(socket).pipe(
-								Effect.catchCause(connectionEnded),
-								Effect.provideService(Peer, identity),
-							),
-					}),
-				),
-			),
-	}
 })

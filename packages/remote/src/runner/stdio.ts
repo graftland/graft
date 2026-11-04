@@ -1,68 +1,75 @@
-import { Plugin } from "@graftland/graft"
+import { Graft, Plugin } from "@graftland/graft"
 import {
-	Array,
 	Cause,
 	Deferred,
 	Effect,
+	Exit,
+	Option,
 	Schema,
 	Sink,
 	Stdio,
 	Stream,
 } from "effect"
-import { Peer } from "../Auth"
-import { Supervisor } from "../Supervisor"
+import { Listener, type Accept } from "../Transport"
 import { TransportError } from "../Errors"
-import { ServeLifecycle } from "../internal/ServeLifecycle"
-import { EndOfStream } from "../internal/runner/Framing"
 
-export const Config = Schema.Struct({
-	identity: Schema.String.pipe(
-		Schema.withDecodingDefaultKey(Effect.succeed("anonymous")),
-	),
-	auth: Schema.optionalKey(Schema.Never),
-})
-const ended = (cause: Cause.Cause<unknown>): boolean =>
-	cause.reasons.length > 0 &&
-	Array.every(
-		cause.reasons,
-		(reason) =>
-			reason._tag === "Fail" &&
-			(Schema.is(TransportError)(reason.error)
-				? ended(reason.error.cause)
-				: Schema.is(EndOfStream)(reason.error)),
-	)
+export const Config = Schema.Struct({ auth: Schema.optionalKey(Schema.Never) })
 export default Plugin.make({
 	name: "remote-stdio-listener",
 	config: Config,
-	inject: [Supervisor, Stdio.Stdio, ServeLifecycle],
-	apply: Effect.fnUntraced(function* (config) {
-		const supervisor = yield* Supervisor
+	inject: [Stdio.Stdio],
+	apply: Effect.fnUntraced(function* () {
 		const stdio = yield* Stdio.Stdio
-		const lifecycle = yield* ServeLifecycle
-		const channel = {
-			input: stdio.stdin.pipe(
-				Stream.mapError((error) =>
-					TransportError.make({ cause: Cause.fail(error) }),
-				),
-			),
-			output: stdio
-				.stdout({ endOnDone: false })
-				.pipe(
-					Sink.mapError((error) =>
-						TransportError.make({ cause: Cause.fail(error) }),
+		yield* Graft.provide(Listener, {
+			properties: {
+				protocol: "stdio",
+				encrypted: false,
+				network: false,
+				carries: [],
+			},
+			bind: Effect.fnUntraced(function* () {
+				const ready = yield* Deferred.make<void>()
+				const eof = yield* Deferred.make<void>()
+				const channel = {
+					input: stdio.stdin.pipe(
+						Stream.onExit((exit) =>
+							Exit.isSuccess(exit)
+								? Deferred.succeed(eof, undefined)
+								: Effect.void,
+						),
+						Stream.mapError((error) =>
+							TransportError.make({ cause: Cause.fail(error) }),
+						),
 					),
-				),
-		}
-		yield* Plugin.fork(
-			supervisor.accept(channel).pipe(
-				Effect.provideService(Peer, config.identity),
-				Effect.scoped,
-				Effect.catchCauseIf(
-					(cause: Cause.Cause<TransportError>) => ended(cause),
-					() => Effect.void,
-				),
-				Effect.onExit((exit) => Deferred.done(lifecycle.ended, exit)),
-			),
-		)
+					output: stdio
+						.stdout({ endOnDone: false })
+						.pipe(
+							Sink.mapError((error) =>
+								TransportError.make({ cause: Cause.fail(error) }),
+							),
+						),
+				}
+				return {
+					ready: Deferred.await(ready),
+					serve: (accept: Accept) =>
+						accept({
+							authorization: Option.none(),
+							certificate: Option.none(),
+						}).pipe(
+							Effect.mapError((error) =>
+								TransportError.make({ cause: Cause.fail(error) }),
+							),
+							Effect.flatMap((session) =>
+								Deferred.succeed(ready, undefined).pipe(
+									Effect.andThen(session(channel)),
+								),
+							),
+							Effect.scoped,
+							// Successful session completion alone is not EOF.
+							Effect.andThen(Deferred.await(eof)),
+						),
+				}
+			}),
+		})
 	}),
 })

@@ -4,7 +4,6 @@ import {
 	Include,
 	Loader,
 	ModuleResolver,
-	type Entry,
 } from "@graftland/loader"
 import {
 	Array,
@@ -22,10 +21,6 @@ import * as Importer from "./importer"
 import { ServeLifecycle, StartupError, make } from "./ServeLifecycle"
 import { cleanupCause } from "./cleanup"
 export { StartupError } from "./ServeLifecycle"
-
-export type Source =
-	| { readonly _tag: "Config"; readonly config: string }
-	| { readonly _tag: "Entries"; readonly entries: ReadonlyArray<Entry.Entry> }
 
 const check = (
 	trees: ReadonlyArray<Fork.ForkTree>,
@@ -53,33 +48,6 @@ const subtree = (
 	)
 const active = (tree: Fork.ForkTree): boolean =>
 	tree.state._tag === "Active" && Array.every(tree.children, active)
-/** Fork names identify listeners regardless of how their modules were resolved. */
-const listeners = (
-	trees: ReadonlyArray<Fork.ForkTree>,
-): ReadonlyArray<string> =>
-	Array.flatMap(trees, (tree) => [
-		...(Array.contains(
-			[
-				"remote-stdio-listener",
-				"remote-unix-listener",
-				"remote-websocket-listener",
-			],
-			tree.name,
-		)
-			? [tree.name]
-			: []),
-		...listeners(tree.children),
-	])
-const exclusive = (tree: Fork.ForkTree) => {
-	const names = listeners([tree])
-	return Array.contains(names, "remote-stdio-listener") && names.length !== 1
-		? Effect.fail(
-				StartupError.make({
-					detail: "A stdio listener must be the only listener in serve",
-				}),
-			)
-		: Effect.void
-}
 const ready = Plugin.make({
 	name: "remote-ready",
 	inject: [Loader.Loader],
@@ -102,7 +70,6 @@ const ready = Plugin.make({
 			Stream.filter(Option.isSome),
 			Stream.map((tree) => tree.value),
 			Stream.tap((tree) => check([tree])),
-			Stream.tap(exclusive),
 			Stream.filter(active),
 			Stream.runHead,
 		)
@@ -124,15 +91,16 @@ const close = (entries: Fork.Fork, lifecycle: typeof ServeLifecycle.Service) =>
 			return yield* Effect.failCause(cleanupCause(cause))
 	})
 
-const load = Effect.fnUntraced(function* (source: Source, directory: string) {
+const load = Effect.fnUntraced(function* (config: string, directory: string) {
 	const lifecycle = yield* make
 	yield* Graft.provide(ServeLifecycle, lifecycle)
 	const importer = yield* Importer.make(directory)
 	const resolver = yield* ModuleResolver.make({ base: directory, importer })
 	yield* Graft.provide(ModuleResolver.ModuleResolver, resolver)
-	const entries = yield* source._tag === "Config"
-		? Graft.plugin(Include.Include, { path: source.config, watch: false })
-		: Graft.plugin(Loader.plugin, source.entries)
+	const entries = yield* Graft.plugin(Include.Include, {
+		path: config,
+		watch: false,
+	})
 	yield* entries.await
 	const startup = yield* Graft.plugin(ready)
 	yield* startup.await
@@ -140,17 +108,11 @@ const load = Effect.fnUntraced(function* (source: Source, directory: string) {
 		Effect.ensuring(close(entries, lifecycle)),
 	)
 })
-export const run = Effect.fnUntraced(function* (source: Source) {
+export const run = Effect.fnUntraced(function* (config: string) {
 	const path = yield* Path.Path
-	const resolved: Source =
-		source._tag === "Config"
-			? { _tag: "Config", config: path.resolve(source.config) }
-			: source
-	const directory =
-		resolved._tag === "Config"
-			? path.dirname(resolved.config)
-			: path.resolve(".")
-	return yield* load(resolved, directory).pipe(
+	const file = path.resolve(config)
+	const directory = path.dirname(file)
+	return yield* load(file, directory).pipe(
 		Effect.mapError((error) =>
 			StartupError.make({
 				detail: "Starting the runner failed",

@@ -28,15 +28,10 @@ describe("remote runner", () => {
 							dist: local("../.cache/runner"),
 							exports: {
 								"./bin": "./dist/bin.js",
+								"./runner": "./dist/runner/index.js",
 								"./watchdog": "./dist/watchdog.js",
 								"./runner/supervisor": "./dist/runner/supervisor.js",
 								"./runner/websocket": "./dist/runner/websocket.js",
-								"./internal/legacy/runner/websocket":
-									"./dist/internal/legacy/runner/websocket.js",
-								"./internal/legacy/runner/auth/none":
-									"./dist/internal/legacy/runner/auth/none.js",
-								"./internal/legacy/runner/auth/mtls":
-									"./dist/internal/legacy/runner/auth/mtls.js",
 								"./runner/auth/jwt": "./dist/runner/auth/jwt.js",
 							},
 						},

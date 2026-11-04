@@ -137,6 +137,7 @@ const runnerTarget = Effect.fnUntraced(function* (
 		{ contractModule: input.contract },
 		{
 			_tag: "Connector",
+			explicitAuth: target.auth !== undefined,
 			...(target.instance === undefined ? {} : { instance: target.instance }),
 			...(target.lease === undefined ? {} : { lease: target.lease }),
 			...(target.margin === undefined ? {} : { margin: target.margin }),

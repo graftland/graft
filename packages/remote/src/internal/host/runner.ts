@@ -1,4 +1,3 @@
-import type { Plugin } from "@graftland/graft"
 import * as FailureGroup from "../FailureGroup"
 import {
 	Cause,
@@ -11,84 +10,17 @@ import {
 	Scope,
 } from "effect"
 import { RpcClient } from "effect/rpc"
-import {
-	MtlsCredentials,
-	NoCredentials,
-	BearerCredentials,
-	JwtCredentials,
-	type PreparedCredentials,
-} from "../../Auth"
-import {
-	WebsocketTransport,
-	UnixTransport,
-	CommandTransport,
-} from "../../Transport"
-import {
-	type Authentication,
-	type Runner as RunnerOptions,
-} from "../../Targets"
-import { connect as connectCapability } from "../assembly"
+import { connectWith as connectCapability } from "../assembly"
 import type { ConfiguredRunner, Connected } from "../runner/Connection"
-import { ProcessExited, TransportError, RemoteError } from "../../Errors"
+import { ProcessExited, TransportError } from "../../Errors"
 import { cleanupCause } from "../cleanup"
 import * as Port from "../port"
 import * as Multiplex from "../runner/Multiplex"
 import * as Packages from "../runner/Packages"
 import * as Wire from "../runner/Wire"
 import { awaitTermination, defaults, childOf } from "../runner/model"
-type RunnerTarget<D extends ReadonlyArray<Plugin.Dependency>> =
-	RunnerOptions<D> & { readonly instance: string }
-
-const prepare = Effect.fnUntraced(function* <
-	D extends ReadonlyArray<Plugin.Dependency>,
->(
-	auth: Authentication<D> | undefined,
-): Effect.fn.Return<
-	PreparedCredentials,
-	RemoteError,
-	| Plugin.Required<D>
-	| Scope.Scope
-	| MtlsCredentials
-	| NoCredentials
-	| BearerCredentials
-	| JwtCredentials
-> {
-	if (auth === undefined || auth._tag === "None") {
-		const encoder = yield* NoCredentials
-		yield* encoder.prepare
-		return {}
-	}
-	if (auth._tag === "Mtls") {
-		const encoder = yield* MtlsCredentials
-		return {
-			certificate: yield* auth.read.pipe(Effect.flatMap(encoder.prepare)),
-		}
-	}
-	const encoder = yield* auth._tag === "Bearer"
-		? BearerCredentials
-		: JwtCredentials
-	return {
-		authorization: yield* auth.read.pipe(Effect.flatMap(encoder.prepare)),
-	}
-})
-const connectChannel = Effect.fnUntraced(function* <
-	D extends ReadonlyArray<Plugin.Dependency>,
->(target: RunnerTarget<D>) {
-	if (target.transport._tag === "Command") {
-		const transport = yield* CommandTransport
-		return yield* transport.connect(target.transport)
-	}
-	const credentials = yield* prepare(target.auth)
-	if (target.transport._tag === "Unix") {
-		const transport = yield* UnixTransport
-		return yield* transport.connect(target.transport, credentials)
-	}
-	const transport = yield* WebsocketTransport
-	return yield* transport.connect(target.transport, credentials)
-})
-
-export const connect = <D extends ReadonlyArray<Plugin.Dependency>>(
-	target: RunnerTarget<D> | (ConfiguredRunner & { readonly instance: string }),
+export const connect = (
+	target: ConfiguredRunner & { readonly instance: string },
 	contractModule: string,
 	options: Port.Options,
 	resources: Scope.Scope,
@@ -98,10 +30,9 @@ export const connect = <D extends ReadonlyArray<Plugin.Dependency>>(
 		const instance = target.instance
 
 		const margin = Duration.toMillis(target.margin ?? "5 seconds")
-		const channel =
-			target._tag === "Connector"
-				? yield* connectCapability.pipe(Scope.provide(processScope))
-				: yield* connectChannel(target).pipe(Scope.provide(processScope))
+		const channel = yield* connectCapability(target.explicitAuth).pipe(
+			Scope.provide(processScope),
+		)
 		const mux = yield* Multiplex.make(channel).pipe(Scope.provide(resources))
 		const control = yield* Port.make(Wire.channel(mux, 0), {
 			session: "session-v1",

@@ -15,10 +15,13 @@ import {
 	Layer,
 	Option,
 	Queue,
+	Clock,
+	Schema,
+	Redacted,
 	Stream,
 } from "effect"
 import { inject } from "vitest"
-import { SecureRandom } from "effect/crypto"
+import { Digest, Signature, SecureRandom } from "effect/crypto"
 import { Connector, Listener, type Channel } from "../src/Transport"
 import { Credentials, Peer } from "../src/Auth"
 import { TransportError } from "../src/Errors"
@@ -27,13 +30,31 @@ import { capability as websocket } from "../src/host/websocket"
 import { capability as listener } from "../src/runner/websocket"
 import { capability as credentials } from "../src/host/auth/mtls"
 import { capability as authenticator } from "../src/runner/auth/mtls"
+import hostUnix from "../src/host/unix"
+import hostCommand from "../src/host/command"
+import runnerUnix from "../src/runner/unix"
+import runnerStdio from "../src/runner/stdio"
+import hostNone from "../src/host/auth/none"
+import hostBearer from "../src/host/auth/bearer"
+import hostJwt from "../src/host/auth/jwt"
+import runnerNone from "../src/runner/auth/none"
+import runnerBearer from "../src/runner/auth/bearer"
+import runnerJwt from "../src/runner/auth/jwt"
+import { Jwk, Jwt } from "effect/jose"
+import { FetchHttpClient } from "effect/http"
+import process from "node:process"
 import * as Assembly from "../src/internal/assembly"
 import * as Certificates from "../src/internal/Certificates"
 import * as Conformance from "./conformance"
 
 const runtime = Graft.layer.pipe(
 	Layer.provideMerge(
-		Layer.merge(NodeServices.layer, SecureRandom.layerWebCrypto),
+		Layer.mergeAll(
+			NodeServices.layer,
+			Digest.layerWebCrypto,
+			Signature.layerWebCrypto,
+			FetchHttpClient.layer,
+		).pipe(Layer.provideMerge(SecureRandom.layerWebCrypto)),
 	),
 )
 class Business extends Context.Service<Business, string>()(
@@ -602,3 +623,147 @@ describe("capability conformance: websocket and mTLS", () => {
 		}).pipe(Effect.scoped, Effect.provide(runtime)),
 	)
 })
+
+const remaining = [
+	{
+		name: "unix/none",
+		connector: hostUnix,
+		listener: runnerUnix,
+		credentials: hostNone,
+		authenticator: runnerNone,
+	},
+	{
+		name: "command/stdio",
+		connector: hostCommand,
+		listener: runnerStdio,
+		credentials: hostNone,
+		authenticator: runnerNone,
+	},
+	{
+		name: "websocket/none",
+		connector: websocket,
+		listener,
+		credentials: hostNone,
+		authenticator: runnerNone,
+	},
+	{
+		name: "websocket/bearer",
+		connector: websocket,
+		listener,
+		credentials: hostBearer,
+		authenticator: runnerBearer,
+	},
+	{
+		name: "websocket/jwt",
+		connector: websocket,
+		listener,
+		credentials: hostJwt,
+		authenticator: runnerJwt,
+	},
+]
+const tokenConfig = Effect.fnUntraced(function* (
+	name: string,
+	directory: string,
+) {
+	const fs = yield* FileSystem.FileSystem
+	if (name === "websocket/bearer") {
+		const digest = yield* Digest.Digest
+		const token = "conformance-token"
+		const hash = yield* digest.digestHex(
+			Digest.sha256,
+			new TextEncoder().encode(token),
+		)
+		const tokens = directory + "/tokens.json"
+		const json = yield* Schema.encodeEffect(
+			Schema.fromJsonString(Schema.Unknown),
+		)({ [hash]: "echo" })
+		yield* fs.writeFileString(tokens, json)
+		return { host: { token }, server: { tokens } }
+	}
+	if (name === "websocket/jwt") {
+		const pair = yield* Jwk.generateKeyPair({ algorithm: "ES256" })
+		const key = yield* Jwk.importPrivate(pair.privateKey, "ES256")
+		const publicKey = yield* Jwk.importPublic(pair.publicKey, "ES256")
+		const pem = yield* Jwk.exportSpki(publicKey, { format: "pem" })
+		const file = directory + "/public.pem"
+		yield* fs.writeFileString(file, pem)
+		const now = Math.floor((yield* Clock.currentTimeMillis) / 1000)
+		const token = yield* Jwt.sign(
+			Schema.Json,
+			{
+				iss: "https://issuer.example",
+				aud: "graft",
+				sub: "echo",
+				exp: now + 300,
+			},
+			key,
+		)
+		return {
+			host: { token: Redacted.value(token) },
+			server: {
+				issuer: "https://issuer.example",
+				audience: ["graft"],
+				algorithms: ["ES256"],
+				keys: { publicKey: file },
+			},
+		}
+	}
+	return { host: {}, server: { identity: "echo" } }
+})
+const remainingConnection =
+	(name: string) => (plugins: Conformance.Capabilities) =>
+		Effect.gen(function* () {
+			yield* Graft.provide(Business, "inherited")
+			const provider = yield* Graft.plugin(supervisor)
+			yield* provider.await
+			const fs = yield* FileSystem.FileSystem
+			const directory = yield* fs.makeTempDirectoryScoped({
+				directory: "/tmp",
+				prefix: "graft-",
+			})
+			const auth = yield* tokenConfig(name, directory)
+			const address = yield* port
+			const config =
+				name === "unix/none"
+					? { path: directory + "/echo.sock" }
+					: { url: `ws://127.0.0.1:${address}` }
+			if (name !== "command/stdio") {
+				const server = yield* Assembly.runner({
+					transport: { plugin: plugins.listener, config },
+					auth: { plugin: plugins.authenticator, config: auth.server },
+				})
+				yield* ready(server)
+			}
+			return yield* host({
+				transport: {
+					plugin: plugins.connector,
+					config:
+						name === "command/stdio"
+							? {
+									argv: [
+										process.execPath,
+										new URL(
+											"../.cache/integration/stdio-echo.js",
+											import.meta.url,
+										).pathname,
+									],
+								}
+							: config,
+				},
+				auth: { plugin: plugins.credentials, config: auth.host },
+			})
+		})
+for (const implementation of remaining) {
+	const checks = Conformance.transport(
+		implementation,
+		remainingConnection(implementation.name),
+	)
+	describe(`capability conformance: ${implementation.name}`, () => {
+		it.live("preserves byte order across split and coalesced frames", () =>
+			checks.chunks.pipe(Effect.scoped, Effect.provide(runtime)),
+		)
+		it.live("exposes clean close as EOF", () =>
+			checks.eof.pipe(Effect.scoped, Effect.provide(runtime)),
+		)
+	})
+}

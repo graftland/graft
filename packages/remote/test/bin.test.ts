@@ -1,4 +1,4 @@
-import { application } from "./application"
+import { runnerConfig } from "./application"
 import { inject } from "vitest"
 import { assert, describe, it } from "@effect/vitest"
 import { NodeServices } from "@effect/platform-node"
@@ -29,91 +29,40 @@ const invoke = (args: ReadonlyArray<string>) =>
 			{ concurrency: "unbounded" },
 		)
 	})
-const serve = [
-	"serve",
-	"--listen",
-	"wss://127.0.0.1:0",
-	"--auth",
-	"mtls",
-	"--state",
-	"unused-state",
-	"--root",
-	"unused-root",
-	"--cert",
-	"unused-cert",
-	"--key",
-	"unused-key",
-	"--ca",
-	"unused-ca",
-]
 describe("remote command line", () => {
 	it.live(
-		"reports invalid ports and durations as usage errors before reading files",
+		"requires a config file and rejects removed serve shorthand flags",
 		() =>
 			Effect.gen(function* () {
-				const cases: ReadonlyArray<readonly [string, string, string]> = [
-					["--listen", "wss://localhost:65536", "URL"],
-					["--listen", "wss://localhost:fraction", "URL"],
-					["--lease", "0 millis", "finite and positive"],
-					["--grace", "Infinity", "finite and positive"],
-					["--lease", "soon", "Duration"],
-					["--lease", "15000", "Duration"],
-				]
-				for (const [flag, value, detail] of cases) {
-					const result = yield* invoke([...serve, flag, value])
+				for (const args of [
+					["serve"],
+					["serve", "--config", "missing.yml", "--listen", "ws://localhost:0"],
+					["serve", "--stdio"],
+				]) {
+					const result = yield* invoke(args)
 					assert.notEqual(result.code, 0)
-					const output = result.stdout + result.stderr
-					assert.include(output, detail)
-					assert.include(output, "USAGE")
-					assert.notInclude(output, "ShowHelp: Help requested")
-					assert.notInclude(output, "ENOENT")
+					assert.include(result.stdout + result.stderr, "USAGE")
+					assert.notInclude(result.stdout + result.stderr, "ENOENT")
 				}
 			}).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 	)
-	it.live("rejects mixing a runner config file with shorthand flags", () =>
-		Effect.gen(function* () {
-			const result = yield* invoke([
-				"serve",
-				"--config",
-				"missing.yml",
-				"--listen",
-				"wss://127.0.0.1:0",
-			])
-			assert.notEqual(result.code, 0)
-			assert.include(
-				result.stdout + result.stderr,
-				"--config cannot be combined",
-			)
-			assert.include(result.stdout + result.stderr, "ERROR")
-			assert.notInclude(result.stdout + result.stderr, "ENOENT")
-		}).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
-	)
-
 	it.live(
 		"reports listener startup failures before claiming a configured runner is ready",
 		() =>
 			Effect.gen(function* () {
 				const fs = yield* FileSystem.FileSystem
 				const directory = yield* fs.makeTempDirectoryScoped()
-				yield* application(directory)
-				const file = directory + "/runner.yml"
-				yield* fs.writeFileString(
-					file,
-					`
-- id: supervisor
-  name: '@graftland/plugin-remote/runner/supervisor'
-  config: { root: '${inject("remoteRoot")}', state: '${directory}/state' }
-- id: auth
-  name: '@graftland/plugin-remote/internal/legacy/runner/auth/mtls'
-  config: { ca: '${inject("remoteTls")}/ca.crt' }
-- id: listener
-  name: '@graftland/plugin-remote/internal/legacy/runner/websocket'
-  config:
-    url: wss://127.0.0.1:0
-    cert: missing.crt
-    key: '${inject("remoteTls")}/server.key'
-    auth: '@graftland/plugin-remote/Auth/MtlsAuthenticator'
-`,
+				const file = yield* runnerConfig(
+					directory + "/state",
+					[
+						{
+							url: "wss://127.0.0.1:0",
+							cert: directory + "/missing.crt",
+							key: inject("remoteTls") + "/server.key",
+							auth: { mtls: { ca: inject("remoteTls") + "/ca.crt" } },
+						},
+					],
+					{ root: inject("remoteRoot") },
 				)
 				const result = yield* invoke(["serve", "--config", file])
 				assert.notEqual(result.code, 0)
@@ -125,87 +74,23 @@ describe("remote command line", () => {
 			}).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 	)
 
-	it.live("rejects stdio combined with network or authentication flags", () =>
-		Effect.gen(function* () {
-			for (const flags of [
-				["--listen", "/tmp/unused.sock"],
-				["--auth", "none"],
-			]) {
-				const result = yield* invoke(["serve", "--stdio", ...flags])
-				assert.notEqual(result.code, 0)
-				assert.include(result.stderr, "--stdio cannot be combined")
-				assert.notInclude(result.stderr, "ENOENT")
-			}
-		}).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
-	)
-
-	it.live(
-		"rejects mismatched and incomplete authentication flags as usage errors",
-		() =>
-			Effect.gen(function* () {
-				const cases = [
-					["--auth", "none", "--tokens", "unused"],
-					["--auth", "bearer", "--ca", "unused"],
-					["--auth", "bearer"],
-					["--auth", "jwt", "--identity", "unused"],
-					["--auth", "jwt", "--tokens", "unused"],
-					["--auth", "jwt"],
-					[
-						"--auth",
-						"jwt",
-						"--jwt-jwks",
-						"https://unused/keys",
-						"--jwt-public-key",
-						"unused",
-					],
-					[
-						"--auth",
-						"jwt",
-						"--jwt-public-key",
-						"unused",
-						"--jwt-issuer",
-						"issuer",
-					],
-					["--auth", "jwt", "--jwt-algorithm", "HS256"],
-					["--auth", "jwt", "--jwt-clock-tolerance", "-1 second"],
-					["--auth", "jwt", "--jwt-clock-tolerance", "soon"],
-					["--auth", "mtls", "--ca", "unused"],
-				]
-				for (const flags of cases) {
-					const result = yield* invoke([
-						"serve",
-						"--listen",
-						"ws://127.0.0.1:0",
-						...flags,
-					])
-					assert.notEqual(result.code, 0)
-					// Handler-level CliError.UserError is rendered as ERROR; parser failures also include USAGE.
-					assert.include(result.stdout + result.stderr, "ERROR")
-					assert.notInclude(result.stdout + result.stderr, "    at ")
-					assert.notInclude(result.stdout + result.stderr, "ENOENT")
-				}
-			}).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
-	)
-
 	it.live(
 		"reports authenticator startup failure even while its listener is waiting",
 		() =>
 			Effect.gen(function* () {
 				const fs = yield* FileSystem.FileSystem
 				const directory = yield* fs.makeTempDirectoryScoped()
-				const result = yield* invoke([
-					"serve",
-					"--listen",
-					"ws://127.0.0.1:0",
-					"--auth",
-					"bearer",
-					"--tokens",
-					directory + "/missing-tokens.json",
-					"--state",
+				const config = yield* runnerConfig(
 					directory + "/state",
-					"--root",
-					inject("remoteRoot"),
-				])
+					[
+						{
+							url: "ws://127.0.0.1:0",
+							auth: { bearer: { tokens: directory + "/missing-tokens.json" } },
+						},
+					],
+					{ root: inject("remoteRoot") },
+				)
+				const result = yield* invoke(["serve", "--config", config])
 				assert.notEqual(result.code, 0)
 				assert.include(result.stderr, "missing-tokens.json")
 				assert.notInclude(result.stdout, '"event":"Listening"')

@@ -13,7 +13,7 @@ import { Digest } from "effect/crypto"
 import { Hex } from "effect/encoding"
 // @effect-diagnostics-next-line nodeBuiltinImport:off -- Token digests use Node's constant-time comparison
 import { timingSafeEqual } from "node:crypto"
-import { BearerAuthenticator } from "../../Auth"
+import { Authenticator } from "../../Auth"
 import { ConfigDirectory } from "@graftland/loader"
 import * as Token from "../../internal/auth/token"
 
@@ -46,7 +46,7 @@ export default Plugin.make({
 					Effect.map((hash) => ({ hash, identity })),
 				),
 		)
-		yield* Graft.provide(BearerAuthenticator, {
+		yield* Graft.provide(Authenticator, {
 			_tag: "Header",
 			authenticate: Effect.fnUntraced(function* (authorization) {
 				const token = yield* Token.read(authorization)

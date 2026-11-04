@@ -6,13 +6,11 @@ import {
 	Console,
 	Cause,
 	Array,
-	Duration,
 	Effect,
 	Layer,
 	Logger,
 	Option,
 	Schema,
-	String,
 } from "effect"
 import { Argument, CliError, Command, Flag } from "effect/cli"
 import process from "node:process"
@@ -23,179 +21,12 @@ import { load, run } from "./Runner"
 import { Bootstrap } from "./internal/runner/Bootstrap"
 import * as Watchdog from "./internal/runner/Watchdog"
 import * as Serve from "./internal/serve"
-import { MtlsAuthenticator } from "./Auth"
-import * as Authentication from "./internal/auth/flags"
-import { Url } from "./internal/websocket"
 import * as Certificates from "./internal/Certificates"
-import { Config as SupervisorConfig } from "./runner/supervisor"
 
-const duration = (name: string) =>
-	Flag.String(name).pipe(
-		Flag.withSchema(Schema.DurationFromString),
-		Flag.filter(
-			(value) => Duration.isFinite(value) && Duration.toMillis(value) > 0,
-			() => "Duration must be finite and positive",
-		),
-		Flag.optional,
-	)
-const required = <A>(value: Option.Option<A>, flag: string) =>
-	Effect.fromOption(value, () =>
-		CliError.UserError.make({
-			cause: `Missing --${flag}`,
-			userMessage: `--${flag} is required without --config`,
-		}),
-	)
-const Listen = Schema.Union([
-	Url,
-	Schema.String.check(
-		Schema.makeFilter((value) => !String.includes("://")(value), {
-			expected: "a unix socket path",
-		}),
-	),
-])
-const listenerEntries = Effect.fnUntraced(function* (
-	options: Parameters<typeof Authentication.entry>[0] & {
-		readonly stdio: boolean
-		readonly listen: ReadonlyArray<typeof Listen.Type>
-		readonly cert: Option.Option<string>
-		readonly key: Option.Option<string>
-	},
-) {
-	if (
-		options.stdio &&
-		(options.listen.length > 0 || Option.isSome(options.auth))
-	)
-		return yield* Authentication.usage(
-			"--stdio cannot be combined with --listen or --auth",
-		)
-	yield* Authentication.validate(options, options.stdio)
-	const secure = Array.some(
-		options.listen,
-		(address) => typeof address !== "string" && address.protocol === "wss:",
-	)
-	if (!secure && (Option.isSome(options.cert) || Option.isSome(options.key)))
-		return yield* Authentication.usage(
-			"--cert and --key require a wss:// listener",
-		)
-	if (options.stdio)
-		return [
-			{
-				id: "remote-stdio",
-				name: "@graftland/plugin-remote/runner/stdio",
-				config: {
-					identity: Option.getOrElse(options.identity, () => "anonymous"),
-				},
-			},
-		]
-	if (options.listen.length === 0)
-		return yield* Authentication.usage(
-			"--listen or --stdio is required without --config",
-		)
-	const auth = yield* Authentication.entry(options)
-	const certificate = secure
-		? {
-				cert: yield* required(options.cert, "cert"),
-				key: yield* required(options.key, "key"),
-			}
-		: {}
-	const listeners = yield* Effect.forEach(options.listen, (address, index) =>
-		Effect.gen(function* () {
-			const id = `remote-listener-${index}`
-			if (
-				auth.key === MtlsAuthenticator.key &&
-				(typeof address === "string" || address.protocol !== "wss:")
-			)
-				return yield* Authentication.usage(
-					"Mutual TLS requires wss:// listeners",
-				)
-			if (typeof address === "string")
-				return {
-					id,
-					name: "@graftland/plugin-remote/runner/unix",
-					config: { path: address, auth: auth.key },
-				}
-			const url = yield* Schema.encodeEffect(Url)(address)
-			return {
-				id,
-				name: "@graftland/plugin-remote/internal/legacy/runner/websocket",
-				config: {
-					...(address.protocol === "wss:" ? certificate : {}),
-					url,
-					auth: auth.key,
-				},
-			}
-		}),
-	)
-	return [auth.entry, ...listeners]
-})
 const serve = Command.make(
 	"serve",
-	{
-		config: Flag.String("config").pipe(Flag.optional),
-		listen: Flag.String("listen").pipe(
-			Flag.withSchema(Listen),
-			Flag.atLeast(0),
-		),
-		stdio: Flag.Boolean("stdio").pipe(Flag.withDefault(false)),
-		...Authentication.flags,
-		state: Flag.String("state").pipe(Flag.optional),
-		root: Flag.String("root").pipe(Flag.optional),
-		cert: Flag.String("cert").pipe(Flag.optional),
-		key: Flag.String("key").pipe(Flag.optional),
-		lease: duration("lease"),
-		grace: duration("grace"),
-	},
-	Effect.fnUntraced(function* (options) {
-		if (Option.isSome(options.config)) {
-			if (
-				options.stdio ||
-				options.listen.length > 0 ||
-				Authentication.anySupplied(options) ||
-				Array.some(
-					[
-						options.state,
-						options.root,
-						options.cert,
-						options.key,
-						options.lease,
-						options.grace,
-					],
-					(value: Option.Option<unknown>) => Option.isSome(value),
-				)
-			)
-				return yield* CliError.UserError.make({
-					cause: "Conflicting serve options",
-					userMessage: "--config cannot be combined with serve shorthand flags",
-				})
-			return yield* Serve.run({ _tag: "Config", config: options.config.value })
-		}
-		const listeners = yield* listenerEntries(options)
-		const state = yield* required(options.state, "state")
-		const root = yield* required(options.root, "root")
-		const supervisor = yield* Schema.encodeEffect(SupervisorConfig)({
-			state,
-			root,
-			...Option.match(options.lease, {
-				onNone: () => ({}),
-				onSome: (lease) => ({ lease }),
-			}),
-			...Option.match(options.grace, {
-				onNone: () => ({}),
-				onSome: (grace) => ({ grace }),
-			}),
-		})
-		return yield* Serve.run({
-			_tag: "Entries",
-			entries: [
-				{
-					id: "remote-supervisor",
-					name: "@graftland/plugin-remote/runner/supervisor",
-					config: supervisor,
-				},
-				...listeners,
-			],
-		})
-	}),
+	{ config: Flag.String("config") },
+	({ config }) => Serve.run(config),
 )
 const certificates = Command.make(
 	"certificates",

@@ -2,7 +2,6 @@ import { Plugin, Graft } from "@graftland/graft"
 import { Cause, Effect, FileSystem, Option, Path, Schema } from "effect"
 import {
 	Connector,
-	WebsocketTransport,
 	type ConnectorApi,
 	type WebsocketOptions,
 } from "../Transport"
@@ -10,22 +9,6 @@ import { TransportError } from "../Errors"
 import { ConfigDirectory } from "@graftland/loader"
 import * as Websocket from "../internal/websocket"
 import * as Channel from "../internal/socketChannel"
-
-const plugin: Plugin.Plugin<void, void, Graft.ServiceConflict> = Plugin.service(
-	WebsocketTransport,
-	Effect.succeed({
-		connect: (options, certificate) =>
-			Websocket.connect(options, certificate).pipe(
-				Effect.flatMap(Channel.fromSocket),
-				Effect.mapError((error) =>
-					TransportError.make({ cause: Cause.fail(error) }),
-				),
-			),
-	}),
-	{ name: "remote-websocket-transport" },
-)
-
-export { plugin as legacy }
 
 /** Configured Connector; certificate paths belong to the enclosing configuration. */
 export const Config = Schema.Struct({

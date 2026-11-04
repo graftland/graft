@@ -1,4 +1,3 @@
-import type { Plugin } from "@graftland/graft"
 import {
 	LocalTransport,
 	WorkerTransport,
@@ -21,7 +20,6 @@ import type { RemoteTerminationUnconfirmed } from "./model"
 import type {
 	Local as LocalTarget,
 	Worker as WorkerTarget,
-	Runner as RunnerOptions,
 	RunnerCommon,
 } from "../../Targets"
 import {
@@ -34,15 +32,13 @@ import * as Port from "../port"
 import * as LocalProcess from "./Local"
 import * as Wire from "./Wire"
 
-type RunnerTarget<D extends ReadonlyArray<Plugin.Dependency>> =
-	RunnerOptions<D> & { readonly instance: string }
 export interface ConfiguredRunner extends Omit<RunnerCommon, "_tag"> {
 	readonly _tag: "Connector"
+	readonly explicitAuth?: boolean
 }
-export type Target<D extends ReadonlyArray<Plugin.Dependency> = readonly []> =
+export type Target =
 	| LocalTarget
 	| WorkerTarget
-	| RunnerTarget<D>
 	| (ConfiguredRunner & { readonly instance: string })
 
 type Peer = Port.Port
@@ -117,15 +113,8 @@ const scopes = Effect.acquireRelease(
 )
 
 /** Setup supplies a concrete control lifecycle; release never reads a later-installed effect. */
-export const acquire = <
-	A,
-	E,
-	R,
-	D,
-	DR,
-	Deps extends ReadonlyArray<Plugin.Dependency>,
->(
-	target: Target<Deps>,
+export const acquire = <A, E, R, D, DR>(
+	target: Target,
 	contractModule: string,
 	options: Port.Options,
 	setup: Effect.Effect<A, E, R | Connection>,

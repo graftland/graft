@@ -150,11 +150,7 @@ export const runnerTransport = (input: Listen): Reference => {
 		})
 	if (input.unix !== undefined)
 		return capability("runner", "unix", { path: input.unix })
-	return capability("runner", "stdio", {
-		...("identity" in input && input.identity !== undefined
-			? { identity: input.identity }
-			: {}),
-	})
+	return capability("runner", "stdio", {})
 }
 export const Host = Schema.Struct({
 	contract: Schema.String,
@@ -168,3 +164,10 @@ export const Runner = Schema.Struct({
 	grace: Schema.optionalKey(PositiveDuration),
 	listen: Schema.Array(Listen),
 })
+
+export const runnerAuthentication = (input: Listen): Reference =>
+	input.stdio !== undefined
+		? capability("runner", "auth/none", {
+				identity: input.identity ?? "anonymous",
+			})
+		: authentication("runner", input.auth)

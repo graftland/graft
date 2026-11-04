@@ -15,15 +15,18 @@ export const application = Effect.fnUntraced(function* (directory: string) {
 		"host/websocket",
 		"host/auth/mtls",
 		"host/auth/none",
+		"host/auth/bearer",
+		"host/auth/jwt",
+		"host/unix",
+		"host/command",
+		"runner/auth/bearer",
+		"runner/auth/jwt",
 		"runner/supervisor",
 		"runner/websocket",
 		"runner/auth/mtls",
 		"runner/auth/none",
 		"runner/stdio",
 		"runner/unix",
-		"internal/legacy/runner/websocket",
-		"internal/legacy/runner/auth/mtls",
-		"internal/legacy/runner/auth/none",
 	]
 	yield* fs.makeDirectory(installed, { recursive: true })
 	const manifest = yield* Schema.encodeEffect(
@@ -101,4 +104,27 @@ export const installModule = Effect.fnUntraced(function* (
 		root + "/index.mjs",
 		`export * from ${quoted};\nexport { default } from ${quoted};\n`,
 	)
+})
+
+/** Each subprocess loads the same public runner entry as a deployed application. */
+export const runnerConfig = Effect.fnUntraced(function* (
+	state: string,
+	listen: ReadonlyArray<unknown>,
+	options: Readonly<Record<string, unknown>>,
+) {
+	const fs = yield* FileSystem.FileSystem
+	const directory = yield* fs.makeTempDirectoryScoped()
+	yield* application(directory)
+	const file = directory + "/runner.yml"
+	const contents = yield* Schema.encodeEffect(
+		Schema.fromJsonString(Schema.Unknown),
+	)([
+		{
+			id: "runner",
+			name: "remote/runner",
+			config: { ...options, state, listen },
+		},
+	])
+	yield* fs.writeFileString(file, contents)
+	return file
 })

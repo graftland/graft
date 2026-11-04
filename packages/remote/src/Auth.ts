@@ -1,11 +1,7 @@
 /** Credentials and authenticated identities shared by transport plugins. */
 import { Context } from "effect"
 import type { Effect, Redacted, Option, Scope } from "effect"
-import type {
-	AuthenticationFailed,
-	CredentialsError,
-	PeerAuthenticationError,
-} from "./Errors"
+import type { AuthenticationFailed, CredentialsError } from "./Errors"
 
 export interface ClientCertificate {
 	readonly cert: string
@@ -14,76 +10,10 @@ export interface ClientCertificate {
 export class Peer extends Context.Service<Peer, string>()(
 	"@graftland/plugin-remote/Auth/Peer",
 ) {}
-export class MtlsCredentials extends Context.Service<
-	MtlsCredentials,
-	{
-		readonly prepare: (
-			certificate: ClientCertificate,
-		) => Effect.Effect<ClientCertificate>
-	}
->()("@graftland/plugin-remote/Auth/MtlsCredentials") {}
-export class MtlsAuthenticator extends Context.Service<
-	MtlsAuthenticator,
-	{
-		readonly _tag: "Mtls"
-		readonly ca: string
-		readonly authenticate: (
-			subjectAltName: string | undefined,
-		) => Effect.Effect<string, PeerAuthenticationError>
-	}
->()("@graftland/plugin-remote/Auth/MtlsAuthenticator") {}
-
-export class NoCredentials extends Context.Service<
-	NoCredentials,
-	{
-		readonly prepare: Effect.Effect<void>
-	}
->()("@graftland/plugin-remote/Auth/NoCredentials") {}
-
-export class NoAuthenticator extends Context.Service<
-	NoAuthenticator,
-	{
-		readonly _tag: "None"
-		readonly identity: string
-	}
->()("@graftland/plugin-remote/Auth/NoAuthenticator") {}
-
 export interface PreparedCredentials {
 	readonly certificate?: ClientCertificate
 	readonly authorization?: Redacted.Redacted<string>
 }
-export interface TokenCredentials {
-	readonly prepare: (
-		token: Redacted.Redacted<string>,
-	) => Effect.Effect<Redacted.Redacted<string>>
-}
-export class BearerCredentials extends Context.Service<
-	BearerCredentials,
-	TokenCredentials
->()("@graftland/plugin-remote/Auth/BearerCredentials") {}
-export class JwtCredentials extends Context.Service<
-	JwtCredentials,
-	TokenCredentials
->()("@graftland/plugin-remote/Auth/JwtCredentials") {}
-
-export interface HeaderAuthenticator {
-	readonly _tag: "Header"
-	readonly authenticate: (
-		authorization: Option.Option<Redacted.Redacted<string>>,
-	) => Effect.Effect<string, PeerAuthenticationError>
-}
-export class BearerAuthenticator extends Context.Service<
-	BearerAuthenticator,
-	HeaderAuthenticator
->()("@graftland/plugin-remote/Auth/BearerAuthenticator") {}
-export class JwtAuthenticator extends Context.Service<
-	JwtAuthenticator,
-	HeaderAuthenticator
->()("@graftland/plugin-remote/Auth/JwtAuthenticator") {}
-export type LegacyAuthenticator =
-	| HeaderAuthenticator
-	| typeof MtlsAuthenticator.Service
-	| typeof NoAuthenticator.Service
 
 export interface VerifiedCertificate {
 	readonly der: Uint8Array

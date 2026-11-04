@@ -59,30 +59,6 @@
 			"source": "./src/host/worker.ts",
 			"default": "./dist/host/worker.js"
 		},
-		"./internal/legacy/host/auth/mtls": {
-			"source": "./src/internal/legacy/host/auth/mtls.ts",
-			"default": "./dist/internal/legacy/host/auth/mtls.js"
-		},
-		"./internal/legacy/host/auth/none": {
-			"source": "./src/internal/legacy/host/auth/none.ts",
-			"default": "./dist/internal/legacy/host/auth/none.js"
-		},
-		"./internal/legacy/host/websocket": {
-			"source": "./src/internal/legacy/host/websocket.ts",
-			"default": "./dist/internal/legacy/host/websocket.js"
-		},
-		"./internal/legacy/runner/auth/mtls": {
-			"source": "./src/internal/legacy/runner/auth/mtls.ts",
-			"default": "./dist/internal/legacy/runner/auth/mtls.js"
-		},
-		"./internal/legacy/runner/auth/none": {
-			"source": "./src/internal/legacy/runner/auth/none.ts",
-			"default": "./dist/internal/legacy/runner/auth/none.js"
-		},
-		"./internal/legacy/runner/websocket": {
-			"source": "./src/internal/legacy/runner/websocket.ts",
-			"default": "./dist/internal/legacy/runner/websocket.js"
-		},
 		"./runner": {
 			"source": "./src/runner/index.ts",
 			"default": "./dist/runner/index.js"
@@ -172,12 +148,6 @@
 			"./host/unix": "./dist/host/unix.js",
 			"./host/websocket": "./dist/host/websocket.js",
 			"./host/worker": "./dist/host/worker.js",
-			"./internal/legacy/host/auth/mtls": "./dist/internal/legacy/host/auth/mtls.js",
-			"./internal/legacy/host/auth/none": "./dist/internal/legacy/host/auth/none.js",
-			"./internal/legacy/host/websocket": "./dist/internal/legacy/host/websocket.js",
-			"./internal/legacy/runner/auth/mtls": "./dist/internal/legacy/runner/auth/mtls.js",
-			"./internal/legacy/runner/auth/none": "./dist/internal/legacy/runner/auth/none.js",
-			"./internal/legacy/runner/websocket": "./dist/internal/legacy/runner/websocket.js",
 			"./runner": "./dist/runner/index.js",
 			"./Runner": "./dist/Runner.js",
 			"./runner/auth/bearer": "./dist/runner/auth/bearer.js",

@@ -105,23 +105,38 @@ export const start = Effect.fn("Lab.start")(function* (options: Options) {
 		})
 
 	const credentials = yield* issue(options.directory)
+	const config = path.join(root, "runner.yml")
+	const contents = yield* Schema.encodeEffect(
+		Schema.fromJsonString(Schema.Unknown),
+	)([
+		{
+			id: "runner",
+			name: "remote/runner",
+			config: {
+				root,
+				state: path.join(options.directory, "state"),
+				listen: [
+					{
+						url: "wss://127.0.0.1:0",
+						cert: path.join(certificates, "server.crt"),
+						key: path.join(certificates, "server.key"),
+						auth: {
+							jwt: {
+								issuer: "https://issuer.example",
+								audience: ["graft"],
+								algorithms: ["ES256"],
+								keys: { publicKey: credentials.publicKey },
+							},
+						},
+					},
+				],
+			},
+		},
+	])
+	yield* fs.writeFileString(config, contents)
 	const runner = yield* ChildProcess.make(
 		process.execPath,
-		[
-			options.runner,
-			"serve",
-			...["--listen", "wss://127.0.0.1:0", "--auth", "jwt"],
-			...["--root", root, "--state", path.join(options.directory, "state")],
-			...["--cert", path.join(certificates, "server.crt")],
-			...["--key", path.join(certificates, "server.key")],
-			...["--jwt-issuer", "https://issuer.example", "--jwt-audience", "graft"],
-			...[
-				"--jwt-algorithm",
-				"ES256",
-				"--jwt-public-key",
-				credentials.publicKey,
-			],
-		],
+		[options.runner, "serve", "--config", config],
 		{ cwd: root, stdin: "ignore", stdout: "pipe", stderr: "inherit" },
 	)
 	// The runner announces its port on stdout. Keep reading so it never blocks on a full pipe.

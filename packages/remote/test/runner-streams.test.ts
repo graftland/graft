@@ -1,4 +1,4 @@
-import { application } from "./application"
+import { runnerConfig } from "./application"
 import { assert, describe, it } from "@effect/vitest"
 import { NodeServices } from "@effect/platform-node"
 import { Graft, Plugin } from "@graftland/graft"
@@ -11,7 +11,6 @@ import {
 	FileSystem,
 	Layer,
 	Option,
-	Schema,
 	String,
 	Schedule,
 	Sink,
@@ -32,9 +31,6 @@ import { childOf, defaults } from "../src/internal/runner/model"
 import { command } from "../src/internal/runner/command"
 import * as Lock from "../src/internal/runner/Lock"
 import { TransportError } from "../src/Errors"
-import unix from "../src/host/unix"
-import launcher from "../src/host/command"
-import { legacy as none } from "../src/host/auth/none"
 import { ChildApi, HostApi, contract } from "./fixtures/services-contract"
 
 const platform = Layer.merge(NodeServices.layer, SecureRandom.layerWebCrypto)
@@ -58,14 +54,10 @@ const spawn = Effect.fnUntraced(function* (args: ReadonlyArray<string>) {
 	)
 	return { child, stderr }
 })
-const args = (state: string) => [
-	"serve",
-	"--stdio",
-	"--state",
-	state,
-	"--root",
-	inject("remoteRoot"),
-]
+const args = (state: string) =>
+	runnerConfig(state, [{ stdio: true }], { root: inject("remoteRoot") }).pipe(
+		Effect.map((config) => ["serve", "--config", config]),
+	)
 const gone = (pid: number) =>
 	Effect.sync(() => {
 		try {
@@ -83,7 +75,8 @@ const gone = (pid: number) =>
 	)
 
 const session = Effect.fnUntraced(function* (state: string) {
-	const { child, stderr } = yield* spawn(args(state))
+	const argv = yield* args(state)
+	const { child, stderr } = yield* spawn(argv)
 	const decoder = Framing.decoder()
 	const channel = {
 		input: child.stdout.pipe(
@@ -125,10 +118,6 @@ const proxy = Effect.fnUntraced(function* (
 	target: Targets.Runner,
 	directory: string,
 ) {
-	for (const capability of [unix, launcher, none]) {
-		const fork = yield* Graft.plugin(capability)
-		yield* fork.await
-	}
 	yield* Graft.provide(HostApi, { double: (n) => Effect.succeed(n * 2) })
 	const remote = yield* Graft.plugin(
 		Remote.plugin(contract, { contractModule: "remote-fixture", target }),
@@ -169,17 +158,12 @@ describe("runner stream transports", () => {
 				const path = directory + "/runner.sock"
 				yield* Effect.scoped(
 					Effect.gen(function* () {
-						const { child } = yield* spawn([
-							"serve",
-							"--listen",
-							path,
-							"--auth",
-							"none",
-							"--state",
+						const file = yield* runnerConfig(
 							directory + "/state",
-							"--root",
-							inject("remoteRoot"),
-						])
+							[{ unix: path, auth: { none: {} } }],
+							{ root: inject("remoteRoot") },
+						)
+						const { child } = yield* spawn(["serve", "--config", file])
 						const line = yield* child.stdout.pipe(
 							Stream.decodeText(),
 							Stream.splitLines,
@@ -217,7 +201,8 @@ describe("runner stream transports", () => {
 							const running = yield* session(state)
 							assert.equal(running.record.handle.key.identity, "anonymous")
 							if (iteration === 1) {
-								const second = yield* spawn(args(state))
+								const argv = yield* args(state)
+								const second = yield* spawn(argv)
 								const stdout = yield* second.child.stdout.pipe(
 									Stream.runCollect,
 									Effect.forkScoped,
@@ -251,11 +236,12 @@ describe("runner stream transports", () => {
 				const fs = yield* FileSystem.FileSystem
 				const directory = yield* fs.makeTempDirectoryScoped()
 				const argv = yield* command()
+				const invocation = yield* args(directory + "/state")
 				yield* proxy(
 					Remote.runner({
 						instance: "worker",
 						transport: Remote.command(
-							[argv[0], ...Array.drop(argv, 1), ...args(directory + "/state")],
+							[argv[0], ...Array.drop(argv, 1), ...invocation],
 							{ cwd: new URL("..", import.meta.url).pathname },
 						),
 					}),
@@ -272,29 +258,22 @@ describe("runner stream transports", () => {
 				const fs = yield* FileSystem.FileSystem
 				const directory = yield* fs.makeTempDirectoryScoped()
 				for (const other of ["stdio", "unix"]) {
-					yield* application(directory)
-					const file = directory + "/runner.yml"
-					const yaml = yield* Schema.encodeEffect(
-						Schema.fromJsonString(Schema.Unknown),
-					)([
-						{
-							name: "@graftland/plugin-remote/runner/supervisor",
-							config: {
-								root: inject("remoteRoot"),
-								state: directory + "/state",
-							},
-						},
-						{ name: "@graftland/plugin-remote/runner/stdio" },
-						{
-							name:
-								other === "stdio"
-									? new URL("../dist/runner/stdio.js", import.meta.url).pathname
-									: "@graftland/plugin-remote/runner/unix",
-							config:
-								other === "unix" ? { path: directory + "/unused.sock" } : {},
-						},
-					])
-					yield* fs.writeFileString(file, yaml)
+					const file = yield* runnerConfig(
+						directory + "/state",
+						[
+							{ stdio: true },
+							other === "stdio"
+								? {
+										transport: {
+											name: new URL("../dist/runner/stdio.js", import.meta.url)
+												.pathname,
+											config: {},
+										},
+									}
+								: { unix: directory + "/unused.sock" },
+						],
+						{ root: inject("remoteRoot") },
+					)
 					const { child, stderr } = yield* spawn(["serve", "--config", file])
 					const stdout = yield* child.stdout.pipe(
 						Stream.runCollect,

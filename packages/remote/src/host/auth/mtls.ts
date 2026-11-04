@@ -10,17 +10,7 @@ import {
 } from "effect"
 import { CredentialsError } from "../../Errors"
 import { ConfigDirectory } from "@graftland/loader"
-import { Credentials, MtlsCredentials, type Prepared } from "../../Auth"
-
-const plugin: Plugin.Plugin<void, void, Graft.ServiceConflict> = Plugin.service(
-	MtlsCredentials,
-	Effect.succeed({ prepare: Effect.succeed }),
-	{
-		name: "remote-mtls-credentials",
-	},
-)
-
-export { plugin as legacy }
+import { Credentials, type Prepared } from "../../Auth"
 
 export const Config = Schema.Struct({ cert: Schema.String, key: Schema.String })
 export const capability = Plugin.make({

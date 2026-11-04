@@ -1,19 +1,19 @@
 import { Effect, Option, Redacted } from "effect"
-import { PeerAuthenticationError } from "../runner/model"
+import { AuthenticationFailed } from "../../Errors"
 
 export const invalid = () =>
-	PeerAuthenticationError.make({
-		detail: "The bearer token is invalid",
-		challenge: "invalid_token",
+	AuthenticationFailed.make({
+		reason: "invalid",
+		challenge: 'Bearer error="invalid_token"',
 	})
 export const read = (
 	authorization: Option.Option<Redacted.Redacted<string>>,
-): Effect.Effect<Redacted.Redacted<string>, PeerAuthenticationError> => {
+): Effect.Effect<Redacted.Redacted<string>, AuthenticationFailed> => {
 	if (Option.isNone(authorization))
 		return Effect.fail(
-			PeerAuthenticationError.make({
-				detail: "A bearer token is required",
-				challenge: "missing",
+			AuthenticationFailed.make({
+				reason: "missing",
+				challenge: "Bearer",
 			}),
 		)
 	const match = /^Bearer +([^ ]+)$/i.exec(Redacted.value(authorization.value))

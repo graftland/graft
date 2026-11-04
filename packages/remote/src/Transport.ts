@@ -15,12 +15,7 @@ import type {
 	ProcessExited,
 	TransportError,
 } from "./Errors"
-import type {
-	PreparedCredentials,
-	Prepared,
-	VerifiedCertificate,
-	TlsPolicy,
-} from "./Auth"
+import type { Prepared, VerifiedCertificate, TlsPolicy } from "./Auth"
 /** Ordered reliable bytes. Chunk boundaries have no meaning; EOF is not exit confirmation. */
 export interface Channel {
 	readonly input: Stream.Stream<Uint8Array, TransportError>
@@ -70,43 +65,14 @@ export interface WebsocketOptions {
 	}
 	readonly openTimeout?: Duration.Input
 }
-export class WebsocketTransport extends Context.Service<
-	WebsocketTransport,
-	{
-		readonly connect: (
-			options: WebsocketOptions,
-			credentials?: PreparedCredentials,
-		) => Effect.Effect<Channel, TransportError, Scope.Scope>
-	}
->()("@graftland/plugin-remote/Transport/WebsocketTransport") {}
-
 export interface UnixOptions {
 	readonly path: string
 }
-export class UnixTransport extends Context.Service<
-	UnixTransport,
-	{
-		readonly connect: (
-			options: UnixOptions,
-			credentials?: PreparedCredentials,
-		) => Effect.Effect<Channel, TransportError, Scope.Scope>
-	}
->()("@graftland/plugin-remote/Transport/UnixTransport") {}
-
 export interface CommandOptions {
 	readonly argv: readonly [string, ...string[]]
 	readonly cwd?: string
 	readonly env?: Readonly<Record<string, string>>
 }
-export class CommandTransport extends Context.Service<
-	CommandTransport,
-	{
-		readonly connect: (
-			options: CommandOptions,
-		) => Effect.Effect<Channel, TransportError, Scope.Scope>
-	}
->()("@graftland/plugin-remote/Transport/CommandTransport") {}
-
 export interface Properties {
 	readonly protocol: string
 	readonly encrypted: boolean

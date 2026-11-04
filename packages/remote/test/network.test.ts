@@ -1,4 +1,9 @@
-import { application, runHost, installModule } from "./application"
+import {
+	application,
+	runHost,
+	installModule,
+	runnerConfig,
+} from "./application"
 import { runnerRuntime } from "./capabilities"
 import { SecureRandom } from "effect/crypto"
 import { Entry, Include, Loader, ModuleResolver } from "@graftland/loader"
@@ -66,33 +71,28 @@ const startRunner = (state: string, lease = 15000, config?: string) =>
 		const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
 		const certs = inject("remoteTls")
 		const argv = yield* command()
+		const file =
+			config ??
+			(yield* runnerConfig(
+				state,
+				[
+					{
+						url: "wss://127.0.0.1:0",
+						cert: certs + "/server.crt",
+						key: certs + "/server.key",
+						auth: { mtls: { ca: certs + "/ca.crt" } },
+					},
+				],
+				{
+					root: inject("remoteRoot"),
+					lease: `${lease} millis`,
+					grace: "5 seconds",
+				},
+			))
 		const child = yield* spawner.spawn(
 			ChildProcess.make(
 				argv[0],
-				config === undefined
-					? [
-							...Array.drop(argv, 1),
-							"serve",
-							"--listen",
-							"wss://127.0.0.1:0",
-							"--auth",
-							"mtls",
-							"--state",
-							state,
-							"--root",
-							inject("remoteRoot"),
-							"--cert",
-							certs + "/server.crt",
-							"--key",
-							certs + "/server.key",
-							"--ca",
-							certs + "/ca.crt",
-							"--lease",
-							`${lease} millis`,
-							"--grace",
-							"5 seconds",
-						]
-					: [...Array.drop(argv, 1), "serve", "--config", config],
+				[...Array.drop(argv, 1), "serve", "--config", file],
 				{
 					cwd: new URL("..", import.meta.url).pathname,
 					stdin: "ignore",
@@ -352,25 +352,19 @@ const loadYamlHost = (directory: string, port: number) => {
 }
 
 const runnerYaml = (state: string, listeners: number) => `
-- id: supervisor
-  name: '@graftland/plugin-remote/runner/supervisor'
+- id: runner
+  name: remote/runner
   config:
     root: ${inject("remoteRoot")}
     state: ${state}
-- id: mtls
-  name: '@graftland/plugin-remote/internal/legacy/runner/auth/mtls'
-  config:
-    ca: ${inject("remoteTls")}/ca.crt
+    listen:
 ${Array.join(
 	Array.map(
 		Array.range(1, listeners),
-		(index) => `- id: listener-${index}
-  name: '@graftland/plugin-remote/internal/legacy/runner/websocket'
-  config:
-    url: wss://127.0.0.1:0
-    cert: ${inject("remoteTls")}/server.crt
-    key: ${inject("remoteTls")}/server.key
-    auth: '@graftland/plugin-remote/Auth/MtlsAuthenticator'
+		() => `      - url: wss://127.0.0.1:0
+        cert: ${inject("remoteTls")}/server.crt
+        key: ${inject("remoteTls")}/server.key
+        auth: { mtls: { ca: ${inject("remoteTls")}/ca.crt } }
 `,
 	),
 	"",

@@ -1,42 +1,64 @@
-import { Plugin, type Graft } from "@graftland/graft"
-import { Cause, Effect, Layer, Redacted } from "effect"
+import { Plugin, Graft } from "@graftland/graft"
+import { ConfigDirectory } from "@graftland/loader"
+import { Cause, Effect, Layer, Option, Path, Redacted, Schema } from "effect"
 import { Socket } from "effect/socket"
 import WS from "ws"
-import type { PreparedCredentials } from "../Auth"
-import { UnixTransport } from "../Transport"
+import type { Prepared } from "../Auth"
+import { Connector, type ConnectorApi, type UnixOptions } from "../Transport"
 import { TransportError } from "../Errors"
 import { path, protocol, payloadLimit } from "../internal/websocket"
 import * as Channel from "../internal/socketChannel"
 
-const constructor = (credentials: PreparedCredentials) =>
+export const properties: ConnectorApi["properties"] = {
+	protocol: "unix",
+	encrypted: false,
+	network: false,
+	carries: ["header"],
+}
+const constructor = (credentials: Prepared) =>
 	Layer.succeed(
 		Socket.WebSocketConstructor,
 		(url) =>
 			new WS(url, protocol, {
 				headers:
-					credentials.authorization === undefined
-						? {}
-						: { authorization: Redacted.value(credentials.authorization) },
+					credentials._tag === "Authorization"
+						? { authorization: Redacted.value(credentials.value) }
+						: {},
 				perMessageDeflate: false,
 				maxPayload: payloadLimit,
 			}),
 	)
-const plugin: Plugin.Plugin<void, void, Graft.ServiceConflict> = Plugin.service(
-	UnixTransport,
-	Effect.succeed({
-		connect: Effect.fnUntraced(
-			function* (options, credentials = {}) {
-				const services = yield* Layer.build(constructor(credentials))
-				const socket = yield* Socket.makeWebSocket(
-					`ws+unix://${options.path}:${path}`,
-				).pipe(Effect.provideContext(services))
-				return yield* Channel.fromSocket(socket)
-			},
-			Effect.mapError((error) =>
-				TransportError.make({ cause: Cause.fail(error) }),
-			),
+export const make = (options: UnixOptions): ConnectorApi => ({
+	properties,
+	connect: Effect.fnUntraced(
+		function* (credentials) {
+			const services = yield* Layer.build(constructor(credentials))
+			const socket = yield* Socket.makeWebSocket(
+				`ws+unix://${options.path}:${path}`,
+			).pipe(Effect.provideContext(services))
+			return yield* Channel.fromSocket(socket)
+		},
+		Effect.mapError((error) =>
+			TransportError.make({ cause: Cause.fail(error) }),
 		),
+	),
+})
+export const Config = Schema.Struct({ path: Schema.String })
+export default Plugin.make({
+	name: "remote-unix-connector",
+	config: Config,
+	inject: [Path.Path],
+	apply: Effect.fnUntraced(function* (config) {
+		const path = yield* Path.Path
+		const directory = yield* ConfigDirectory
+		yield* Graft.provide(
+			Connector,
+			make({
+				path: path.resolve(
+					Option.getOrElse(directory, () => "."),
+					config.path,
+				),
+			}),
+		)
 	}),
-	{ name: "remote-unix-transport" },
-)
-export default plugin
+})

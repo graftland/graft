@@ -1,5 +1,14 @@
 import { Graft, Plugin, type Fork } from "@graftland/graft"
-import { Array, Context, Effect, Fiber, Option, Schema, Stream } from "effect"
+import {
+	Array,
+	Context,
+	Deferred,
+	Effect,
+	Fiber,
+	Option,
+	Schema,
+	Stream,
+} from "effect"
 import {
 	Authenticator,
 	Credentials,
@@ -17,7 +26,17 @@ import {
 import { AuthenticationFailed } from "../Errors"
 import { Supervisor } from "../Supervisor"
 import { follow } from "./follow"
-import { connectionEnded } from "./runner/connectionEnded"
+import { connectionEnded, closedNormally } from "./runner/connectionEnded"
+import { ServeLifecycle } from "./ServeLifecycle"
+
+export class ListenerConfigError extends Schema.TaggedError<
+	ListenerConfigError,
+	{ readonly brand: unique symbol }
+>()("ListenerConfigError", { detail: Schema.String }) {
+	override get message() {
+		return this.detail
+	}
+}
 
 export class CapabilityContractError extends Schema.TaggedError<
 	CapabilityContractError,
@@ -164,7 +183,7 @@ export const runner = (
 export const compatible = (
 	properties: Properties,
 	kind: CredentialsApi["kind"],
-) => {
+): Effect.Effect<void, CapabilityCombinationError> => {
 	if (
 		kind === "Certificate" &&
 		(properties.protocol !== "wss" ||
@@ -200,25 +219,37 @@ const warn = (
 			properties.network && !properties.encrypted
 				? Effect.logWarning(
 						credentials === "Authorization"
-							? "Remote connection is unencrypted; credentials are transmitted in plaintext"
-							: "Remote connection is unencrypted",
+							? `${properties.protocol}:// ${side === "host" ? "connection" : "listener"} is unencrypted; credentials are transmitted in plaintext`
+							: `${properties.protocol}:// ${side === "host" ? "connection" : "listener"} is unencrypted`,
 					)
 				: Effect.void,
 			side === "runner" && properties.network && credentials === "None"
-				? Effect.logWarning("Remote listener has no authentication")
+				? Effect.logWarning("WebSocket listener has no authentication")
 				: Effect.void,
 		],
 		{ discard: true },
 	)
 
-export const connect = Effect.gen(function* () {
-	const connector = yield* Connector
-	const credentials = yield* Credentials
-	yield* compatible(connector.properties, credentials.kind)
-	yield* warn(connector.properties, credentials.kind, "host")
-	const prepared = yield* credentials.read
-	return yield* connector.connect(prepared)
-})
+export const directAuth = (properties: Properties, explicit: boolean) =>
+	explicit &&
+	(properties.protocol === "stdio" || properties.protocol === "command")
+		? Effect.fail(
+				CapabilityCombinationError.make({
+					detail: `${properties.protocol} transports do not accept auth`,
+				}),
+			)
+		: Effect.void
+
+export const connectWith = (explicitAuth = false) =>
+	Effect.gen(function* () {
+		const connector = yield* Connector
+		const credentials = yield* Credentials
+		yield* directAuth(connector.properties, explicitAuth)
+		yield* compatible(connector.properties, credentials.kind)
+		yield* warn(connector.properties, credentials.kind, "host")
+		const prepared = yield* credentials.read
+		return yield* connector.connect(prepared)
+	})
 
 export const accept =
 	(
@@ -237,39 +268,75 @@ export const accept =
 							onSome: auth.authenticate,
 						})
 					: (properties.network
-							? Effect.logWarning("Remote connection has no authentication")
+							? Effect.logWarning("WebSocket connection has no authentication")
 							: Effect.void
 						).pipe(Effect.as(auth.identity))
 		return identity.pipe(Effect.map(session))
 	}
 
-export const listenerConsumer = Plugin.make({
-	name: "remote-listener-consumer",
-	inject: [Listener, Authenticator, Supervisor],
-	apply: Effect.fnUntraced(function* () {
-		const listener = yield* Listener
-		const auth = yield* Authenticator
-		const supervisor = yield* Supervisor
-		yield* compatible(listener.properties, kind(auth))
-		yield* warn(listener.properties, kind(auth), "runner")
-		const serving = yield* listener.bind(
-			auth._tag === "Mtls" ? Option.some(auth.tls) : Option.none(),
-		)
-		const running = yield* Plugin.fork(
-			serving.serve(
-				accept(
-					auth,
-					listener.properties,
-					(identity) => (channel) =>
-						supervisor
-							.accept(channel)
-							.pipe(
-								Effect.catchCause(connectionEnded),
-								Effect.provideService(Peer, identity),
-							),
+export const makeListenerConsumer = (
+	prepare: (
+		properties: Properties,
+		auth: AuthenticatorApi,
+	) => Effect.Effect<void, CapabilityCombinationError> = () => Effect.void,
+	ready: Effect.Effect<void> = Effect.void,
+) =>
+	Plugin.make({
+		name: "remote-listener-consumer",
+		inject: [
+			Listener,
+			Authenticator,
+			Supervisor,
+			Plugin.optional(ServeLifecycle),
+		],
+		apply: Effect.fnUntraced(function* () {
+			const listener = yield* Listener
+			const auth = yield* Authenticator
+			const supervisor = yield* Supervisor
+			const lifecycle = yield* Effect.serviceOption(ServeLifecycle)
+			yield* prepare(listener.properties, auth)
+			yield* compatible(listener.properties, kind(auth)).pipe(
+				Effect.mapError((error) =>
+					ListenerConfigError.make({ detail: error.detail }),
 				),
-			),
-		)
-		yield* serving.ready.pipe(Effect.raceFirst(Fiber.join(running)))
-	}),
-})
+			)
+			yield* warn(listener.properties, kind(auth), "runner")
+			const serving = yield* listener.bind(
+				auth._tag === "Mtls" ? Option.some(auth.tls) : Option.none(),
+			)
+			const running = yield* Plugin.fork(
+				serving
+					.serve(
+						accept(
+							auth,
+							listener.properties,
+							(identity) => (channel) =>
+								supervisor.accept(channel).pipe(
+									Effect.catchCause((cause) =>
+										listener.properties.protocol === "stdio"
+											? closedNormally(cause)
+												? Effect.void
+												: Effect.failCause(cause)
+											: connectionEnded(cause),
+									),
+									Effect.provideService(Peer, identity),
+								),
+						),
+					)
+					.pipe(
+						Effect.onExit((exit) =>
+							listener.properties.protocol === "stdio" &&
+							Option.isSome(lifecycle)
+								? Deferred.done(lifecycle.value.ended, exit)
+								: Effect.void,
+						),
+					),
+			)
+			yield* serving.ready.pipe(Effect.raceFirst(Fiber.join(running)))
+			yield* ready
+		}),
+	})
+
+export const listenerConsumer = makeListenerConsumer()
+
+export const connect = connectWith()

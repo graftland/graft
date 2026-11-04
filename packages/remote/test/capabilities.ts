@@ -1,8 +1,6 @@
 import { Graft, Plugin } from "@graftland/graft"
 import { Effect, Layer } from "effect"
 import local from "../src/host/local"
-import { legacy as websocket } from "../src/host/websocket"
-import { legacy as mtls } from "../src/host/auth/mtls"
 
 const load = (
 	plugins: ReadonlyArray<Plugin.Plugin<void, void, Graft.ServiceConflict>>,
@@ -16,7 +14,4 @@ export const localRuntime = Layer.provideMerge(
 	Layer.effectDiscard(load([local])),
 	Graft.layer,
 )
-export const runnerRuntime = Layer.provideMerge(
-	Layer.effectDiscard(load([websocket, mtls])),
-	Graft.layer,
-)
+export const runnerRuntime = Graft.layer

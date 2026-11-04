@@ -5,7 +5,7 @@ import { EndOfStream } from "./Framing"
 import { Peer } from "../../Auth"
 
 // Multiplex preserves the socket reason inside TransportError; only an entirely normal close is silent.
-const closedNormally = (cause: Cause.Cause<unknown>): boolean =>
+export const closedNormally = (cause: Cause.Cause<unknown>): boolean =>
 	cause.reasons.length > 0 &&
 	Array.every(
 		cause.reasons,

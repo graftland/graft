@@ -2,8 +2,8 @@ import { Entry } from "@graftland/loader"
 import { Plugin } from "@graftland/graft"
 import { Array, Cause, Effect, Fiber, Option, Schema, Scope } from "effect"
 import { SecureRandom } from "effect/crypto"
-import { validate, dependencies, type Target } from "../Targets"
-import { Connector } from "../Transport"
+import { type Local, type Worker } from "../Targets"
+import { Connector, LocalTransport, WorkerTransport } from "../Transport"
 import { Credentials } from "../Auth"
 import type { Options } from "../index"
 import * as Connection from "./runner/Connection"
@@ -12,6 +12,15 @@ import * as Host from "./host"
 import { RemoteWithdrawn, RemoteError, MissingInstance } from "../Errors"
 import * as Contract from "../Contract"
 import * as Control from "./control"
+
+const dependencies = (
+	target: Local | Worker | Connection.ConfiguredRunner,
+): ReadonlyArray<Plugin.Dependency> =>
+	target._tag === "Connector"
+		? [Connector, Credentials]
+		: target._tag === "Local"
+			? [LocalTransport]
+			: [WorkerTransport]
 
 /** One owned execution per activation, with explicitly mapped services. */
 export const executionPlugin = <
@@ -28,7 +37,7 @@ export const executionPlugin = <
 >(
 	contract: Contract.Contract<S, E>,
 	options: Options<D>,
-	configured: Target<D> | Connection.ConfiguredRunner,
+	configured: Local | Worker | Connection.ConfiguredRunner,
 	annotations: Readonly<Record<string, unknown>> = {},
 ): Plugin.Plugin<
 	S["Encoded"],
@@ -43,16 +52,13 @@ export const executionPlugin = <
 		name: contract.name,
 		inject: [
 			SecureRandom.SecureRandom,
-			...(configured._tag === "Connector"
-				? [Connector, Credentials]
-				: dependencies(configured)),
+			...dependencies(configured),
 			...Array.map(contract.inject, (service) => service.key),
 		],
 		config: Schema.toEncoded(contract.config),
 		retry: options.retry,
 		apply: (input) =>
 			Effect.gen(function* () {
-				if (configured._tag !== "Connector") yield* validate(configured)
 				const random = yield* SecureRandom.SecureRandom
 				const session = yield* random.uuidV4()
 				const target = yield* resolveTarget(configured)
@@ -108,11 +114,11 @@ export const publicError = <E extends Schema.Top>(
 			? error
 			: RemoteError.make({ cause: Cause.fail(error) })
 
-const resolveTarget = <D extends ReadonlyArray<Plugin.Dependency>>(
-	target: Target<D> | Connection.ConfiguredRunner,
-): Effect.Effect<Connection.Target<D>, MissingInstance> =>
+const resolveTarget = (
+	target: Local | Worker | Connection.ConfiguredRunner,
+): Effect.Effect<Connection.Target, MissingInstance> =>
 	Effect.gen(function* () {
-		if (target._tag !== "Runner" && target._tag !== "Connector") return target
+		if (target._tag !== "Connector") return target
 		const instance =
 			target.instance === undefined
 				? yield* Entry.CurrentId

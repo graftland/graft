@@ -1,14 +1,10 @@
-import { Effect } from "effect"
-import { Plugin, type Graft } from "@graftland/graft"
-import { JwtCredentials } from "../../Auth"
-import { prepare } from "../../internal/auth/token"
+import type { Graft, Plugin } from "@graftland/graft"
+import { Config, plugin } from "../../internal/auth/tokenCredentials"
+export { Config }
 
-const plugin: Plugin.Plugin<void, void, Graft.ServiceConflict> = Plugin.service(
-	JwtCredentials,
-	Effect.succeed({ prepare }),
-	{
-		name: "remote-jwt-credentials",
-	},
-)
-
-export default plugin
+const capability: Plugin.Plugin<
+	typeof Config.Type,
+	typeof Config.Encoded,
+	Graft.ServiceConflict
+> = plugin("remote-jwt-credentials")
+export default capability

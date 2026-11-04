@@ -1,14 +1,10 @@
-import { Effect } from "effect"
-import { Plugin, type Graft } from "@graftland/graft"
-import { BearerCredentials } from "../../Auth"
-import { prepare } from "../../internal/auth/token"
+import type { Graft, Plugin } from "@graftland/graft"
+import { Config, plugin } from "../../internal/auth/tokenCredentials"
+export { Config }
 
-const plugin: Plugin.Plugin<void, void, Graft.ServiceConflict> = Plugin.service(
-	BearerCredentials,
-	Effect.succeed({ prepare }),
-	{
-		name: "remote-bearer-credentials",
-	},
-)
-
-export default plugin
+const capability: Plugin.Plugin<
+	typeof Config.Type,
+	typeof Config.Encoded,
+	Graft.ServiceConflict
+> = plugin("remote-bearer-credentials")
+export default capability

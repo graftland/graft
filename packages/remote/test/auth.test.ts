@@ -33,22 +33,19 @@ import * as Remote from "../src/index"
 import { TransportError } from "../src/Errors"
 import type * as Targets from "../src/Targets"
 import { Supervisor } from "../src/Supervisor"
-import {
-	UnixTransport,
-	WebsocketTransport,
-	type Channel,
-} from "../src/Transport"
-import { legacy as websocket } from "../src/runner/websocket"
+import { Connector, type Channel } from "../src/Transport"
+import * as Assembly from "../src/internal/assembly"
+import { default as websocket } from "../src/runner/websocket"
 import unix from "../src/runner/unix"
 import bearer from "../src/runner/auth/bearer"
 import jwt from "../src/runner/auth/jwt"
-import { legacy as none } from "../src/runner/auth/none"
+import { default as none } from "../src/runner/auth/none"
 import { Config as StdioConfig } from "../src/runner/stdio"
-import { legacy as hostWebsocket } from "../src/host/websocket"
+import { default as hostWebsocket } from "../src/host/websocket"
 import hostUnix from "../src/host/unix"
 import hostBearer from "../src/host/auth/bearer"
 import hostJwt from "../src/host/auth/jwt"
-import { legacy as hostNone } from "../src/host/auth/none"
+import { default as hostNone } from "../src/host/auth/none"
 import * as Framing from "../src/internal/runner/Framing"
 import { contract } from "./fixtures/contract"
 
@@ -86,14 +83,15 @@ const supervisor = Graft.provide(Supervisor, {
 		yield* Stream.runDrain(channel.input)
 	}),
 })
-const listen = Effect.fnUntraced(function* (auth: string) {
+const listen = Effect.fnUntraced(function* () {
 	yield* supervisor
 	const port = yield* availablePort
 	const fork = yield* Graft.plugin(websocket, {
 		url: `ws://127.0.0.1:${port}`,
-		auth,
 	})
 	yield* fork.await
+	const consumer = yield* Graft.plugin(Assembly.listenerConsumer)
+	yield* consumer.await
 	return port
 })
 
@@ -218,25 +216,27 @@ describe("runner authentication", () => {
 					const tokens = yield* tokenFile
 					const auth = yield* Graft.plugin(bearer, { tokens })
 					yield* auth.await
-					const port = yield* listen(Auth.BearerAuthenticator.key)
+					const port = yield* listen()
 					yield* reject(port, undefined, true)
 					yield* reject(port, "Bearer wrong-secret")
 					const success = yield* request(port, "Bearer test-bearer-secret")
 					assert.include(success, "101 Switching Protocols")
-					const transportPlugin = yield* Graft.plugin(hostWebsocket)
-					const credentialsPlugin = yield* Graft.plugin(hostBearer)
+					const transportPlugin = yield* Graft.plugin(hostWebsocket, {
+						url: "ws://127.0.0.1:" + port,
+					})
+					const credentialsPlugin = yield* Graft.plugin(hostBearer, {
+						token: "test-bearer-secret",
+					})
 					yield* transportPlugin.await
 					yield* credentialsPlugin.await
-					const transport = yield* capability(WebsocketTransport)
-					const credentials = yield* capability(Auth.BearerCredentials)
-					const authorization = yield* credentials.prepare(
-						Redacted.make("test-bearer-secret"),
-					)
+					const transport = yield* capability(Connector)
+					const credentials = yield* capability(Auth.Credentials)
+
 					const received = yield* Effect.scoped(
 						Effect.gen(function* () {
-							const channel = yield* transport.connect(
-								{ url: "ws://127.0.0.1:" + port },
-								{ authorization },
+							const channel = yield* Assembly.connect.pipe(
+								Effect.provideService(Connector, transport),
+								Effect.provideService(Auth.Credentials, credentials),
 							)
 							return yield* identity(channel)
 						}),
@@ -269,16 +269,17 @@ describe("runner authentication", () => {
 					const path = directory + "/runner.sock"
 					const listener = yield* Graft.plugin(unix, {
 						path,
-						auth: Auth.BearerAuthenticator.key,
 					})
 					yield* listener.await
-					const host = yield* Graft.plugin(hostUnix)
+					const consumer = yield* Graft.plugin(Assembly.listenerConsumer)
+					yield* consumer.await
+					const host = yield* Graft.plugin(hostUnix, { path })
 					yield* host.await
-					const transport = yield* capability(UnixTransport)
-					const channel = yield* transport.connect(
-						{ path },
-						{ authorization: Redacted.make("Bearer test-bearer-secret") },
-					)
+					const transport = yield* capability(Connector)
+					const channel = yield* transport.connect({
+						_tag: "Authorization",
+						value: Redacted.make("Bearer test-bearer-secret"),
+					})
 					const received = yield* identity(channel)
 					assert.equal(received, "stable-host")
 					assert.isFalse(
@@ -290,7 +291,7 @@ describe("runner authentication", () => {
 
 	it.effect("rejects authentication in stdio listener configuration", () =>
 		Schema.decodeUnknownEffect(StdioConfig)({
-			auth: Auth.NoAuthenticator.key,
+			auth: { none: {} },
 		}).pipe(
 			Effect.flip,
 			Effect.map((error) => assert.include(error.message, "auth")),
@@ -309,7 +310,7 @@ describe("runner authentication", () => {
 					keys: { publicKey: keys.file },
 				})
 				yield* auth.await
-				const port = yield* listen(Auth.JwtAuthenticator.key)
+				const port = yield* listen()
 				const valid = yield* keys.sign(keys.claims)
 				const success = yield* request(port, "Bearer " + Redacted.value(valid))
 				assert.include(success, "101 Switching Protocols")
@@ -388,19 +389,20 @@ describe("runner authentication", () => {
 					keys: { jwksUrl: "https://127.0.0.1:" + port + "/keys" },
 				})
 				yield* auth.await
-				const listener = yield* listen(Auth.JwtAuthenticator.key)
-				const credentialsPlugin = yield* Graft.plugin(hostJwt)
-				const transportPlugin = yield* Graft.plugin(hostWebsocket)
+				const listener = yield* listen()
+				const token = yield* keys.sign({ ...keys.claims, host: "custom-host" })
+				const credentialsPlugin = yield* Graft.plugin(hostJwt, {
+					token: Redacted.value(token),
+				})
+				const transportPlugin = yield* Graft.plugin(hostWebsocket, {
+					url: "ws://127.0.0.1:" + listener,
+				})
 				yield* credentialsPlugin.await
 				yield* transportPlugin.await
-				const credentials = yield* capability(Auth.JwtCredentials)
-				const transport = yield* capability(WebsocketTransport)
-				const token = yield* keys.sign({ ...keys.claims, host: "custom-host" })
-				const authorization = yield* credentials.prepare(token)
-				const channel = yield* transport.connect(
-					{ url: "ws://127.0.0.1:" + listener },
-					{ authorization },
-				)
+				const credentials = yield* capability(Auth.Credentials)
+				const transport = yield* capability(Connector)
+				const prepared = yield* credentials.read
+				const channel = yield* transport.connect(prepared)
 				const received = yield* identity(channel)
 				assert.equal(received, "custom-host")
 			}).pipe(
@@ -421,7 +423,7 @@ describe("runner authentication", () => {
 					yield* auth.await
 					// Raw upgrade requests close TCP without a WebSocket close frame. Drain that listener before measuring unix logs.
 					yield* Effect.gen(function* () {
-						const port = yield* listen(Auth.NoAuthenticator.key)
+						const port = yield* listen()
 						for (const authorization of [
 							undefined,
 							"Bearer ignored",
@@ -460,16 +462,18 @@ describe("runner authentication", () => {
 						path: directory + "/runner.sock",
 					})
 					yield* listener.await
-					const transportPlugin = yield* Graft.plugin(hostUnix)
-					const credentialsPlugin = yield* Graft.plugin(hostNone)
-					yield* transportPlugin.await
-					yield* credentialsPlugin.await
-					const transport = yield* capability(UnixTransport)
-					const credentials = yield* capability(Auth.NoCredentials)
-					yield* credentials.prepare
-					const channel = yield* transport.connect({
+					const consumer = yield* Graft.plugin(Assembly.listenerConsumer)
+					yield* consumer.await
+					const transportPlugin = yield* Graft.plugin(hostUnix, {
 						path: directory + "/runner.sock",
 					})
+					const credentialsPlugin = yield* Graft.plugin(hostNone, {})
+					yield* transportPlugin.await
+					yield* credentialsPlugin.await
+					const transport = yield* capability(Connector)
+					const credentials = yield* capability(Auth.Credentials)
+					const prepared = yield* credentials.read
+					const channel = yield* transport.connect(prepared)
 					const received = yield* identity(channel)
 					assert.equal(received, "anonymous-host")
 					assert.lengthOf(logs(), before)
@@ -490,14 +494,10 @@ describe("runner authentication", () => {
 					return Redacted.make("injected")
 				}),
 			})
-			const credentials = yield* Graft.plugin(hostBearer)
-			yield* credentials.await
-			yield* Graft.provide(WebsocketTransport, {
-				connect: () => Effect.fail(TransportError.make({ cause: Cause.empty })),
-			})
+
 			const target = Remote.runner({
 				instance: "worker",
-				transport: Remote.websocket({ url: "ws://unused" }),
+				transport: Remote.websocket({ url: "ws://127.0.0.1:1" }),
 				auth: Remote.bearer({
 					inject: [Source],
 					read: Effect.flatMap(Source, (source) => source.token),
