@@ -1,5 +1,6 @@
-import { Graft, type Fork } from "@graftland/graft"
 import { Array, Effect, Option, Stream } from "effect"
+
+import { Graft, type Fork } from "@graftland/graft"
 
 /** A Pending fork is settled too, so fork.await alone cannot establish readiness. */
 export const reach = (fork: Fork.Fork, tag: Fork.ForkState["_tag"]) =>

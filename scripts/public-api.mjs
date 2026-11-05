@@ -1,15 +1,17 @@
-import { packageManifests } from "./workspace.mjs"
-import { API, SymbolFlags } from "typescript/unstable/sync"
-import { SyntaxKind } from "typescript/unstable/ast"
 import {
-	readFileSync,
-	readdirSync,
-	mkdirSync,
-	writeFileSync,
 	existsSync,
+	mkdirSync,
+	readdirSync,
+	readFileSync,
 	realpathSync,
+	writeFileSync,
 } from "node:fs"
-import { dirname, join, resolve, relative, sep } from "node:path"
+import { dirname, join, relative, resolve, sep } from "node:path"
+
+import { SyntaxKind } from "typescript/unstable/ast"
+import { API, SymbolFlags } from "typescript/unstable/sync"
+
+import { packageManifests } from "./workspace.mjs"
 
 const json = (file) => JSON.parse(readFileSync(file, "utf8"))
 

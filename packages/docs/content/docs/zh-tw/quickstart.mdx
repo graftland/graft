@@ -55,8 +55,9 @@ Node 轉接器要求的版本。該版本也提供熱重載所需的 `module.reg
 ## 範例外掛
 
 ```js title="hello.mjs"
-import { Plugin } from "@graftland/graft"
 import { Effect, Schema } from "effect"
+
+import { Plugin } from "@graftland/graft"
 
 // Module evaluation only defines the plugin; its activation owns all resources.
 export default Plugin.make({

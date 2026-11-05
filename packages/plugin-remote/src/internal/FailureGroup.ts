@@ -1,18 +1,20 @@
 import {
 	Array,
 	Cause,
-	Fiber,
 	Data,
 	Deferred,
 	Effect,
 	Exit,
+	Fiber,
 	FiberSet,
 	Ref,
-	Scope,
 	Schema,
+	Scope,
 	TxRef,
 } from "effect"
+
 import * as Release from "@graftland/graft/Release"
+
 import { cleanupCause } from "./cleanup"
 
 type State<E> = Data.TaggedEnum<{

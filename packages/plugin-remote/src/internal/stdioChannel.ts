@@ -1,7 +1,9 @@
-import { NodeSink } from "@effect/platform-node"
-import { Cause, Effect, Stdio, Stream } from "effect"
 // @effect-diagnostics-next-line nodeBuiltinImport:off -- Node's extra inherited descriptor carries protocol output separately from console output.
 import { createWriteStream } from "node:fs"
+
+import { Cause, Effect, Stdio, Stream } from "effect"
+import { NodeSink } from "@effect/platform-node"
+
 import { TransportError } from "../Errors"
 import type * as Port from "./port"
 

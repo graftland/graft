@@ -1,19 +1,21 @@
-import { loadModule } from "./loadModule"
-import { ContractNotFound } from "./childErrors"
-import type { Graft } from "@graftland/graft"
 import { Effect, Logger, Option } from "effect"
 import { RpcServer } from "effect/rpc"
+
+import type { Graft } from "@graftland/graft"
+
 import { fromModule, type RunnerContract } from "../Contract"
-import * as Port from "./port"
-import { prepare, type RunnerContract as PreparedContract } from "./contract"
-import * as Services from "./services"
 import * as Child from "./child"
+import { ContractNotFound } from "./childErrors"
+import { prepare, type RunnerContract as PreparedContract } from "./contract"
+import { endpoint } from "./control"
+import { loadModule } from "./loadModule"
+import * as Port from "./port"
+import type { Bootstrap } from "./runner/Bootstrap"
+import { closedNormally } from "./runner/connectionEnded"
+import { ExecutionError } from "./runner/model"
 import * as Multiplex from "./runner/Multiplex"
 import * as Wire from "./runner/Wire"
-import type { Bootstrap } from "./runner/Bootstrap"
-import { ExecutionError } from "./runner/model"
-import { closedNormally } from "./runner/connectionEnded"
-import { endpoint } from "./control"
+import * as Services from "./services"
 
 /** Import a contract in the runner installation; importing this module performs no I/O. */
 export const load = Effect.fnUntraced(function* (specifier: string) {

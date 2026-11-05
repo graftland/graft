@@ -1,7 +1,15 @@
+import {
+	Effect,
+	Exit,
+	FileSystem,
+	Path,
+	PlatformError,
+	String,
+	type Scope,
+} from "effect"
 import { NodeServices } from "@effect/platform-node"
 import { assert, describe, it } from "@effect/vitest"
-import { Effect, Exit, FileSystem, Path, PlatformError, String } from "effect"
-import type { Scope } from "effect"
+
 import { create } from "../src/index.ts"
 
 const run = <A, E>(

@@ -1,18 +1,19 @@
-import { assert, describe, it } from "@effect/vitest"
 import {
 	Array,
 	Cause,
-	Deferred,
-	Pull,
 	Context,
+	Deferred,
 	Effect,
 	Layer,
 	Option,
+	Pull,
 	Ref,
 	Schedule,
 	Stream,
 } from "effect"
 import { TestClock } from "effect/testing"
+import { assert, describe, it } from "@effect/vitest"
+
 import { Event, Graft, Plugin } from "../src/index.ts"
 import { reach, run } from "./utils.ts"
 

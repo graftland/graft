@@ -1,4 +1,3 @@
-import { assert, it } from "@effect/vitest"
 import {
 	Array,
 	Cause,
@@ -9,6 +8,8 @@ import {
 	Ref,
 	Schema,
 } from "effect"
+import { assert, it } from "@effect/vitest"
+
 import * as Release from "../src/Release"
 
 for (const mode of ["masked", "interruptible", "self", "joined", "mixed"]) {

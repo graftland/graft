@@ -1,6 +1,7 @@
+import { registerHooks } from "node:module"
+
 import { Effect, Path, String } from "effect"
 import { SecureRandom } from "effect/crypto"
-import { registerHooks } from "node:module"
 
 /** Bare names resolve from the application; imported dependencies keep their own parent URLs. */
 export const make = Effect.fnUntraced(function* (directory: string) {

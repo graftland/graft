@@ -1,5 +1,7 @@
-import { Plugin } from "@graftland/graft"
 import { Effect, Option, PubSub } from "effect"
+
+import { Plugin } from "@graftland/graft"
+
 import { Candles, Notifier } from "./services.ts"
 
 export const alerts = Plugin.make({

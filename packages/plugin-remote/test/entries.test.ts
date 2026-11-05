@@ -1,6 +1,7 @@
-import { assert, describe, it } from "@effect/vitest"
-import { NodeServices } from "@effect/platform-node"
 import { Effect, FileSystem, Schema, String } from "effect"
+import { NodeServices } from "@effect/platform-node"
+import { assert, describe, it } from "@effect/vitest"
+
 import { application, runHost } from "./application"
 
 const prepare = Effect.fnUntraced(function* (

@@ -1,8 +1,10 @@
-import { assert, describe, it } from "@effect/vitest"
-import { NodeServices } from "@effect/platform-node"
+import process from "node:process"
+
 import { Array, Effect } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
-import process from "node:process"
+import { NodeServices } from "@effect/platform-node"
+import { assert, describe, it } from "@effect/vitest"
+
 import * as Processes from "../src/internal/runner/Processes"
 
 describe("runner process identity", () => {

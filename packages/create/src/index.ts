@@ -1,7 +1,7 @@
 /** A local, non-interactive template. Installation is a separate package-manager operation. */
+import { Effect, FileSystem, Path, Schema, type PlatformError } from "effect"
+
 import { PackageManagerDeclaration } from "@graftland/package-manager/PackageManagerDeclaration"
-import { Effect, FileSystem, Path, Schema } from "effect"
-import type { PlatformError } from "effect"
 
 export class CreateError extends Schema.TaggedError<
 	CreateError,

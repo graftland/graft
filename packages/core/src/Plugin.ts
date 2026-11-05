@@ -3,9 +3,6 @@
  * needs, decodes its configuration with a schema, and runs `apply` inside a
  * scope that lives exactly as long as the plugin is active.
  */
-import { RuntimeContext } from "./internal/runtimeContext"
-import type { Fiber, Schedule, Scope } from "effect"
-import { identity } from "effect/Function"
 import {
 	Array,
 	Context,
@@ -16,11 +13,18 @@ import {
 	Option,
 	Predicate,
 	Schema,
+	type Fiber,
+	type Schedule,
+	type Scope,
 } from "effect"
+import { identity } from "effect/Function"
+
+import { Graft, provide, type ServiceConflict } from "./Graft"
+import { RuntimeContext } from "./internal/runtimeContext"
 import * as TaskGroup from "./internal/tasks"
 import type { Tasks } from "./internal/tasks"
+
 export type { Tasks } from "./internal/tasks"
-import { provide, Graft, type ServiceConflict } from "./Graft"
 
 const TypeId = "~@graftland/graft/Plugin"
 const Contract = "~@graftland/graft/Plugin/Contract"

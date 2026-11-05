@@ -1,4 +1,5 @@
 import { Cause, Effect, FileSystem, Path } from "effect"
+
 import { StateDirectoryLocked } from "./model"
 
 /** SQLite owns the local directory lock for the enclosing scope, including failed startup. */

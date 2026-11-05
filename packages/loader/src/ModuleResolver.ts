@@ -1,10 +1,6 @@
 /**
  * Turns the `name` of an entry into a plugin.
  */
-import { CurrentObservation } from "./internal/observation"
-import { ConfigDirectory } from "./ConfigDirectory"
-import { isOnlyFailure } from "./internal/recovery"
-import { Plugin } from "@graftland/graft"
 import {
 	Array,
 	Cause,
@@ -12,19 +8,25 @@ import {
 	Data,
 	Effect,
 	Exit,
-	Layer,
 	HashMap,
-	Ref,
-	Result,
+	Layer,
 	Option,
 	Path,
 	Predicate,
 	Record,
+	Ref,
+	Result,
 	Schema,
 	Scope,
-	String,
 	Stream,
+	String,
 } from "effect"
+
+import { Plugin } from "@graftland/graft"
+
+import { ConfigDirectory } from "./ConfigDirectory"
+import { CurrentObservation } from "./internal/observation"
+import { isOnlyFailure } from "./internal/recovery"
 
 export class ModuleNotFound extends Schema.TaggedError<
 	ModuleNotFound,

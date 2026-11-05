@@ -1,6 +1,7 @@
 /** Configuration schemas for remote entries and their built-in capabilities. */
-import * as Auth from "./internal/auth/config"
 import { Effect, JsonSchema, Schema } from "effect"
+
+import * as Auth from "./internal/auth/config"
 import { PositiveDuration } from "./internal/config"
 
 export const Reference = Schema.Struct({

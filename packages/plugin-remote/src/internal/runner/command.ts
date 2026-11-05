@@ -1,6 +1,7 @@
-import { Effect } from "effect"
 import process from "node:process"
 import { fileURLToPath } from "node:url"
+
+import { Effect } from "effect"
 
 /** Resolve the executable through the installed package export, never a relative dist path. */
 export const command = (override?: readonly [string, ...string[]]) =>

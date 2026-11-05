@@ -1,4 +1,3 @@
-import { assert, describe, it } from "@effect/vitest"
 import {
 	Array,
 	Cause,
@@ -14,8 +13,10 @@ import {
 	Stream,
 } from "effect"
 import { Rpc, RpcClient, RpcGroup, RpcMessage, RpcServer } from "effect/rpc"
-import * as Port from "../src/internal/port"
+import { assert, describe, it } from "@effect/vitest"
+
 import { TransportError } from "../src/Errors"
+import * as Port from "../src/internal/port"
 
 const Group = RpcGroup.make(
 	Rpc.make("Hold"),

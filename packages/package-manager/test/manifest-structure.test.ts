@@ -1,4 +1,3 @@
-import { assert, describe, it } from "@effect/vitest"
 import {
 	Array,
 	Cause,
@@ -6,16 +5,18 @@ import {
 	Exit,
 	HashMap,
 	Option,
-	Ref,
 	Record,
+	Ref,
 	Schema,
 } from "effect"
+import { assert, describe, it } from "@effect/vitest"
+
 import {
 	applyChanges,
 	decodeManifest,
 	encodeManifest,
+	type Changes,
 } from "../src/manifest.ts"
-import type { Changes } from "../src/manifest.ts"
 import { run, setup, success } from "./fixtures.ts"
 
 const edit = Effect.fnUntraced(function* (

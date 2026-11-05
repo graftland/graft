@@ -1,36 +1,37 @@
-import * as ProcessObservation from "./ProcessObservation"
-import * as FailureGroup from "../FailureGroup"
-import { Command, CommandJson } from "./WatchdogProtocol"
 import {
 	Array,
 	Cause,
-	FileSystem,
-	Path,
-	Schema,
 	Context,
 	Effect,
+	FileSystem,
 	HashMap,
 	HashSet,
+	Layer,
+	Path,
 	Queue,
 	Ref,
+	Schema,
+	Scope,
 	Sink,
 	Stream,
-	Layer,
-	Scope,
 } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
+
 import { TransportError } from "../../Errors"
-import * as Multiplex from "./Multiplex"
-import * as Packages from "./Packages"
-import * as Processes from "./Processes"
+import * as FailureGroup from "../FailureGroup"
+import { Bootstrap } from "./Bootstrap"
+import { command } from "./command"
 import {
 	Execution,
 	ExecutionError,
 	SessionConflict,
 	SessionStopped,
 } from "./model"
-import { Bootstrap } from "./Bootstrap"
-import { command } from "./command"
+import * as Multiplex from "./Multiplex"
+import * as Packages from "./Packages"
+import * as Processes from "./Processes"
+import * as ProcessObservation from "./ProcessObservation"
+import { Command, CommandJson } from "./WatchdogProtocol"
 
 export class Channels extends Context.Service<
 	Channels,

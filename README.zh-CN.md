@@ -12,8 +12,9 @@ Graft 是基于 [Effect](https://effect.website)
 的插件框架。应用是一棵插件树：每个插件嫁接在一个 scope 上，从周围汲取服务，也发布自己的服务。你可以在进程持续运行的同时加载、重新配置、替换和卸载任意一枝。剪掉哪里，树的其余部分都照常生长。
 
 ```ts
-import { Graft, Plugin } from "@graftland/graft"
 import { Context, Effect, Schema } from "effect"
+
+import { Graft, Plugin } from "@graftland/graft"
 
 class Greeter extends Context.Service<
 	Greeter,

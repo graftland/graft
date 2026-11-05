@@ -1,5 +1,3 @@
-import { RuntimeContext } from "../src/internal/runtimeContext"
-import { assert, describe, it } from "@effect/vitest"
 import {
 	Array,
 	Cause,
@@ -13,7 +11,10 @@ import {
 	Ref,
 	Schema,
 } from "effect"
+import { assert, describe, it } from "@effect/vitest"
+
 import { Fork, Graft, Plugin } from "../src/index.ts"
+import { RuntimeContext } from "../src/internal/runtimeContext"
 import { reach, run } from "./utils.ts"
 
 class Rpc extends Context.Service<

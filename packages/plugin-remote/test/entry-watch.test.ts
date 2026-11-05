@@ -1,7 +1,5 @@
-import { assert, it } from "@effect/vitest"
-import { NodeServices } from "@effect/platform-node"
-import { Graft, Plugin } from "@graftland/graft"
-import { Loader, ModuleResolver } from "@graftland/loader"
+import { pathToFileURL } from "node:url"
+
 import {
 	Array,
 	ByteSize,
@@ -15,15 +13,20 @@ import {
 	PlatformError,
 	Queue,
 	Ref,
-	Scope,
 	Schema,
+	Scope,
 	Stream,
 	String,
 } from "effect"
 import { SecureRandom } from "effect/crypto"
 import { TestClock } from "effect/testing"
-import { pathToFileURL } from "node:url"
+import { NodeServices } from "@effect/platform-node"
+import { assert, it } from "@effect/vitest"
+
+import { Graft, Plugin } from "@graftland/graft"
 import * as Hmr from "@graftland/hmr"
+import { Loader, ModuleResolver } from "@graftland/loader"
+
 import * as Contract from "../src/Contract"
 import { host } from "../src/internal/entry"
 

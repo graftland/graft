@@ -3,8 +3,9 @@
 ## Define
 
 ```ts
-import { Plugin } from "@graftland/graft"
 import { Effect, Schedule, Schema } from "effect"
+
+import { Plugin } from "@graftland/graft"
 
 export default Plugin.make({
 	name: "ticker",

@@ -1,5 +1,6 @@
-import { assert, describe, it } from "@effect/vitest"
 import { Context, Deferred, Effect, Exit, Fiber, Option, Scope } from "effect"
+import { assert, describe, it } from "@effect/vitest"
+
 import { Event } from "../src/index.ts"
 import { makeJournal, run } from "./utils.ts"
 

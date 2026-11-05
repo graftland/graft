@@ -1,8 +1,9 @@
-import { assert, describe, it } from "@effect/vitest"
-import { NodeServices } from "@effect/platform-node"
 import { Effect, FileSystem, Ref, Schema } from "effect"
-import * as Packages from "../src/internal/runner/Packages"
+import { NodeServices } from "@effect/platform-node"
+import { assert, describe, it } from "@effect/vitest"
+
 import { PackageError } from "../src/internal/runner/model"
+import * as Packages from "../src/internal/runner/Packages"
 
 const setup = Effect.gen(function* () {
 	const fs = yield* FileSystem.FileSystem

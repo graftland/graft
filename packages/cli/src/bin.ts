@@ -2,12 +2,13 @@
 /**
  * The `graft` executable. Running this module starts the program.
  */
+import { Array, Effect, Layer, Logger, Option, Stdio } from "effect"
+import { Argument, CliError, Command, Flag } from "effect/cli"
 import { NodeRuntime } from "@effect/platform-node"
-import { Array, Effect, Option, Layer, Logger, Stdio } from "effect"
-import { Argument, Command, Flag, CliError } from "effect/cli"
-import { version } from "../package.json" with { type: "json" }
 
 import { Graft } from "@graftland/graft"
+
+import { version } from "../package.json" with { type: "json" }
 import { platform } from "./Application"
 import * as Host from "./internal/commandHost"
 

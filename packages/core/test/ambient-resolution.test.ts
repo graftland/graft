@@ -1,5 +1,6 @@
-import { assert, describe, it } from "@effect/vitest"
 import { Context, Deferred, Effect, Layer, Option, Ref } from "effect"
+import { assert, describe, it } from "@effect/vitest"
+
 import { Event, Graft, Plugin } from "../src/index.ts"
 
 class Service extends Context.Service<Service, string>()(

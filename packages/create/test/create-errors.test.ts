@@ -1,5 +1,3 @@
-import { NodeServices } from "@effect/platform-node"
-import { assert, it } from "@effect/vitest"
 import {
 	Array,
 	Cause,
@@ -10,6 +8,9 @@ import {
 	PlatformError,
 	Schema,
 } from "effect"
+import { NodeServices } from "@effect/platform-node"
+import { assert, it } from "@effect/vitest"
+
 import { create, InvalidName, InvalidPackageManager } from "../src/index.ts"
 
 const isInvalidName = Schema.is(InvalidName)

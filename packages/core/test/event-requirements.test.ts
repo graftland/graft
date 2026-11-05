@@ -1,6 +1,8 @@
-import { assert, it } from "@effect/vitest"
-import { expectTypeOf } from "vitest"
 import { Context, Effect, Ref, Scope } from "effect"
+import { assert, it } from "@effect/vitest"
+
+import { expectTypeOf } from "vitest"
+
 import { Event, Graft } from "../src/index.ts"
 import { run } from "./utils.ts"
 

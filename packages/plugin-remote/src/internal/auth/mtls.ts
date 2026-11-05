@@ -1,4 +1,5 @@
 import { Array, Cause, Effect, Schema, String } from "effect"
+
 import { AuthenticationFailed } from "../../Errors"
 
 // Node JSON-quotes SAN values containing separators, escaping commas inside the value.

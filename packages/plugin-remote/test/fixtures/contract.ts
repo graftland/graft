@@ -1,4 +1,5 @@
 import { Schema } from "effect"
+
 import { Contract } from "../../src/index"
 
 export class Rejected extends Schema.TaggedError<

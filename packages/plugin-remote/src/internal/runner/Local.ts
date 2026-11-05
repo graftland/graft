@@ -1,11 +1,12 @@
 import { Cause, Effect, Fiber, Option } from "effect"
-import type { Execution } from "../directTransport"
-import * as FailureGroup from "../FailureGroup"
+
 import {
 	LocalTerminationTimeout,
 	ProcessExited,
 	TransportError,
 } from "../../Errors"
+import type { Execution } from "../directTransport"
+import * as FailureGroup from "../FailureGroup"
 import * as Port from "../port"
 import { stdinExitTimeout } from "./ProcessObservation"
 

@@ -1,8 +1,11 @@
+import { Array, Cause, Effect, Option, Result, Schema, Stream } from "effect"
 import { assert, it } from "@effect/vitest"
+
 import { Graft, type Fork } from "@graftland/graft"
-import { Effect, Array, Stream, Result, Option, Cause, Schema } from "effect"
+
 import { Group, Tree, type Entry } from "../src/index.ts"
 import { echo, run } from "./utils.ts"
+
 const flatten = (
 	nodes: ReadonlyArray<Fork.ForkTree>,
 ): ReadonlyArray<Fork.ForkTree> =>

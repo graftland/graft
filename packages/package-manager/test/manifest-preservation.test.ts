@@ -1,5 +1,6 @@
-import { assert, describe, it } from "@effect/vitest"
 import { Effect, HashMap, Option, String } from "effect"
+import { assert, describe, it } from "@effect/vitest"
+
 import { run, setup, success } from "./fixtures.ts"
 
 describe("manifest preservation", () => {

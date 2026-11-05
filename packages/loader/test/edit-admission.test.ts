@@ -1,5 +1,3 @@
-import { assert, describe, it } from "@effect/vitest"
-import { Graft, Plugin } from "@graftland/graft"
 import {
 	Array,
 	Cause,
@@ -11,6 +9,10 @@ import {
 	Ref,
 	Stream,
 } from "effect"
+import { assert, describe, it } from "@effect/vitest"
+
+import { Graft, Plugin } from "@graftland/graft"
+
 import { Entry, Loader, Tree } from "../src/index.ts"
 import { loaderService, run } from "./utils.ts"
 

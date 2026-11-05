@@ -5,9 +5,10 @@
  * plugin only once the service exists, and stops it before the service goes
  * away, so its code never has to check.
  */
-import { NodeRuntime } from "@effect/platform-node"
-import { type Fork, Graft, Plugin } from "@graftland/graft"
 import { Context, Effect, Layer, Logger, Stream } from "effect"
+import { NodeRuntime } from "@effect/platform-node"
+
+import { Graft, Plugin, type Fork } from "@graftland/graft"
 
 // A service is an ordinary Effect service key.
 export class Greeter extends Context.Service<

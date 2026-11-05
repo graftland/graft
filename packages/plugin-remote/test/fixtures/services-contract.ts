@@ -1,5 +1,6 @@
 import { Context, Effect, Schema, Stream } from "effect"
 import { Rpc, RpcGroup } from "effect/rpc"
+
 import { Contract } from "../../src/index"
 
 export class HostApi extends Context.Service<

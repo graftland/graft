@@ -1,5 +1,7 @@
-import { Event, Graft, type Fork, type Plugin } from "@graftland/graft"
 import { Context, Effect, References, type Scope } from "effect"
+
+import { Event, Graft, type Fork, type Plugin } from "@graftland/graft"
+
 import { ready } from "./lifecycle.ts"
 import {
 	NoteRequest,

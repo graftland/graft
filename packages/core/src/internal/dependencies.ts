@@ -1,4 +1,5 @@
 import { Effect, HashMap, HashSet, Option, TxRef } from "effect"
+
 import type { ActiveResolution, GraphNode, ServiceKey } from "./runtime"
 
 /** The exact dependency snapshot must still be valid when plugin code publishes. */

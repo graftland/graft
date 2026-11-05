@@ -3,9 +3,9 @@
  * commands or filters: plugins register event handlers, and Graft removes
  * those handlers when the plugin that registered them stops.
  */
+import { Array, Effect, Option, String, type Scope } from "effect"
+
 import { Event, type Graft } from "@graftland/graft"
-import type { Scope } from "effect"
-import { Array, Effect, Option, String } from "effect"
 
 export interface Message {
 	readonly user: string

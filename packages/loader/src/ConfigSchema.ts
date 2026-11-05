@@ -1,6 +1,8 @@
 /** Compose the editor schema for a config file without loading plugin implementations. */
-import * as Entry from "./Entry"
 import { Array, JsonSchema, Schema } from "effect"
+
+import * as Entry from "./Entry"
+
 /** A plugin name and its aliases share one encoded JSON Schema for config. */
 export interface Registration {
 	readonly names: ReadonlyArray<string>

@@ -1,23 +1,25 @@
 // Native require exercises the same Node module hooks used by the CLI.
 import { createRequire } from "node:module"
-import { NodeFileSystem } from "@effect/platform-node"
-import { assert, it } from "@effect/vitest"
+
 import {
+	Cause,
 	Deferred,
 	Effect,
 	Exit,
-	FileSystem,
-	Option,
-	Cause,
 	Fiber,
+	FileSystem,
 	Logger,
-	Queue,
+	Option,
 	Path,
 	Predicate,
+	Queue,
 	Schema,
 	Stream,
 	String,
 } from "effect"
+import { NodeFileSystem } from "@effect/platform-node"
+import { assert, it } from "@effect/vitest"
+
 import type { Plugin as PluginType } from "@graftland/graft"
 
 const runtimeUrl = new URL("../.cache/integration/runtime.mjs", import.meta.url)

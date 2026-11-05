@@ -1,8 +1,24 @@
 /**
  * Runs a Graft application from its config file.
  */
+import {
+	Array,
+	Cause,
+	Deferred,
+	Effect,
+	Exit,
+	FileSystem,
+	Layer,
+	Logger,
+	Option,
+	Path,
+	Scope,
+	Semaphore,
+	type PlatformError,
+	type Schema,
+} from "effect"
 import { NodeServices } from "@effect/platform-node"
-import { Application, ApplicationError, platform } from "./Application"
+
 import { Graft, Plugin } from "@graftland/graft"
 import * as Hmr from "@graftland/hmr"
 import {
@@ -12,22 +28,9 @@ import {
 	ModuleResolver,
 	type Tree,
 } from "@graftland/loader"
-import type { PlatformError, Schema } from "effect"
-import {
-	Deferred,
-	Exit,
-	Effect,
-	FileSystem,
-	Layer,
-	Logger,
-	Path,
-	Scope,
-	Semaphore,
-	Cause,
-	Option,
-	Array,
-} from "effect"
-import { EnvFile, layer as env, watchEnvFile } from "./internal/env"
+
+import { Application, ApplicationError, platform } from "./Application"
+import { layer as env, EnvFile, watchEnvFile } from "./internal/env"
 import { layer as intercepts } from "./internal/intercepts"
 import { watchModules } from "./internal/watch"
 

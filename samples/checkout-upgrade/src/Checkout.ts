@@ -1,5 +1,5 @@
-import type { Effect } from "effect"
-import { Context } from "effect"
+import { Context, type Effect } from "effect"
+
 import type { Order, Receipt } from "./Orders.ts"
 
 /** A connection pool to the orders database. */

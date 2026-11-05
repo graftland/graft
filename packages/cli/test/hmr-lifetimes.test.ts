@@ -1,7 +1,6 @@
 // Native loading exercises the same HMR hooks as the CLI process.
 import { createRequire } from "node:module"
-import { NodeServices } from "@effect/platform-node"
-import { assert, it } from "@effect/vitest"
+
 import {
 	Array,
 	Cause,
@@ -20,6 +19,8 @@ import {
 	Stream,
 	String,
 } from "effect"
+import { NodeServices } from "@effect/platform-node"
+import { assert, it } from "@effect/vitest"
 
 const runtimeUrl = new URL("../.cache/integration/runtime.mjs", import.meta.url)
 const { Hmr, Graft, ModuleResolver, watchModules } = createRequire(

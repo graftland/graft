@@ -8,8 +8,11 @@ import {
 	Random,
 	Schema,
 	Scope,
+	type FileSystem,
+	type Path,
+	type PlatformError,
 } from "effect"
-import type { FileSystem, Path, PlatformError } from "effect"
+
 /** File writes have completed and the original installer group is stopped or absent. */
 export interface ManagedWritersIdle {
 	readonly _tag: "ManagedWritersIdle"

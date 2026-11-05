@@ -1,4 +1,3 @@
-import { assert, it } from "@effect/vitest"
 import {
 	Cause,
 	Context,
@@ -12,6 +11,8 @@ import {
 	Stream,
 	String,
 } from "effect"
+import { assert, it } from "@effect/vitest"
+
 import { Fork, Graft, Plugin } from "../src/index.ts"
 import { reach, run } from "./utils.ts"
 

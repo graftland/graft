@@ -1,5 +1,3 @@
-import { assert, describe, it } from "@effect/vitest"
-import { Graft } from "@graftland/graft"
 import {
 	Array,
 	Effect,
@@ -9,8 +7,12 @@ import {
 	Queue,
 	Schedule,
 	Stream,
+	type Scope,
 } from "effect"
-import type { Scope } from "effect"
+import { assert, describe, it } from "@effect/vitest"
+
+import { Graft } from "@graftland/graft"
+
 import { Ledger, OrderQueue, type Receipt } from "../src/Orders.ts"
 import checkout from "../src/plugins/checkout.ts"
 import database from "../src/plugins/database.ts"

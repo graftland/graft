@@ -1,9 +1,12 @@
-import { NodeHttpServer } from "@effect/platform-node"
-import { Event, Graft, Plugin } from "@graftland/graft"
-import { Effect, Option, Schema } from "effect"
-import { HttpServer, HttpServerRequest, HttpServerResponse } from "effect/http"
 // @effect-diagnostics-next-line nodeBuiltinImport:off -- NodeHttpServer takes a factory for a Node server
 import { createServer } from "node:http"
+
+import { Effect, Option, Schema } from "effect"
+import { HttpServer, HttpServerRequest, HttpServerResponse } from "effect/http"
+import { NodeHttpServer } from "@effect/platform-node"
+
+import { Event, Graft, Plugin } from "@graftland/graft"
+
 import { Gateway, Route } from "../Gateway.ts"
 
 /**

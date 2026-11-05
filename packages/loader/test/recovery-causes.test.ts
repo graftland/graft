@@ -1,20 +1,22 @@
-import { assert, it } from "@effect/vitest"
-import { Graft, Plugin } from "@graftland/graft"
 import {
 	Array,
 	Cause,
 	ConfigProvider,
-	Layer,
-	Schema,
-	Stream,
 	Effect,
 	Exit,
 	FileSystem,
+	Layer,
 	Option,
 	Path,
 	PlatformError,
 	Ref,
+	Schema,
+	Stream,
 } from "effect"
+import { assert, it } from "@effect/vitest"
+
+import { Graft, Plugin } from "@graftland/graft"
+
 import { Entry, Loader, ModuleResolver } from "../src/index.ts"
 import { atomicWrite } from "../src/internal/atomicWrite.ts"
 import { loaderService, run } from "./utils.ts"

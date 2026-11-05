@@ -8,9 +8,10 @@ import {
 	Schedule,
 	Stream,
 	String,
+	type PlatformError,
 } from "effect"
-import type { PlatformError } from "effect"
 import type { ChildProcessSpawner } from "effect/process"
+
 import * as FailureGroup from "../FailureGroup"
 
 /** Time allowed for a direct execution unit or launcher to exit after input EOF. */

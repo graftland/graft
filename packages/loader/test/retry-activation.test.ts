@@ -1,6 +1,5 @@
-import { assert, it } from "@effect/vitest"
-import { Graft, Plugin } from "@graftland/graft"
 import {
+	Array,
 	Context,
 	Deferred,
 	Effect,
@@ -9,8 +8,11 @@ import {
 	Ref,
 	Schema,
 	Stream,
-	Array,
 } from "effect"
+import { assert, it } from "@effect/vitest"
+
+import { Graft, Plugin } from "@graftland/graft"
+
 import { Loader, ModuleResolver } from "../src/index.ts"
 import { loaderService, run } from "./utils.ts"
 

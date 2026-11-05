@@ -1,12 +1,13 @@
-import { Commands } from "@graftland/cli/Commands"
+import { Context, Effect, Layer, Schema, Sink, Stream } from "effect"
 import { Command } from "effect/cli"
+import { Rpc, RpcGroup } from "effect/rpc"
+
+import { Commands } from "@graftland/cli/Commands"
 import { Event, Graft, Plugin } from "@graftland/graft"
 import { Group, Include, Loader, ModuleResolver } from "@graftland/loader"
 import * as Remote from "@graftland/plugin-remote"
 import { Authenticator, Credentials } from "@graftland/plugin-remote/Auth"
 import { Connector, Listener } from "@graftland/plugin-remote/Transport"
-import { Context, Effect, Layer, Schema, Sink, Stream } from "effect"
-import { Rpc, RpcGroup } from "effect/rpc"
 
 class Word extends Context.Service<Word, string>()("fixture/Word") {}
 class Greeter extends Context.Service<

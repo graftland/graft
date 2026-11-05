@@ -1,13 +1,5 @@
-import { Peer } from "../src/internal/Peer"
-import { assert, describe, it } from "@effect/vitest"
-import {
-	NodeHttpServer,
-	NodeHttpClient,
-	NodeServices,
-	NodeSocket,
-	NodeSocketServer,
-} from "@effect/platform-node"
-import { Graft, Plugin } from "@graftland/graft"
+import { createSecureServer } from "node:http2"
+
 import {
 	Array,
 	Cause,
@@ -20,35 +12,47 @@ import {
 	Logger,
 	MutableList,
 	Option,
-	String as Str,
 	Redacted,
 	Ref,
 	Schema,
+	String as Str,
 	Stream,
 } from "effect"
 import { Digest, Mac, SecureRandom, Signature } from "effect/crypto"
+import { FetchHttpClient, HttpClient, HttpServerResponse } from "effect/http"
 import { Jwk, Jwt } from "effect/jose"
-import { HttpServerResponse, HttpClient, FetchHttpClient } from "effect/http"
+import {
+	NodeHttpClient,
+	NodeHttpServer,
+	NodeServices,
+	NodeSocket,
+	NodeSocketServer,
+} from "@effect/platform-node"
+import { assert, describe, it } from "@effect/vitest"
+
+import { Graft, Plugin } from "@graftland/graft"
+
 import { inject } from "vitest"
-import { createSecureServer } from "node:http2"
+
 import * as Auth from "../src/Auth"
-import * as Remote from "../src/index"
 import { AuthenticationFailed, TransportError } from "../src/Errors"
-import { Supervisor } from "../src/internal/Supervisor"
-import { Connector, Listener, type Channel } from "../src/Transport"
+import hostBearer from "../src/host/auth/bearer"
+import hostJwt from "../src/host/auth/jwt"
+import { default as hostNone } from "../src/host/auth/none"
+import hostUnix from "../src/host/unix"
+import { default as hostWebsocket } from "../src/host/websocket"
+import * as Remote from "../src/index"
 import * as Assembly from "../src/internal/assembly"
-import { default as websocket } from "../src/runner/websocket"
-import unix from "../src/runner/unix"
+import { Peer } from "../src/internal/Peer"
+import * as Framing from "../src/internal/runner/Framing"
+import { Supervisor } from "../src/internal/Supervisor"
 import bearer from "../src/runner/auth/bearer"
 import jwt from "../src/runner/auth/jwt"
 import { default as none } from "../src/runner/auth/none"
 import { Config as StdioConfig } from "../src/runner/stdio"
-import { default as hostWebsocket } from "../src/host/websocket"
-import hostUnix from "../src/host/unix"
-import hostBearer from "../src/host/auth/bearer"
-import hostJwt from "../src/host/auth/jwt"
-import { default as hostNone } from "../src/host/auth/none"
-import * as Framing from "../src/internal/runner/Framing"
+import unix from "../src/runner/unix"
+import { default as websocket } from "../src/runner/websocket"
+import { Connector, Listener, type Channel } from "../src/Transport"
 import { contract } from "./fixtures/contract"
 
 const crypto = Layer.mergeAll(

@@ -1,6 +1,12 @@
 /** Credentials and authenticated identities shared by transport plugins. */
-import { Context } from "effect"
-import type { Effect, Redacted, Option, Scope } from "effect"
+import {
+	Context,
+	type Effect,
+	type Option,
+	type Redacted,
+	type Scope,
+} from "effect"
+
 import type {
 	AuthenticationFailed,
 	AuthenticatorUnavailable,

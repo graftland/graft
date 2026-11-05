@@ -1,5 +1,7 @@
-import type { Fork } from "@graftland/graft"
 import { Array, Deferred, Effect, HashSet, Option, Stream } from "effect"
+
+import type { Fork } from "@graftland/graft"
+
 import type { AuthenticatorApi } from "../Auth"
 import type { Properties } from "../Transport"
 import { CapabilityCombinationError, CapabilityFailed } from "./assembly"

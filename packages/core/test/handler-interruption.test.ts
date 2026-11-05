@@ -1,4 +1,3 @@
-import { assert, describe, it } from "@effect/vitest"
 import {
 	Cause,
 	Context,
@@ -9,6 +8,8 @@ import {
 	Option,
 	Scope,
 } from "effect"
+import { assert, describe, it } from "@effect/vitest"
+
 import { Event } from "../src/index.ts"
 import { run } from "./utils.ts"
 

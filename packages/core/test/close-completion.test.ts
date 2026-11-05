@@ -1,4 +1,3 @@
-import { assert, describe, it } from "@effect/vitest"
 import {
 	Cause,
 	Deferred,
@@ -11,9 +10,11 @@ import {
 	Stream,
 } from "effect"
 import { TestClock } from "effect/testing"
+import { assert, describe, it } from "@effect/vitest"
+
 import { Event, Graft, Plugin, type Fork } from "../src/index.ts"
-import { run } from "./utils.ts"
 import { ownedScope } from "../src/internal/scope.ts"
+import { run } from "./utils.ts"
 
 describe("fork close completion", () => {
 	it.effect("makes every concurrent dispose wait for cleanup", () =>

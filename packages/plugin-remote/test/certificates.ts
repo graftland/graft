@@ -1,8 +1,10 @@
-import { NodeServices } from "@effect/platform-node"
+import process from "node:process"
+
 import { Effect, FileSystem, Layer } from "effect"
 import { SecureRandom } from "effect/crypto"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
-import process from "node:process"
+import { NodeServices } from "@effect/platform-node"
+
 import * as Certificates from "../src/internal/Certificates"
 
 /** Exercise the deployment command for ordinary certificates; only invalid identities bypass it. */

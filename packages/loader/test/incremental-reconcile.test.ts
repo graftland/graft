@@ -1,5 +1,3 @@
-import { assert, it } from "@effect/vitest"
-import { Graft, Plugin } from "@graftland/graft"
 import {
 	Array,
 	ConfigProvider,
@@ -9,10 +7,14 @@ import {
 	Fiber,
 	Layer,
 	Option,
-	Stream,
 	Ref,
 	Schema,
+	Stream,
 } from "effect"
+import { assert, it } from "@effect/vitest"
+
+import { Graft, Plugin } from "@graftland/graft"
+
 import { Entry, Loader, ModuleResolver } from "../src/index.ts"
 import { loaderService, run } from "./utils.ts"
 

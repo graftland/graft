@@ -1,6 +1,3 @@
-import { NodeServices } from "@effect/platform-node"
-import { TestClock } from "effect/testing"
-import { assert, describe, it } from "@effect/vitest"
 import {
 	Array,
 	Cause,
@@ -15,6 +12,10 @@ import {
 	Queue,
 	Stream,
 } from "effect"
+import { TestClock } from "effect/testing"
+import { NodeServices } from "@effect/platform-node"
+import { assert, describe, it } from "@effect/vitest"
+
 import {
 	EnvFile,
 	layer as envLayer,

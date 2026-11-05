@@ -1,9 +1,19 @@
+import {
+	Array,
+	Context,
+	Deferred,
+	Effect,
+	Layer,
+	Stream,
+	String,
+	type Scope,
+} from "effect"
+import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/http"
 import { assert, describe, it } from "@effect/vitest"
+
 import { Graft, Plugin } from "@graftland/graft"
 import { Loader, ModuleResolver } from "@graftland/loader"
-import { Array, Context, Deferred, Effect, Layer, Stream, String } from "effect"
-import type { Scope } from "effect"
-import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/http"
+
 import { Gateway } from "../src/Gateway.ts"
 import health from "../src/plugins/health.ts"
 import inspector from "../src/plugins/inspector.ts"

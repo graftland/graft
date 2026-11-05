@@ -1,6 +1,7 @@
-import { assert, describe, it } from "@effect/vitest"
 import { Cause, Deferred, Effect, Exit, Fiber, Ref } from "effect"
 import { TestClock } from "effect/testing"
+import { assert, describe, it } from "@effect/vitest"
+
 import { Event } from "../src/index.ts"
 import { run } from "./utils.ts"
 

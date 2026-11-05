@@ -1,24 +1,26 @@
 import { createRequire } from "node:module"
-import { NodeFileSystem } from "@effect/platform-node"
-import { assert, describe, it } from "@effect/vitest"
-import type { Graft as GraftType, Plugin as PluginType } from "@graftland/graft"
+
 import {
-	Deferred,
 	Cause,
-	Exit,
+	Deferred,
 	Effect,
+	Exit,
 	Fiber,
 	FileSystem,
 	Logger,
-	Queue,
-	Path,
 	Option,
-	Schema,
+	Path,
 	Predicate,
+	Queue,
+	Schema,
 	Scope,
 	Stream,
 	String,
 } from "effect"
+import { NodeFileSystem } from "@effect/platform-node"
+import { assert, describe, it } from "@effect/vitest"
+
+import type { Graft as GraftType, Plugin as PluginType } from "@graftland/graft"
 
 const runtimeUrl = new URL("../.cache/integration/runtime.mjs", import.meta.url)
 const { Hmr, Graft } = createRequire(import.meta.url)(

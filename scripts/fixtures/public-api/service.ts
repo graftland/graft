@@ -1,5 +1,7 @@
-import { Plugin } from "@graftland/graft"
 import { Context, Effect, Layer } from "effect"
+
+import { Plugin } from "@graftland/graft"
+
 class Word extends Context.Service<Word, string>()("fixture/service/Word") {}
 export const service = Plugin.service(Word, Effect.succeed("hello"), {
 	name: "word",

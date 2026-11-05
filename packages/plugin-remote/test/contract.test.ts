@@ -1,7 +1,9 @@
-import { expectTypeOf } from "vitest"
-import { assert, describe, it } from "@effect/vitest"
 import { Context, Effect, Schema } from "effect"
 import { Rpc, RpcGroup } from "effect/rpc"
+import { assert, describe, it } from "@effect/vitest"
+
+import { expectTypeOf } from "vitest"
+
 import { Contract } from "../src/index"
 
 class First extends Context.Service<First, {}>()(

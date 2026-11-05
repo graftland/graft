@@ -1,12 +1,21 @@
 /** Execution and byte-channel capabilities; implementations live in host plugins. */
-import { Context } from "effect"
-import type { Effect, Option, Scope, Stream, Sink, Redacted } from "effect"
+import {
+	Context,
+	type Effect,
+	type Option,
+	type Redacted,
+	type Scope,
+	type Sink,
+	type Stream,
+} from "effect"
+
+import type { Prepared, TlsPolicy, VerifiedCertificate } from "./Auth"
 import type {
 	AuthenticationFailed,
 	AuthenticatorUnavailable,
 	TransportError,
 } from "./Errors"
-import type { Prepared, VerifiedCertificate, TlsPolicy } from "./Auth"
+
 /** Ordered reliable bytes. Chunk boundaries have no meaning; EOF is not exit confirmation. */
 export interface Channel {
 	readonly input: Stream.Stream<Uint8Array, TransportError>

@@ -1,5 +1,3 @@
-import { Limits, PositiveInt } from "../Limits"
-export { Limits, PositiveInt, PositiveFinite, defaults } from "../Limits"
 import {
 	Array,
 	Cause,
@@ -9,8 +7,12 @@ import {
 	Effect,
 	Option,
 	Schema,
+	type Scope,
 } from "effect"
-import type { Scope } from "effect"
+
+import { Limits, PositiveInt } from "../Limits"
+
+export { Limits, PositiveInt, PositiveFinite, defaults } from "../Limits"
 
 const diagnosticCause = Schema.Cause(
 	Schema.Defect({ includeStack: true }),

@@ -1,5 +1,3 @@
-import { RuntimeContext } from "../src/internal/runtimeContext"
-import { assert, describe, it } from "@effect/vitest"
 import {
 	Array,
 	Context,
@@ -13,9 +11,12 @@ import {
 	TxRef,
 	TxSubscriptionRef,
 } from "effect"
+import { assert, describe, it } from "@effect/vitest"
+
 import { Graft, Plugin } from "../src/index.ts"
-import * as Slots from "../src/internal/slots.ts"
 import { realmKey } from "../src/internal/runtime.ts"
+import { RuntimeContext } from "../src/internal/runtimeContext"
+import * as Slots from "../src/internal/slots.ts"
 import { reach, registrySnapshot, run } from "./utils.ts"
 
 class Required extends Context.Service<Required, number>()(

@@ -18,9 +18,10 @@ CLI 是建立在這些函式庫之上的一個小程式。你可以用同樣的�
 `Graft.layer` 建立 runtime。在一個 scope 中載入外掛，關閉該 scope 就會卸載它們：
 
 ```ts
-import { NodeRuntime, NodeServices } from "@effect/platform-node"
-import { Graft } from "@graftland/graft"
 import { Effect, Layer } from "effect"
+import { NodeRuntime, NodeServices } from "@effect/platform-node"
+
+import { Graft } from "@graftland/graft"
 
 const program = Effect.gen(function* () {
 	yield* Graft.plugin(greeter, { greeting: "Hello" })
@@ -132,8 +133,10 @@ const program = Effect.gen(function* () {
 `Graft.plugin` 載入它：
 
 ```ts
-import * as Remote from "@graftland/plugin-remote"
 import { SecureRandom } from "effect/crypto"
+
+import * as Remote from "@graftland/plugin-remote"
+
 import { contract } from "./contract.js"
 
 const greeter = Remote.plugin(contract, {

@@ -1,6 +1,3 @@
-import { EndOfStream } from "./runner/Framing"
-export type { Channel } from "../Transport"
-import type { Channel } from "../Transport"
 import {
 	Array,
 	Cause,
@@ -15,21 +12,29 @@ import {
 	Record,
 	Result,
 	Schema,
-	type Scope,
 	Stream,
 	TxQueue,
 	TxRef,
+	type Scope,
 } from "effect"
 import {
 	RpcClient,
 	RpcClientError,
 	RpcSerialization,
 	RpcServer,
+	type Rpc,
+	type RpcGroup,
+	type RpcMessage,
 } from "effect/rpc"
-import type { Rpc, RpcGroup, RpcMessage } from "effect/rpc"
-import * as FailureGroup from "./FailureGroup"
+
 import { TransportError } from "../Errors"
+import type { Channel } from "../Transport"
+import * as FailureGroup from "./FailureGroup"
 import { defaults, type Limits } from "./Limits"
+import { EndOfStream } from "./runner/Framing"
+
+export type { Channel } from "../Transport"
+
 export type Priority = keyof Limits
 
 export const Priority = Context.Reference<Priority>(

@@ -15,8 +15,9 @@ reconfigure, replace and unload any branch while the process keeps running. Cut
 anywhere, and the rest of the tree carries on.
 
 ```ts
-import { Graft, Plugin } from "@graftland/graft"
 import { Context, Effect, Schema } from "effect"
+
+import { Graft, Plugin } from "@graftland/graft"
 
 class Greeter extends Context.Service<
 	Greeter,

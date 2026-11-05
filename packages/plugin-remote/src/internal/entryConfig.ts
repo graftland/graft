@@ -1,10 +1,11 @@
 import {
 	Reference,
-	type Authentication,
 	RunnerAuthentication,
+	type Authentication,
 	type Connect,
 	type Listen,
 } from "../Config"
+
 export * from "../Config"
 const capability = (
 	side: "host" | "runner",

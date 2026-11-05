@@ -1,11 +1,11 @@
 import {
 	Array,
 	Cause,
-	Layer,
 	Effect,
 	FileSystem,
 	HashMap,
 	HashSet,
+	Layer,
 	Path,
 	Ref,
 	Schema,
@@ -14,7 +14,8 @@ import {
 	type PlatformError,
 } from "effect"
 import { Digest, SecureRandom } from "effect/crypto"
-import { Key, SessionRecord, Store, StateStorageError } from "./model"
+
+import { Key, SessionRecord, StateStorageError, Store } from "./model"
 import * as Retention from "./Retention"
 
 /** Injectable store used by deterministic supervisor tests. */

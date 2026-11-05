@@ -1,4 +1,5 @@
-import { assert, it } from "@effect/vitest"
+import * as NodeProcess from "node:process"
+
 import {
 	Effect,
 	Exit,
@@ -9,7 +10,8 @@ import {
 	Schema,
 } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
-import * as NodeProcess from "node:process"
+import { assert, it } from "@effect/vitest"
+
 import { groupExists } from "../src/process.ts"
 import { run, setup } from "./fixtures.ts"
 

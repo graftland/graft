@@ -1,5 +1,7 @@
-import { Event, Plugin } from "@graftland/graft"
 import { Effect, Option } from "effect"
+
+import { Event, Plugin } from "@graftland/graft"
+
 import { NoteRequest, NoteStore, Quota, type Reply } from "./services.ts"
 
 export const notes = Plugin.make({

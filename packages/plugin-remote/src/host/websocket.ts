@@ -1,13 +1,16 @@
+import { Cause, Effect, FileSystem, Option, Path, Schema } from "effect"
+
+import { Graft, Plugin } from "@graftland/graft"
+import { ConfigDirectory } from "@graftland/loader"
+
+import { TransportError } from "../Errors"
+import * as Channel from "../internal/socketChannel"
+import type { WebsocketOptions } from "../internal/transportOptions"
+import * as Websocket from "../internal/websocket"
+import { Connector, type ConnectorApi } from "../Transport"
+
 /** Options for the websocket connector. */
 export type { WebsocketOptions as Options } from "../internal/transportOptions"
-import type { WebsocketOptions } from "../internal/transportOptions"
-import { Plugin, Graft } from "@graftland/graft"
-import { Cause, Effect, FileSystem, Option, Path, Schema } from "effect"
-import { Connector, type ConnectorApi } from "../Transport"
-import { TransportError } from "../Errors"
-import { ConfigDirectory } from "@graftland/loader"
-import * as Websocket from "../internal/websocket"
-import * as Channel from "../internal/socketChannel"
 
 /** Configured Connector; certificate paths belong to the enclosing configuration. */
 export const Config = Schema.Struct({

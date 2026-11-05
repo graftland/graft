@@ -1,8 +1,9 @@
-import { assert, it } from "@effect/vitest"
-import { NodeServices } from "@effect/platform-node"
+import process from "node:process"
+
 import { Effect, Schema, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
-import process from "node:process"
+import { NodeServices } from "@effect/platform-node"
+import { assert, it } from "@effect/vitest"
 
 it.live(
 	"finishes asynchronous cleanup before exiting after a broken protocol pipe",

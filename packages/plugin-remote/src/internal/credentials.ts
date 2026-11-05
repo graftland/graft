@@ -1,5 +1,7 @@
-import { Graft, Plugin } from "@graftland/graft"
 import { Cause, Context, Effect, Redacted, Scope } from "effect"
+
+import { Graft, Plugin } from "@graftland/graft"
+
 import { Credentials, type ClientCertificate, type Prepared } from "../Auth"
 import { CredentialsError } from "../Errors"
 import { prepare } from "./auth/token"

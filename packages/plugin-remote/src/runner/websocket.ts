@@ -1,4 +1,7 @@
-import { Graft, Plugin } from "@graftland/graft"
+// @effect-diagnostics-next-line nodeBuiltinImport:off -- NodeHttpServer takes a factory for an HTTP/1.1 upgrade server
+import { createServer } from "node:http"
+import { createSecureServer } from "node:http2"
+
 import {
 	Cause,
 	Console,
@@ -9,16 +12,15 @@ import {
 	Schema,
 	String,
 } from "effect"
+
+import { Graft, Plugin } from "@graftland/graft"
 import { ConfigDirectory } from "@graftland/loader"
-import { createSecureServer } from "node:http2"
-import { Url, path as upgradePath } from "../internal/websocket"
-import { Listener } from "../Transport"
+
 import type { TlsPolicy } from "../Auth"
 import { TransportError } from "../Errors"
+import { properties, path as upgradePath, Url } from "../internal/websocket"
 import * as Server from "../internal/websocketServer"
-import { properties } from "../internal/websocket"
-// @effect-diagnostics-next-line nodeBuiltinImport:off -- NodeHttpServer takes a factory for an HTTP/1.1 upgrade server
-import { createServer } from "node:http"
+import { Listener } from "../Transport"
 
 const url = (protocol: "ws:" | "wss:") =>
 	Url.check(

@@ -20,9 +20,10 @@ your own Effect program in the same way.
 unloads them:
 
 ```ts
-import { NodeRuntime, NodeServices } from "@effect/platform-node"
-import { Graft } from "@graftland/graft"
 import { Effect, Layer } from "effect"
+import { NodeRuntime, NodeServices } from "@effect/platform-node"
+
+import { Graft } from "@graftland/graft"
 
 const program = Effect.gen(function* () {
 	yield* Graft.plugin(greeter, { greeting: "Hello" })
@@ -141,8 +142,10 @@ contract's implementation in a child process, a worker or on a runner. Load it
 with `Graft.plugin` like any other plugin:
 
 ```ts
-import * as Remote from "@graftland/plugin-remote"
 import { SecureRandom } from "effect/crypto"
+
+import * as Remote from "@graftland/plugin-remote"
+
 import { contract } from "./contract.js"
 
 const greeter = Remote.plugin(contract, {

@@ -1,8 +1,5 @@
-import { assert, it } from "@effect/vitest"
-import { NodeServices } from "@effect/platform-node"
 import {
 	Array,
-	String as Str,
 	Effect,
 	FileSystem,
 	Logger,
@@ -11,9 +8,13 @@ import {
 	Path,
 	PlatformError,
 	Sink,
+	String as Str,
 	Stream,
 } from "effect"
 import { ChildProcessSpawner } from "effect/process"
+import { NodeServices } from "@effect/platform-node"
+import { assert, it } from "@effect/vitest"
+
 import * as Manage from "../src/Manage.ts"
 
 it.effect(

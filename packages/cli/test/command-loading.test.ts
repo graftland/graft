@@ -1,7 +1,7 @@
-import { NodeServices } from "@effect/platform-node"
-import { assert, describe, it } from "@effect/vitest"
 import { Array, Effect, FileSystem, Schema, Stream, String } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
+import { NodeServices } from "@effect/platform-node"
+import { assert, describe, it } from "@effect/vitest"
 
 const commands = new URL("../.cache/commands/", import.meta.url)
 const quote = Schema.encodeEffect(Schema.fromJsonString(Schema.String))

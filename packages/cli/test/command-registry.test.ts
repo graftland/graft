@@ -1,6 +1,7 @@
-import { assert, it } from "@effect/vitest"
 import { Effect, Result } from "effect"
 import { Command } from "effect/cli"
+import { assert, it } from "@effect/vitest"
+
 import * as Registry from "../src/internal/commandRegistry"
 
 it.effect(

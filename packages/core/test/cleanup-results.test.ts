@@ -1,4 +1,3 @@
-import { assert, describe, it } from "@effect/vitest"
 import {
 	Array,
 	Cause,
@@ -10,6 +9,8 @@ import {
 	Schema,
 	Scope,
 } from "effect"
+import { assert, describe, it } from "@effect/vitest"
+
 import { Fork, Graft, Plugin } from "../src/index.ts"
 import { reach, run } from "./utils.ts"
 

@@ -100,9 +100,10 @@ itself. `loader.retry` retries failed entries and rereads `!env` values.
 Run plugins from code:
 
 ```ts
-import { NodeRuntime, NodeServices } from "@effect/platform-node"
-import { Graft } from "@graftland/graft"
 import { Effect, Layer } from "effect"
+import { NodeRuntime, NodeServices } from "@effect/platform-node"
+
+import { Graft } from "@graftland/graft"
 
 const program = Effect.gen(function* () {
 	yield* Graft.plugin(greeter, { greeting: "Hello" })

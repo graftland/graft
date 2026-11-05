@@ -1,5 +1,7 @@
-import { Graft, Plugin } from "@graftland/graft"
 import { Effect, Schema } from "effect"
+
+import { Graft, Plugin } from "@graftland/graft"
+
 import { ready } from "./lifecycle.ts"
 import { notes } from "./notes.ts"
 import { storage } from "./storage.ts"

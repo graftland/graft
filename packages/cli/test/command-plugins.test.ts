@@ -1,7 +1,7 @@
-import { assert, it } from "@effect/vitest"
-import { NodeServices } from "@effect/platform-node"
 import { Array, Config, Effect, FileSystem, Schema, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
+import { NodeServices } from "@effect/platform-node"
+import { assert, it } from "@effect/vitest"
 
 const json = Schema.encodeEffect(Schema.fromJsonString(Schema.Json))
 const install = Effect.fnUntraced(function* (directory: string) {

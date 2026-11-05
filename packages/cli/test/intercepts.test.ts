@@ -1,7 +1,3 @@
-import { NodeServices } from "@effect/platform-node"
-import { assert, describe, it } from "@effect/vitest"
-import { Graft, Plugin, type Fork } from "@graftland/graft"
-import { Include, Intercept, Loader, ModuleResolver } from "@graftland/loader"
 import {
 	Array,
 	Cause,
@@ -17,8 +13,14 @@ import {
 	References,
 	Schema,
 	Stream,
+	type Scope,
 } from "effect"
-import type { Scope } from "effect"
+import { NodeServices } from "@effect/platform-node"
+import { assert, describe, it } from "@effect/vitest"
+
+import { Graft, Plugin, type Fork } from "@graftland/graft"
+import { Include, Intercept, Loader, ModuleResolver } from "@graftland/loader"
+
 import { layer as intercepts } from "../src/internal/intercepts"
 
 const run = <A, E>(

@@ -1,7 +1,9 @@
 import { strict as assert } from "node:assert"
 import { test } from "node:test"
 import { fileURLToPath } from "node:url"
+
 import { Application, ReflectionKind } from "typedoc"
+
 import { publicEntries } from "../../scripts/public-api.mjs"
 
 // Exercise real Effect Schema classes and overloaded APIs, where flattening or

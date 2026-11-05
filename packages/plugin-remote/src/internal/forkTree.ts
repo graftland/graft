@@ -1,5 +1,6 @@
-import type { Fork } from "@graftland/graft"
 import { Array, Option } from "effect"
+
+import type { Fork } from "@graftland/graft"
 
 export const findSubtree = (
 	trees: ReadonlyArray<Fork.ForkTree>,

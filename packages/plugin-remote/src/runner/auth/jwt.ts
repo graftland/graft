@@ -1,16 +1,18 @@
-import { Option } from "effect"
-import { Graft, Plugin } from "@graftland/graft"
-import { Cause, Effect, FileSystem, Layer, Path, Schema } from "effect"
-import { Jwk, Jwks, Jwt } from "effect/jose"
+import { Cause, Effect, FileSystem, Layer, Option, Path, Schema } from "effect"
 import { Signature } from "effect/crypto"
 import { HttpClient } from "effect/http"
-import { Authenticator } from "../../Auth"
+import { Jwk, Jwks, Jwt } from "effect/jose"
+
+import { Graft, Plugin } from "@graftland/graft"
 import { ConfigDirectory } from "@graftland/loader"
+
+import { Authenticator } from "../../Auth"
 import { AuthenticationFailed, AuthenticatorUnavailable } from "../../Errors"
+import { Jwt as Config } from "../../internal/auth/config"
 import * as Token from "../../internal/auth/token"
 
 export { ClockTolerance } from "../../internal/auth/config"
-import { Jwt as Config } from "../../internal/auth/config"
+
 export { Config }
 const keys = Effect.fnUntraced(function* (config: typeof Config.Type) {
 	if (config.keys.jwksUrl !== undefined)

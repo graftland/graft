@@ -1,7 +1,9 @@
 import { rmSync } from "node:fs"
+import { join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
-import { resolve, join } from "node:path"
+
 import { createStarlightTypeDocPlugin } from "starlight-typedoc"
+
 import { publicPackages } from "../../scripts/public-api.mjs"
 import { referenceEntries, verifyReference } from "../../scripts/reference.mjs"
 

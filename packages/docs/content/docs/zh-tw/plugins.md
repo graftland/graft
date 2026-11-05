@@ -16,8 +16,9 @@ description: 使用 Plugin.make、Plugin.service 和 Plugin.layer 定義外掛�
 ## 定義外掛
 
 ```ts
-import { Plugin } from "@graftland/graft"
 import { Effect, Schedule, Schema } from "effect"
+
+import { Plugin } from "@graftland/graft"
 
 export const ticker = Plugin.make({
 	name: "ticker",

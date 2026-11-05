@@ -1,5 +1,3 @@
-import { Graft, Plugin } from "@graftland/graft"
-import { ConfigDirectory } from "@graftland/loader"
 import {
 	Cause,
 	Effect,
@@ -9,6 +7,10 @@ import {
 	Redacted,
 	Schema,
 } from "effect"
+
+import { Graft, Plugin } from "@graftland/graft"
+import { ConfigDirectory } from "@graftland/loader"
+
 import { Credentials, type Prepared } from "../../Auth"
 import { CredentialsError } from "../../Errors"
 import { prepare } from "./token"

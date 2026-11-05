@@ -1,5 +1,3 @@
-import { assert, it } from "@effect/vitest"
-import { Fork, Graft, Plugin } from "@graftland/graft"
 import {
 	Cause,
 	Deferred,
@@ -14,11 +12,15 @@ import {
 	Stdio,
 	Stream,
 } from "effect"
-import { Listener, type Channel } from "../src/Transport"
+import { assert, it } from "@effect/vitest"
+
+import { Fork, Graft, Plugin } from "@graftland/graft"
+import { ReleaseInterrupted } from "@graftland/graft/Release"
+
 import { Peer } from "../src/internal/Peer"
 import { accept } from "../src/internal/runner/accept"
-import { ReleaseInterrupted } from "@graftland/graft/Release"
 import stdio from "../src/runner/stdio"
+import { Listener, type Channel } from "../src/Transport"
 
 const unexpected = Effect.die("Unexpected session request")
 const supervisor = {

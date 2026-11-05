@@ -1,7 +1,8 @@
-import { assert, describe, it } from "@effect/vitest"
 import { Array, Effect, HashMap, Option, Result, Stream } from "effect"
-import * as Aliases from "../src/internal/aliases.ts"
+import { assert, describe, it } from "@effect/vitest"
+
 import { Graft, Plugin } from "../src/index.ts"
+import * as Aliases from "../src/internal/aliases.ts"
 import { run } from "./utils.ts"
 
 const plugin = (name: string) => Plugin.make({ name, apply: () => Effect.void })

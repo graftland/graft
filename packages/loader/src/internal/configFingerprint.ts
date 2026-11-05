@@ -1,4 +1,5 @@
 import { Array, Equal, Hash, Order } from "effect"
+
 import { isContainer } from "./snapshot"
 
 /** A conservative accelerator, never an equality decision. Cycles and opaque values fall back. */

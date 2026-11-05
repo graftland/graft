@@ -1,5 +1,3 @@
-import { ProtocolStdio } from "./internal/protocolOutput"
-import { NodeServices } from "@effect/platform-node"
 import {
 	Context,
 	Effect,
@@ -7,11 +5,14 @@ import {
 	Layer,
 	Option,
 	Schema,
-	Stdio,
 	Scope,
+	Stdio,
 } from "effect"
 import { Digest, SecureRandom, Signature } from "effect/crypto"
 import { FetchHttpClient } from "effect/http"
+import { NodeServices } from "@effect/platform-node"
+
+import { ProtocolStdio } from "./internal/protocolOutput"
 
 /** Set before argument parsing when stdout belongs to a byte protocol. */
 export const ProtocolOutput = Context.Reference(

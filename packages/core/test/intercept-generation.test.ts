@@ -1,5 +1,3 @@
-import { RuntimeContext } from "../src/internal/runtimeContext"
-import { assert, it } from "@effect/vitest"
 import {
 	Deferred,
 	Effect,
@@ -13,7 +11,10 @@ import {
 	TxSubscriptionRef,
 } from "effect"
 import { TestClock } from "effect/testing"
+import { assert, it } from "@effect/vitest"
+
 import { Graft, Plugin } from "../src/index.ts"
+import { RuntimeContext } from "../src/internal/runtimeContext"
 import { reach, run } from "./utils.ts"
 
 it.effect(

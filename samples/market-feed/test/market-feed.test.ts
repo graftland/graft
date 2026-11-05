@@ -1,5 +1,3 @@
-import { assert, describe, it } from "@effect/vitest"
-import { Graft, Plugin } from "@graftland/graft"
 import {
 	Array,
 	Cause,
@@ -8,11 +6,15 @@ import {
 	Exit,
 	Layer,
 	Option,
-	type Scope,
 	Stream,
 	String,
+	type Scope,
 } from "effect"
 import { TestClock } from "effect/testing"
+import { assert, describe, it } from "@effect/vitest"
+
+import { Graft, Plugin } from "@graftland/graft"
+
 import { alerts } from "../src/alerts.ts"
 import { candles } from "../src/candles.ts"
 import { exchange } from "../src/exchange.ts"

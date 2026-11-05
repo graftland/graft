@@ -1,13 +1,19 @@
-import { runnerConfig } from "./application"
-import { inject } from "vitest"
-import { assert, describe, it } from "@effect/vitest"
-import { NodeServices } from "@effect/platform-node"
+import { Buffer } from "node:buffer"
+
 import { Effect, FileSystem, Stream, String } from "effect"
 import { WebCrypto } from "effect/crypto"
-import { Buffer } from "node:buffer"
-import * as pki from "pkijs"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
-import { cliCommand as command, cliDirectory } from "./application"
+import { NodeServices } from "@effect/platform-node"
+import { assert, describe, it } from "@effect/vitest"
+
+import * as pki from "pkijs"
+import { inject } from "vitest"
+
+import {
+	cliDirectory,
+	cliCommand as command,
+	runnerConfig,
+} from "./application"
 
 const invoke = (args: ReadonlyArray<string>, internal = false) =>
 	Effect.gen(function* () {

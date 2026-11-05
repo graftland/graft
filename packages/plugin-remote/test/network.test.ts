@@ -1,15 +1,5 @@
-import {
-	application,
-	runHost,
-	installModule,
-	runnerConfig,
-} from "./application"
-import { SecureRandom } from "effect/crypto"
-import { Entry, Include, Loader, ModuleResolver } from "@graftland/loader"
-import { assert, describe, it } from "@effect/vitest"
-import { inject } from "vitest"
-import { NodeServices } from "@effect/platform-node"
-import { Graft, Plugin } from "@graftland/graft"
+import process from "node:process"
+
 import {
 	Array,
 	Cause,
@@ -17,34 +7,48 @@ import {
 	Deferred,
 	Duration,
 	Effect,
-	Option,
-	Path,
 	Exit,
 	Fiber,
 	FiberSet,
 	FileSystem,
 	Layer,
+	Option,
+	Path,
+	Queue,
 	Redacted,
 	Ref,
-	Queue,
-	Schema,
 	Schedule,
+	Schema,
 	Stream,
 	String,
 } from "effect"
+import { SecureRandom } from "effect/crypto"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
-import process from "node:process"
-import * as Remote from "../src/index"
 import { RpcClient } from "effect/rpc"
+import { NodeServices } from "@effect/platform-node"
+import { assert, describe, it } from "@effect/vitest"
+
+import { Graft, Plugin } from "@graftland/graft"
+import { Entry, Include, Loader, ModuleResolver } from "@graftland/loader"
+
+import { inject } from "vitest"
+
+import * as Remote from "../src/index"
 import * as Port from "../src/internal/port"
-import * as Websocket from "./websocket"
-import * as Wire from "../src/internal/runner/Wire"
 import * as Model from "../src/internal/runner/model"
 import * as Processes from "../src/internal/runner/Processes"
-import { tcpProxy } from "./network-proxy"
-import { cliCommand as command } from "./application"
+import * as Wire from "../src/internal/runner/Wire"
+import {
+	application,
+	cliCommand as command,
+	installModule,
+	runHost,
+	runnerConfig,
+} from "./application"
 import { expectFailure } from "./errors"
-import { ChildApi, HostApi, contract } from "./fixtures/services-contract"
+import { ChildApi, contract, HostApi } from "./fixtures/services-contract"
+import { tcpProxy } from "./network-proxy"
+import * as Websocket from "./websocket"
 
 declare module "vitest" {
 	export interface ProvidedContext {

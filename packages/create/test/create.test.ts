@@ -1,10 +1,21 @@
+import {
+	Effect,
+	Exit,
+	FileSystem,
+	Path,
+	Schema,
+	String,
+	type Scope,
+} from "effect"
 import { NodeServices } from "@effect/platform-node"
 import { assert, describe, it } from "@effect/vitest"
+
 import { Entry } from "@graftland/loader"
-import { Effect, Exit, FileSystem, Path, Schema, String } from "effect"
-import type { Scope } from "effect"
+
 import { parse } from "yaml"
+
 import { create } from "../src/index.ts"
+
 const run = <A, E>(
 	effect: Effect.Effect<A, E, FileSystem.FileSystem | Path.Path | Scope.Scope>,
 ) => effect.pipe(Effect.scoped, Effect.provide(NodeServices.layer))

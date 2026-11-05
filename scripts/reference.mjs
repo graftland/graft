@@ -1,6 +1,8 @@
-import { API, SymbolFlags } from "typescript/unstable/sync"
 import { readFileSync, writeFileSync } from "node:fs"
 import { join, resolve } from "node:path"
+
+import { API, SymbolFlags } from "typescript/unstable/sync"
+
 import { publicEntries, publicPackages } from "./public-api.mjs"
 
 /** Entries an application imports; internal subpaths exist only so runtimes can load them. */

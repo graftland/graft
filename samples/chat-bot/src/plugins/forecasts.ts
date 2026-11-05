@@ -1,5 +1,7 @@
-import { Graft, Plugin } from "@graftland/graft"
 import { Effect, Option, Record, String } from "effect"
+
+import { Graft, Plugin } from "@graftland/graft"
+
 import { config } from "../forecastContract.ts"
 import { Forecasts } from "../Forecasts.ts"
 

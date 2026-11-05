@@ -1,4 +1,3 @@
-import { assert, describe, it } from "@effect/vitest"
 import {
 	Array,
 	Cause,
@@ -12,6 +11,8 @@ import {
 } from "effect"
 import { ChildProcessSpawner } from "effect/process"
 import { TestClock } from "effect/testing"
+import { assert, describe, it } from "@effect/vitest"
+
 import { run, setup } from "./fixtures.ts"
 
 const failure = Effect.succeed(ChildProcessSpawner.ExitCode(7))

@@ -4,7 +4,7 @@
 // @effect-diagnostics-next-line nodeBuiltinImport:off -- native import resolution must work without requiring a platform layer
 import { realpath } from "node:fs/promises"
 import { fileURLToPath, pathToFileURL } from "node:url"
-import { Graft, Plugin } from "@graftland/graft"
+
 import {
 	Array,
 	Cause,
@@ -19,16 +19,19 @@ import {
 	Option,
 	Ref,
 	Result,
-	String,
 	Schema,
+	Scope,
 	Semaphore,
 	Stream,
-	Scope,
+	String,
+	type Duration,
+	type PlatformError,
 } from "effect"
-import type { Duration, PlatformError } from "effect"
-import * as SourceObservation from "./internal/sourceObservation"
-import { digest } from "./internal/digest"
+
+import { Graft, Plugin } from "@graftland/graft"
+
 import { changes } from "./internal/changes"
+import { digest } from "./internal/digest"
 import {
 	isMissingEntry,
 	modules,
@@ -36,6 +39,7 @@ import {
 	type Attempt,
 	type FileVersion,
 } from "./internal/modules"
+import * as SourceObservation from "./internal/sourceObservation"
 
 export class HmrError extends Schema.TaggedError<
 	HmrError,

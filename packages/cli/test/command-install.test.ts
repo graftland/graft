@@ -1,5 +1,3 @@
-import { assert, it } from "@effect/vitest"
-import { NodeServices } from "@effect/platform-node"
 import {
 	ConfigProvider,
 	Effect,
@@ -12,7 +10,11 @@ import {
 	String,
 } from "effect"
 import { ChildProcessSpawner } from "effect/process"
+import { NodeServices } from "@effect/platform-node"
+import { assert, it } from "@effect/vitest"
+
 import { parse } from "yaml"
+
 import * as Manage from "../src/Manage"
 
 const manager = (code: number, calls: MutableList.MutableList<string>) =>

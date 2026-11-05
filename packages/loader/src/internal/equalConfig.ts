@@ -1,4 +1,5 @@
 import { Array, Equal, MutableList, Record } from "effect"
+
 import { isContainer } from "./snapshot"
 
 /**

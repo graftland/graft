@@ -1,18 +1,20 @@
-import type { Plugin } from "@graftland/graft"
 import {
 	Array,
 	Cause,
-	Equivalence,
 	Deferred,
 	Effect,
+	Equivalence,
 	Fiber,
+	Schema,
 	Stream,
 	String,
-	Schema,
 } from "effect"
+
+import type { Plugin } from "@graftland/graft"
+
 import type { TransportError } from "./Errors"
-import type { Channel } from "./Transport"
 import * as Framing from "./internal/runner/Framing"
+import type { Channel } from "./Transport"
 
 export class ConformanceError extends Schema.TaggedError<
 	ConformanceError,

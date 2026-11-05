@@ -1,12 +1,14 @@
-import { NodeRuntime } from "@effect/platform-node"
-import { Graft, Plugin } from "@graftland/graft"
 import { Effect, Layer, Logger, Option, Stream } from "effect"
+import { NodeRuntime } from "@effect/platform-node"
+
+import { Graft, Plugin } from "@graftland/graft"
+
 import { Authenticator } from "../../src/Auth"
-import { Listener } from "../../src/Transport"
-import listener from "../../src/runner/stdio"
-import authenticator from "../../src/runner/auth/none"
 import { accept } from "../../src/internal/assembly"
 import { platform } from "../../src/internal/platform"
+import authenticator from "../../src/runner/auth/none"
+import listener from "../../src/runner/stdio"
+import { Listener } from "../../src/Transport"
 
 const echo = Plugin.make({
 	name: "stdio-echo",

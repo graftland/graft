@@ -1,5 +1,3 @@
-import { RuntimeContext } from "../src/internal/runtimeContext"
-import { assert, describe, it } from "@effect/vitest"
 import {
 	Cause,
 	Deferred,
@@ -13,7 +11,10 @@ import {
 	Scope,
 	TxRef,
 } from "effect"
+import { assert, describe, it } from "@effect/vitest"
+
 import { Event } from "../src/index.ts"
+import { RuntimeContext } from "../src/internal/runtimeContext"
 import { makeJournal, run } from "./utils.ts"
 
 const ownedScope = Effect.acquireRelease(Scope.make(), (scope) =>

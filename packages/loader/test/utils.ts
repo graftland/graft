@@ -1,6 +1,3 @@
-import { assert } from "@effect/vitest"
-import { NodeServices } from "@effect/platform-node"
-import { Graft, Plugin } from "@graftland/graft"
 import {
 	Array,
 	ConfigProvider,
@@ -11,8 +8,15 @@ import {
 	Ref,
 	Schedule,
 	Schema,
+	type FileSystem,
+	type Path,
+	type Scope,
 } from "effect"
-import type { FileSystem, Path, Scope } from "effect"
+import { NodeServices } from "@effect/platform-node"
+import { assert } from "@effect/vitest"
+
+import { Graft, Plugin } from "@graftland/graft"
+
 import { Loader, ModuleResolver } from "../src/index.ts"
 
 export interface Journal {

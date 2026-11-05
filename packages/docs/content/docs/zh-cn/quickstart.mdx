@@ -55,8 +55,9 @@ Node 适配器要求的版本。该版本也提供热重载所需的 `module.reg
 ## 示例插件
 
 ```js title="hello.mjs"
-import { Plugin } from "@graftland/graft"
 import { Effect, Schema } from "effect"
+
+import { Plugin } from "@graftland/graft"
 
 // Module evaluation only defines the plugin; its activation owns all resources.
 export default Plugin.make({

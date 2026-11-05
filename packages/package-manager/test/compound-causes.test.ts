@@ -1,8 +1,14 @@
-import { assert, it } from "@effect/vitest"
 import { Array, Cause, Effect, Exit, Option, PlatformError } from "effect"
 import { ChildProcessSpawner } from "effect/process"
-import { closeProcessWithTestClock as closeProcess } from "./fixtures.ts"
-import { handle, run, setup, success } from "./fixtures.ts"
+import { assert, it } from "@effect/vitest"
+
+import {
+	closeProcessWithTestClock as closeProcess,
+	handle,
+	run,
+	setup,
+	success,
+} from "./fixtures.ts"
 
 const error = (method: string) =>
 	PlatformError.systemError({

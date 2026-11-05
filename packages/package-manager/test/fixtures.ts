@@ -1,10 +1,20 @@
-import { NodeServices } from "@effect/platform-node"
-import { Effect, Fiber, FileSystem, Option, Path, Sink, Stream } from "effect"
-import type { PlatformError, Scope } from "effect"
+import {
+	Effect,
+	Fiber,
+	FileSystem,
+	Option,
+	Path,
+	Sink,
+	Stream,
+	type PlatformError,
+	type Scope,
+} from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import { TestClock } from "effect/testing"
-import { closeProcess } from "../src/process.ts"
+import { NodeServices } from "@effect/platform-node"
+
 import { make } from "../src/index.ts"
+import { closeProcess } from "../src/process.ts"
 
 export const handle = (
 	exitCode: ChildProcessSpawner.ChildProcessHandle["exitCode"],

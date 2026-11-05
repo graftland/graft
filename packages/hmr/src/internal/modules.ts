@@ -1,7 +1,7 @@
 // Node's synchronous module hooks have no Effect equivalent.
-import { digest } from "./digest"
 import { registerHooks } from "node:module"
 import { fileURLToPath, pathToFileURL } from "node:url"
+
 import {
 	Array,
 	Chunk,
@@ -12,6 +12,8 @@ import {
 	Schema,
 	String,
 } from "effect"
+
+import { digest } from "./digest"
 
 export class RestartRequired extends Schema.TaggedError<
 	RestartRequired,

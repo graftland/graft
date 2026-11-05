@@ -4,9 +4,10 @@
  * A plugin registers a handler with `Event.on`. When the plugin stops, Graft
  * removes the handler for it: there is no unsubscribe code to write or forget.
  */
-import { NodeRuntime } from "@effect/platform-node"
-import { Event, Graft, Plugin } from "@graftland/graft"
 import { Effect, Layer, Logger, String } from "effect"
+import { NodeRuntime } from "@effect/platform-node"
+
+import { Event, Graft, Plugin } from "@graftland/graft"
 
 // An event is a typed name. Handlers of this one receive a string.
 export const Message = Event.make<[text: string]>(

@@ -1,5 +1,7 @@
-import { Graft, Plugin } from "@graftland/graft"
 import { Effect } from "effect"
+
+import { Graft, Plugin } from "@graftland/graft"
+
 import { Notifier } from "./services.ts"
 
 export const notifier = Plugin.make({

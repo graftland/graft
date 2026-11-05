@@ -1,5 +1,7 @@
-import { Event, Plugin } from "@graftland/graft"
 import { Array, Effect, Ref, Schema, String } from "effect"
+
+import { Event, Plugin } from "@graftland/graft"
+
 import { Inbound } from "../Chat.ts"
 
 /**

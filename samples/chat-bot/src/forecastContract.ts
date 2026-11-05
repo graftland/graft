@@ -1,6 +1,8 @@
-import { Contract } from "@graftland/plugin-remote"
 import { Effect, Schema } from "effect"
 import { Rpc, RpcGroup } from "effect/rpc"
+
+import { Contract } from "@graftland/plugin-remote"
+
 import { Forecasts, ForecastUnavailable } from "./Forecasts.ts"
 
 const api = RpcGroup.make(

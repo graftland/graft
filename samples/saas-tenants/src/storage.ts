@@ -1,5 +1,7 @@
-import { Graft, Plugin } from "@graftland/graft"
 import { Array, Effect, FileSystem, HashMap, Ref, Schema } from "effect"
+
+import { Graft, Plugin } from "@graftland/graft"
+
 import { Note, NotesFile, NoteStore } from "./services.ts"
 
 export const storage = Plugin.make({

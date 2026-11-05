@@ -1,5 +1,3 @@
-import { assert, it } from "@effect/vitest"
-import { Plugin } from "@graftland/graft"
 import {
 	Array,
 	Deferred,
@@ -10,6 +8,10 @@ import {
 	Ref,
 	Scope,
 } from "effect"
+import { assert, it } from "@effect/vitest"
+
+import { Plugin } from "@graftland/graft"
+
 import { ConfigDirectory, ModuleResolver } from "../src/index.ts"
 
 const plugin = Plugin.make({ name: "planned", apply: () => Effect.void })

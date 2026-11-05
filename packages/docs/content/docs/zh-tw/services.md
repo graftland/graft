@@ -13,8 +13,9 @@ Graft 中的服務就是一般的 Effect `Context` 鍵及其對應的值。Graft
 在 `apply` 內呼叫 `Graft.provide`：
 
 ```ts
-import { Graft, Plugin } from "@graftland/graft"
 import { Context, Effect } from "effect"
+
+import { Graft, Plugin } from "@graftland/graft"
 
 class Clock extends Context.Service<
 	Clock,

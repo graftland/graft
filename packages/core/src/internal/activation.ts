@@ -28,37 +28,38 @@ import {
 	Exit,
 	Fiber,
 	FiberSet,
-	Ref,
 	HashMap,
 	HashSet,
 	Option,
 	Pull,
+	Ref,
 	Schedule,
 	Schema,
 	Scope,
 	TxRef,
 } from "effect"
-import * as Release from "../Release"
-import { Graft, ServiceConflict } from "../Graft"
+
 import { ForkState } from "../Fork"
+import { Graft, ServiceConflict } from "../Graft"
 import { isOptional, type Update } from "../Plugin"
-import * as TaskGroup from "./tasks"
-import * as Slots from "./slots"
+import * as Release from "../Release"
 import { publicationCycle, resolutionChanged } from "./dependencies"
 import { setState } from "./forkState"
 import {
-	Realms,
 	realmKey,
 	realmOf,
+	Realms,
 	type Activation,
-	type Slot,
-	type GraphNode,
 	type ForkStatus,
+	type GraphNode,
 	type Provision,
 	type Runtime,
 	type ServiceKey,
+	type Slot,
 	type Spec,
 } from "./runtime"
+import * as Slots from "./slots"
+import * as TaskGroup from "./tasks"
 
 // A finalizer forwarding exactly the requested interrupt is indistinguishable from acknowledging cancellation.
 const interruptedBy = <E>(cause: Cause.Cause<E>, id: number) =>

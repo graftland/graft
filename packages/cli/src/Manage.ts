@@ -1,24 +1,26 @@
 /**
  * Creating projects and changing their dependencies.
  */
-import { parseDocument, type Document } from "yaml"
-import { home } from "./internal/commandConfig"
-import { CommandConfigError } from "./Commands"
-
-import * as Create from "@graftland/create"
-import * as PackageManager from "@graftland/package-manager"
 import {
 	Array,
 	Config,
 	Effect,
 	FileSystem,
-	Path,
 	Option,
+	Path,
 	Predicate,
 	Record,
 	Schema,
 	String,
 } from "effect"
+
+import * as Create from "@graftland/create"
+import * as PackageManager from "@graftland/package-manager"
+
+import { parseDocument, type Document } from "yaml"
+
+import { CommandConfigError } from "./Commands"
+import { home } from "./internal/commandConfig"
 
 const report = (result: PackageManager.InstallResult) =>
 	Effect.logInfo(

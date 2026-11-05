@@ -1,9 +1,10 @@
 /** A listener hands an authenticated byte channel to the supervisor. */
-import { Context } from "effect"
-import type { Effect, Scope } from "effect"
-import type { Peer } from "./Peer"
-import type { Channel } from "../Transport"
+import { Context, type Effect, type Scope } from "effect"
+
 import type { TransportError } from "../Errors"
+import type { Channel } from "../Transport"
+import type { Peer } from "./Peer"
+
 export class Supervisor extends Context.Service<
 	Supervisor,
 	{

@@ -1,38 +1,42 @@
-import { assert, describe, it } from "@effect/vitest"
-import { NodeServices } from "@effect/platform-node"
-import { Graft, Plugin, type Fork } from "@graftland/graft"
+import { Buffer } from "node:buffer"
+import process from "node:process"
+import { MessageChannel } from "node:worker_threads"
+
 import {
 	Array,
 	Cause,
 	Clock,
 	Deferred,
-	type Duration,
 	Effect,
 	Exit,
-	FileSystem,
 	Fiber,
+	FileSystem,
 	Layer,
 	Option,
 	Schedule,
 	Schema,
 	Stream,
+	type Duration,
 } from "effect"
 import { SecureRandom } from "effect/crypto"
-import { Buffer } from "node:buffer"
-import { MessageChannel } from "node:worker_threads"
+import { NodeServices } from "@effect/platform-node"
+import { assert, describe, it } from "@effect/vitest"
+
+import { Graft, Plugin, type Fork } from "@graftland/graft"
+
 import { expectTypeOf } from "vitest"
-import process from "node:process"
-import * as Remote from "../src/index"
-import { executionPlugin } from "../src/internal/execution"
+
+import { LocalTerminationTimeout } from "../src/Errors"
 import worker from "../src/host/worker"
+import * as Remote from "../src/index"
 import {
 	WorkerTransport,
 	type Execution,
 } from "../src/internal/directTransport"
-import { LocalTerminationTimeout } from "../src/Errors"
+import { executionPlugin } from "../src/internal/execution"
 import * as Channel from "../src/internal/workerChannel"
-import { contract, ChildApi, HostApi } from "./fixtures/services-contract"
 import { contract as handles } from "./fixtures/contract"
+import { ChildApi, contract, HostApi } from "./fixtures/services-contract"
 
 const runtime = Graft.layer.pipe(
 	Layer.provideMerge(

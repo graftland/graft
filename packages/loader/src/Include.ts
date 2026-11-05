@@ -3,33 +3,34 @@
  * formatting and comments preserved, and edits made to the file by hand are
  * picked up while the loader runs.
  */
-import { ConfigDirectory } from "./ConfigDirectory"
-import { Plugin } from "@graftland/graft"
 import {
 	Array,
 	Cause,
+	Chunk,
 	Deferred,
 	Effect,
-	Fiber,
 	Exit,
-	Queue,
+	Fiber,
 	FileSystem,
-	HashSet,
 	HashMap,
-	Chunk,
+	HashSet,
 	Option,
 	Path,
+	Queue,
 	Record,
 	Ref,
 	Schema,
 	Stream,
 	SubscriptionRef,
 } from "effect"
+
+import { Plugin } from "@graftland/graft"
+
 import {
 	Document,
 	isAlias,
-	isNode,
 	isMap,
+	isNode,
 	isSeq,
 	parseDocument,
 	visit,
@@ -39,13 +40,15 @@ import {
 	type YAMLMap,
 	type YAMLSeq,
 } from "yaml"
-import { isOnlyFailure } from "./internal/recovery"
+
+import { ConfigDirectory } from "./ConfigDirectory"
+import { Entry, Env } from "./Entry"
+import { atomicWrite, WriteConflict } from "./internal/atomicWrite"
 import { makeFingerprint } from "./internal/configFingerprint"
 import { equalConfig } from "./internal/equalConfig"
-import { Entry, Env } from "./Entry"
-import { newId, start, StoreError } from "./Loader"
 import { fileTarget } from "./internal/fileTarget"
-import { atomicWrite, WriteConflict } from "./internal/atomicWrite"
+import { isOnlyFailure } from "./internal/recovery"
+import { newId, start, StoreError } from "./Loader"
 import {
 	apply,
 	Op,

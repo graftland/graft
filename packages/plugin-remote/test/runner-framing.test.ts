@@ -1,4 +1,3 @@
-import { assert, describe, it } from "@effect/vitest"
 import {
 	Array,
 	Cause,
@@ -12,6 +11,8 @@ import {
 	Sink,
 	Stream,
 } from "effect"
+import { assert, describe, it } from "@effect/vitest"
+
 import { TransportError } from "../src/Errors"
 import * as Framing from "../src/internal/runner/Framing"
 import * as Multiplex from "../src/internal/runner/Multiplex"

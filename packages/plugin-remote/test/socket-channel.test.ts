@@ -1,9 +1,10 @@
-import { assert, describe, it } from "@effect/vitest"
 import { Array, Cause, Deferred, Effect, Fiber, Schema, Stream } from "effect"
 import { Socket } from "effect/socket"
+import { assert, describe, it } from "@effect/vitest"
+
 import { TransportError } from "../src/Errors"
-import * as Channel from "../src/internal/socketChannel"
 import * as Framing from "../src/internal/runner/Framing"
+import * as Channel from "../src/internal/socketChannel"
 import { expectFailure } from "./errors"
 
 const socket = (write: Socket.Writer["write"]) =>

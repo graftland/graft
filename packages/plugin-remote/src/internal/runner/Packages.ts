@@ -1,3 +1,8 @@
+// @effect-diagnostics-next-line nodeBuiltinImport:off -- WebCrypto has no incremental digest API; package files are hashed as streams without buffering the directory.
+import { createHash } from "node:crypto"
+import process from "node:process"
+import { fileURLToPath } from "node:url"
+
 import {
 	Array,
 	Cause,
@@ -8,13 +13,10 @@ import {
 	Schema,
 	Stream,
 	String,
+	type PlatformError,
 } from "effect"
-import type { PlatformError } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
-// @effect-diagnostics-next-line nodeBuiltinImport:off -- WebCrypto has no incremental digest API; package files are hashed as streams without buffering the directory.
-import { createHash } from "node:crypto"
-import process from "node:process"
-import { fileURLToPath } from "node:url"
+
 import { PackageError, type CodeIdentity } from "./model"
 
 const Manifest = Schema.Struct({ name: Schema.String, version: Schema.String })

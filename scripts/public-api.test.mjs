@@ -1,14 +1,16 @@
-import { assert, it } from "vitest"
 import {
-	mkdtempSync,
 	mkdirSync,
-	writeFileSync,
-	readFileSync,
+	mkdtempSync,
 	readdirSync,
+	readFileSync,
 	rmSync,
+	writeFileSync,
 } from "node:fs"
-import { resolve, dirname, join } from "node:path"
+import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
+
+import { assert, it } from "vitest"
+
 import {
 	checkWorkspace,
 	forgottenExports,

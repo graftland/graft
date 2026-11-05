@@ -1,9 +1,10 @@
-import { assert, describe, it } from "@effect/vitest"
-import { NodeServices } from "@effect/platform-node"
 import { Effect, FileSystem, Schema } from "effect"
+import { NodeServices } from "@effect/platform-node"
+import { assert, describe, it } from "@effect/vitest"
+
 import * as Config from "../src/Config"
-import { authentication } from "../src/internal/entryConfig"
 import { Jwt } from "../src/internal/auth/config"
+import { authentication } from "../src/internal/entryConfig"
 
 const valid = Schema.is(Schema.toEncoded(Config.Host))
 const host = (connect: unknown) => ({

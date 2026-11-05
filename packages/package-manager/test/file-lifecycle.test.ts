@@ -1,6 +1,13 @@
+import {
+	Deferred,
+	Effect,
+	Exit,
+	Fiber,
+	Option,
+	type PlatformError,
+} from "effect"
 import { assert, it } from "@effect/vitest"
-import { Deferred, Effect, Exit, Fiber, Option } from "effect"
-import type { PlatformError } from "effect"
+
 import { run, setup } from "./fixtures.ts"
 
 it.effect(

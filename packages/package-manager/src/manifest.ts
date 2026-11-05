@@ -1,8 +1,8 @@
 import {
 	Array,
+	Chunk,
 	Effect,
 	HashMap,
-	Chunk,
 	Option,
 	Record,
 	Schema,

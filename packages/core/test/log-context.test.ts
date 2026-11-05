@@ -1,5 +1,6 @@
-import { assert, it } from "@effect/vitest"
 import { Array, Effect, Stream } from "effect"
+import { assert, it } from "@effect/vitest"
+
 import { Event, Graft, Plugin } from "../src/index.ts"
 import { run } from "./utils.ts"
 

@@ -1,7 +1,8 @@
-import { Graft, Plugin } from "@graftland/graft"
-import { Commands } from "@graftland/cli/Commands"
 import { Console, Context, Effect, Schema } from "effect"
 import { Argument, Command } from "effect/cli"
+
+import { Commands } from "@graftland/cli/Commands"
+import { Graft, Plugin } from "@graftland/graft"
 
 export default Plugin.make({
 	name: "hello-commands",

@@ -1,16 +1,19 @@
 #!/usr/bin/env node
 /** Internal executable for local and supervised child runtimes. */
-import { Graft } from "@graftland/graft"
-import { NodeRuntime } from "@effect/platform-node"
-import { Array, Effect, Layer, Logger, Option, Schema } from "effect"
-import { Argument, CliError, Command } from "effect/cli"
 import process from "node:process"
 import { pathToFileURL } from "node:url"
-import { platform } from "./platform"
-import { bytes } from "./stdioChannel"
+
+import { Array, Effect, Layer, Logger, Option, Schema } from "effect"
+import { Argument, CliError, Command } from "effect/cli"
+import { NodeRuntime } from "@effect/platform-node"
+
+import { Graft } from "@graftland/graft"
+
 import { load, run } from "./childRuntime"
+import { platform } from "./platform"
 import { Bootstrap } from "./runner/Bootstrap"
 import * as Watchdog from "./runner/Watchdog"
+import { bytes } from "./stdioChannel"
 
 const child = Command.make(
 	"child",

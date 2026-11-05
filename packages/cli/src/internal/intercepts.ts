@@ -1,5 +1,6 @@
-import { Intercept } from "@graftland/loader"
 import { LogLevel, References, Schema } from "effect"
+
+import { Intercept } from "@graftland/loader"
 
 /** References that can be configured by stock CLI entries. */
 export const registrations = [

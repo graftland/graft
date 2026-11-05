@@ -1,6 +1,8 @@
-import { it } from "@effect/vitest"
-import { Graft } from "@graftland/graft"
 import { Effect } from "effect"
+import { it } from "@effect/vitest"
+
+import { Graft } from "@graftland/graft"
+
 import { Entry, Loader } from "../src/index.ts"
 import { echo, loaderService, run } from "./utils.ts"
 

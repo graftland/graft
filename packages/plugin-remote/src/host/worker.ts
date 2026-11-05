@@ -1,12 +1,15 @@
-import { Plugin } from "@graftland/graft"
-import { Cause, Deferred, Effect, FiberSet, Option, Schema } from "effect"
 import { Worker } from "node:worker_threads"
-import { WorkerTransport } from "../internal/directTransport"
+
+import { Cause, Deferred, Effect, FiberSet, Option, Schema } from "effect"
+
+import { Plugin } from "@graftland/graft"
+
 import { ProcessExited, TransportError } from "../Errors"
-import * as Channel from "../internal/workerChannel"
+import { cleanupCause } from "../internal/cleanup"
+import { WorkerTransport } from "../internal/directTransport"
 import * as FailureGroup from "../internal/FailureGroup"
 import { Bootstrap } from "../internal/workerBootstrap"
-import { cleanupCause } from "../internal/cleanup"
+import * as Channel from "../internal/workerChannel"
 
 const start: typeof WorkerTransport.Service.start = Effect.fnUntraced(
 	function* (options) {

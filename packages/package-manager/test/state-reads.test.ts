@@ -1,4 +1,3 @@
-import { assert, describe, it } from "@effect/vitest"
 import {
 	Array,
 	Cause,
@@ -10,11 +9,13 @@ import {
 	Option,
 	PlatformError,
 	Queue,
-	Ref,
 	Record,
+	Ref,
 	Schema,
 	String,
 } from "effect"
+import { assert, describe, it } from "@effect/vitest"
+
 import { run, setup, success } from "./fixtures.ts"
 
 const encodeJson = Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))

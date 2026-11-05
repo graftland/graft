@@ -1,6 +1,3 @@
-import { loadModule } from "./loadModule"
-import { AlreadyLoaded, ActivationFailed } from "./childErrors"
-import { Graft, Plugin, type Fork } from "@graftland/graft"
 import {
 	Array,
 	Cause,
@@ -18,12 +15,17 @@ import {
 	Scope,
 	Stream,
 	SynchronizedRef,
+	type Schema,
 } from "effect"
-import type { Schema } from "effect"
-import { type RunnerContract } from "./contract"
+
+import { Graft, Plugin, type Fork } from "@graftland/graft"
+
 import { Instance, type Identity } from "../Instance"
-import type * as Port from "./port"
+import { ActivationFailed, AlreadyLoaded } from "./childErrors"
+import { type RunnerContract } from "./contract"
 import type { Event, Log, LogEvent } from "./control"
+import { loadModule } from "./loadModule"
+import type * as Port from "./port"
 
 type Peer = Port.Port
 type ChildEvent = Data.TaggedEnum<{

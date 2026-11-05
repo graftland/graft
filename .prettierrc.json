@@ -3,5 +3,19 @@
 	"tabWidth": 2,
 	"semi": false,
 	"singleQuote": false,
-	"proseWrap": "always"
+	"proseWrap": "always",
+	"plugins": ["@ianvs/prettier-plugin-sort-imports"],
+	"importOrder": [
+		"<BUILTIN_MODULES>",
+		"",
+		"^effect(/.*)?$",
+		"^@effect/(.*)$",
+		"",
+		"^@graftland/(.*)$",
+		"",
+		"<THIRD_PARTY_MODULES>",
+		"",
+		"^[.]"
+	],
+	"importOrderTypeScriptVersion": "5.9.3"
 }

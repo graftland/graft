@@ -1,7 +1,9 @@
-import { assert, it } from "@effect/vitest"
-import { NodeServices } from "@effect/platform-node"
-import { Graft, Plugin } from "@graftland/graft"
 import { Array, Effect, FileSystem, Layer, Option, Queue, Ref } from "effect"
+import { NodeServices } from "@effect/platform-node"
+import { assert, it } from "@effect/vitest"
+
+import { Graft, Plugin } from "@graftland/graft"
+
 import { ConfigDirectory, Include, ModuleResolver } from "../src/index"
 
 it.live(

@@ -1,22 +1,20 @@
 // Native require bypasses Vite so integration tests exercise Node's module hooks.
 import { createRequire } from "node:module"
-import { TestClock } from "effect/testing"
-import { NodeFileSystem } from "@effect/platform-node"
-import { assert, describe, it } from "@effect/vitest"
+
 import {
 	Array,
 	Cause,
 	Deferred,
 	Effect,
 	Exit,
+	Fiber,
 	FileSystem,
 	HashMap,
 	HashSet,
-	Fiber,
-	Option,
-	Path,
 	Logger,
 	MutableList,
+	Option,
+	Path,
 	Predicate,
 	Queue,
 	Ref,
@@ -25,6 +23,10 @@ import {
 	Stream,
 	String,
 } from "effect"
+import { TestClock } from "effect/testing"
+import { NodeFileSystem } from "@effect/platform-node"
+import { assert, describe, it } from "@effect/vitest"
+
 import {
 	Plugin,
 	type Graft as GraftType,

@@ -1,5 +1,6 @@
-import { Plugin } from "@graftland/graft"
 import { Duration, Effect, Schedule, Schema } from "effect"
+
+import { Plugin } from "@graftland/graft"
 
 // Logs a tick every few seconds, until its entry is removed or disabled.
 export default Plugin.make({

@@ -1,5 +1,6 @@
+import { Option, Result, Schema } from "effect"
 import { assert, describe, it } from "@effect/vitest"
-import { Option, Schema, Result } from "effect"
+
 import { defaults } from "../src/internal/runner/model"
 import { Session } from "../src/internal/runner/Wire"
 

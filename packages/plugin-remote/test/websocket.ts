@@ -1,16 +1,17 @@
 import { createSecureServer } from "node:http2"
-import { Effect, Redacted } from "effect"
-import type { Duration, Scope } from "effect"
-import { Peer } from "../src/internal/Peer"
-import type { Channel as ByteChannel } from "../src/Transport"
-import { make as mtls } from "../src/runner/auth/mtls"
+
+import { Effect, Redacted, type Duration, type Scope } from "effect"
+
 import { accept } from "../src/internal/assembly"
-import { properties } from "../src/internal/websocket"
+import { Peer } from "../src/internal/Peer"
 import { connectionEnded } from "../src/internal/runner/connectionEnded"
+import * as Multiplex from "../src/internal/runner/Multiplex"
+import * as Channel from "../src/internal/socketChannel"
+import { properties } from "../src/internal/websocket"
 import * as Websocket from "../src/internal/websocket"
 import * as Server from "../src/internal/websocketServer"
-import * as Channel from "../src/internal/socketChannel"
-import * as Multiplex from "../src/internal/runner/Multiplex"
+import { make as mtls } from "../src/runner/auth/mtls"
+import type { Channel as ByteChannel } from "../src/Transport"
 
 export interface Credentials {
 	readonly ca: string

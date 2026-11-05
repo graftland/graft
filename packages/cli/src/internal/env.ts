@@ -2,8 +2,6 @@
  * Where `!env` values come from: the process environment, then an optional
  * `.env` file that watch mode reads again when it changes.
  */
-import { observeShutdown } from "./observeShutdown"
-import type { PlatformError } from "effect"
 import {
 	Cause,
 	ConfigProvider,
@@ -17,7 +15,10 @@ import {
 	Queue,
 	Ref,
 	Stream,
+	type PlatformError,
 } from "effect"
+
+import { observeShutdown } from "./observeShutdown"
 
 // An empty variable is still set: it overrides the file, and the plugin's
 // schema decides whether it is valid.

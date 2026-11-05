@@ -1,6 +1,7 @@
-import { assert, describe, it } from "@effect/vitest"
-import { NodeServices } from "@effect/platform-node"
 import { Array, Effect, FileSystem, LogLevel, Record, Schema } from "effect"
+import { NodeServices } from "@effect/platform-node"
+import { assert, describe, it } from "@effect/vitest"
+
 import { make } from "../src/internal/configSchema"
 import { registrations } from "../src/internal/intercepts"
 

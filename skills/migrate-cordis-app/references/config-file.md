@@ -108,10 +108,11 @@ A host that built `new Context()` and loaded the loader becomes an Effect
 program:
 
 ```ts
+import { Effect, Layer } from "effect"
 import { NodeRuntime, NodeServices } from "@effect/platform-node"
+
 import { Graft } from "@graftland/graft"
 import { Include, ModuleResolver } from "@graftland/loader"
-import { Effect, Layer } from "effect"
 
 // Written in the application, so package names resolve from its dependencies.
 const resolver = ModuleResolver.layer({

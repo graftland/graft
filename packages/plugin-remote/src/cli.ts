@@ -1,8 +1,9 @@
-import { Plugin } from "@graftland/graft"
-import { Commands } from "@graftland/cli/Commands"
-import { platform } from "@graftland/cli/Application"
 import { Console, Effect } from "effect"
 import { CliError, Command, Flag } from "effect/cli"
+
+import { platform } from "@graftland/cli/Application"
+import { Commands } from "@graftland/cli/Commands"
+import { Plugin } from "@graftland/graft"
 
 const certificates = Command.make(
 	"certificates",

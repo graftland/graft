@@ -3,45 +3,50 @@
  * changes: untouched entries keep running, configuration changes are applied
  * through `Fork.update`, and anything else is unloaded and loaded again.
  */
-import { CurrentObservation } from "./internal/observation"
-import { Select } from "./Entry"
-
-import { Graft, Plugin, Fork } from "@graftland/graft"
 import {
 	Array,
 	Cause,
 	Context,
+	Deferred,
 	Effect,
 	Equal,
-	Deferred,
 	Exit,
-	Queue,
 	FiberMap,
 	HashMap,
 	Option,
+	Queue,
 	Record,
 	Ref,
 	Schema,
-	Stream,
 	Scope,
 	ScopedRef,
+	Stream,
 	type Config,
 } from "effect"
-import { equalConfig } from "./internal/equalConfig"
-import { PendingRefreshes, track } from "./internal/pending"
-import { CurrentId, Entry, resolveEnv, type CyclicConfig } from "./Entry"
-import { ModuleResolver, Watch } from "./ModuleResolver"
-import * as Intercept from "./Intercept"
-import { GroupEntries, validateGroup, type InvalidOperation } from "./Tree"
 
+import { Fork, Graft, Plugin } from "@graftland/graft"
+
+import {
+	CurrentId,
+	Entry,
+	resolveEnv,
+	Select,
+	type CyclicConfig,
+} from "./Entry"
+import * as Intercept from "./Intercept"
+import { equalConfig } from "./internal/equalConfig"
+import { CurrentObservation } from "./internal/observation"
+import { PendingRefreshes, track } from "./internal/pending"
 import {
 	epochOf,
 	nextEpoch,
 	preserveEpoch,
 	withEpoch,
 } from "./internal/refresh"
-import { copyGroup, groups } from "./internal/validated"
 import { snapshot } from "./internal/snapshot"
+import { copyGroup, groups } from "./internal/validated"
+import { ModuleResolver, Watch } from "./ModuleResolver"
+import { GroupEntries, validateGroup, type InvalidOperation } from "./Tree"
 
 interface Child {
 	readonly entry: Entry

@@ -1,16 +1,20 @@
-/** Options for the unix connector. */
-export type { UnixOptions as Options } from "../internal/transportOptions"
-import type { UnixOptions } from "../internal/transportOptions"
-import { Plugin, Graft } from "@graftland/graft"
-import { ConfigDirectory } from "@graftland/loader"
 import { Cause, Effect, Layer, Option, Path, Redacted, Schema } from "effect"
 import { Socket } from "effect/socket"
+
+import { Graft, Plugin } from "@graftland/graft"
+import { ConfigDirectory } from "@graftland/loader"
+
 import WS from "ws"
+
 import type { Prepared } from "../Auth"
-import { Connector, type ConnectorApi } from "../Transport"
 import { TransportError } from "../Errors"
-import { path, protocol, payloadLimit } from "../internal/websocket"
 import * as Channel from "../internal/socketChannel"
+import type { UnixOptions } from "../internal/transportOptions"
+import { path, payloadLimit, protocol } from "../internal/websocket"
+import { Connector, type ConnectorApi } from "../Transport"
+
+/** Options for the unix connector. */
+export type { UnixOptions as Options } from "../internal/transportOptions"
 
 export const properties: ConnectorApi["properties"] = {
 	protocol: "unix",

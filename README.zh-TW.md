@@ -12,8 +12,9 @@ Graft 是以 [Effect](https://effect.website)
 打造的外掛框架。應用程式是一棵外掛樹：每個外掛嫁接在一個 scope 上，從周圍汲取服務，也發布自己的服務。你可以在行程持續執行的同時載入、重新設定、取代和卸載任意一枝。剪掉哪裡，樹的其餘部分都照常生長。
 
 ```ts
-import { Graft, Plugin } from "@graftland/graft"
 import { Context, Effect, Schema } from "effect"
+
+import { Graft, Plugin } from "@graftland/graft"
 
 class Greeter extends Context.Service<
 	Greeter,

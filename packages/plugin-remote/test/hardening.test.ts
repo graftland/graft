@@ -1,12 +1,6 @@
-import * as LocalExecution from "../src/internal/host/local"
-import { SecureRandom } from "effect/crypto"
-import { prepare } from "../src/internal/contract"
-import { AlreadyLoaded, type ChildFailure } from "../src/internal/childErrors"
-import { underlying } from "./errors"
-import { ProcessExited } from "../src/Errors"
-import { assert, describe, it } from "@effect/vitest"
-import { NodeServices } from "@effect/platform-node"
-import { Graft } from "@graftland/graft"
+import process from "node:process"
+import { fileURLToPath } from "node:url"
+
 import {
 	Array,
 	Cause,
@@ -26,14 +20,23 @@ import {
 	Stream,
 	String,
 } from "effect"
+import { SecureRandom } from "effect/crypto"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import { RpcClient } from "effect/rpc"
-import process from "node:process"
-import { fileURLToPath } from "node:url"
+import { NodeServices } from "@effect/platform-node"
+import { assert, describe, it } from "@effect/vitest"
+
+import { Graft } from "@graftland/graft"
+
+import { ProcessExited } from "../src/Errors"
 import * as Remote from "../src/index"
+import { AlreadyLoaded, type ChildFailure } from "../src/internal/childErrors"
 import { cleanupCause } from "../src/internal/cleanup"
+import { prepare } from "../src/internal/contract"
 import { endpoint } from "../src/internal/control"
+import * as LocalExecution from "../src/internal/host/local"
 import * as Local from "../src/internal/runner/Local"
+import { underlying } from "./errors"
 import { contract, Rejected } from "./fixtures/contract"
 
 const contractModule = new URL(

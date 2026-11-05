@@ -1,7 +1,3 @@
-import { assert, it } from "@effect/vitest"
-import { NodeServices, NodeSocketServer } from "@effect/platform-node"
-import { Graft, Plugin, type Fork } from "@graftland/graft"
-import { ModuleResolver } from "@graftland/loader"
 import {
 	Array,
 	Cause,
@@ -16,22 +12,29 @@ import {
 } from "effect"
 import { Digest, SecureRandom } from "effect/crypto"
 import { RpcClient } from "effect/rpc"
+import { NodeServices, NodeSocketServer } from "@effect/platform-node"
+import { assert, it } from "@effect/vitest"
+
+import { Graft, Plugin, type Fork } from "@graftland/graft"
+import { ModuleResolver } from "@graftland/loader"
+
 import { inject } from "vitest"
-import runner from "../src/runner/index"
-import websocket from "../src/runner/websocket"
-import none from "../src/runner/auth/none"
-import bearer from "../src/runner/auth/bearer"
+
 import { Authenticator } from "../src/Auth"
-import { Listener } from "../src/Transport"
-import { Supervisor } from "../src/internal/Supervisor"
 import { AuthenticationFailed, TransportError } from "../src/Errors"
 import { make as connector } from "../src/host/websocket"
-import { properties } from "../src/internal/websocket"
-import * as Multiplex from "../src/internal/runner/Multiplex"
-import * as Port from "../src/internal/port"
-import * as Wire from "../src/internal/runner/Wire"
-import { defaults } from "../src/internal/runner/model"
 import { CapabilityCombinationError } from "../src/internal/assembly"
+import * as Port from "../src/internal/port"
+import { defaults } from "../src/internal/runner/model"
+import * as Multiplex from "../src/internal/runner/Multiplex"
+import * as Wire from "../src/internal/runner/Wire"
+import { Supervisor } from "../src/internal/Supervisor"
+import { properties } from "../src/internal/websocket"
+import bearer from "../src/runner/auth/bearer"
+import none from "../src/runner/auth/none"
+import runner from "../src/runner/index"
+import websocket from "../src/runner/websocket"
+import { Listener } from "../src/Transport"
 import { expectFailure } from "./errors"
 
 const header = Plugin.make({

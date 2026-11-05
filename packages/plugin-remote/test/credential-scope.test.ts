@@ -1,6 +1,8 @@
-import { assert, it } from "@effect/vitest"
-import { Graft, Plugin } from "@graftland/graft"
 import { Context, Effect, Redacted, Ref } from "effect"
+import { assert, it } from "@effect/vitest"
+
+import { Graft, Plugin } from "@graftland/graft"
+
 import { Credentials } from "../src/Auth"
 import { invocation } from "../src/internal/credentials"
 

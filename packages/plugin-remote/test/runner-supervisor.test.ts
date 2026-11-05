@@ -1,5 +1,3 @@
-import type { SessionError } from "../src/internal/runner/Wire"
-import { assert, layer } from "@effect/vitest"
 import {
 	Array,
 	Cause,
@@ -7,33 +5,36 @@ import {
 	Effect,
 	Exit,
 	Fiber,
-	Queue,
-	Option,
 	Logger,
 	MutableList,
+	Option,
+	Queue,
 	Ref,
 	Scheduler,
 	Schema,
 } from "effect"
 import { SecureRandom } from "effect/crypto"
 import { TestClock } from "effect/testing"
-import * as Supervisor from "../src/internal/runner/Supervisor"
-import * as Stores from "../src/internal/runner/Store"
+import { assert, layer } from "@effect/vitest"
+
 import {
+	awaitTermination,
+	childOf,
+	defaults,
 	Execution,
+	ExecutionError,
+	RemoteTerminationUnconfirmed,
+	StateStorageError,
 	Store,
 	type ExecutionFailure,
-	childOf,
-	RemoteTerminationUnconfirmed,
-	awaitTermination,
-	defaults,
-	ExecutionError,
-	StateStorageError,
 	type ExitStatus,
 	type ProcessIdentity,
 	type SessionRecord,
 	type Termination,
 } from "../src/internal/runner/model"
+import * as Stores from "../src/internal/runner/Store"
+import * as Supervisor from "../src/internal/runner/Supervisor"
+import type { SessionError } from "../src/internal/runner/Wire"
 
 const key = { identity: "certificate-a", instance: "worker" }
 const code = { name: "fixture", version: "1.0.0", digest: "fixture-digest" }

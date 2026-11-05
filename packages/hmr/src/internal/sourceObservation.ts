@@ -1,3 +1,5 @@
+import { fileURLToPath } from "node:url"
+
 import {
 	Array,
 	Cause,
@@ -9,10 +11,10 @@ import {
 	Stream,
 	SubscriptionRef,
 } from "effect"
-import { fileURLToPath } from "node:url"
-import type { FileVersion } from "./modules"
+
 import { changes } from "./changes"
 import { digest } from "./digest"
+import type { FileVersion } from "./modules"
 
 type Files = HashMap.HashMap<string, FileVersion>
 interface Sources {

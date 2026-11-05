@@ -1,8 +1,9 @@
 import { strict as assert } from "node:assert"
-import { test } from "node:test"
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { dirname, join } from "node:path"
+import { test } from "node:test"
 import { fileURLToPath } from "node:url"
+
 import { checkLinks } from "./check-links.mjs"
 
 function fixture(files, run) {

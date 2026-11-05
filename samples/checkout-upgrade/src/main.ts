@@ -4,8 +4,6 @@
  *
  * Run it with `pnpm start` after building the workspace.
  */
-import { NodeRuntime } from "@effect/platform-node"
-import { Graft } from "@graftland/graft"
 import {
 	Array,
 	Effect,
@@ -16,7 +14,11 @@ import {
 	Queue,
 	Schedule,
 } from "effect"
-import { Ledger, type Order, OrderQueue } from "./Orders.ts"
+import { NodeRuntime } from "@effect/platform-node"
+
+import { Graft } from "@graftland/graft"
+
+import { Ledger, OrderQueue, type Order } from "./Orders.ts"
 import checkout from "./plugins/checkout.ts"
 import database from "./plugins/database.ts"
 import { pricingV1, pricingV2 } from "./plugins/pricing.ts"

@@ -1,4 +1,3 @@
-import { assert, describe, it } from "@effect/vitest"
 import {
 	Cause,
 	Context,
@@ -10,7 +9,9 @@ import {
 	Scope,
 	String,
 } from "effect"
-import { Graft, Event, Plugin } from "../src/index.ts"
+import { assert, describe, it } from "@effect/vitest"
+
+import { Event, Graft, Plugin } from "../src/index.ts"
 import { makeJournal, reach, run } from "./utils.ts"
 
 const Message = Event.make<[text: string]>("message")

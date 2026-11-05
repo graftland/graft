@@ -1,7 +1,14 @@
 import { Array, Context, Effect, Record } from "effect"
+import {
+	RpcClient,
+	RpcServer,
+	type Rpc,
+	type RpcClientError,
+	type RpcGroup,
+} from "effect/rpc"
+
 import { Graft } from "@graftland/graft"
-import { RpcClient, RpcServer } from "effect/rpc"
-import type { Rpc, RpcClientError, RpcGroup } from "effect/rpc"
+
 import type { Service } from "../Contract"
 
 export const service = <

@@ -4,9 +4,10 @@
  * When a plugin fails, Graft cleans it up, logs the error, and tries again on
  * the plugin's `retry` schedule. Other plugins keep running.
  */
-import { NodeRuntime } from "@effect/platform-node"
-import { type Fork, Graft, Plugin } from "@graftland/graft"
 import { Effect, Layer, Logger, Ref, Schedule, Schema, Stream } from "effect"
+import { NodeRuntime } from "@effect/platform-node"
+
+import { Graft, Plugin, type Fork } from "@graftland/graft"
 
 export class ConnectionRefused extends Schema.TaggedError<
 	ConnectionRefused,

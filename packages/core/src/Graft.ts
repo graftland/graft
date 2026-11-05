@@ -4,8 +4,8 @@
  */
 import {
 	Array,
-	Context,
 	Cause,
+	Context,
 	Effect,
 	Exit,
 	Fiber,
@@ -15,44 +15,45 @@ import {
 	Logger,
 	Option,
 	Order,
-	Record,
 	PubSub,
-	References,
+	Record,
 	Ref,
+	References,
 	Schema,
 	Scope,
 	Stream,
 	TxRef,
 	TxSubscriptionRef,
 } from "effect"
+
 import { CleanupError, ForkState, type Fork, type ForkTree } from "./Fork"
-import { publicationCycle, resolutionChanged } from "./internal/dependencies"
-import * as Slots from "./internal/slots"
+import { setState, supervise, withdraw } from "./internal/activation"
 import * as Aliases from "./internal/aliases"
-import { ownedScope } from "./internal/scope"
-import * as ForkStatus from "./internal/forkState"
 import { inheritContext } from "./internal/context"
-import { supervise, setState, withdraw } from "./internal/activation"
+import { publicationCycle, resolutionChanged } from "./internal/dependencies"
+import * as ForkStatus from "./internal/forkState"
 import {
-	Realms,
 	GraftKey,
 	realmKey,
 	realmOf,
+	Realms,
 	type Activation,
-	type Slot,
 	type ForkEntry,
 	type ForkStatus as ForkStatusHandle,
-	type LocalSnapshot,
 	type GraphNode,
 	type Handler,
+	type LocalSnapshot,
 	type LogEntry,
 	type Provision,
 	type Runtime,
 	type ServiceKey,
+	type Slot,
 	type Spec,
 } from "./internal/runtime"
 import { RuntimeContext } from "./internal/runtimeContext"
-import type { Plugin, InputOf, ErrorOf } from "./Plugin"
+import { ownedScope } from "./internal/scope"
+import * as Slots from "./internal/slots"
+import type { ErrorOf, InputOf, Plugin } from "./Plugin"
 
 /** Identifies the current runtime. Use the module's operations to access it; its state is private. */
 export class Graft extends Context.Service<Graft, unknown>()(GraftKey) {}

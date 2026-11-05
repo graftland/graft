@@ -1,6 +1,8 @@
-import { type Fork, Graft, Plugin } from "@graftland/graft"
 import { Array, Effect, Option, Stream, String } from "effect"
 import { HttpServerResponse } from "effect/http"
+
+import { Graft, Plugin, type Fork } from "@graftland/graft"
+
 import { route } from "../Gateway.ts"
 
 const render = (tree: Fork.ForkTree, depth: number): ReadonlyArray<string> => [

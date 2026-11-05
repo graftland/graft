@@ -1,5 +1,7 @@
-import { Event, Plugin } from "@graftland/graft"
 import { Array, Effect, Order } from "effect"
+
+import { Event, Plugin } from "@graftland/graft"
+
 import { command, Describe } from "../Chat.ts"
 
 /** `/help` asks the commands that are loaded right now, so it is never out of date. */

@@ -1,5 +1,4 @@
-import type { Effect, Option } from "effect"
-import { Context, Schema } from "effect"
+import { Context, Schema, type Effect, type Option } from "effect"
 
 export class ForecastUnavailable extends Schema.TaggedError<
 	ForecastUnavailable,

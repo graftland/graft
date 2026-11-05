@@ -1,8 +1,7 @@
-import * as FailureGroup from "../FailureGroup"
 import {
 	Cause,
-	Effect,
 	Duration,
+	Effect,
 	Exit,
 	Fiber,
 	Option,
@@ -10,15 +9,18 @@ import {
 	Scope,
 } from "effect"
 import { RpcClient } from "effect/rpc"
-import { connectWith as connectCapability } from "../assembly"
-import type { ConfiguredRunner, Connected } from "../runner/Connection"
+
 import { ProcessExited, TransportError } from "../../Errors"
+import { connectWith as connectCapability } from "../assembly"
 import { cleanupCause } from "../cleanup"
+import * as FailureGroup from "../FailureGroup"
 import * as Port from "../port"
+import type { ConfiguredRunner, Connected } from "../runner/Connection"
+import { awaitTermination, childOf, defaults } from "../runner/model"
 import * as Multiplex from "../runner/Multiplex"
 import * as Packages from "../runner/Packages"
 import * as Wire from "../runner/Wire"
-import { awaitTermination, defaults, childOf } from "../runner/model"
+
 export const connect = Effect.fnUntraced(function* (
 	target: ConfiguredRunner,
 	contractModule: string,

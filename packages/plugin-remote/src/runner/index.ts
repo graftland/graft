@@ -1,25 +1,27 @@
-import { Application, ProtocolOutput } from "@graftland/cli/Application"
-import * as Lifecycle from "../internal/RunnerLifecycle"
-import { cleanupCause } from "../internal/cleanup"
-import { Graft, Plugin, type Fork } from "@graftland/graft"
-import { SecureRandom } from "effect/crypto"
-import { Path } from "effect"
-import { ModuleResolver } from "@graftland/loader"
 import {
+	Array,
 	Cause,
 	Deferred,
 	Effect,
 	Exit,
 	Option,
+	Path,
 	Schema,
 	Stream,
-	Array,
 } from "effect"
-import * as Configuration from "../internal/entryConfig"
-import { boundary, resolve } from "../internal/entry"
+import { SecureRandom } from "effect/crypto"
+
+import { Application, ProtocolOutput } from "@graftland/cli/Application"
+import { Graft, Plugin, type Fork } from "@graftland/graft"
+import { ModuleResolver } from "@graftland/loader"
+
 import * as Assembly from "../internal/assembly"
-import * as Startup from "../internal/listenerStartup"
+import { cleanupCause } from "../internal/cleanup"
+import { boundary, resolve } from "../internal/entry"
+import * as Configuration from "../internal/entryConfig"
 import { follow } from "../internal/follow"
+import * as Startup from "../internal/listenerStartup"
+import * as Lifecycle from "../internal/RunnerLifecycle"
 import { Supervisor } from "../internal/Supervisor"
 import supervisor, {
 	Config as SupervisorConfig,

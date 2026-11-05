@@ -1,6 +1,7 @@
-import { Contract } from "@graftland/plugin-remote"
 import { Context, Effect, Schema } from "effect"
 import { Rpc, RpcGroup } from "effect/rpc"
+
+import { Contract } from "@graftland/plugin-remote"
 
 export class GreetingUnavailable extends Schema.TaggedError<
 	GreetingUnavailable,

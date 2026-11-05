@@ -1,7 +1,5 @@
-import { runnerConfig } from "./application"
-import { assert, describe, it } from "@effect/vitest"
-import { NodeServices } from "@effect/platform-node"
-import { Graft, Plugin } from "@graftland/graft"
+import process from "node:process"
+
 import {
 	Array,
 	Cause,
@@ -12,27 +10,32 @@ import {
 	FileSystem,
 	Layer,
 	Option,
-	String,
 	Schedule,
 	Schema,
 	Sink,
 	Stream,
+	String,
 } from "effect"
 import { SecureRandom } from "effect/crypto"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import { RpcClient } from "effect/rpc"
-import { inject, expectTypeOf } from "vitest"
-import process from "node:process"
+import { NodeServices } from "@effect/platform-node"
+import { assert, describe, it } from "@effect/vitest"
+
+import { Graft, Plugin } from "@graftland/graft"
+
+import { expectTypeOf, inject } from "vitest"
+
+import { TransportError } from "../src/Errors"
 import * as Remote from "../src/index"
 import * as Port from "../src/internal/port"
-import * as Multiplex from "../src/internal/runner/Multiplex"
 import * as Framing from "../src/internal/runner/Framing"
-import * as Wire from "../src/internal/runner/Wire"
-import { childOf, defaults } from "../src/internal/runner/model"
-import { cliCommand as command } from "./application"
 import * as Lock from "../src/internal/runner/Lock"
-import { TransportError } from "../src/Errors"
-import { ChildApi, HostApi, contract } from "./fixtures/services-contract"
+import { childOf, defaults } from "../src/internal/runner/model"
+import * as Multiplex from "../src/internal/runner/Multiplex"
+import * as Wire from "../src/internal/runner/Wire"
+import { cliCommand as command, runnerConfig } from "./application"
+import { ChildApi, contract, HostApi } from "./fixtures/services-contract"
 
 const platform = Layer.merge(NodeServices.layer, SecureRandom.layerWebCrypto)
 const runtime = Graft.layer.pipe(Layer.provideMerge(platform))

@@ -1,8 +1,11 @@
-import { Plugin } from "@graftland/graft"
-import { Cause, Console, Effect, FileSystem, Schedule } from "effect"
-import { config, Rejected } from "./contract"
 import process from "node:process"
 import { MessageChannel } from "node:worker_threads"
+
+import { Cause, Console, Effect, FileSystem, Schedule } from "effect"
+
+import { Plugin } from "@graftland/graft"
+
+import { config, Rejected } from "./contract"
 
 export default Plugin.make({
 	name: "fixture-implementation",

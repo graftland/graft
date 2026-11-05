@@ -1,5 +1,7 @@
-import { Graft, Plugin } from "@graftland/graft"
 import { Effect } from "effect"
+
+import { Graft, Plugin } from "@graftland/graft"
+
 import { Checkout, Database, Pricing } from "../Checkout.ts"
 
 /**

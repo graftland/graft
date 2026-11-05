@@ -1,5 +1,3 @@
-import { NodeServices } from "@effect/platform-node"
-import { assert, describe, it } from "@effect/vitest"
 import {
 	Array,
 	Cause,
@@ -14,11 +12,15 @@ import {
 	Ref,
 	Schema,
 	String,
+	type PlatformError,
+	type Scope,
 } from "effect"
-import type { PlatformError, Scope } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
-import { handle } from "./fixtures.ts"
+import { NodeServices } from "@effect/platform-node"
+import { assert, describe, it } from "@effect/vitest"
+
 import { detectAgent, make } from "../src/index.ts"
+import { handle } from "./fixtures.ts"
 
 const encode = Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))
 const setup = Effect.gen(function* () {

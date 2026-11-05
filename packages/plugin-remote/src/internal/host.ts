@@ -1,24 +1,25 @@
-import * as FailureGroup from "./FailureGroup"
-import * as ContractModule from "../Contract"
 import {
-	Cause,
 	Array,
+	Cause,
 	Deferred,
 	Effect,
-	Ref,
 	Option,
+	Ref,
 	Schema,
 	Scope,
 	Stream,
 } from "effect"
 import { RpcClient, type RpcClientError } from "effect/rpc"
-import { RemoteWithdrawn } from "../Errors"
-import * as Control from "./control"
-import { cleanupCause } from "./cleanup"
-import { Connection } from "./runner/Connection"
+
+import * as ContractModule from "../Contract"
 import type { Service } from "../Contract"
+import { RemoteWithdrawn } from "../Errors"
 import type { ChildFailure } from "./childErrors"
+import { cleanupCause } from "./cleanup"
 import type { prepare } from "./contract"
+import * as Control from "./control"
+import * as FailureGroup from "./FailureGroup"
+import { Connection } from "./runner/Connection"
 
 type ErrorSchema = Schema.Top & {
 	readonly DecodingServices: never

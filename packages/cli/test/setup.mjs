@@ -1,5 +1,7 @@
 import { writeFile } from "node:fs/promises"
+
 import { build } from "tsdown"
+
 import packageConfig from "../../../tsdown.config.ts"
 
 export default function setup() {

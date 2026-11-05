@@ -1,8 +1,11 @@
-import { vi } from "vitest"
-import { assert, describe, it } from "@effect/vitest"
-import { Graft } from "@graftland/graft"
 import { Array, Chunk, Effect, FileSystem, Path, String } from "effect"
+import { assert, describe, it } from "@effect/vitest"
+
+import { Graft } from "@graftland/graft"
+
+import { vi } from "vitest"
 import { parse } from "yaml"
+
 import { Include } from "../src/index.ts"
 import { echo, loaderService, run } from "./utils.ts"
 

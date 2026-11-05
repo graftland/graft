@@ -3,7 +3,6 @@ import {
 	Array,
 	Cause,
 	Data,
-	Ref,
 	Effect,
 	Exit,
 	FileSystem,
@@ -13,30 +12,14 @@ import {
 	Path,
 	PlatformError,
 	Record,
+	Ref,
 	Schema,
 	Semaphore,
-	String,
 	Stream,
+	String,
 } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
-import {
-	PackageManagerDeclaration,
-	PackageManagerName,
-} from "./PackageManagerDeclaration"
-export { PackageManagerDeclaration } from "./PackageManagerDeclaration"
-import { terminateProcess } from "./process"
-import {
-	writeSnapshot,
-	withSnapshot,
-	type SnapshotCleanupFailure,
-	inspectManagedFiles,
-	UnsupportedFileTypeError,
-	type Contents,
-} from "./snapshot"
-export {
-	UnsupportedFileTypeError,
-	type SnapshotCleanupFailure,
-} from "./snapshot"
+
 import {
 	applyChanges,
 	Changes,
@@ -45,6 +28,27 @@ import {
 	fields,
 	type Manifest,
 } from "./manifest"
+import {
+	PackageManagerDeclaration,
+	PackageManagerName,
+} from "./PackageManagerDeclaration"
+import { terminateProcess } from "./process"
+import {
+	inspectManagedFiles,
+	UnsupportedFileTypeError,
+	withSnapshot,
+	writeSnapshot,
+	type Contents,
+	type SnapshotCleanupFailure,
+} from "./snapshot"
+
+export { PackageManagerDeclaration } from "./PackageManagerDeclaration"
+
+export {
+	UnsupportedFileTypeError,
+	type SnapshotCleanupFailure,
+} from "./snapshot"
+
 export { Changes, PackageName } from "./manifest"
 
 export const Agent = Schema.Literals([

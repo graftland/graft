@@ -1,5 +1,7 @@
-import { Graft, Plugin } from "@graftland/graft"
 import { Array, Effect, Number, Option, Record } from "effect"
+
+import { Graft, Plugin } from "@graftland/graft"
+
 import { Pricing } from "../Checkout.ts"
 import type { Order } from "../Orders.ts"
 

@@ -1,4 +1,3 @@
-import { assert, it } from "@effect/vitest"
 import {
 	Array,
 	Cause,
@@ -10,7 +9,10 @@ import {
 	Ref,
 } from "effect"
 import { ChildProcessSpawner } from "effect/process"
+import { assert, it } from "@effect/vitest"
+
 import { handle, run, setup } from "./fixtures.ts"
+
 it.effect(
 	"retains termination failure when interrupted before spawn returns",
 	() =>

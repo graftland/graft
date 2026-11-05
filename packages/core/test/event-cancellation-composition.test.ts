@@ -1,5 +1,3 @@
-import { RuntimeContext } from "../src/internal/runtimeContext"
-import { assert, it } from "@effect/vitest"
 import {
 	Deferred,
 	Effect,
@@ -10,7 +8,10 @@ import {
 	Schedule,
 	Scope,
 } from "effect"
+import { assert, it } from "@effect/vitest"
+
 import { Event, Graft, Plugin } from "../src/index.ts"
+import { RuntimeContext } from "../src/internal/runtimeContext"
 import { run } from "./utils.ts"
 
 const register = Effect.fn("register")(function* (

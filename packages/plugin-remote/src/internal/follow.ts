@@ -1,5 +1,6 @@
-import { Plugin, type Fork, type Graft } from "@graftland/graft"
 import { Effect, Stream, type Cause, type Schema } from "effect"
+
+import { Plugin, type Fork, type Graft } from "@graftland/graft"
 
 /** Follow startup and later failures without changing the caller's error boundary. */
 export const follow = Effect.fnUntraced(function* <I, E, F>(

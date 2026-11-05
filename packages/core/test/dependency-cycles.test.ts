@@ -1,5 +1,6 @@
-import { assert, describe, it } from "@effect/vitest"
 import { Context, Deferred, Effect, Layer, Ref } from "effect"
+import { assert, describe, it } from "@effect/vitest"
+
 import { Graft, Plugin } from "../src/index.ts"
 import { reach } from "./utils.ts"
 

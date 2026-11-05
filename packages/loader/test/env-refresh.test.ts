@@ -1,5 +1,3 @@
-import { assert, it } from "@effect/vitest"
-import { Graft, Plugin } from "@graftland/graft"
 import {
 	Array,
 	ConfigProvider,
@@ -16,6 +14,10 @@ import {
 	Schema,
 	type Scope,
 } from "effect"
+import { assert, it } from "@effect/vitest"
+
+import { Graft, Plugin } from "@graftland/graft"
+
 import {
 	Entry,
 	Group,

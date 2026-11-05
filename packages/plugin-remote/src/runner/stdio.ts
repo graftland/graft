@@ -1,4 +1,3 @@
-import { Graft, Plugin } from "@graftland/graft"
 import {
 	Cause,
 	Deferred,
@@ -10,9 +9,12 @@ import {
 	Stdio,
 	Stream,
 } from "effect"
-import { Listener, type Accept } from "../Transport"
-import { TransportError } from "../Errors"
+
+import { Graft, Plugin } from "@graftland/graft"
 import * as Release from "@graftland/graft/Release"
+
+import { TransportError } from "../Errors"
+import { Listener, type Accept } from "../Transport"
 
 export const Config = Schema.Struct({ auth: Schema.optionalKey(Schema.Never) })
 export default Plugin.make({

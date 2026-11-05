@@ -4,8 +4,9 @@ An event is a typed token. Its type fixes the dispatch arguments, each handler's
 result and the errors handlers may fail with.
 
 ```ts
-import { Event } from "@graftland/graft"
 import { Option } from "effect"
+
+import { Event } from "@graftland/graft"
 
 export const Message = Event.make<[text: string]>("@acme/chat/message")
 export const Command = Event.make<[name: string], Option.Option<string>>(

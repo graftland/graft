@@ -1,8 +1,6 @@
-import { assert, it } from "@effect/vitest"
 import {
 	Array,
 	ByteSize,
-	String,
 	Cause,
 	Effect,
 	Fiber,
@@ -16,8 +14,11 @@ import {
 	Ref,
 	Scope,
 	Stream,
+	String,
 } from "effect"
 import { TestClock } from "effect/testing"
+import { assert, it } from "@effect/vitest"
+
 import * as Source from "../src/internal/sourceObservation"
 
 it.effect(

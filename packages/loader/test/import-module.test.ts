@@ -1,5 +1,6 @@
-import { assert, it } from "@effect/vitest"
 import { Effect, Path, Ref, Scope } from "effect"
+import { assert, it } from "@effect/vitest"
+
 import { ModuleResolver } from "../src/index"
 
 it.effect("imports an exact non-plugin module with a caller-owned lease", () =>

@@ -59,8 +59,9 @@ import { Card, CardGrid } from "@astrojs/starlight/components"
 ## 第一次嫁接
 
 ```ts
-import { Graft, Plugin } from "@graftland/graft"
 import { Context, Effect, Schema } from "effect"
+
+import { Graft, Plugin } from "@graftland/graft"
 
 class Greeter extends Context.Service<
 	Greeter,

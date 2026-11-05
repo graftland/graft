@@ -1,4 +1,5 @@
 import {
+	Array,
 	Config,
 	Effect,
 	FileSystem,
@@ -7,11 +8,12 @@ import {
 	Path,
 	Predicate,
 	Schema,
-	Array,
 } from "effect"
+
 import { parseDocument } from "yaml"
 
 import { CommandConfigError } from "../Commands"
+
 const Description = Schema.Struct({
 	name: Schema.String,
 	config: Schema.optionalKey(Schema.Unknown),

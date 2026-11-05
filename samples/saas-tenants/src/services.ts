@@ -1,5 +1,6 @@
-import { Event } from "@graftland/graft"
 import { Context, Effect, Option, Schema } from "effect"
+
+import { Event } from "@graftland/graft"
 
 export const Note = Schema.Struct({ id: Schema.String, text: Schema.String })
 export type Note = typeof Note.Type

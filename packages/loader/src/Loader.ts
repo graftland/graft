@@ -4,36 +4,38 @@
  * reconciled to match. Admitted edits belong to the loader's scope, so a caller
  * cancelling its wait cannot interrupt persistence or reconciliation.
  */
-import { Graft, Plugin, type Fork } from "@graftland/graft"
 import {
 	Array,
-	Context,
 	Cause,
+	Context,
 	Deferred,
 	Effect,
 	Exit,
 	Option,
-	Random,
 	Queue,
+	Random,
 	Ref,
 	Schema,
 	Semaphore,
 	Stream,
 	String,
 	SubscriptionRef,
+	type PlatformError,
 } from "effect"
-import type { PlatformError } from "effect"
+
+import { Graft, Plugin, type Fork } from "@graftland/graft"
+
 import { Entry } from "./Entry"
+import { Group } from "./Group"
 import { PendingRefreshes } from "./internal/pending"
 import { nextEpoch, withEpoch } from "./internal/refresh"
-import { copyGroup } from "./internal/validated"
 import { snapshot } from "./internal/snapshot"
-import { Group } from "./Group"
+import { copyGroup } from "./internal/validated"
 import {
+	apply,
 	EntryNotFound,
 	InvalidOperation,
 	Op,
-	apply,
 	validate,
 	type Patch,
 } from "./Tree"

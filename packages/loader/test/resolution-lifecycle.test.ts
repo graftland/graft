@@ -1,7 +1,3 @@
-import { assert, it } from "@effect/vitest"
-import { Graft, Plugin, type Fork } from "@graftland/graft"
-import { Loader, ModuleResolver, Intercept } from "../src/index.ts"
-import { loaderService } from "./utils.ts"
 import {
 	Array,
 	Context,
@@ -16,6 +12,12 @@ import {
 	Stream,
 } from "effect"
 import { TestClock } from "effect/testing"
+import { assert, it } from "@effect/vitest"
+
+import { Graft, Plugin, type Fork } from "@graftland/graft"
+
+import { Intercept, Loader, ModuleResolver } from "../src/index.ts"
+import { loaderService } from "./utils.ts"
 
 const Settings = Context.Reference(
 	"@graftland/loader/test/resolution-lifecycle/Settings",

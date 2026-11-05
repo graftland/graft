@@ -1,9 +1,11 @@
-import { Plugin } from "@graftland/graft"
 import { Array, Effect, Scope } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
+
+import { Plugin } from "@graftland/graft"
+
 import { LocalTransport } from "../internal/directTransport"
-import { command } from "../internal/runner/command"
 import * as Local from "../internal/host/local"
+import { command } from "../internal/runner/command"
 
 const make = Effect.map(ChildProcessSpawner.ChildProcessSpawner, (spawner) =>
 	LocalTransport.of({

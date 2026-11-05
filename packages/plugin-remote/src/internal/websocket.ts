@@ -1,14 +1,17 @@
 import { Array, Effect, Layer, Redacted, Schema } from "effect"
 import { Socket } from "effect/socket"
+
 import WS from "ws"
+
 import type { ClientCertificate } from "../Auth"
 import type { Properties } from "../Transport"
+import { headerSize, maxPayload } from "./runner/Framing"
+import type { WebsocketOptions } from "./transportOptions"
+
 interface PreparedCredentials {
 	readonly certificate?: ClientCertificate
 	readonly authorization?: Redacted.Redacted<string>
 }
-import type { WebsocketOptions } from "./transportOptions"
-import { headerSize, maxPayload } from "./runner/Framing"
 
 export const protocol = "graft-remote.v1"
 export const path = "/graft"

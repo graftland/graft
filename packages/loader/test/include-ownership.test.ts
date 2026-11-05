@@ -1,8 +1,11 @@
-import { assert, it } from "@effect/vitest"
 import { Effect, FileSystem, Path } from "effect"
+import { assert, it } from "@effect/vitest"
+
 import { Graft } from "@graftland/graft"
+
 import { Include } from "../src/index.ts"
-import { run, echo, loaderService } from "./utils.ts"
+import { echo, loaderService, run } from "./utils.ts"
+
 const setup = Effect.gen(function* () {
 	const fs = yield* FileSystem.FileSystem
 	const path = yield* Path.Path

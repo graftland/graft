@@ -1,6 +1,8 @@
-import { Cause, Effect } from "effect"
 // This test proxy abruptly cuts both TCP endpoints to simulate a network partition.
-import { createServer, connect, type Socket } from "node:net"
+import { connect, createServer, type Socket } from "node:net"
+
+import { Cause, Effect } from "effect"
+
 import { TransportError } from "../src/Errors"
 
 export const tcpProxy = (port: number) =>

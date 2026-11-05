@@ -1,29 +1,30 @@
-import { Graft, Plugin, type Fork } from "@graftland/graft"
-import { ConfigDirectory, Entry, ModuleResolver } from "@graftland/loader"
 import {
 	Cause,
 	Effect,
 	Option,
 	Path,
-	Schema,
 	References,
+	Schema,
 	Scope,
 	String,
 } from "effect"
+import { SecureRandom } from "effect/crypto"
 import { ChildProcessSpawner } from "effect/process"
+
+import { Graft, Plugin, type Fork } from "@graftland/graft"
+import { ConfigDirectory, Entry, ModuleResolver } from "@graftland/loader"
+
 import * as Contract from "../Contract"
-import { MissingInstance, RemoteEntryError as EntryError } from "../Errors"
+import { RemoteEntryError as EntryError, MissingInstance } from "../Errors"
+import * as Assembly from "./assembly"
+import { children } from "./cleanup"
 import { LocalTransport, WorkerTransport } from "./directTransport"
 import * as Configuration from "./entryConfig"
-import * as Assembly from "./assembly"
-import { executionPlugin } from "./execution"
+import { executionPlugin, type ExecutionOptions } from "./execution"
 import { follow } from "./follow"
-import { children } from "./cleanup"
-import { resolveEntry } from "./runner/Packages"
-import type { LocalTarget, WorkerTarget } from "./runner/Connection"
-import type { ExecutionOptions } from "./execution"
 import * as Importer from "./importer"
-import { SecureRandom } from "effect/crypto"
+import type { LocalTarget, WorkerTarget } from "./runner/Connection"
+import { resolveEntry } from "./runner/Packages"
 
 export const boundary = Effect.fnUntraced(function* (field: string) {
 	const entry = yield* Entry.CurrentId

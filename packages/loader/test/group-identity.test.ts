@@ -1,7 +1,9 @@
-import { assert, it } from "@effect/vitest"
-import { Graft, type Fork } from "@graftland/graft"
-import { Group } from "../src/index.ts"
 import { Array, Cause, Effect, Exit, Option, Schema, Stream } from "effect"
+import { assert, it } from "@effect/vitest"
+
+import { Graft, type Fork } from "@graftland/graft"
+
+import { Group } from "../src/index.ts"
 import { echo, run } from "./utils.ts"
 
 const flatten = (

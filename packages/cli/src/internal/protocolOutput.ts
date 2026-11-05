@@ -1,8 +1,9 @@
-import { NodeSink } from "@effect/platform-node"
-import { Context, Effect, Logger, Option, PlatformError, Stdio } from "effect"
-// @effect-diagnostics-next-line nodeBuiltinImport:off -- a native Writable retains the protocol writer while Node forwards all diagnostic output to stderr.
-import { Writable, finished } from "node:stream"
 import process from "node:process"
+// @effect-diagnostics-next-line nodeBuiltinImport:off -- a native Writable retains the protocol writer while Node forwards all diagnostic output to stderr.
+import { finished, Writable } from "node:stream"
+
+import { Context, Effect, Logger, Option, PlatformError, Stdio } from "effect"
+import { NodeSink } from "@effect/platform-node"
 
 // A peer that stops reading but keeps the pipe open must not hold shutdown forever.
 const flushTimeout = "2 seconds"

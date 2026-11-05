@@ -1,4 +1,5 @@
-import { NodeHttpServer, NodeHttpServerRequest } from "@effect/platform-node"
+import { TLSSocket } from "node:tls"
+
 import {
 	Array,
 	Cause,
@@ -11,15 +12,16 @@ import {
 } from "effect"
 import { HttpServerRequest, HttpServerResponse } from "effect/http"
 import type { Socket } from "effect/socket"
-import { TLSSocket } from "node:tls"
+import { NodeHttpServer, NodeHttpServerRequest } from "@effect/platform-node"
+
 import {
+	TransportError,
 	type AuthenticationFailed,
 	type AuthenticatorUnavailable,
-	TransportError,
 } from "../Errors"
 import type { Accept, Handshake, Serving } from "../Transport"
 import * as Channel from "./socketChannel"
-import { path, protocol, payloadLimit } from "./websocket"
+import { path, payloadLimit, protocol } from "./websocket"
 
 const rejection = (error: AuthenticationFailed | AuthenticatorUnavailable) =>
 	error._tag === "AuthenticatorUnavailable"

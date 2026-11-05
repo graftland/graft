@@ -1,4 +1,5 @@
 import { Array, Cause, Option, Predicate, Schema } from "effect"
+
 import { RemoteError } from "../src/Errors"
 
 /** Assertions inspect the same diagnostics through the public boundary error. */

@@ -1,9 +1,11 @@
-import { NodeServices } from "@effect/platform-node"
-import { assert, describe, it } from "@effect/vitest"
-import { Graft, Plugin } from "@graftland/graft"
-import * as Remote from "@graftland/plugin-remote"
 import { Effect, Layer, Option, Stream } from "effect"
 import { SecureRandom } from "effect/crypto"
+import { NodeServices } from "@effect/platform-node"
+import { assert, describe, it } from "@effect/vitest"
+
+import { Graft, Plugin } from "@graftland/graft"
+import * as Remote from "@graftland/plugin-remote"
+
 import { contract, Greeter } from "../src/contract"
 
 const consumer = Plugin.make({

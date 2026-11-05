@@ -1,8 +1,13 @@
-import { assert, it } from "@effect/vitest"
 import { Array, Cause, Effect, Exit, Option, PlatformError } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
-import { closeProcessWithTestClock as closeProcess } from "./fixtures.ts"
-import { handle, run, setup } from "./fixtures.ts"
+import { assert, it } from "@effect/vitest"
+
+import {
+	closeProcessWithTestClock as closeProcess,
+	handle,
+	run,
+	setup,
+} from "./fixtures.ts"
 
 it.live(
 	"accepts a successful installer whose entire process group has exited",

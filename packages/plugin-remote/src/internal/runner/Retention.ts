@@ -1,4 +1,5 @@
 import { Array, HashMap, Option } from "effect"
+
 import { keyOf, type SessionKey, type SessionRecord } from "./model"
 
 /** A terminal high-water record fences every older Open, even after its request id is forgotten. */

@@ -1,5 +1,7 @@
-import { Graft, Plugin } from "@graftland/graft"
 import { Effect } from "effect"
+
+import { Graft, Plugin } from "@graftland/graft"
+
 import { config, Greeter } from "./contract.ts"
 
 export default Plugin.make({

@@ -2,8 +2,6 @@
  * Typed events. Handlers are registered for the lifetime of the current
  * scope and run with the registration context and a fresh invocation scope.
  */
-import { RuntimeContext } from "./internal/runtimeContext"
-import { identity } from "effect/Function"
 import {
 	Array,
 	Cause,
@@ -18,9 +16,12 @@ import {
 	Scope,
 	TxRef,
 } from "effect"
+import { identity } from "effect/Function"
+
 import { Graft } from "./Graft"
+import { realmOf, Realms, type Handler } from "./internal/runtime"
+import { RuntimeContext } from "./internal/runtimeContext"
 import * as Release from "./Release"
-import { Realms, realmOf, type Handler } from "./internal/runtime"
 
 const TypeId = "~@graftland/graft/Event"
 

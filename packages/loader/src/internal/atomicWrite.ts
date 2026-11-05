@@ -1,4 +1,3 @@
-import { isOnlyFailure } from "./recovery"
 import {
 	Effect,
 	Equal,
@@ -10,6 +9,8 @@ import {
 	Scope,
 	type PlatformError,
 } from "effect"
+
+import { isOnlyFailure } from "./recovery"
 
 /** The file changed while a replacement was being prepared. Contains no configuration data. */
 export class WriteConflict extends Schema.TaggedError<

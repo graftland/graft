@@ -1,14 +1,15 @@
-import { Cause, Effect, Ref, Option, Scope, Semaphore } from "effect"
+import { Cause, Effect, Option, Ref, Scope, Semaphore } from "effect"
 import { RpcServer } from "effect/rpc"
-import { Peer } from "../Peer"
+
 import { TransportError } from "../../Errors"
 import type { Channel } from "../../Transport"
-import type { Supervisor } from "./Supervisor"
-import type { Channels } from "./Execution"
+import { Peer } from "../Peer"
 import * as Port from "../port"
-import * as Multiplex from "./Multiplex"
-import * as Wire from "./Wire"
+import type { Channels } from "./Execution"
 import { SessionAccessDenied, SessionConflict, type Handle } from "./model"
+import * as Multiplex from "./Multiplex"
+import type { Supervisor } from "./Supervisor"
+import * as Wire from "./Wire"
 
 export const accept = Effect.fnUntraced(function* (
 	supervisor: typeof Supervisor.Service,

@@ -7,9 +7,11 @@ Graft runtime.
 ## Skeleton
 
 ```ts
-import { assert, describe, it } from "@effect/vitest"
-import { Graft } from "@graftland/graft"
 import { Effect, Layer, Stream } from "effect"
+import { assert, describe, it } from "@effect/vitest"
+
+import { Graft } from "@graftland/graft"
+
 import plugin from "../src/index.ts"
 
 describe("greeter", () => {

@@ -1,4 +1,3 @@
-import { assert, describe, it } from "@effect/vitest"
 import {
 	Array,
 	Cause,
@@ -6,14 +5,16 @@ import {
 	Effect,
 	Exit,
 	Fiber,
-	Ref,
 	PlatformError,
-	Schema,
+	Ref,
 	Schedule,
+	Schema,
 	String,
 } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import { TestClock } from "effect/testing"
+import { assert, describe, it } from "@effect/vitest"
+
 import { PackageManagerError } from "../src/index.ts"
 import { handle, run, setup } from "./fixtures.ts"
 

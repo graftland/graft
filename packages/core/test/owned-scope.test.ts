@@ -1,4 +1,3 @@
-import { assert, it } from "@effect/vitest"
 import {
 	Cause,
 	Deferred,
@@ -9,6 +8,8 @@ import {
 	Queue,
 	Scope,
 } from "effect"
+import { assert, it } from "@effect/vitest"
+
 import { ownedScope } from "../src/internal/scope.ts"
 
 const logging = Effect.gen(function* () {

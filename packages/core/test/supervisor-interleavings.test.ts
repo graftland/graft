@@ -1,4 +1,3 @@
-import { assert, describe, it } from "@effect/vitest"
 import {
 	Context,
 	Deferred,
@@ -11,6 +10,8 @@ import {
 	Stream,
 } from "effect"
 import { TestClock } from "effect/testing"
+import { assert, describe, it } from "@effect/vitest"
+
 import { Graft, Plugin } from "../src/index.ts"
 import { makeJournal, reach, run } from "./utils.ts"
 

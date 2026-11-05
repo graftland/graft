@@ -1,5 +1,3 @@
-import { RuntimeContext } from "../src/internal/runtimeContext"
-import { assert, describe, it } from "@effect/vitest"
 import {
 	Array,
 	Context,
@@ -14,9 +12,12 @@ import {
 	TxRef,
 	TxSubscriptionRef,
 } from "effect"
+import { assert, describe, it } from "@effect/vitest"
+
 import { Fork, Graft, Plugin } from "../src/index.ts"
-import { reach, run } from "./utils.ts"
 import { setState } from "../src/internal/forkState.ts"
+import { RuntimeContext } from "../src/internal/runtimeContext"
+import { reach, run } from "./utils.ts"
 
 const entryOf = Effect.fnUntraced(function* (fork: Fork.Fork) {
 	const { runtime } = yield* RuntimeContext

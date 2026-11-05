@@ -1,19 +1,23 @@
-import type {
-	Cause,
-	Deferred,
-	Effect,
-	FiberSet,
-	LogLevel,
-	PubSub,
-	Scope,
-	TxRef,
-	TxSubscriptionRef,
+import {
+	Context,
+	HashMap,
+	HashSet,
+	Option,
+	type Cause,
+	type Deferred,
+	type Effect,
+	type FiberSet,
+	type LogLevel,
+	type PubSub,
+	type Scope,
+	type TxRef,
+	type TxSubscriptionRef,
 } from "effect"
-import { Context, HashMap, HashSet, Option } from "effect"
+
 import type { ForkState } from "../Fork"
 import type { Plugin } from "../Plugin"
-import type { Group } from "./tasks"
 import type { Aliases } from "./aliases"
+import type { Group } from "./tasks"
 
 /** Length-prefixed encoding keeps realm and service identities unambiguous. */
 export type ServiceKey = string

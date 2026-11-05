@@ -1,6 +1,8 @@
-import { observeShutdown } from "./observeShutdown"
-import type * as Hmr from "@graftland/hmr"
 import { Array, Cause, Effect, Exit, Stream, String } from "effect"
+
+import type * as Hmr from "@graftland/hmr"
+
+import { observeShutdown } from "./observeShutdown"
 
 const moduleExtensions = [".js", ".mjs", ".cjs", ".ts", ".mts", ".cts"]
 

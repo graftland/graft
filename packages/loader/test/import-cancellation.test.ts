@@ -1,6 +1,6 @@
-import { assert, it } from "@effect/vitest"
 // @effect-diagnostics-next-line nodeBuiltinImport:off -- native unhandledRejection is delivered on a host event-loop turn, independent of TestClock
 import { setImmediate } from "node:timers/promises"
+
 import {
 	Array,
 	Deferred,
@@ -10,6 +10,8 @@ import {
 	MutableList,
 	Path,
 } from "effect"
+import { assert, it } from "@effect/vitest"
+
 import { ModuleResolver } from "../src/index.ts"
 
 it.effect(

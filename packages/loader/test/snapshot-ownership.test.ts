@@ -1,4 +1,3 @@
-import { assert, it } from "@effect/vitest"
 import {
 	Array,
 	Deferred,
@@ -11,10 +10,14 @@ import {
 	Result,
 	Stream,
 } from "effect"
+import { assert, it } from "@effect/vitest"
+
 import { Graft, Plugin } from "@graftland/graft"
+
 import { Entry, Loader, Tree } from "../src/index.ts"
 import { snapshot } from "../src/internal/snapshot.ts"
-import { run, echo, loaderService } from "./utils.ts"
+import { echo, loaderService, run } from "./utils.ts"
+
 it.effect(
 	"keeps the accepted target independent from the caller config object",
 	() =>

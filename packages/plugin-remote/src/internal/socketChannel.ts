@@ -1,7 +1,8 @@
 import { Cause, Effect, Exit, Sink, Stream } from "effect"
 import { Socket } from "effect/socket"
+
 import { TransportError } from "../Errors"
-import { FrameError, isCompleteFrame, decoder, encode } from "./runner/Framing"
+import { decoder, encode, FrameError, isCompleteFrame } from "./runner/Framing"
 
 /** WebSocket boundaries are a wire compatibility detail, not Channel chunk boundaries. */
 export const fromSocket = Effect.fnUntraced(function* (socket: Socket.Socket) {

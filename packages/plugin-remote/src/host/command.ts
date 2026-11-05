@@ -1,7 +1,3 @@
-/** Options for the command connector. */
-export type { CommandOptions as Options } from "../internal/transportOptions"
-import type { CommandOptions } from "../internal/transportOptions"
-import { Plugin, Graft } from "@graftland/graft"
 import {
 	Array,
 	Cause,
@@ -14,11 +10,18 @@ import {
 	Stream,
 } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
-import { Connector } from "../Transport"
+
+import { Graft, Plugin } from "@graftland/graft"
 import { ConfigDirectory } from "@graftland/loader"
+
 import { TransportError } from "../Errors"
 import { cleanupCause } from "../internal/cleanup"
 import * as ProcessObservation from "../internal/runner/ProcessObservation"
+import type { CommandOptions } from "../internal/transportOptions"
+import { Connector } from "../Transport"
+
+/** Options for the command connector. */
+export type { CommandOptions as Options } from "../internal/transportOptions"
 
 export class CommandExited extends Schema.TaggedError<
 	CommandExited,

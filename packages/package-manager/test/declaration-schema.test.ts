@@ -1,5 +1,6 @@
-import { assert, it } from "@effect/vitest"
 import { Effect, Exit, Schema, String } from "effect"
+import { assert, it } from "@effect/vitest"
+
 import { detectAgent } from "../src/index.ts"
 import { PackageManagerDeclaration } from "../src/PackageManagerDeclaration.ts"
 import { run, setup } from "./fixtures.ts"

@@ -1,8 +1,5 @@
-import { SecureRandom } from "effect/crypto"
-import { underlying } from "./errors"
-import { assert, describe, it } from "@effect/vitest"
-import { NodeServices } from "@effect/platform-node"
-import { Graft, Plugin } from "@graftland/graft"
+import process from "node:process"
+
 import {
 	Array,
 	Deferred,
@@ -17,14 +14,21 @@ import {
 	Schema,
 	Stream,
 } from "effect"
-import process from "node:process"
+import { SecureRandom } from "effect/crypto"
+import { NodeServices } from "@effect/platform-node"
+import { assert, describe, it } from "@effect/vitest"
+
+import { Graft, Plugin } from "@graftland/graft"
+
 import * as Remote from "../src/index"
+import { underlying } from "./errors"
 import {
 	ChildApi,
 	ChildLabel,
-	HostApi,
 	contract,
+	HostApi,
 } from "./fixtures/services-contract"
+
 const contractModule = new URL(
 	"../.cache/integration/services-contract.js",
 	import.meta.url,

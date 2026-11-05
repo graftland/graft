@@ -1,5 +1,3 @@
-import { assert, describe, it } from "@effect/vitest"
-import { Graft } from "@graftland/graft"
 import {
 	Array,
 	Cause,
@@ -10,7 +8,12 @@ import {
 	Path,
 	Schema,
 } from "effect"
+import { assert, describe, it } from "@effect/vitest"
+
+import { Graft } from "@graftland/graft"
+
 import { parse } from "yaml"
+
 import { Include, Loader } from "../src/index.ts"
 import { echo, loaderService, run } from "./utils.ts"
 

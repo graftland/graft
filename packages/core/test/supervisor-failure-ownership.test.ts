@@ -1,5 +1,3 @@
-import { RuntimeContext } from "../src/internal/runtimeContext"
-import { assert, it } from "@effect/vitest"
 import {
 	Array,
 	Cause,
@@ -11,14 +9,17 @@ import {
 	Ref,
 	References,
 	Schema,
-	String,
 	Stream,
+	String,
 	TxRef,
 } from "effect"
+import { assert, it } from "@effect/vitest"
+
 import { Graft, Plugin } from "../src/index.ts"
 import { supervise } from "../src/internal/activation.ts"
 import * as ForkStatus from "../src/internal/forkState.ts"
 import type { GraphNode, Spec } from "../src/internal/runtime.ts"
+import { RuntimeContext } from "../src/internal/runtimeContext"
 import { run } from "./utils.ts"
 
 it.effect(

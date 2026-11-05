@@ -2,8 +2,7 @@
  * A fork is one loaded instance of a plugin. Loading the same plugin twice
  * yields two independent forks.
  */
-import type { Cause, Effect, Stream } from "effect"
-import { Data, Schema } from "effect"
+import { Data, Schema, type Cause, type Effect, type Stream } from "effect"
 
 export type ForkState<E = unknown> = Data.TaggedEnum<{
 	/** Decoding configuration or running `apply`. */

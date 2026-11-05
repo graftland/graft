@@ -4,18 +4,19 @@
  */
 import {
 	Array,
+	Chunk,
 	Data,
 	HashSet,
-	Chunk,
 	Option,
 	Predicate,
 	Record,
 	Result,
 	Schema,
 } from "effect"
+
 import { Entry } from "./Entry"
-import { groups, trees, structures } from "./internal/validated"
 import { isSnapshot, snapshot } from "./internal/snapshot"
+import { groups, structures, trees } from "./internal/validated"
 
 export type Path = ReadonlyArray<string | number>
 

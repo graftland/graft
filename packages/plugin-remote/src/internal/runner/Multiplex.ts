@@ -9,9 +9,10 @@ import {
 	TxQueue,
 } from "effect"
 import type { Socket } from "effect/socket"
+
 import { TransportError } from "../../Errors"
-import type { Channel as ByteChannel } from "../port"
 import * as FailureGroup from "../FailureGroup"
+import type { Channel as ByteChannel } from "../port"
 import * as Framing from "./Framing"
 
 export interface Peer {

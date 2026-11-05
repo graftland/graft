@@ -1,7 +1,14 @@
-import { Context } from "effect"
-import type { Effect, Option, Scope, PlatformError } from "effect"
+import {
+	Context,
+	type Effect,
+	type Option,
+	type PlatformError,
+	type Scope,
+} from "effect"
+
 import type { ProcessExited, TransportError } from "../Errors"
 import type { Channel } from "../Transport"
+
 export interface LocalOptions {
 	readonly command?: readonly [string, ...string[]]
 	readonly contractModule: string

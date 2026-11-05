@@ -1,4 +1,3 @@
-import { assert, describe, it } from "@effect/vitest"
 import {
 	Array,
 	Cause,
@@ -11,6 +10,8 @@ import {
 	Schema,
 } from "effect"
 import { ChildProcessSpawner } from "effect/process"
+import { assert, describe, it } from "@effect/vitest"
+
 import { PackageManagerError, RecoveryRequiredError } from "../src/index.ts"
 import { run, setup } from "./fixtures.ts"
 

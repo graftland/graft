@@ -1,6 +1,3 @@
-import { RuntimeContext } from "../src/internal/runtimeContext"
-import { registrySnapshot } from "./utils.ts"
-import { assert, it } from "@effect/vitest"
 import {
 	Array,
 	Context,
@@ -15,12 +12,14 @@ import {
 	TxRef,
 	TxSubscriptionRef,
 } from "effect"
+import { assert, it } from "@effect/vitest"
+
 import { Graft, Plugin } from "../src/index.ts"
-import { realmKey } from "../src/internal/runtime.ts"
 import { supervise } from "../src/internal/activation.ts"
 import * as ForkStatus from "../src/internal/forkState.ts"
-import type { GraphNode, Spec } from "../src/internal/runtime.ts"
-import { run } from "./utils.ts"
+import { realmKey, type GraphNode, type Spec } from "../src/internal/runtime.ts"
+import { RuntimeContext } from "../src/internal/runtimeContext"
+import { registrySnapshot, run } from "./utils.ts"
 
 class Service extends Context.Service<Service, string>()(
 	"@graftland/graft/test/interruption.test/Service",

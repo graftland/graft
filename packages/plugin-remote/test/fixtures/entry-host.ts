@@ -1,7 +1,6 @@
 // Runs natively so the application importer uses Node's resolution hooks, not Vite's module runner.
-import { NodeRuntime, NodeServices } from "@effect/platform-node"
-import { Graft, Plugin } from "@graftland/graft"
-import { Include, ModuleResolver } from "@graftland/loader"
+import process from "node:process"
+
 import {
 	Array,
 	Cause,
@@ -14,10 +13,15 @@ import {
 	Stream,
 } from "effect"
 import { SecureRandom } from "effect/crypto"
-import process from "node:process"
-import * as Importer from "../../src/internal/importer"
+import { NodeRuntime, NodeServices } from "@effect/platform-node"
+
+import { Graft, Plugin } from "@graftland/graft"
+import { Include, ModuleResolver } from "@graftland/loader"
+
 import { CapabilityFailed } from "../../src/internal/assembly"
+import * as Importer from "../../src/internal/importer"
 import { ChildApi, HostApi } from "./services-contract"
+
 const resolver = Effect.fnUntraced(function* (directory: string) {
 	const importer = yield* Importer.make(directory)
 	return yield* ModuleResolver.make({ base: directory, importer })

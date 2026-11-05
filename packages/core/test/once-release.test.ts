@@ -1,5 +1,3 @@
-import { RuntimeContext } from "../src/internal/runtimeContext"
-import { assert, describe, it } from "@effect/vitest"
 import {
 	Array,
 	Cause,
@@ -14,7 +12,10 @@ import {
 	TxRef,
 } from "effect"
 import { TestClock } from "effect/testing"
+import { assert, describe, it } from "@effect/vitest"
+
 import { Event } from "../src/index.ts"
+import { RuntimeContext } from "../src/internal/runtimeContext"
 import { run } from "./utils.ts"
 
 // Inspect ownership directly: garbage-collection timing is not a reliable retention test.

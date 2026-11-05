@@ -1,5 +1,3 @@
-import { assert, describe, it } from "@effect/vitest"
-import { WatchResult } from "@graftland/hmr"
 import {
 	Array,
 	Cause,
@@ -14,6 +12,10 @@ import {
 	Stream,
 } from "effect"
 import { TestClock } from "effect/testing"
+import { assert, describe, it } from "@effect/vitest"
+
+import { WatchResult } from "@graftland/hmr"
+
 import { isModule, watchModules } from "../src/internal/watch.ts"
 
 const logging = Effect.gen(function* () {

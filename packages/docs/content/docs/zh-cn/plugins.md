@@ -16,8 +16,9 @@ description: 使用 Plugin.make、Plugin.service 和 Plugin.layer 定义插件�
 ## 定义插件
 
 ```ts
-import { Plugin } from "@graftland/graft"
 import { Effect, Schedule, Schema } from "effect"
+
+import { Plugin } from "@graftland/graft"
 
 export const ticker = Plugin.make({
 	name: "ticker",

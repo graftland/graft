@@ -1,20 +1,21 @@
-import { packageManifests } from "./workspace.mjs"
+import { execFileSync, spawnSync } from "node:child_process"
 // Packs every public workspace package with one shared version, and publishes
 // the packed files to GitHub Packages or to npm. See the "Releases" page in
 // the docs for how CI uses this script.
 import { createHash } from "node:crypto"
-import { execFileSync, spawnSync } from "node:child_process"
 import {
 	mkdirSync,
 	mkdtempSync,
-	readFileSync,
 	readdirSync,
+	readFileSync,
 	rmSync,
 	writeFileSync,
 } from "node:fs"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
+
+import { packageManifests } from "./workspace.mjs"
 
 export const registries = {
 	github: { url: "https://npm.pkg.github.com", snapshots: true },

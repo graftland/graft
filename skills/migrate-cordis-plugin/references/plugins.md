@@ -21,8 +21,10 @@ export function apply(ctx: Context, config: z.infer<typeof Config>) {
 Graft:
 
 ```ts
-import { Event, Plugin } from "@graftland/graft"
 import { Effect, Schema } from "effect"
+
+import { Event, Plugin } from "@graftland/graft"
+
 import { Database, Message } from "./tokens.ts"
 
 export default Plugin.make({

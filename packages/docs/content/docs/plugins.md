@@ -16,8 +16,9 @@ creates a **fork**: one running instance with its own configuration and its own
 ## Define a plugin
 
 ```ts
-import { Plugin } from "@graftland/graft"
 import { Effect, Schedule, Schema } from "effect"
+
+import { Plugin } from "@graftland/graft"
 
 export const ticker = Plugin.make({
 	name: "ticker",

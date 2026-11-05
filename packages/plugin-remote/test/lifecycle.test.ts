@@ -1,9 +1,5 @@
-import { SecureRandom } from "effect/crypto"
-import { underlying } from "./errors"
-import { LocalTerminationTimeout, ProcessExited } from "../src/Errors"
-import { assert, describe, it } from "@effect/vitest"
-import { NodeServices } from "@effect/platform-node"
-import { Graft } from "@graftland/graft"
+import process from "node:process"
+
 import {
 	Array,
 	Cause,
@@ -11,21 +7,28 @@ import {
 	Exit,
 	Fiber,
 	FileSystem,
+	HashSet,
 	Layer,
 	Option,
+	Predicate,
 	Schedule,
 	Schema,
 	Scope,
 	Stream,
 	String,
-	Predicate,
-	HashSet,
 } from "effect"
-import process from "node:process"
+import { SecureRandom } from "effect/crypto"
+import { NodeServices } from "@effect/platform-node"
+import { assert, describe, it } from "@effect/vitest"
+
+import { Graft } from "@graftland/graft"
+
+import { LocalTerminationTimeout, ProcessExited } from "../src/Errors"
 import * as Remote from "../src/index"
-import { contract as nullContract } from "./fixtures/null-config-contract"
-import { contract as emptyContract } from "./fixtures/empty-config-contract"
+import { underlying } from "./errors"
 import { contract, Rejected } from "./fixtures/contract"
+import { contract as emptyContract } from "./fixtures/empty-config-contract"
+import { contract as nullContract } from "./fixtures/null-config-contract"
 
 const contractModule = new URL(
 	"../.cache/integration/contract.js",

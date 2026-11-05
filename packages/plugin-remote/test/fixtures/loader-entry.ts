@@ -1,5 +1,7 @@
-import { Graft, Plugin } from "@graftland/graft"
 import { Config, Effect } from "effect"
+
+import { Graft, Plugin } from "@graftland/graft"
+
 import * as Remote from "../../src/index"
 import { follow } from "../../src/internal/follow"
 import { contract } from "./services-contract"

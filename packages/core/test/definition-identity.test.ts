@@ -1,5 +1,6 @@
-import { assert, describe, it } from "@effect/vitest"
 import { Array, Effect, Equal, Hash, Option, Result, Stream } from "effect"
+import { assert, describe, it } from "@effect/vitest"
+
 import { Graft, Plugin } from "../src/index.ts"
 import { run } from "./utils.ts"
 

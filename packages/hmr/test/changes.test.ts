@@ -1,8 +1,7 @@
-import { assert, describe, it } from "@effect/vitest"
 import {
 	Array,
-	Cause,
 	ByteSize,
+	Cause,
 	Deferred,
 	Effect,
 	Exit,
@@ -19,9 +18,11 @@ import {
 	String,
 } from "effect"
 import { TestClock } from "effect/testing"
-import type { FileVersion } from "../src/internal/modules"
-import { digest } from "../src/internal/digest"
+import { assert, describe, it } from "@effect/vitest"
+
 import { changes } from "../src/internal/changes"
+import { digest } from "../src/internal/digest"
+import type { FileVersion } from "../src/internal/modules"
 
 const version = (content: string | undefined, generation = 1): FileVersion => ({
 	generation,

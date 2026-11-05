@@ -1,26 +1,28 @@
 // @effect-diagnostics-next-line nodeBuiltinImport:off -- watcher paths use host-platform syntax without adding a Path service requirement
 import { dirname, resolve } from "node:path"
-import type { FileVersion } from "./modules"
-import type { WatchOptions } from "../index"
-import { digest } from "./digest"
 import { fileURLToPath, pathToFileURL } from "node:url"
+
 import {
 	Array,
 	Cause,
-	Exit,
+	Clock,
 	Effect,
+	Equal,
+	Exit,
 	Fiber,
 	FileSystem,
 	HashMap,
 	HashSet,
-	Equal,
-	Clock,
-	Ref,
-	Queue,
 	Option,
+	Queue,
+	Ref,
 	Stream,
 	String,
 } from "effect"
+
+import type { WatchOptions } from "../index"
+import { digest } from "./digest"
+import type { FileVersion } from "./modules"
 
 export type WithFiles = <A, E, R>(
 	use: (files: HashMap.HashMap<string, FileVersion>) => Effect.Effect<A, E, R>,

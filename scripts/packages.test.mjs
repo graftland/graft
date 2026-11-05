@@ -2,11 +2,12 @@ import assert from "node:assert/strict"
 import { execFile, spawnSync } from "node:child_process"
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { createServer } from "node:http"
-import { promisify } from "node:util"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { test } from "node:test"
 import { fileURLToPath } from "node:url"
+import { promisify } from "node:util"
+
 import {
 	publicationPlan,
 	releaseManifest,

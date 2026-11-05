@@ -1,4 +1,5 @@
 import { assert, it } from "@effect/vitest"
+
 import { ConfigSchema } from "../src/index"
 
 it("constrains registered names outside the fallback union and inside groups", () => {

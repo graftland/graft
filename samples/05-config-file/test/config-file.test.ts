@@ -1,7 +1,9 @@
-import { assert, describe, it } from "@effect/vitest"
-import { Graft } from "@graftland/graft"
 import { Array, Effect, Exit, Layer, Option, Stream } from "effect"
 import { TestClock } from "effect/testing"
+import { assert, describe, it } from "@effect/vitest"
+
+import { Graft } from "@graftland/graft"
+
 import greeter from "../src/greeter.ts"
 import ticker from "../src/ticker.ts"
 

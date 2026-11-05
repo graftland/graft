@@ -1,4 +1,5 @@
 import type { Duration } from "effect"
+
 export interface WebsocketOptions {
 	readonly url: string
 	readonly tls?: {

@@ -1,7 +1,10 @@
 /** The CLI adds its intercepts to the loader's recursive editor schema. */
-import { ConfigSchema } from "@graftland/loader"
 import { Array, Record, Schema } from "effect"
+
+import { ConfigSchema } from "@graftland/loader"
+
 import { registrations } from "./intercepts"
+
 const Intercept = Schema.Struct(
 	Record.fromEntries(
 		Array.map(

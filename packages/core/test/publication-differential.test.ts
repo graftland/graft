@@ -1,4 +1,3 @@
-import { assert, it } from "@effect/vitest"
 import {
 	Array,
 	Effect,
@@ -9,6 +8,8 @@ import {
 	Result,
 	TxRef,
 } from "effect"
+import { assert, it } from "@effect/vitest"
+
 import { publicationCycle } from "../src/internal/dependencies.ts"
 import {
 	realmKey,

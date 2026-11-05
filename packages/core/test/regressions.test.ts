@@ -1,6 +1,3 @@
-import { RuntimeContext } from "../src/internal/runtimeContext"
-import { registrySnapshot } from "./utils.ts"
-import { assert, describe, it } from "@effect/vitest"
 import {
 	Array,
 	Cause,
@@ -19,9 +16,12 @@ import {
 	String,
 	TxRef,
 } from "effect"
+import { assert, describe, it } from "@effect/vitest"
+
 import { Graft, Plugin } from "../src/index.ts"
 import { realmKey } from "../src/internal/runtime.ts"
-import { reach, run } from "./utils.ts"
+import { RuntimeContext } from "../src/internal/runtimeContext"
+import { reach, registrySnapshot, run } from "./utils.ts"
 
 class Service extends Context.Service<Service, string>()(
 	"@graftland/graft/test/regressions.test/Service",

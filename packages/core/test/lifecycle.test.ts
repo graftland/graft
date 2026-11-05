@@ -1,4 +1,3 @@
-import { assert, describe, it } from "@effect/vitest"
 import {
 	Cause,
 	Context,
@@ -12,7 +11,9 @@ import {
 	Stream,
 } from "effect"
 import { TestClock } from "effect/testing"
-import { Graft, Fork, Plugin } from "../src/index.ts"
+import { assert, describe, it } from "@effect/vitest"
+
+import { Fork, Graft, Plugin } from "../src/index.ts"
 import { makeJournal, reach, run, type Journal } from "./utils.ts"
 
 class Database extends Context.Service<Database, { readonly name: string }>()(

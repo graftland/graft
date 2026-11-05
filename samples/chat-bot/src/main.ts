@@ -4,14 +4,16 @@
  *
  * Run it with `pnpm start` after building the workspace.
  */
-import { NodeRuntime, NodeServices } from "@effect/platform-node"
-import { type Fork, Graft } from "@graftland/graft"
 import { Array, Effect, Layer, Logger, Option, Stream } from "effect"
-import { receive } from "./Chat.ts"
-import dice from "./plugins/dice.ts"
-import * as Remote from "@graftland/plugin-remote"
 import { SecureRandom } from "effect/crypto"
+import { NodeRuntime, NodeServices } from "@effect/platform-node"
+
+import { Graft, type Fork } from "@graftland/graft"
+import * as Remote from "@graftland/plugin-remote"
+
+import { receive } from "./Chat.ts"
 import { contract } from "./forecastContract.ts"
+import dice from "./plugins/dice.ts"
 import help from "./plugins/help.ts"
 import moderation from "./plugins/moderation.ts"
 import weather from "./plugins/weather.ts"

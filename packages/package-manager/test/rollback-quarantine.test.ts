@@ -1,4 +1,3 @@
-import { assert, it } from "@effect/vitest"
 import {
 	Array,
 	Cause,
@@ -11,6 +10,8 @@ import {
 	Ref,
 } from "effect"
 import { ChildProcessSpawner } from "effect/process"
+import { assert, it } from "@effect/vitest"
+
 import { run, setup } from "./fixtures.ts"
 
 for (const { failure, restoreFailure, recoveryCode } of [

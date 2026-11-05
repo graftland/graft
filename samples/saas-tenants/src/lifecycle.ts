@@ -1,5 +1,6 @@
-import type { Fork } from "@graftland/graft"
 import { Effect, Option, Stream } from "effect"
+
+import type { Fork } from "@graftland/graft"
 
 // Fork.await also settles at Pending; onboarding needs an accepting handler.
 export const ready = <I, E>(fork: Fork.Fork<I, E>) =>

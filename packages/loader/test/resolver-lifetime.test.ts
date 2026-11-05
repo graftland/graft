@@ -1,6 +1,8 @@
-import { assert, describe, it } from "@effect/vitest"
-import { Graft, Plugin } from "@graftland/graft"
 import { Context, Effect, Layer, Path, Ref, Schema, Scope } from "effect"
+import { assert, describe, it } from "@effect/vitest"
+
+import { Graft, Plugin } from "@graftland/graft"
+
 import { Loader, ModuleResolver } from "../src/index.ts"
 import { loaderService } from "./utils.ts"
 

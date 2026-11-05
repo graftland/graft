@@ -1,5 +1,3 @@
-import { assert, describe, it } from "@effect/vitest"
-import { Graft } from "@graftland/graft"
 import {
 	Array,
 	Cause,
@@ -8,17 +6,22 @@ import {
 	Exit,
 	Fiber,
 	FileSystem,
-	Option,
 	Logger,
 	MutableList,
+	Option,
 	Path,
 	Queue,
 	Ref,
-	Stream,
 	Schema,
+	Stream,
 } from "effect"
 import { TestClock } from "effect/testing"
+import { assert, describe, it } from "@effect/vitest"
+
+import { Graft } from "@graftland/graft"
+
 import { parse } from "yaml"
+
 import { Include, Loader } from "../src/index.ts"
 import { echo, loaderService, run } from "./utils.ts"
 

@@ -1,9 +1,11 @@
-import { Option } from "effect"
-import { Graft, Plugin } from "@graftland/graft"
+// @effect-diagnostics-next-line nodeBuiltinImport:off -- Token digests use Node's constant-time comparison
+import { timingSafeEqual } from "node:crypto"
+
 import {
 	Array,
 	Effect,
 	FileSystem,
+	Option,
 	Path,
 	Record,
 	Redacted,
@@ -11,13 +13,14 @@ import {
 } from "effect"
 import { Digest } from "effect/crypto"
 import { Hex } from "effect/encoding"
-// @effect-diagnostics-next-line nodeBuiltinImport:off -- Token digests use Node's constant-time comparison
-import { timingSafeEqual } from "node:crypto"
-import { Authenticator } from "../../Auth"
+
+import { Graft, Plugin } from "@graftland/graft"
 import { ConfigDirectory } from "@graftland/loader"
+
+import { Authenticator } from "../../Auth"
+import { Bearer as Config } from "../../internal/auth/config"
 import * as Token from "../../internal/auth/token"
 
-import { Bearer as Config } from "../../internal/auth/config"
 export { Config }
 const Tokens = Schema.fromJsonString(
 	Schema.Record(

@@ -1,6 +1,8 @@
-import { Graft, Plugin } from "@graftland/graft"
 import { Array, Effect, Ref, Schema } from "effect"
-import { type Todo, TodoStore } from "../TodoStore.ts"
+
+import { Graft, Plugin } from "@graftland/graft"
+
+import { TodoStore, type Todo } from "../TodoStore.ts"
 
 /** Publishes an in-memory `TodoStore`, seeded from its config. */
 export default Plugin.make({

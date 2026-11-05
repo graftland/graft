@@ -1,6 +1,8 @@
+import process from "node:process"
+
 import { Cause, Effect, Option, Schedule, Stream, String } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
-import process from "node:process"
+
 import {
 	ExecutionError,
 	TerminationUnconfirmed,

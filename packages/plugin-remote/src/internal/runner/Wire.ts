@@ -1,28 +1,29 @@
-import { Cause, Effect, Sink, Stream, Schema } from "effect"
+import { Cause, Effect, Schema, Sink, Stream } from "effect"
 import { Rpc, RpcGroup } from "effect/rpc"
+
 import { TransportError } from "../../Errors"
 import * as Port from "../port"
-import type * as Multiplex from "./Multiplex"
 import {
 	CodeIdentity,
-	Handle,
-	Limits,
-	PositiveInt,
-	PositiveFinite,
-	SessionRecord,
-	SessionAccessDenied,
-	StaleSession,
-	LeaseExpired,
-	SessionStopped,
-	SessionConflict,
-	StateStorageError,
 	ExecutionError,
+	Handle,
+	LeaseExpired,
+	Limits,
 	PackageError,
-	TerminationUnconfirmed,
+	PositiveFinite,
+	PositiveInt,
 	RunnerClosing,
+	SessionAccessDenied,
+	SessionConflict,
+	SessionRecord,
+	SessionStopped,
+	StaleSession,
 	StateDirectoryLocked,
+	StateStorageError,
 	Termination,
+	TerminationUnconfirmed,
 } from "./model"
+import type * as Multiplex from "./Multiplex"
 
 /** The RPC boundary is the only place that assembles the runner's error schema. */
 export const SessionError = Schema.Union([

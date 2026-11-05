@@ -1,5 +1,3 @@
-import { assert, describe, it } from "@effect/vitest"
-import { Graft } from "@graftland/graft"
 import {
 	Array,
 	Effect,
@@ -12,11 +10,15 @@ import {
 	Stream,
 	type Scope,
 } from "effect"
+import { assert, describe, it } from "@effect/vitest"
+
+import { Graft } from "@graftland/graft"
+
 import { onboard, request } from "../src/hosting.ts"
 import { ready } from "../src/lifecycle.ts"
 import { notes } from "../src/notes.ts"
 import { quota } from "../src/quota.ts"
-import { NoteStore, NotesFile, Plan } from "../src/services.ts"
+import { NotesFile, NoteStore, Plan } from "../src/services.ts"
 
 interface Disk {
 	readonly files: Ref.Ref<HashMap.HashMap<string, string>>

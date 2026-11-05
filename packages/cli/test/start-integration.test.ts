@@ -1,5 +1,3 @@
-import { NodeServices } from "@effect/platform-node"
-import { assert, describe, it } from "@effect/vitest"
 import {
 	Array,
 	Deferred,
@@ -14,6 +12,8 @@ import {
 	String,
 } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
+import { NodeServices } from "@effect/platform-node"
+import { assert, describe, it } from "@effect/vitest"
 
 const pluginUrl = new URL("../.cache/integration/plugin.mjs", import.meta.url)
 const runtimeUrl = new URL("../.cache/integration/runtime.mjs", import.meta.url)

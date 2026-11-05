@@ -1,5 +1,3 @@
-import { assert, it } from "@effect/vitest"
-import { Graft } from "@graftland/graft"
 import {
 	Array,
 	Effect,
@@ -9,10 +7,15 @@ import {
 	Stream,
 	String,
 } from "effect"
-import { Include, Loader, Tree, type Entry } from "../src/index.ts"
+import { assert, it } from "@effect/vitest"
+
+import { Graft } from "@graftland/graft"
+
 import { expectTypeOf } from "vitest"
 import { parse } from "yaml"
-import { run, loaderService, echo } from "./utils.ts"
+
+import { Include, Loader, Tree, type Entry } from "../src/index.ts"
+import { echo, loaderService, run } from "./utils.ts"
 
 const setup = Effect.fn("setup")(function* (text: string) {
 	const fs = yield* FileSystem.FileSystem

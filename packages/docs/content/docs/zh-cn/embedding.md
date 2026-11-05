@@ -18,9 +18,10 @@ CLI 是建立在这些库之上的一个小程序。你也可以用同样的方�
 `Graft.layer` 创建运行时。在 `Scope` 内加载插件，关闭 `Scope` 就会卸载它们：
 
 ```ts
-import { NodeRuntime, NodeServices } from "@effect/platform-node"
-import { Graft } from "@graftland/graft"
 import { Effect, Layer } from "effect"
+import { NodeRuntime, NodeServices } from "@effect/platform-node"
+
+import { Graft } from "@graftland/graft"
 
 const program = Effect.gen(function* () {
 	yield* Graft.plugin(greeter, { greeting: "Hello" })
@@ -134,8 +135,10 @@ const program = Effect.gen(function* () {
 `Graft.plugin` 加载它：
 
 ```ts
-import * as Remote from "@graftland/plugin-remote"
 import { SecureRandom } from "effect/crypto"
+
+import * as Remote from "@graftland/plugin-remote"
+
 import { contract } from "./contract.js"
 
 const greeter = Remote.plugin(contract, {

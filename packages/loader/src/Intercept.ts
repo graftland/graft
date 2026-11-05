@@ -1,5 +1,4 @@
 /** Explicit, schema-checked configuration of references from entry data. */
-import { Graft } from "@graftland/graft"
 import {
 	Array,
 	Context,
@@ -10,6 +9,8 @@ import {
 	Record,
 	Schema,
 } from "effect"
+
+import { Graft } from "@graftland/graft"
 
 export class UnregisteredReference extends Schema.TaggedError<
 	UnregisteredReference,

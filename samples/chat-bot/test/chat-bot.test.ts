@@ -1,9 +1,3 @@
-import { NodeServices } from "@effect/platform-node"
-import * as Remote from "@graftland/plugin-remote"
-import { SecureRandom } from "effect/crypto"
-import { contract } from "../src/forecastContract"
-import { assert, describe, it } from "@effect/vitest"
-import { Graft, type Fork } from "@graftland/graft"
 import {
 	Array,
 	Effect,
@@ -14,10 +8,18 @@ import {
 	Option,
 	Schema,
 	Stream,
+	type Scope,
 } from "effect"
-import type { Scope } from "effect"
-import { Forecasts, ForecastUnavailable } from "../src/Forecasts.ts"
+import { SecureRandom } from "effect/crypto"
+import { NodeServices } from "@effect/platform-node"
+import { assert, describe, it } from "@effect/vitest"
+
+import { Graft, type Fork } from "@graftland/graft"
+import * as Remote from "@graftland/plugin-remote"
+
 import { receive } from "../src/Chat.ts"
+import { contract } from "../src/forecastContract"
+import { Forecasts, ForecastUnavailable } from "../src/Forecasts.ts"
 import dice from "../src/plugins/dice.ts"
 import forecasts from "../src/plugins/forecasts.ts"
 import help from "../src/plugins/help.ts"

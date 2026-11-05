@@ -1,6 +1,5 @@
-import { assert, it } from "@effect/vitest"
-import { Graft, Plugin } from "@graftland/graft"
 import {
+	Array,
 	ConfigProvider,
 	Context,
 	Deferred,
@@ -10,9 +9,12 @@ import {
 	Ref,
 	Schema,
 	Stream,
-	Array,
 } from "effect"
 import { TestClock } from "effect/testing"
+import { assert, it } from "@effect/vitest"
+
+import { Graft, Plugin } from "@graftland/graft"
+
 import { Entry, Intercept, Loader, ModuleResolver } from "../src/index.ts"
 import { loaderService } from "./utils.ts"
 

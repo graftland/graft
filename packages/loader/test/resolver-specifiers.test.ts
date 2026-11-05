@@ -1,7 +1,9 @@
-import { assert, it } from "@effect/vitest"
-import { Plugin } from "@graftland/graft"
-import { NodeServices } from "@effect/platform-node"
 import { Array, Effect, FileSystem, Path, Predicate, Ref } from "effect"
+import { NodeServices } from "@effect/platform-node"
+import { assert, it } from "@effect/vitest"
+
+import { Plugin } from "@graftland/graft"
+
 import { ModuleResolver } from "../src/index.ts"
 
 /** A native module bypasses Vitest's rewritten module-resolution errors. */

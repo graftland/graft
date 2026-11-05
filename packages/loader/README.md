@@ -317,9 +317,10 @@ Config-file intercepts need explicit registration. Provide an `Intercept.layer`
 in the environment used to build `Graft.layer`, before you load entries:
 
 ```ts
+import { Context, Layer, Schema } from "effect"
+
 import { Graft } from "@graftland/graft"
 import { Intercept, ModuleResolver } from "@graftland/loader"
-import { Context, Layer, Schema } from "effect"
 
 const Settings = Context.Reference("app/Settings", {
 	defaultValue: () => ({ color: "blue", size: 12 }),

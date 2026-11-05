@@ -1,18 +1,19 @@
-import { assert, describe, it } from "@effect/vitest"
 import {
 	Array,
-	Option,
 	Cause,
 	Deferred,
 	Effect,
 	Exit,
 	Fiber,
+	Option,
 	Ref,
 	Schema,
 } from "effect"
+import { assert, describe, it } from "@effect/vitest"
+
 import { Event, Graft, Plugin } from "../src/index.ts"
-import { makeJournal, run } from "./utils.ts"
 import { ReleaseInterrupted } from "../src/Release.ts"
+import { makeJournal, run } from "./utils.ts"
 
 const resource = (alive: Ref.Ref<boolean>) =>
 	Effect.acquireRelease(Ref.set(alive, true), () => Ref.set(alive, false))

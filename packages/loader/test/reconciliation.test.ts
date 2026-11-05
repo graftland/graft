@@ -1,6 +1,8 @@
-import { assert, describe, it } from "@effect/vitest"
-import { Graft, Plugin } from "@graftland/graft"
 import { Array, Deferred, Effect, Fiber, Ref, Schema, Stream } from "effect"
+import { assert, describe, it } from "@effect/vitest"
+
+import { Graft, Plugin } from "@graftland/graft"
+
 import { Loader } from "../src/index.ts"
 import { loaderService, run } from "./utils.ts"
 

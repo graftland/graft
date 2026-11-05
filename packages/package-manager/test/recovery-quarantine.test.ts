@@ -1,4 +1,3 @@
-import { assert, it } from "@effect/vitest"
 import {
 	Array,
 	Cause,
@@ -9,11 +8,13 @@ import {
 	Option,
 	PlatformError,
 	Ref,
-	String,
 	Schema,
+	String,
 } from "effect"
 import { ChildProcessSpawner } from "effect/process"
 import { TestClock } from "effect/testing"
+import { assert, it } from "@effect/vitest"
+
 import { handle, run, setup, success } from "./fixtures.ts"
 
 for (const operation of ["install", "recover"] as const) {

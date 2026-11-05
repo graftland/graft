@@ -1,5 +1,3 @@
-import { assert, it } from "@effect/vitest"
-import { Graft, Plugin } from "@graftland/graft"
 import {
 	Array,
 	ConfigProvider,
@@ -11,6 +9,10 @@ import {
 	Result,
 	Schema,
 } from "effect"
+import { assert, it } from "@effect/vitest"
+
+import { Graft, Plugin } from "@graftland/graft"
+
 import { Entry, Loader, Tree } from "../src/index.ts"
 import { equalConfig } from "../src/internal/equalConfig.ts"
 import { snapshot } from "../src/internal/snapshot.ts"

@@ -1,4 +1,3 @@
-import { assert, describe, it } from "@effect/vitest"
 import {
 	Array,
 	Cause,
@@ -13,6 +12,8 @@ import {
 	Stream,
 	String,
 } from "effect"
+import { assert, describe, it } from "@effect/vitest"
+
 import { detectAgent } from "../src/index.ts"
 import { run, setup } from "./fixtures.ts"
 

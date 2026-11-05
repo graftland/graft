@@ -1,5 +1,5 @@
-import { snapshot } from "./snapshot"
 import type { Entry } from "../Entry"
+import { snapshot } from "./snapshot"
 
 /** Identity evidence belongs only to snapshots produced by the validation boundary. */
 export const trees = new WeakSet<object>()

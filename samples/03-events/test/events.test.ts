@@ -1,6 +1,8 @@
-import { assert, describe, it } from "@effect/vitest"
-import { Event, Graft } from "@graftland/graft"
 import { Array, Effect, Layer, Stream } from "effect"
+import { assert, describe, it } from "@effect/vitest"
+
+import { Event, Graft } from "@graftland/graft"
+
 import { Message, printer, shouter } from "../src/main.ts"
 
 const text = (entry: Graft.LogEntry) =>

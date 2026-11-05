@@ -1,5 +1,6 @@
+import { cp, mkdir, rm, writeFile } from "node:fs/promises"
+
 import { build } from "tsdown"
-import { rm, cp, mkdir, writeFile } from "node:fs/promises"
 
 const common = {
 	config: false,

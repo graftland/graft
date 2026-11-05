@@ -1,16 +1,17 @@
-import { assert } from "@effect/vitest"
 import {
 	Array,
 	Effect,
+	HashMap,
 	Layer,
 	Option,
 	Ref,
 	Stream,
-	HashMap,
 	TxRef,
 	TxSubscriptionRef,
+	type Scope,
 } from "effect"
-import type { Scope } from "effect"
+import { assert } from "@effect/vitest"
+
 import { Graft, type Fork } from "../src/index.ts"
 
 /** Runs a test inside a fresh root graft. */

@@ -1,5 +1,7 @@
-import { Plugin } from "@graftland/graft"
 import { Array, Effect, Number, Option, Random } from "effect"
+
+import { Plugin } from "@graftland/graft"
+
 import { command } from "../Chat.ts"
 
 const notation = /^(\d{1,2})d(\d{1,3})$/

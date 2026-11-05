@@ -1,5 +1,3 @@
-import { assert, it } from "@effect/vitest"
-import { Plugin } from "@graftland/graft"
 import {
 	Array,
 	Cause,
@@ -11,6 +9,10 @@ import {
 	Ref,
 	Scope,
 } from "effect"
+import { assert, it } from "@effect/vitest"
+
+import { Plugin } from "@graftland/graft"
+
 import { ModuleResolver } from "../src/index.ts"
 
 const missing = Object.assign(

@@ -1,8 +1,9 @@
 import { Array, Effect, HashMap, Option, TxRef } from "effect"
 import { Command, type CliError } from "effect/cli"
+
 import {
-	Commands,
 	CommandRegistrationError,
+	Commands,
 	type Environment,
 } from "../Commands"
 

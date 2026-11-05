@@ -1,12 +1,15 @@
 /** Executable entry for a direct worker; platform services belong to this thread. */
-import { Graft } from "@graftland/graft"
-import { NodeRuntime } from "@effect/platform-node"
-import { Cause, Effect, Layer, Logger, Schema } from "effect"
 import { parentPort, workerData } from "node:worker_threads"
+
+import { Cause, Effect, Layer, Logger, Schema } from "effect"
+import { NodeRuntime } from "@effect/platform-node"
+
+import { Graft } from "@graftland/graft"
+
 import { load, run } from "./childRuntime"
+import { platform } from "./platform"
 import { Bootstrap } from "./workerBootstrap"
 import * as Channel from "./workerChannel"
-import { platform } from "./platform"
 
 const main = Effect.scoped(
 	Effect.gen(function* () {

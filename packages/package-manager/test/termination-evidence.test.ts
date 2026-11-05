@@ -1,4 +1,3 @@
-import { assert, it } from "@effect/vitest"
 import {
 	Array,
 	Cause,
@@ -11,6 +10,8 @@ import {
 } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import { TestClock } from "effect/testing"
+import { assert, it } from "@effect/vitest"
+
 import { closeProcess } from "../src/process.ts"
 import { handle, run, setup, success } from "./fixtures.ts"
 

@@ -1,5 +1,6 @@
-import { Plugin } from "@graftland/graft"
 import { Effect, Schema } from "effect"
+
+import { Plugin } from "@graftland/graft"
 
 // A plugin module exports its plugin as the default export. Importing the
 // module must not start anything: Graft calls `apply` when it loads the entry.

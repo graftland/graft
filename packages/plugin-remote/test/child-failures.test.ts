@@ -1,25 +1,27 @@
-import { assert, it } from "@effect/vitest"
-import { Graft } from "@graftland/graft"
 import {
 	Array,
 	Cause,
 	Context,
 	Deferred,
-	Ref,
 	Effect,
 	Exit,
 	Queue,
+	Ref,
 	Schema,
 	Sink,
 	Stream,
 } from "effect"
 import { Rpc, RpcGroup } from "effect/rpc"
+import { assert, it } from "@effect/vitest"
+
+import { Graft } from "@graftland/graft"
+
 import * as Contract from "../src/Contract"
-import * as Child from "../src/internal/child"
-import { prepare } from "../src/internal/contract"
-import * as Runtime from "../src/internal/childRuntime"
-import * as Port from "../src/internal/port"
 import { TransportError } from "../src/Errors"
+import * as Child from "../src/internal/child"
+import * as Runtime from "../src/internal/childRuntime"
+import { prepare } from "../src/internal/contract"
+import * as Port from "../src/internal/port"
 import { EndOfStream } from "../src/internal/runner/Framing"
 
 const empty = Contract.make({

@@ -1,6 +1,6 @@
-import { assert, describe, it } from "@effect/vitest"
-import { NodeServices } from "@effect/platform-node"
 import { Array, Effect, FileSystem, String } from "effect"
+import { NodeServices } from "@effect/platform-node"
+import { assert, describe, it } from "@effect/vitest"
 
 const root = new URL("../src/", import.meta.url)
 

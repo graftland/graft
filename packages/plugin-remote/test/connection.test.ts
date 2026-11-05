@@ -1,9 +1,11 @@
-import * as LocalExecution from "../src/internal/host/local"
-import { assert, describe, it } from "@effect/vitest"
-import { NodeServices } from "@effect/platform-node"
+import process from "node:process"
+
 import { Effect, Exit, Scope } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
-import process from "node:process"
+import { NodeServices } from "@effect/platform-node"
+import { assert, describe, it } from "@effect/vitest"
+
+import * as LocalExecution from "../src/internal/host/local"
 import * as Local from "../src/internal/runner/Local"
 
 describe("local connection ownership", () => {

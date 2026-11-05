@@ -1,9 +1,3 @@
-import { SecureRandom } from "effect/crypto"
-import * as Certificates from "../src/internal/Certificates"
-import { Peer } from "../src/internal/Peer"
-import { identityFromSubjectAltName } from "../src/internal/auth/mtls"
-import { assert, describe, it } from "@effect/vitest"
-import { NodeServices, NodeSocket } from "@effect/platform-node"
 import {
 	Array,
 	Cause,
@@ -13,12 +7,20 @@ import {
 	FileSystem,
 	Redacted,
 } from "effect"
-import { inject } from "vitest"
+import { SecureRandom } from "effect/crypto"
 import { Socket } from "effect/socket"
+import { NodeServices, NodeSocket } from "@effect/platform-node"
+import { assert, describe, it } from "@effect/vitest"
+
+import { inject } from "vitest"
 import WS from "ws"
+
+import { identityFromSubjectAltName } from "../src/internal/auth/mtls"
+import * as Certificates from "../src/internal/Certificates"
+import { Peer } from "../src/internal/Peer"
+import * as Framing from "../src/internal/runner/Framing"
 import * as WebsocketClient from "../src/internal/websocket"
 import * as Websocket from "./websocket"
-import * as Framing from "../src/internal/runner/Framing"
 
 declare module "vitest" {
 	export interface ProvidedContext {

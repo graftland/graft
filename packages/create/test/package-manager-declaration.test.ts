@@ -1,6 +1,7 @@
+import { Effect, Exit, FileSystem, Path, Schema, String } from "effect"
 import { NodeServices } from "@effect/platform-node"
 import { assert, it } from "@effect/vitest"
-import { Effect, Exit, FileSystem, Path, Schema, String } from "effect"
+
 import { create } from "../src/index.ts"
 
 it.effect(

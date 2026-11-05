@@ -2,10 +2,10 @@
  * What the gateway's plugins share. Routes are event handlers, so a route
  * exists exactly as long as the plugin that registered it is loaded.
  */
-import { Event, type Graft } from "@graftland/graft"
-import type { Scope } from "effect"
-import { Context, Effect, Option } from "effect"
+import { Context, Effect, Option, type Scope } from "effect"
 import { HttpServerRequest, type HttpServerResponse } from "effect/http"
+
+import { Event, type Graft } from "@graftland/graft"
 
 /** Offered to every route in turn; the first route that answers wins. */
 export const Route = Event.make<

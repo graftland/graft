@@ -1,7 +1,9 @@
-import { assert, describe, it } from "@effect/vitest"
-import { Graft } from "@graftland/graft"
 import { Array, Effect, Layer, Ref, Stream, String } from "effect"
 import { TestClock } from "effect/testing"
+import { assert, describe, it } from "@effect/vitest"
+
+import { Graft } from "@graftland/graft"
+
 import { heartbeat, makeClient } from "../src/main.ts"
 
 const text = (entry: Graft.LogEntry) =>

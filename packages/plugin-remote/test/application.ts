@@ -1,6 +1,7 @@
-import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import process from "node:process"
+
 import { Effect, FileSystem, Path, Schema, Stream } from "effect"
+import { ChildProcess, ChildProcessSpawner } from "effect/process"
 
 /** Install forwarding modules, not symlinks or build output, in a temporary application. */
 export const application = Effect.fnUntraced(function* (directory: string) {

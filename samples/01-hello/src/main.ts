@@ -4,9 +4,10 @@
  * A plugin describes how to start something. Graft starts it, restarts it
  * when its config changes, and stops it, running its cleanup each time.
  */
-import { NodeRuntime } from "@effect/platform-node"
-import { Graft, Plugin } from "@graftland/graft"
 import { Effect, Layer, Logger, Schema } from "effect"
+import { NodeRuntime } from "@effect/platform-node"
+
+import { Graft, Plugin } from "@graftland/graft"
 
 export const greeter = Plugin.make({
 	name: "greeter",

@@ -57,8 +57,9 @@ adapter needs. It also has `module.registerHooks`, which hot reload uses.
 ## The example plugin
 
 ```js title="hello.mjs"
-import { Plugin } from "@graftland/graft"
 import { Effect, Schema } from "effect"
+
+import { Plugin } from "@graftland/graft"
 
 // Module evaluation only defines the plugin; its activation owns all resources.
 export default Plugin.make({

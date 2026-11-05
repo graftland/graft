@@ -1,10 +1,12 @@
-import { Plugin, Graft } from "@graftland/graft"
 import { Cause, Effect, FileSystem, Option, Path, Redacted } from "effect"
-import { CredentialsError } from "../../Errors"
-import { ConfigDirectory } from "@graftland/loader"
-import { Credentials, type Prepared } from "../../Auth"
 
+import { Graft, Plugin } from "@graftland/graft"
+import { ConfigDirectory } from "@graftland/loader"
+
+import { Credentials, type Prepared } from "../../Auth"
+import { CredentialsError } from "../../Errors"
 import { Certificate as Config } from "../../internal/auth/config"
+
 export { Config }
 export default Plugin.make({
 	name: "remote-certificate-credentials",

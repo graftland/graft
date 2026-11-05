@@ -1,9 +1,11 @@
 /** Executable worker: fd 4 and the lease timer remain independent of the plugin thread. */
-import { NodeRuntime, NodeStream } from "@effect/platform-node"
-import { Clock, Effect, FiberHandle, Ref, Schema, Stream } from "effect"
 import { Socket } from "node:net"
-import { parentPort } from "node:worker_threads"
 import process from "node:process"
+import { parentPort } from "node:worker_threads"
+
+import { Clock, Effect, FiberHandle, Ref, Schema, Stream } from "effect"
+import { NodeRuntime, NodeStream } from "@effect/platform-node"
+
 import { CommandJson, Notice } from "./runner/WatchdogProtocol"
 
 // The runner machine is trusted. A suspended machine cannot enforce a deadline until it resumes.

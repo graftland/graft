@@ -1,8 +1,12 @@
-import { Graft, Plugin } from "@graftland/graft"
-import { Effect, FileSystem, Schedule, Stream } from "effect"
 import process from "node:process"
+
+import { Effect, FileSystem, Schedule, Stream } from "effect"
+
+import { Graft, Plugin } from "@graftland/graft"
+
 import { Instance } from "../../src/index"
-import { ChildApi, ChildLabel, HostApi, config } from "./services-contract"
+import { ChildApi, ChildLabel, config, HostApi } from "./services-contract"
+
 export default Plugin.make({
 	name: "service-implementation",
 	config,

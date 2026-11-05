@@ -1,8 +1,9 @@
 import starlight from "@astrojs/starlight"
 import { defineConfig } from "astro/config"
 import starlightLlmsTxt from "starlight-llms-txt"
-import { reference } from "./reference.mjs"
+
 import { referenceLinkCheck } from "./check-links.mjs"
+import { reference } from "./reference.mjs"
 
 // DOCS_URL is the public address of the site, such as
 // https://graftland.github.io/graft/. Its path becomes the base of every page.

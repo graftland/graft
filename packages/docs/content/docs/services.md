@@ -14,8 +14,9 @@ two guarantees:
 Call `Graft.provide` inside `apply`:
 
 ```ts
-import { Graft, Plugin } from "@graftland/graft"
 import { Context, Effect } from "effect"
+
+import { Graft, Plugin } from "@graftland/graft"
 
 class Clock extends Context.Service<
 	Clock,

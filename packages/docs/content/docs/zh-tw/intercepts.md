@@ -76,9 +76,10 @@ Reference 也可以列在 `inject` 中。
 請在應用程式啟動時註冊：
 
 ```ts
+import { Context, Layer, Schema } from "effect"
+
 import { Graft } from "@graftland/graft"
 import { Intercept, ModuleResolver } from "@graftland/loader"
-import { Context, Layer, Schema } from "effect"
 
 const Settings = Context.Reference("app/Settings", {
 	defaultValue: () => ({ color: "blue", size: 12 }),

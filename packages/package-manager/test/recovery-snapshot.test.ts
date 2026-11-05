@@ -1,6 +1,7 @@
-import { assert, it } from "@effect/vitest"
 import { Array, Cause, Effect, Exit, Option, Ref } from "effect"
 import { ChildProcessSpawner } from "effect/process"
+import { assert, it } from "@effect/vitest"
+
 import { run, setup } from "./fixtures.ts"
 
 it.effect(

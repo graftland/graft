@@ -1,6 +1,8 @@
-import { Cause, Deferred, Effect, Schema } from "effect"
-import * as FailureGroup from "../FailureGroup"
 import { Worker } from "node:worker_threads"
+
+import { Cause, Deferred, Effect, Schema } from "effect"
+
+import * as FailureGroup from "../FailureGroup"
 import { ExecutionError } from "./model"
 import { Notice } from "./WatchdogProtocol"
 

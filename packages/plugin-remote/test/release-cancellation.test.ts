@@ -1,4 +1,3 @@
-import { assert, it } from "@effect/vitest"
 import {
 	Array,
 	Cause,
@@ -7,18 +6,21 @@ import {
 	Exit,
 	Fiber,
 	Ref,
+	Schema,
 	Sink,
 	Stream,
-	Schema,
 } from "effect"
+import { assert, it } from "@effect/vitest"
+
 import * as Release from "@graftland/graft/Release"
-import { Connector } from "../src/Transport"
+
 import { Credentials } from "../src/Auth"
-import * as Connection from "../src/internal/runner/Connection"
 import {
 	LocalTransport,
 	WorkerTransport,
 } from "../src/internal/directTransport"
+import * as Connection from "../src/internal/runner/Connection"
+import { Connector } from "../src/Transport"
 
 for (const mode of ["masked", "interruptible", "self", "joined", "mixed"]) {
 	for (const timing of ["body", "release"]) {

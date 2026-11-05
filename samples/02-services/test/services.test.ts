@@ -1,6 +1,8 @@
-import { assert, describe, it } from "@effect/vitest"
-import { type Fork, Graft } from "@graftland/graft"
 import { Array, Effect, Layer, Stream } from "effect"
+import { assert, describe, it } from "@effect/vitest"
+
+import { Graft, type Fork } from "@graftland/graft"
+
 import { english, french, welcome } from "../src/main.ts"
 
 const text = (entry: Graft.LogEntry) =>

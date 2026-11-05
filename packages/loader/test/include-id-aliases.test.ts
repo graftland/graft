@@ -1,7 +1,10 @@
-import { assert, it } from "@effect/vitest"
-import { Graft, Plugin } from "@graftland/graft"
 import { Array, Effect, FileSystem, Schema } from "effect"
+import { assert, it } from "@effect/vitest"
+
+import { Graft, Plugin } from "@graftland/graft"
+
 import { parse } from "yaml"
+
 import { Include } from "../src/index.ts"
 import { loaderService, run } from "./utils.ts"
 

@@ -1,5 +1,6 @@
-import { assert, it } from "@effect/vitest"
 import { Array, Deferred, Effect, Fiber, Ref, Schema } from "effect"
+import { assert, it } from "@effect/vitest"
+
 import { Graft, Plugin } from "../src/index.ts"
 import { makeJournal, run } from "./utils.ts"
 
