@@ -66,24 +66,50 @@ jobs:
           include-hidden-files: true
           retention-days: 7
 
-  # Each vitest project group runs in its own job on every supported platform.
+  # Lists every vitest project, so a new package or sample gets a test job
+  # without editing this workflow.
+  projects:
+    name: Discover test projects
+    runs-on: ubuntu-latest
+    outputs:
+      list: ${{ steps.list.outputs.list }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: DeterminateSystems/nix-installer-action@3138316df39ed29be04236d7ffc686fa525866aa # v23
+        with:
+          # Download prebuilt devenv packages instead of building them.
+          extra-conf: |
+            extra-substituters = https://devenv.cachix.org
+            extra-trusted-public-keys = devenv.cachix.org-1:w1cLUi8dv3hnoSPGAuibQv+f9TZLr6cv/Hm9XgU50cw=
+      # Keeps Nix build results in the GitHub Actions cache between runs.
+      - uses: DeterminateSystems/magic-nix-cache-action@84c0677f58dcedf3b91f8223ce36a9ea5b3c84b7 # v15
+        with:
+          use-flakehub: false
+          diagnostic-endpoint: ""
+      - name: Install devenv
+        run: nix profile add github:cachix/devenv/v2.4.0
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .cache/pnpm
+          key: pnpm-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: pnpm-${{ runner.os }}-
+      - name: Install dependencies
+        run:
+          devenv shell -- pnpm install --frozen-lockfile --store-dir .cache/pnpm
+      - name: List vitest projects
+        id: list
+        run:
+          echo "list=$(devenv shell -- node scripts/test-projects.mjs)" >>
+          "$GITHUB_OUTPUT"
+
   test:
-    name: Test ${{ matrix.group.name }} on ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
+    name: Test ${{ matrix.project }}
+    needs: projects
+    runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
-        group:
-          - { name: graft, projects: "@graftland/graft" }
-          - { name: loader, projects: "@graftland/loader" }
-          - { name: hmr, projects: "@graftland/hmr" }
-          - { name: cli, projects: "@graftland/cli" }
-          - { name: plugin-remote, projects: remote }
-          - { name: package-manager, projects: "@graftland/package-manager" }
-          - { name: create, projects: "@graftland/create" }
-          - { name: samples, projects: "@graftland/sample-* sample-*" }
-          - { name: public-api, projects: public-api }
+        project: ${{ fromJSON(needs.projects.outputs.list) }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: DeterminateSystems/nix-installer-action@3138316df39ed29be04236d7ffc686fa525866aa # v23
@@ -111,14 +137,9 @@ jobs:
       - name: Build
         run: devenv shell -- pnpm -r --filter '!@graftland/docs' build
       - name: Test
-        run: |
-          # Project names may contain wildcards for vitest, not for the shell.
-          set -f
-          args=()
-          for project in ${{ matrix.group.projects }}; do
-            args+=(--project "$project")
-          done
-          devenv shell -- pnpm vitest run "${args[@]}"
+        run: devenv shell -- pnpm vitest run --project "$PROJECT"
+        env:
+          PROJECT: ${{ matrix.project }}
 
   # Pushes enqueue publication to GitHub Packages: main as a commit snapshot,
   # version tags as stable releases or prereleases.
