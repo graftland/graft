@@ -4,7 +4,6 @@ export default defineProject({
 	resolve: { conditions: ["source"] },
 	ssr: { resolve: { conditions: ["source"] } },
 	test: {
-		name: "remote",
 		globalSetup: ["./test/setup.mjs"],
 		include: ["test/**/*.test.ts"],
 		// Each integration file boots child runtimes. Serialize files to bound
