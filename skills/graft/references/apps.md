@@ -54,7 +54,8 @@ manager and rolls back on failure; then add an entry for it.
 
 - `!env NAME` reads a variable at load time and stays a tag in the file, so
   secrets never land in it. A missing variable fails only that entry.
-  `graft start --env-file .env` adds a file; the process environment wins.
+  `graft start --env-file .env` adds a file and `--env-dir /run/secrets` a
+  directory with one file per variable; the process environment wins.
 - Declare the tag for the YAML language server:
   `{ "yaml.customTags": ["!env scalar"] }` in `.vscode/settings.json`.
 - Groups with `isolate` are how a config file runs separate instances.

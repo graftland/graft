@@ -41,7 +41,7 @@ valid file; restart the CLI to load its command entries.
 ## graft start
 
 ```sh
-graft start [config] [--watch] [--env-file <path>] [--stdio]
+graft start [config] [--watch] [--env-file <path>] [--env-dir <path>] [--stdio]
 ```
 
 Runs the application that a [config file](../config-file/) describes. `config`
@@ -65,6 +65,7 @@ and exits; startup or cleanup failure gives a nonzero exit.
 | ------------------- | ---------------------------------------------------------------------------------------------------------- |
 | `--watch`, `-w`     | Watches the config file and plugin modules. See [Watch mode](#watch-mode).                                 |
 | `--env-file <path>` | Reads a `.env` file for [`!env`](../config-file/#environment-variables) tags. See [Env files](#env-files). |
+| `--env-dir <path>`  | Reads a directory with one file per variable for `!env` tags. See [Env directories](#env-directories).     |
 
 ### Env files
 
@@ -84,6 +85,20 @@ With `--watch`, `.env` files also use polling and watcher recovery:
 | Changed contents    | Only changed contents retry the loader.                                                                                                                                           |
 | Read failures       | Keep the last values and are logged; polling continues.                                                                                                                           |
 | Watcher failures    | Logged. The watcher is installed again after one second.                                                                                                                          |
+
+### Env directories
+
+`graft start --env-dir /run/secrets` reads secrets mounted as files, such as
+Docker secrets or a Kubernetes Secret volume.
+
+| Behavior          | Detail                                                                                                                                                                   |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Variables         | Each regular file is one variable, named after the file. Symbolic links to files count; hidden entries and subdirectories are skipped.                                   |
+| Value             | The file's contents without trailing line breaks. An empty file sets an empty value.                                                                                     |
+| Priority          | After the process environment and `--env-file`.                                                                                                                          |
+| Missing directory | The command stops.                                                                                                                                                       |
+| With `--watch`    | Watched and polled every second like [env files](#env-files). Only changed values retry the loader. If the directory cannot be read, the previous values stay in effect. |
+| Path and scope    | As for env files.                                                                                                                                                        |
 
 ### Invalid first configuration
 

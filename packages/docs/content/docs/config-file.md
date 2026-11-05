@@ -63,8 +63,8 @@ Declare command plugins as top-level entries:
 These entries configure CLI commands, not application plugins. `graft start`
 leaves them out of the application tree. Their `config` is passed to the command
 plugin; `disabled: true` disables them. Restart the command to apply changes.
-Command entries read `!env` from the process environment; `start --env-file`
-applies to application entries.
+Command entries read `!env` from the process environment; `start --env-file` and
+`--env-dir` apply to application entries.
 
 | Source            | Rule                                                                                                                                |
 | ----------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
@@ -203,7 +203,8 @@ candidate:
 - The file keeps the tag, so secrets are never written into it.
 - If the variable is not set, the entry fails until you fix it.
 - `graft start --env-file .env` also reads variables from a `.env` file; the
-  process environment wins. See [the command line](../cli/#graft-start).
+  process environment wins. `--env-dir` reads mounted secret files the same way.
+  See [the command line](../cli/#graft-start).
 
 ### Types and secrets
 

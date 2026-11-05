@@ -31,6 +31,12 @@ const start = Command.make(
 			),
 			Flag.optional,
 		),
+		envDir: Flag.String("env-dir").pipe(
+			Flag.withDescription(
+				"Read variables for !env from a directory with one file per variable, such as /run/secrets",
+			),
+			Flag.optional,
+		),
 	},
 	(options) =>
 		Effect.promise(() => import("./Start")).pipe(
@@ -39,6 +45,7 @@ const start = Command.make(
 				Start.run({
 					...options,
 					envFile: Option.getOrUndefined(options.envFile),
+					envDir: Option.getOrUndefined(options.envDir),
 				}),
 			),
 		),

@@ -30,7 +30,13 @@ import {
 } from "@graftland/loader"
 
 import { Application, ApplicationError, platform } from "./Application"
-import { layer as env, EnvFile, watchEnvFile } from "./internal/env"
+import {
+	layer as env,
+	EnvDir,
+	EnvFile,
+	watchEnvDir,
+	watchEnvFile,
+} from "./internal/env"
 import { layer as intercepts } from "./internal/intercepts"
 import { watchModules } from "./internal/watch"
 
@@ -44,6 +50,12 @@ export interface Options {
 	 * a variable. With `watch`, changes to it are read again.
 	 */
 	readonly envFile?: string | undefined
+	/**
+	 * A directory of secret files that `!env` reads when neither the process
+	 * environment nor `envFile` sets a variable. Each regular file is one
+	 * variable, named after the file. With `watch`, changes are read again.
+	 */
+	readonly envDir?: string | undefined
 }
 
 /**
@@ -138,7 +150,8 @@ export const run = (
 		yield* included.await
 		if (options.watch) {
 			const { reload } = yield* EnvFile
-			const envFile = options.envFile
+			const { reload: reloadDir } = yield* EnvDir
+			const { envFile, envDir } = options
 			const reloader = Plugin.make({
 				name: "reloader",
 				inject: [Loader.Loader, FileSystem.FileSystem, Path.Path],
@@ -150,6 +163,10 @@ export const run = (
 						)
 						if (envFile !== undefined)
 							yield* watchEnvFile(envFile, reload, loader.retry).pipe(
+								Effect.forkScoped,
+							)
+						if (envDir !== undefined)
+							yield* watchEnvDir(envDir, reloadDir, loader.retry).pipe(
 								Effect.forkScoped,
 							)
 					}),
@@ -171,7 +188,9 @@ export const run = (
 				Layer.mergeAll(
 					platform,
 					intercepts,
-					env(options.envFile).pipe(Layer.provide(NodeServices.layer)),
+					env({ file: options.envFile, dir: options.envDir }).pipe(
+						Layer.provide(NodeServices.layer),
+					),
 					Logger.layer([Logger.consolePretty()]),
 				),
 			),

@@ -30,7 +30,8 @@ freshly deployed file is not rewritten at startup.
 
 Read secrets with `!env` and decode them as `Redacted`, so neither the file nor
 the logs hold the value
-([Types and secrets](../../config-file/#types-and-secrets)):
+([Types and secrets](../../config-file/#types-and-secrets)). For secrets mounted
+as files, add [`--env-dir`](../../cli/#env-directories):
 
 ```yaml title="graft.yml"
 - id: database
@@ -271,7 +272,8 @@ entry always restarts its plugin process.
 - A running process's environment cannot change from outside. Rotating a secret
   set there needs a restart. `loader.retry`
   [rereads `!env` values](../../config-file/#when-values-are-read-again), which
-  helps only when their source changed, such as `--env-file` under `--watch`.
+  helps only when their source changed, such as `--env-file` or `--env-dir`
+  under `--watch`.
 - Support [Update in place](../../plugins/#update-in-place) in plugins that hold
   connections or caches, so a config edit does not drop them.
 
