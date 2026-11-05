@@ -12,6 +12,7 @@ import { Graft } from "@graftland/graft"
 import { version } from "../package.json" with { type: "json" }
 import { platform } from "./Application"
 import * as Host from "./internal/commandHost"
+import { schemaFileName } from "./internal/schemaFileName"
 
 const start = Command.make(
 	"start",
@@ -97,6 +98,26 @@ const remove = Command.make(
 	),
 )
 
+const schema = Command.make(
+	"schema",
+	{
+		output: Flag.String("output").pipe(
+			Flag.withAlias("o"),
+			Flag.withDescription("Path of the schema file"),
+			Flag.withDefault(schemaFileName),
+		),
+	},
+	({ output }) =>
+		Effect.promise(() => import("./internal/schemaFile")).pipe(
+			Effect.uninterruptible,
+			Effect.flatMap((EditorSchema) => EditorSchema.write(".", output)),
+		),
+).pipe(
+	Command.withDescription(
+		"Write the JSON Schema of graft.yml, with the config of installed plugins",
+	),
+)
+
 const graft = Command.make("graft").pipe(
 	Command.withDescription("Run and manage Graft applications"),
 	Command.withSharedFlags({
@@ -113,7 +134,7 @@ const program = Effect.gen(function* () {
 			Effect.gen(function* () {
 				const context = yield* Layer.build(Graft.layer)
 				return yield* Host.run(
-					[start, create, add, remove],
+					[start, create, add, remove, schema],
 					graft,
 					version,
 					args,

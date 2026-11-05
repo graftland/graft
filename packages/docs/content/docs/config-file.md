@@ -296,30 +296,29 @@ Environment resolution treats other class instances as opaque.
 
 ## Editor support
 
-Every Graft release includes a JSON Schema for this file, with the same version
-as the release. Point the YAML language server to it with a comment on the first
-line, and editors such as VS Code (with the YAML extension) can complete and
-check the entry fields:
+[`graft schema`](../cli/#graft-schema) writes `graft.schema.json`, the JSON
+Schema of this file for the plugins your project installs. Point the YAML
+language server to it with a comment on the first line, and editors such as VS
+Code (with the YAML extension) can complete and check the entries:
 
 ```yaml title="graft.yml"
-# yaml-language-server: $schema=https://cdn.jsdelivr.net/npm/@graftland/cli@1.2.3/schema.json
+# yaml-language-server: $schema=./graft.schema.json
 - id: api
   name: ./plugins/api.mjs
 ```
 
-- Replace `1.2.3` with the version of `@graftland/cli` in your project, and
-  update it when you upgrade Graft. `graft create` writes this line with its own
-  version.
-- The schema is also in the package as `@graftland/cli/schema.json`.
-- It checks entry fields, registered intercepts, and the config of `remote`,
-  `remote/runner` and `remote/cli`, including entries nested in groups. Business
-  config and custom capability config remain open; their own schemas check them
-  at startup.
+| Schema                                                    | Checks                                                                                                                                                                        | Kept current by                                                                     |
+| --------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| `graft.schema.json`                                       | Entry fields, registered intercepts, and the `config` of every installed plugin that exports a [registration](../best-practices/packaging/#editor-completion), in groups too. | `graft create`, and `graft add` and `graft remove` when the file exists.            |
+| `@graftland/cli/schema.json`, released with every version | Entry fields and registered intercepts. The `config` of every plugin, Graft's own included, stays open.                                                                       | Its version, as in `https://cdn.jsdelivr.net/npm/@graftland/cli@1.2.3/schema.json`. |
 
-For an application's editor schema, combine explicit plugin registrations with
-`ConfigSchema.make` from `@graftland/loader`. Remote publishes its registrations
-through `@graftland/plugin-remote/Config`. Generating a schema does not load
-plugins.
+- `graft create` points `graft.yml` to `./graft.schema.json`, and writes the
+  file once dependencies are installed.
+- Commit `graft.schema.json`, so editors check entries right after a clone.
+- Run `graft schema` yourself after installing or upgrading packages with the
+  package manager directly.
+- Config without a registration stays open; its plugin's schema checks it at
+  startup.
 
 The language server may flag `!env`. Declare the tag in the editor settings. For
 VS Code:

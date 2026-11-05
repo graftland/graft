@@ -9,6 +9,7 @@ import {
 	Stream,
 	String,
 } from "effect"
+import { SecureRandom } from "effect/crypto"
 import { ChildProcessSpawner } from "effect/process"
 import { NodeServices } from "@effect/platform-node"
 import { assert, it } from "@effect/vitest"
@@ -96,7 +97,10 @@ for (const global of [false, true]) {
 				assert.deepEqual(entries, [
 					{ name: "@graftland/plugin-remote/cli", cli: true },
 				])
-			}).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+			}).pipe(
+				Effect.scoped,
+				Effect.provide([NodeServices.layer, SecureRandom.layerWebCrypto]),
+			),
 	)
 }
 
@@ -122,5 +126,8 @@ it.live("does not enable a command plugin when installation fails", () =>
 		assert.equal(result._tag, "Failure")
 		const unchanged = yield* fs.readFileString(directory + "/graft.yml")
 		assert.equal(unchanged, original)
-	}).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+	}).pipe(
+		Effect.scoped,
+		Effect.provide([NodeServices.layer, SecureRandom.layerWebCrypto]),
+	),
 )

@@ -12,6 +12,7 @@ The `@graftland/cli` package provides the `graft` command. It needs Node.js
 | `graft create [directory]`  | Creates a new project.                        | [graft create](#graft-create) |
 | `graft add <package...>`    | Adds dependencies and installs them.          | [graft add](#graft-add)       |
 | `graft remove <package...>` | Removes dependencies.                         | [graft remove](#graft-remove) |
+| `graft schema`              | Writes the editor schema of `graft.yml`.      | [graft schema](#graft-schema) |
 
 `graft start` runs both [remote hosts](../remote/hosts/) and
 [runners](../remote/runners/). Command plugins add subcommands such as
@@ -211,7 +212,8 @@ With `--yes`, or when stdin or stdout is not a terminal, it asks nothing and
 | `--plugin`          | Takes `name` or `name@range`; short names map as in `graft add --plugin`. The package goes into `dependencies` and gets a `- name:` entry in `graft.yml`. Without a range, Graft's own plugins use Graft's version and others `latest`. |
 | `--package-manager` | A version, as in `pnpm@9.15.9`, is written to the `packageManager` field of `package.json`.                                                                                                                                             |
 | Git                 | `git init` only, without a first commit. Skipped, with the reason, when the project is inside a repository or git is not installed.                                                                                                     |
-| Afterwards          | Prints the commands to run next, such as `cd my-app` and `pnpm dev`, including an install or `git init` that was skipped or failed. A failed install or `git init` keeps the project and exits with a nonzero status.                   |
+| Schema              | After installing, the project's own `@graftland/cli` runs [`graft schema`](#graft-schema).                                                                                                                                              |
+| Afterwards          | Prints the commands to run next, such as `cd my-app` and `pnpm dev`, including an install, `graft schema` or `git init` that was skipped or failed. A failed step keeps the project and exits with a nonzero status.                    |
 
 ### Templates
 
@@ -230,8 +232,8 @@ With `--yes`, or when stdin or stdout is not a terminal, it asks nothing and
 | `build`     |                       | Compiles `src` to `dist`                      |                       |
 
 - Every project depends on the same Graft version as the command, and
-  `graft.yml` points to the [schema](../config-file/#editor-support) of that
-  version.
+  `graft.yml` points to its [editor schema](../config-file/#editor-support),
+  `./graft.schema.json`.
 - Node runs the TypeScript of `app` directly, so it has no build step. A
   `plugin` package is built, because Node does not strip types inside
   `node_modules`.
@@ -257,6 +259,29 @@ graft remove <package...>
 ```
 
 Removes dependencies from the project in the current directory.
+
+## graft schema
+
+```sh
+graft schema [--output <file>]
+```
+
+Writes `graft.schema.json`, the [editor schema](../config-file/#editor-support)
+of `graft.yml`, for the project in the current directory. Besides what the
+released schema checks, it checks the `config` of every installed plugin that
+registers one.
+
+| Case                          | Behavior                                                                                                                                                                                            |
+| ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Which packages                | Those in `dependencies`, `devDependencies` and `optionalDependencies` that list `@graftland/graft` as a dependency or peer and export [`./schema`](../best-practices/packaging/#editor-completion). |
+| What is imported              | Only their `./schema` modules. No plugin is loaded.                                                                                                                                                 |
+| A dependency is not installed | A warning. Its config stays open.                                                                                                                                                                   |
+| A `./schema` is not valid     | `SchemaRegistrationError` names the package, and no file is written.                                                                                                                                |
+| Kept current                  | `graft add` and `graft remove` rewrite `graft.schema.json` after installing when the project has one, and exit with a nonzero status if that fails. `graft create` writes it.                       |
+| `--output`, `-o`              | The path to write. Defaults to `graft.schema.json`.                                                                                                                                                 |
+
+Run it yourself after installing or upgrading packages with the package manager
+directly.
 
 ## Package managers
 

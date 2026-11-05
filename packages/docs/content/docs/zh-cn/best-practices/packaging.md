@@ -64,7 +64,7 @@ export default Plugin.make({
 | `./tokens`   | 服务键、事件、Reference、带标签的错误和配置 schema。 | 消费方插件、测试，以及实现同一服务的其他包。                                      |
 | `./<plugin>` | 另一个插件，每个模块一个。                           | `name: postgres/migrations` 这样的条目。                                          |
 | `./contract` | [Remote 契约](../../remote/hosts/#定义契约)。        | 插件能在别处运行时，供宿主和 [runner](../../remote/runners/#部署-runner) 导入。   |
-| `./schema`   | 配置的[编辑器登记项](#编辑器补全)。                  | 应用的编辑器 schema。                                                             |
+| `./schema`   | 配置的[编辑器登记项](#编辑器补全)。                  | [`graft schema`](../../cli/#graft-schema)，用于生成应用的编辑器 schema。          |
 | `./cli`      | 添加 `graft` 子命令的命令插件。                      | [`graft add --plugin <package>`](../../cli/#命令插件)，它会启用 `<package>/cli`。 |
 
 | 规则                             | 避免的问题                                                                                                 |
@@ -193,8 +193,8 @@ export const entries = () => [
 | `schema`   | 配置 schema 的编码侧。`referencePolicy: () => undefined` 会把定义内联，否则这些定义会丢失。`onExcessProperty: "error"` 会标出未知字段，否则解码时它们会被悄悄丢弃。 |
 | `required` | 配置有必填字段时设为 `true`，这样没有 `config` 的条目会被标出。                                                                                                     |
 
-这里只导入令牌模块：生成 schema 不能加载插件。应用把登记项传给
-`ConfigSchema.make`，见[编辑器支持](../../config-file/#编辑器支持)。
+这里只导入令牌模块：生成 schema 不能加载插件。[`graft schema`](../../cli/#graft-schema)
+通过 `./schema` 导出和对 `@graftland/graft` 的 peer 依赖找到这个模块。
 
 ## 支持的 Graft 版本
 

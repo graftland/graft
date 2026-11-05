@@ -13,8 +13,7 @@
 		"dist",
 		"src",
 		"README.zh-CN.md",
-		"README.zh-TW.md",
-		"schema.json"
+		"README.zh-TW.md"
 	],
 	"sideEffects": false,
 	"exports": {
@@ -110,6 +109,10 @@
 			"source": "./src/runner/websocket.ts",
 			"default": "./dist/runner/websocket.js"
 		},
+		"./schema": {
+			"source": "./src/schema.ts",
+			"default": "./dist/schema.js"
+		},
 		"./Testing": {
 			"source": "./src/Testing.ts",
 			"default": "./dist/Testing.js"
@@ -124,7 +127,7 @@
 		"./internal/worker": "./dist/internal/workerMain.js"
 	},
 	"scripts": {
-		"build": "tsc -b && tsdown && node scripts/schema.mjs",
+		"build": "tsc -b && tsdown",
 		"test": "vitest run"
 	},
 	"peerDependencies": {
@@ -171,6 +174,7 @@
 			"./runner/stdio": "./dist/runner/stdio.js",
 			"./runner/unix": "./dist/runner/unix.js",
 			"./runner/websocket": "./dist/runner/websocket.js",
+			"./schema": "./dist/schema.js",
 			"./Testing": "./dist/Testing.js",
 			"./Transport": "./dist/Transport.js",
 			"./package.json": "./package.json",

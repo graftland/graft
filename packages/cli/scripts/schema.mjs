@@ -1,21 +1,11 @@
-// Writes schema.json from the built CLI, so the JSON Schema of graft.yml in
-// each release matches the loader and the intercepts of that release.
-import { readFileSync, writeFileSync } from "node:fs"
+// Writes schema.json from the built CLI: the JSON Schema of graft.yml in each
+// release, with the loader's entry fields and the CLI's intercepts. Plugins
+// add their config in each project through `graft schema`.
+import { writeFileSync } from "node:fs"
 
 import { make } from "../dist/internal/configSchema.js"
 
 writeFileSync(
 	new URL("../schema.json", import.meta.url),
-	JSON.stringify(
-		make(
-			JSON.parse(
-				readFileSync(
-					new URL("../../plugin-remote/schema.json", import.meta.url),
-					"utf8",
-				),
-			),
-		),
-		null,
-		"\t",
-	) + "\n",
+	JSON.stringify(make(), null, "\t") + "\n",
 )

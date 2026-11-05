@@ -6,12 +6,13 @@ description: graft 命令及其子命令。
 `@graftland/cli` 包提供 `graft` 命令。它需要 Node.js 22.19 或更高版本，与 Effect
 Node 适配器的要求一致。
 
-| 命令                        | 作用                       | 章节                          |
-| --------------------------- | -------------------------- | ----------------------------- |
-| `graft start [config]`      | 运行配置文件所描述的应用。 | [graft start](#graft-start)   |
-| `graft create [directory]`  | 创建新项目。               | [graft create](#graft-create) |
-| `graft add <package...>`    | 添加依赖并安装。           | [graft add](#graft-add)       |
-| `graft remove <package...>` | 移除依赖。                 | [graft remove](#graft-remove) |
+| 命令                        | 作用                               | 章节                          |
+| --------------------------- | ---------------------------------- | ----------------------------- |
+| `graft start [config]`      | 运行配置文件所描述的应用。         | [graft start](#graft-start)   |
+| `graft create [directory]`  | 创建新项目。                       | [graft create](#graft-create) |
+| `graft add <package...>`    | 添加依赖并安装。                   | [graft add](#graft-add)       |
+| `graft remove <package...>` | 移除依赖。                         | [graft remove](#graft-remove) |
+| `graft schema`              | 写入 `graft.yml` 的编辑器 Schema。 | [graft schema](#graft-schema) |
 
 `graft start` 同时支持 [remote 宿主](../remote/hosts/)和
 [runner](../remote/runners/)。命令插件可以添加 `graft remote certificates`
@@ -186,7 +187,8 @@ graft create [directory] [options]
 | `--plugin`          | 接受 `name` 或 `name@range`，短名称的映射与 `graft add --plugin` 相同。该包写入 `dependencies`，并在 `graft.yml` 中得到一个 `- name:` 配置项。未指定范围时，Graft 自己的插件使用 Graft 的版本，其他插件使用 `latest`。 |
 | `--package-manager` | 带版本时（如 `pnpm@9.15.9`）写入 `package.json` 的 `packageManager` 字段。                                                                                                                                             |
 | Git                 | 只运行 `git init`，不创建首次提交。项目位于某个仓库内或未安装 git 时跳过，并说明原因。                                                                                                                                 |
-| 完成之后            | 输出接下来要运行的命令，如 `cd my-app` 和 `pnpm dev`，其中包括被跳过或失败的安装和 `git init`。安装或 `git init` 失败时保留项目，并以非零状态退出。                                                                    |
+| Schema              | 安装完成后，由项目自己的 `@graftland/cli` 运行 [`graft schema`](#graft-schema)。                                                                                                                                       |
+| 完成之后            | 输出接下来要运行的命令，如 `cd my-app` 和 `pnpm dev`，其中包括被跳过或失败的安装、`graft schema` 和 `git init`。任一步骤失败时保留项目，并以非零状态退出。                                                             |
 
 ### 模板
 
@@ -204,8 +206,8 @@ graft create [directory] [options]
 | `typecheck` | `effect-tsgo tsc`     | `effect-tsgo tsc`                          |                       |
 | `build`     |                       | 把 `src` 编译到 `dist`                     |                       |
 
-- 每个项目依赖的 Graft 版本与该命令相同，`graft.yml` 指向该版本的
-  [schema](../config-file/#编辑器支持)。
+- 每个项目依赖的 Graft 版本与该命令相同，`graft.yml`
+  指向项目的[编辑器 Schema](../config-file/#编辑器支持) `./graft.schema.json`。
 - Node 直接运行 `app` 的 TypeScript，因此没有构建步骤。`plugin`
   包需要构建，因为 Node 不会剥离 `node_modules` 中的类型。
 - `.vscode/extensions.json` 推荐 YAML 扩展，它根据 schema 补全
@@ -228,6 +230,27 @@ graft remove <package...>
 ```
 
 从当前目录中的项目移除依赖。
+
+## graft schema
+
+```sh
+graft schema [--output <file>]
+```
+
+为当前目录中的项目写入 `graft.schema.json`，即 `graft.yml`
+的[编辑器 Schema](../config-file/#编辑器支持)。除了随版本发布的 Schema 检查的内容，它还检查每个已安装且登记了配置的插件的
+`config`。
+
+| 情况             | 行为                                                                                                                                                                       |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 哪些包           | `dependencies`、`devDependencies` 和 `optionalDependencies` 中，把 `@graftland/graft` 列为依赖或 peer，并导出 [`./schema`](../best-practices/packaging/#编辑器补全) 的包。 |
+| 导入什么         | 只导入它们的 `./schema` 模块，不加载任何插件。                                                                                                                             |
+| 依赖未安装       | 输出警告，其配置保持开放。                                                                                                                                                 |
+| `./schema` 无效  | `SchemaRegistrationError` 指出是哪个包，不写入文件。                                                                                                                       |
+| 保持更新         | 项目已有 `graft.schema.json` 时，`graft add` 和 `graft remove` 在安装后重写它，失败则以非零状态退出。`graft create` 会写入它。                                             |
+| `--output`、`-o` | 写入的路径，默认为 `graft.schema.json`。                                                                                                                                   |
+
+直接用包管理器安装或升级包之后，自己运行它。
 
 ## 包管理器
 

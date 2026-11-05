@@ -61,8 +61,7 @@ const warnings = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
 		)
 		return { result, warnings: MutableList.toArray(logs) }
 	})
-const schemaComment =
-	"# yaml-language-server: $schema=https://cdn.jsdelivr.net/npm/@graftland/cli@0.0.0/schema.json"
+const schemaComment = "# yaml-language-server: $schema=./graft.schema.json"
 
 describe("create", () => {
 	it.effect("generates a TypeScript app that the loader accepts", () =>

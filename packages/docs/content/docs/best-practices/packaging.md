@@ -68,7 +68,7 @@ Expose each part as its own entry point:
 | `./tokens`   | Service keys, events, references, tagged errors and the config schema. | Consumer plugins, tests, and other packages that implement the same service.                   |
 | `./<plugin>` | A further plugin, one per module.                                      | Entries such as `name: postgres/migrations`.                                                   |
 | `./contract` | A [Remote contract](../../remote/hosts/#define-a-contract).            | Hosts and [runners](../../remote/runners/#set-up-a-runner), when the plugin can run elsewhere. |
-| `./schema`   | The [editor registration](#editor-completion) of the config.           | The application's editor schema.                                                               |
+| `./schema`   | The [editor registration](#editor-completion) of the config.           | [`graft schema`](../../cli/#graft-schema), for the application's editor schema.                |
 | `./cli`      | A command plugin that adds `graft` subcommands.                        | [`graft add --plugin <package>`](../../cli/#command-plugins), which enables `<package>/cli`.   |
 
 | Rule                                                 | Pitfall it avoids                                                                                                                       |
@@ -205,8 +205,8 @@ export const entries = () => [
 | `required` | `true` when the config has required fields, so an entry without `config` is flagged.                                                                                                                                          |
 
 Import only the tokens module here: generating a schema must not load the
-plugin. Applications pass the registrations to `ConfigSchema.make`; see
-[Editor support](../../config-file/#editor-support).
+plugin. [`graft schema`](../../cli/#graft-schema) finds the module through the
+`./schema` export and the `@graftland/graft` peer dependency.
 
 ## Support Graft versions
 

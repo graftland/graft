@@ -8,7 +8,7 @@
 		"./contract": "./dist/contract.js"
 	},
 	"scripts": {
-		"build": "tsdown && node scripts/install.mjs",
+		"build": "tsdown && node scripts/install.mjs && node node_modules/@graftland/cli/dist/bin.js schema",
 		"start": "graft start --watch",
 		"runner": "graft start runner.yml",
 		"test": "vitest run"

@@ -125,13 +125,6 @@ const ownVersion = Effect.gen(function* () {
 }).pipe(Effect.orDie)
 
 /**
- * The JSON Schema of graft.yml as released with a version of Graft. Every
- * package shares that version, and npm keeps each release's files unchanged.
- */
-export const schemaUrl = (version: string): string =>
-	`https://cdn.jsdelivr.net/npm/@graftland/cli@${version}/schema.json`
-
-/**
  * The package a plugin name refers to: `review` is `@graftland/plugin-review`,
  * while scoped and `graft-plugin-*` names stay as they are.
  */
@@ -331,7 +324,6 @@ export const create: (
 			cli: options.versions?.cli ?? version,
 			effect: options.versions?.effect ?? "4.1.2",
 		},
-		schemaUrl: schemaUrl(version),
 		plugins,
 	}
 	// Strings and plain objects always encode.

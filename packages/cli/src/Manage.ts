@@ -12,6 +12,7 @@ import {
 	Record,
 	Schema,
 } from "effect"
+import { CliError } from "effect/cli"
 
 import * as Create from "@graftland/create"
 import * as PackageManager from "@graftland/package-manager"
@@ -20,6 +21,7 @@ import { parseDocument, type Document } from "yaml"
 
 import { CommandConfigError } from "./Commands"
 import { home } from "./internal/commandConfig"
+import { schemaFileName } from "./internal/schemaFileName"
 
 const report = (result: PackageManager.InstallResult) =>
 	Effect.logInfo(
@@ -52,6 +54,29 @@ const Spec = Schema.Union([
 ])
 const decodeSpecs = Schema.decodeEffect(Schema.Array(Spec))
 
+/**
+ * Regenerates the project's editor schema, but only when it has one, so that
+ * the plugins just added or removed are checked. Imports no plugin.
+ */
+const refreshSchema = Effect.fnUntraced(function* (directory: string) {
+	const fs = yield* FileSystem.FileSystem
+	const path = yield* Path.Path
+	const root = path.resolve(directory)
+	const file = path.join(root, schemaFileName)
+	if (!(yield* fs.exists(file))) return
+	const EditorSchema = yield* Effect.promise(
+		() => import("./internal/schemaFile"),
+	).pipe(Effect.uninterruptible)
+	yield* EditorSchema.write(root, file).pipe(
+		Effect.mapError((cause) =>
+			CliError.UserError.make({
+				cause,
+				userMessage: `Dependencies changed, but ${file} was not regenerated: ${cause.message}`,
+			}),
+		),
+	)
+})
+
 const install = Effect.fn("Manage.install")(function* (
 	directory: string,
 	changes: Readonly<Record<string, string | null>>,
@@ -64,6 +89,7 @@ const install = Effect.fn("Manage.install")(function* (
 	const manager = yield* PackageManager.make({ directory, userAgent })
 	const result = yield* manager.install(decoded)
 	yield* report(result)
+	yield* refreshSchema(directory)
 })
 
 export const add = Effect.fn("Manage.add")(function* (

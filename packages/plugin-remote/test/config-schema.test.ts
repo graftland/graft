@@ -1,10 +1,12 @@
-import { Effect, FileSystem, Schema } from "effect"
-import { NodeServices } from "@effect/platform-node"
+import { Array, Effect, Schema } from "effect"
 import { assert, describe, it } from "@effect/vitest"
+
+import { ConfigSchema } from "@graftland/loader"
 
 import * as Config from "../src/Config"
 import { Jwt } from "../src/internal/auth/config"
 import { authentication } from "../src/internal/entryConfig"
+import { entries } from "../src/schema"
 
 const valid = Schema.is(Schema.toEncoded(Config.Host))
 const host = (connect: unknown) => ({
@@ -108,18 +110,18 @@ describe("remote editor schemas", () => {
 				yield* Schema.decodeUnknownEffect(Jwt)(reference.config)
 			}),
 	)
-	it.effect(
-		"ships the same editor definitions that the public schemas generate",
-		() =>
-			Effect.gen(function* () {
-				const fs = yield* FileSystem.FileSystem
-				const text = yield* fs.readFileString(
-					new URL("../schema.json", import.meta.url).pathname,
-				)
-				const saved = yield* Schema.decodeEffect(
-					Schema.fromJsonString(Schema.Unknown),
-				)(text)
-				assert.deepEqual(saved, Config.entries())
-			}).pipe(Effect.provide(NodeServices.layer)),
-	)
+	it("composes its editor registrations into the config file schema", () => {
+		const document = ConfigSchema.make({ entries: entries() })
+		assert.deepEqual(
+			Array.map(
+				document.definitions.Entry.allOf ?? [],
+				(constraint) => constraint.if.properties.name.enum,
+			),
+			[
+				["remote", "@graftland/plugin-remote"],
+				["remote/runner", "@graftland/plugin-remote/runner"],
+				["remote/cli", "@graftland/plugin-remote/cli"],
+			],
+		)
+	})
 })

@@ -60,11 +60,12 @@ change.
 
 ## Editor support
 
-Put the schema comment on the first line, with the project's `@graftland/cli`
-version:
+Run `graft schema` in the project to write `graft.schema.json`, which checks
+entry fields and the config of every installed plugin that exports `./schema`.
+Put the schema comment on the first line, and commit the file:
 
 ```yaml
-# yaml-language-server: $schema=https://cdn.jsdelivr.net/npm/@graftland/cli@<version>/schema.json
+# yaml-language-server: $schema=./graft.schema.json
 ```
 
 For VS Code, declare the tag: `{ "yaml.customTags": ["!env scalar"] }`.

@@ -6,12 +6,13 @@ description: graft 命令及其子命令。
 `@graftland/cli` 套件提供 `graft` 命令。它需要 Node.js
 22.19 或更新版本，與其 Effect Node 轉接器的要求一致。
 
-| 命令                        | 作用                         | 章節                          |
-| --------------------------- | ---------------------------- | ----------------------------- |
-| `graft start [config]`      | 執行設定檔所描述的應用程式。 | [graft start](#graft-start)   |
-| `graft create [directory]`  | 建立新專案。                 | [graft create](#graft-create) |
-| `graft add <package...>`    | 新增相依套件並安裝。         | [graft add](#graft-add)       |
-| `graft remove <package...>` | 移除相依套件。               | [graft remove](#graft-remove) |
+| 命令                        | 作用                               | 章節                          |
+| --------------------------- | ---------------------------------- | ----------------------------- |
+| `graft start [config]`      | 執行設定檔所描述的應用程式。       | [graft start](#graft-start)   |
+| `graft create [directory]`  | 建立新專案。                       | [graft create](#graft-create) |
+| `graft add <package...>`    | 新增相依套件並安裝。               | [graft add](#graft-add)       |
+| `graft remove <package...>` | 移除相依套件。                     | [graft remove](#graft-remove) |
+| `graft schema`              | 寫入 `graft.yml` 的編輯器 Schema。 | [graft schema](#graft-schema) |
 
 `graft start` 同時支援 [remote 宿主](../remote/hosts/)與
 [runner](../remote/runners/)。命令外掛可以加入 `graft remote certificates`
@@ -185,7 +186,8 @@ graft create [directory] [options]
 | `--plugin`          | 接受 `name` 或 `name@range`；短名稱的對應方式與 `graft add --plugin` 相同。套件加入 `dependencies`，並在 `graft.yml` 中得到一個 `- name:` 項目。未指定範圍時，Graft 自己的外掛使用 Graft 的版本，其他外掛使用 `latest`。 |
 | `--package-manager` | 帶版本時（例如 `pnpm@9.15.9`），版本會寫入 `package.json` 的 `packageManager` 欄位。                                                                                                                                     |
 | Git                 | 只執行 `git init`，不建立第一個 commit。專案位於儲存庫內或未安裝 git 時會略過，並說明原因。                                                                                                                              |
-| 完成之後            | 輸出接下來要執行的命令，例如 `cd my-app` 和 `pnpm dev`，包括被略過或失敗的安裝或 `git init`。安裝或 `git init` 失敗時會保留專案，並以非零狀態碼結束。                                                                    |
+| Schema              | 安裝完成後，由專案自己的 `@graftland/cli` 執行 [`graft schema`](#graft-schema)。                                                                                                                                         |
+| 完成之後            | 輸出接下來要執行的命令，例如 `cd my-app` 和 `pnpm dev`，包括被略過或失敗的安裝、`graft schema` 或 `git init`。任一步驟失敗時會保留專案，並以非零狀態碼結束。                                                             |
 
 ### 範本
 
@@ -203,8 +205,9 @@ graft create [directory] [options]
 | `typecheck` | `effect-tsgo tsc`     | `effect-tsgo tsc`                          |                       |
 | `build`     |                       | 將 `src` 編譯到 `dist`                     |                       |
 
-- 每個專案相依的 Graft 版本都與此命令相同，`graft.yml` 也指向該版本的
-  [Schema](../config-file/#編輯器支援)。
+- 每個專案相依的 Graft 版本都與此命令相同，`graft.yml`
+  也指向專案的[編輯器 Schema](../config-file/#編輯器支援)
+  `./graft.schema.json`。
 - Node 直接執行 `app` 的 TypeScript，因此沒有建置步驟。`plugin`
   套件需要建置，因為 Node 不會移除 `node_modules` 內檔案的型別。
 - `.vscode/extensions.json` 推薦 YAML 擴充功能，它會依 Schema 補全
@@ -227,6 +230,27 @@ graft remove <package...>
 ```
 
 從目前目錄的專案中移除相依套件。
+
+## graft schema
+
+```sh
+graft schema [--output <file>]
+```
+
+為目前目錄的專案寫入 `graft.schema.json`，也就是 `graft.yml`
+的[編輯器 Schema](../config-file/#編輯器支援)。除了隨版本發布的 Schema 檢查的內容，它還會檢查每個已安裝且登記了設定的外掛的
+`config`。
+
+| 情況             | 行為                                                                                                                                                                             |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 哪些套件         | `dependencies`、`devDependencies` 與 `optionalDependencies` 中，把 `@graftland/graft` 列為相依或 peer，並匯出 [`./schema`](../best-practices/packaging/#編輯器自動補全) 的套件。 |
+| 匯入什麼         | 只匯入它們的 `./schema` 模組，不載入任何外掛。                                                                                                                                   |
+| 相依套件未安裝   | 輸出警告，其設定保持開放。                                                                                                                                                       |
+| `./schema` 無效  | `SchemaRegistrationError` 指出是哪個套件，不寫入檔案。                                                                                                                           |
+| 保持最新         | 專案已有 `graft.schema.json` 時，`graft add` 與 `graft remove` 會在安裝後重寫它，失敗則以非零狀態碼結束。`graft create` 會寫入它。                                               |
+| `--output`、`-o` | 寫入的路徑，預設為 `graft.schema.json`。                                                                                                                                         |
+
+直接用套件管理器安裝或升級套件後，請自行執行。
 
 ## 套件管理器
 

@@ -171,5 +171,8 @@ plugin. Hot reload uses `replace`.
 - Ship ECMAScript modules; CommonJS and native dependencies block hot reload.
 - List `@graftland/graft` and `effect` under `peerDependencies`, so the app
   keeps one copy of each.
+- Export the config's editor registration as `./schema` (an `entries()`
+  function, importing only the tokens), so `graft schema` checks entries in
+  applications' editors.
 - Document the config schema and the service key strings, since `graft.yml`
   users write them by hand.

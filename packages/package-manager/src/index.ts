@@ -245,6 +245,10 @@ export const parseUserAgent = (userAgent: string): Option.Option<UserAgent> =>
 export const runPrefix = (agent: Agent): string =>
 	agent === "npm" ? "npm run" : agent === "pnpm" ? "pnpm" : "yarn"
 
+/** What runs a dependency's executable, such as `npx` in `npx graft schema`. */
+export const execPrefix = (agent: Agent): string =>
+	agent === "npm" ? "npx" : agent === "pnpm" ? "pnpm exec" : "yarn"
+
 /** The command that installs a project's dependencies. */
 export const installCommand = (agent: Agent): string =>
 	agent === "npm" ? "npm install" : agent === "pnpm" ? "pnpm install" : "yarn"

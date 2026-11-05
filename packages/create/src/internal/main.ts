@@ -22,6 +22,7 @@ import {
 import * as Git from "./git"
 import { install } from "./install"
 import { resolve, type Input } from "./resolve"
+import * as EditorSchema from "./schema"
 
 /** A path as typed in a shell; anything but plain characters is single-quoted. */
 const shellQuote = (value: string) =>
@@ -86,6 +87,17 @@ export const main = Effect.fn("Create.main")(function* (input: Input) {
 			installed.cause,
 		)
 
+	// Needs the installed CLI and plugins; without them the next steps say how.
+	const schema =
+		installed !== undefined && Exit.isSuccess(installed)
+			? yield* Effect.exit(EditorSchema.write(project.directory))
+			: undefined
+	if (schema !== undefined && Exit.isFailure(schema))
+		yield* Effect.logError(
+			"Writing graft.schema.json failed; the project is kept",
+			schema.cause,
+		)
+
 	const git = answers.git
 		? yield* Effect.exit(Git.init(project.directory))
 		: undefined
@@ -107,6 +119,9 @@ export const main = Effect.fn("Create.main")(function* (input: Input) {
 		...(installed === undefined || Exit.isFailure(installed)
 			? [PackageManager.installCommand(agent)]
 			: []),
+		...(schema === undefined || Exit.isFailure(schema)
+			? [`${PackageManager.execPrefix(agent)} graft schema`]
+			: []),
 		...(git !== undefined && Exit.isFailure(git) ? ["git init"] : []),
 		...Array.map(
 			scripts[project.template],
@@ -124,6 +139,7 @@ export const main = Effect.fn("Create.main")(function* (input: Input) {
 		...(installed !== undefined && Exit.isFailure(installed)
 			? [installed.cause]
 			: []),
+		...(schema !== undefined && Exit.isFailure(schema) ? [schema.cause] : []),
 		...(git !== undefined && Exit.isFailure(git) ? [git.cause] : []),
 	]
 	if (failures.length > 0)

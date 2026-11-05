@@ -56,7 +56,10 @@ devenv shell -- pnpm start
 
 外掛行程不使用宿主的 TypeScript 載入器，所以
 [`tsdown.config.ts`](tsdown.config.ts) 會把兩者建置到
-`dist/`。修改任一檔案後，請執行 `devenv shell -- pnpm build` 重新建置。
+`dist/`。修改任一檔案後，請執行 `devenv shell -- pnpm build`
+重新建置。建置也會執行
+[`graft schema`](../../packages/docs/content/docs/zh-tw/cli.md#graft-schema)，讓編輯器檢查兩個 YAML 檔中的
+`remote` 項目。
 
 1. 把 `greeting: Hello` 改成 `greeting: Hi`
    並儲存。提供者重新啟動後，welcome 印出 `Hi, Alice!`。

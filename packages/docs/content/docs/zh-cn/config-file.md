@@ -268,26 +268,27 @@ Effect.runSync(readSettings({})) // => { port: 8080 }
 
 ## 编辑器支持
 
-每个 Graft 版本都附带这个文件的 JSON
-Schema，版本号与该版本相同。在文件第一行用注释把 YAML language server 指向它，VS
-Code（装有 YAML 扩展）等编辑器就能补全和检查配置项字段：
+[`graft schema`](../cli/#graft-schema) 写入
+`graft.schema.json`，即针对项目所安装插件的这个文件的 JSON
+Schema。在文件第一行用注释把 YAML language server 指向它，VS
+Code（装有 YAML 扩展）等编辑器就能补全和检查配置项：
 
 ```yaml title="graft.yml"
-# yaml-language-server: $schema=https://cdn.jsdelivr.net/npm/@graftland/cli@1.2.3/schema.json
+# yaml-language-server: $schema=./graft.schema.json
 - id: api
   name: ./plugins/api.mjs
 ```
 
-- 把 `1.2.3` 换成项目中 `@graftland/cli`
-  的版本，升级 Graft 时一并更新。`graft create` 会用自己的版本写入这一行。
-- 包里也带有这个 Schema，路径为 `@graftland/cli/schema.json`。
-- 它检查配置项字段、已登记的 intercept，以及 `remote`、`remote/runner` 和
-  `remote/cli`
-  的配置，包括 group 内的条目。业务配置和自定义能力的配置保持开放，在启动时由各自的 schema 检查。
+| Schema                                       | 检查内容                                                                                                                               | 保持更新的方式                                                                   |
+| -------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| `graft.schema.json`                          | 配置项字段、已登记的 intercept，以及每个导出[登记项](../best-practices/packaging/#编辑器补全)的已安装插件的 `config`，group 内也一样。 | `graft create`；文件存在时还有 `graft add` 和 `graft remove`。                   |
+| `@graftland/cli/schema.json`，随每个版本发布 | 配置项字段和已登记的 intercept。所有插件的 `config` 都保持开放，包括 Graft 自己的插件。                                                | 按版本固定，如 `https://cdn.jsdelivr.net/npm/@graftland/cli@1.2.3/schema.json`。 |
 
-要生成应用自己的编辑器 Schema，用 `@graftland/loader` 的 `ConfigSchema.make`
-组合明确登记的插件配置。Remote 通过 `@graftland/plugin-remote/Config`
-发布自己的登记项。生成 Schema 不会加载插件。
+- `graft create` 让 `graft.yml` 指向
+  `./graft.schema.json`，并在依赖安装完成后写入该文件。
+- 把 `graft.schema.json` 提交到仓库，克隆后编辑器即可检查配置项。
+- 直接用包管理器安装或升级包之后，自己运行 `graft schema`。
+- 没有登记项的配置保持开放，在启动时由插件自己的 schema 检查。
 
 language server 可能会把 `!env` 标为错误。需要在编辑器设置中声明这个标签，以 VS
 Code 为例：

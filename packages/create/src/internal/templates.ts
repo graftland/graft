@@ -25,7 +25,6 @@ export interface Context {
 		readonly cli: string
 		readonly effect: string
 	}
-	readonly schemaUrl: string
 	readonly plugins: ReadonlyArray<PluginDependency>
 }
 
@@ -57,8 +56,8 @@ const bundled = (name: TemplateName) =>
 			.pipe(Effect.orDie)
 	})
 
-const header = (context: Context) =>
-	`# yaml-language-server: $schema=${context.schemaUrl}\n`
+/** The editor schema that `graft schema` writes once the plugins are installed. */
+const header = "# yaml-language-server: $schema=./graft.schema.json\n"
 
 /** Package names are JSON strings, which YAML reads as quoted scalars; `@` cannot start a plain one. */
 const pluginEntries = (context: Context) =>
@@ -113,7 +112,7 @@ const app: Template = {
 		devDependencies: toolchain,
 	}),
 	config: (context) =>
-		header(context) +
+		header +
 		`- id: hello
   name: ./src/hello.ts
   config:
@@ -166,7 +165,7 @@ const plugin: Template = {
 		},
 	}),
 	config: (context) =>
-		header(context) +
+		header +
 		`- id: greeter
   name: ./src/index.ts
   config:
@@ -189,8 +188,7 @@ const minimal: Template = {
 		dependencies: dependencies(context),
 	}),
 	config: (context) =>
-		header(context) +
-		(context.plugins.length === 0 ? "[]\n" : pluginEntries(context)),
+		header + (context.plugins.length === 0 ? "[]\n" : pluginEntries(context)),
 }
 
 export const templates: Readonly<Record<TemplateName, Template>> = {

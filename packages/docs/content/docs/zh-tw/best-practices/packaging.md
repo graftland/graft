@@ -65,7 +65,7 @@ export default Plugin.make({
 | `./tokens`   | 服務鍵、事件、Reference、tagged error 和設定 schema。 | 消費者外掛、測試，以及實作同一個服務的其他套件。                                  |
 | `./<plugin>` | 另一個外掛，每個模組一個。                            | 像 `name: postgres/migrations` 這樣的設定項目。                                   |
 | `./contract` | [Remote 契約](../../remote/hosts/#定義契約)。         | 外掛可在別處執行時，由宿主和 [runner](../../remote/runners/#架設-runner) 匯入。   |
-| `./schema`   | 設定的[編輯器登記項目](#編輯器自動補全)。             | 應用程式的編輯器 Schema。                                                         |
+| `./schema`   | 設定的[編輯器登記項目](#編輯器自動補全)。             | [`graft schema`](../../cli/#graft-schema)，用於產生應用程式的編輯器 Schema。      |
 | `./cli`      | 為 `graft` 加入子命令的命令外掛。                     | [`graft add --plugin <package>`](../../cli/#命令外掛)，它會啟用 `<package>/cli`。 |
 
 | 規則                           | 避免的問題                                                                                         |
@@ -194,8 +194,8 @@ export const entries = () => [
 | `schema`   | 設定 schema 的編碼端。`referencePolicy: () => undefined` 會把定義內嵌進來，否則它們會遺失。`onExcessProperty: "error"` 會標出未知欄位，否則解碼時它們會被悄悄丟棄。 |
 | `required` | 設定有必要欄位時設為 `true`，這樣沒有 `config` 的設定項目會被標記出來。                                                                                             |
 
-這裡只匯入識別物件模組：產生 Schema 時不得載入外掛。應用程式把這些登記項目傳給
-`ConfigSchema.make`，請參閱[編輯器支援](../../config-file/#編輯器支援)。
+這裡只匯入識別物件模組：產生 Schema 時不得載入外掛。[`graft schema`](../../cli/#graft-schema)
+透過 `./schema` 匯出與對 `@graftland/graft` 的 peer 相依找到這個模組。
 
 ## 支援的 Graft 版本
 

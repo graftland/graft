@@ -268,26 +268,27 @@ Effect.runSync(readSettings({})) // => { port: 8080 }
 
 ## 編輯器支援
 
-每個 Graft 版本都附帶這份檔案的 JSON
-Schema，版本號與該版本相同。在第一行用註解把 YAML language server 指向它，VS
-Code（搭配 YAML 擴充功能）等編輯器就能自動補全並檢查設定項目欄位：
+[`graft schema`](../cli/#graft-schema) 會寫入
+`graft.schema.json`，也就是針對專案所安裝外掛的這份檔案的 JSON
+Schema。在第一行用註解把 YAML language server 指向它，VS
+Code（搭配 YAML 擴充功能）等編輯器就能自動補全並檢查設定項目：
 
 ```yaml title="graft.yml"
-# yaml-language-server: $schema=https://cdn.jsdelivr.net/npm/@graftland/cli@1.2.3/schema.json
+# yaml-language-server: $schema=./graft.schema.json
 - id: api
   name: ./plugins/api.mjs
 ```
 
-- 請把 `1.2.3` 換成專案中 `@graftland/cli`
-  的版本，並在升級 Graft 時一併更新。`graft create` 會以自己的版本寫入這一行。
-- Schema 也包含在套件中，路徑為 `@graftland/cli/schema.json`。
-- 它檢查設定項目欄位、已登記的 intercept，以及 `remote`、`remote/runner` 與
-  `remote/cli`
-  的設定，包括 group 內的項目。業務設定與自訂能力的設定保持開放，在啟動時由各自的 schema 檢查。
+| Schema                                       | 檢查內容                                                                                                                                   | 保持最新的方式                                                                     |
+| -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------- |
+| `graft.schema.json`                          | 項目欄位、已登記的 intercept，以及每個匯出[登記項目](../best-practices/packaging/#編輯器自動補全)的已安裝外掛的 `config`，group 內也一樣。 | `graft create`；檔案存在時還有 `graft add` 與 `graft remove`。                     |
+| `@graftland/cli/schema.json`，隨每個版本發布 | 項目欄位和已登記的 intercept。所有外掛的 `config` 都保持開放，包括 Graft 自己的外掛。                                                      | 依版本固定，例如 `https://cdn.jsdelivr.net/npm/@graftland/cli@1.2.3/schema.json`。 |
 
-要產生應用程式自己的編輯器 Schema，用 `@graftland/loader` 的 `ConfigSchema.make`
-組合明確登記的外掛設定。Remote 透過 `@graftland/plugin-remote/Config`
-發布自己的登記項目。產生 Schema 不會載入外掛。
+- `graft create` 會讓 `graft.yml` 指向
+  `./graft.schema.json`，並在相依套件安裝完成後寫入這個檔案。
+- 請把 `graft.schema.json` 提交到版本庫，複製專案後編輯器就能檢查設定項目。
+- 直接用套件管理器安裝或升級套件後，請自行執行 `graft schema`。
+- 沒有登記項目的設定保持開放，在啟動時由外掛自己的 schema 檢查。
 
 language server 可能會標記 `!env`。請在編輯器設定中宣告這個標籤。以 VS
 Code 為例：
