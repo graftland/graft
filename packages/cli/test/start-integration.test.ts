@@ -707,4 +707,6 @@ Start.run({ config: ${config}, watch: true }).pipe(NodeRuntime.runMain);`,
 			assert.include(text, "REMOTE_STOPPED")
 			assert.notInclude(text, "Remote source watcher stopped")
 		}).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+	// Up to four reload rounds, each restarting the remote child process.
+	20_000,
 )
