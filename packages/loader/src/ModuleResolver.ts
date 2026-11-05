@@ -349,7 +349,7 @@ export const make = <E>(
 					options?.observationScope ??
 						Option.match(observation, {
 							onNone: () => caller,
-							onSome: (value) => value.scope,
+							onSome: (value) => value.observation.scope,
 						}),
 				).pipe(inCandidateScope)
 			}),
@@ -411,8 +411,10 @@ export const fromRecord = (
 /** Files belonging to one entry, retained independently of its activation and retries. */
 export interface Observation {
 	readonly scope: Scope.Scope
+	/** Files registered by one activation accumulate; the next activation's files replace them. */
 	readonly watch: (
 		files: ReadonlyArray<string>,
+		activation: Scope.Scope,
 	) => Effect.Effect<void, ModuleInvalid>
 	readonly changes: Stream.Stream<void>
 }
@@ -427,12 +429,13 @@ export const Watch = Context.Reference(
 	},
 )
 
-/** Replaces an entry's explicit source files after a successful load without importing them. */
+/** Adds files to the current activation's explicit sources without importing them. */
 export const observe = (files: ReadonlyArray<string>) =>
 	Effect.flatMap(
 		CurrentObservation,
 		Option.match({
 			onNone: () => Effect.void,
-			onSome: (source) => source.watch(files),
+			onSome: ({ observation, activation }) =>
+				observation.watch(files, activation),
 		}),
 	)

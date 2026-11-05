@@ -137,6 +137,8 @@ process.exit(0);
 				),
 			)(output)
 			assert.isTrue(result.exited, result.stderr)
+			// The 4 MiB frame cannot fit in the pipe, so only the flush bound lets the child exit.
+			assert.isAbove(result.elapsed, 1500)
 			assert.isBelow(result.elapsed, 6000)
 			assert.notInclude(result.stderr, "Unhandled 'error' event")
 			const parentCode = yield* parent.exitCode

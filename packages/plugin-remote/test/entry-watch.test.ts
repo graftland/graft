@@ -15,6 +15,7 @@ import {
 	PlatformError,
 	Queue,
 	Ref,
+	Scope,
 	Schema,
 	Stream,
 	String,
@@ -176,8 +177,8 @@ it.effect(
 				),
 				Effect.map((source) => ({
 					...source,
-					watch: (files: ReadonlyArray<string>) =>
-						source.watch(files).pipe(
+					watch: (files: ReadonlyArray<string>, activation: Scope.Scope) =>
+						source.watch(files, activation).pipe(
 							Effect.mapError((cause) =>
 								ModuleResolver.ModuleInvalid.make({
 									specifier: "remote",

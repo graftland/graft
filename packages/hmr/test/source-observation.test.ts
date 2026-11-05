@@ -14,6 +14,7 @@ import {
 	PlatformError,
 	Queue,
 	Ref,
+	Scope,
 	Stream,
 } from "effect"
 import { TestClock } from "effect/testing"
@@ -70,7 +71,8 @@ it.effect(
 			})
 			yield* Effect.gen(function* () {
 				const source = yield* Source.make()
-				yield* source.watch(["file:///source/implementation.mjs"])
+				const activation = yield* Scope.make()
+				yield* source.watch(["file:///source/implementation.mjs"], activation)
 				const changed = yield* source.changes.pipe(
 					Stream.runHead,
 					Effect.forkScoped,
@@ -164,7 +166,8 @@ it.effect("retains failed dependencies and replaces them after success", () =>
 				files("replacement"),
 				true,
 			)
-			yield* source.watch(["file:///source/replacement.mjs"])
+			const activation = yield* Scope.make()
+			yield* source.watch(["file:///source/replacement.mjs"], activation)
 			yield* TestClock.adjust("2 seconds")
 			MutableList.clear(reads)
 			yield* TestClock.adjust("12 seconds")
@@ -174,9 +177,8 @@ it.effect("retains failed dependencies and replaces them after success", () =>
 	}).pipe(Effect.scoped),
 )
 
-it.effect("keeps every watched file set when one entry watches several", () =>
+const sourceFiles = (first: Ref.Ref<string>) =>
 	Effect.gen(function* () {
-		const first = yield* Ref.make("first")
 		const subscriptions = yield* Queue.unbounded<void>()
 		const fs = FileSystem.makeNoop({
 			realPath: (path) => Effect.succeed(path),
@@ -208,12 +210,21 @@ it.effect("keeps every watched file set when one entry watches several", () =>
 					Stream.concat(Stream.never),
 				),
 		})
+		return { fs, subscriptions }
+	})
+
+it.effect("accumulates the files one activation watches", () =>
+	Effect.gen(function* () {
+		const first = yield* Ref.make("first")
+		const { fs, subscriptions } = yield* sourceFiles(first)
 		yield* Effect.gen(function* () {
 			const source = yield* Source.make()
-			yield* source.watch(["file:///source/first.mjs"])
-			yield* source.watch(["file:///source/second.mjs"])
+			const activation = yield* Scope.make()
+			yield* source.watch(["file:///source/first.mjs"], activation)
+			yield* source.watch(["file:///source/second.mjs"], activation)
 			const changed = yield* source.changes.pipe(
 				Stream.runHead,
+				Effect.timeoutOption("1 minute"),
 				Effect.forkScoped,
 			)
 			yield* Queue.take(subscriptions)
@@ -222,6 +233,33 @@ it.effect("keeps every watched file set when one entry watches several", () =>
 			yield* TestClock.adjust("12 seconds")
 			const event = yield* Fiber.join(changed)
 			assert.isTrue(Option.isSome(event))
+		}).pipe(Effect.provideService(FileSystem.FileSystem, fs))
+	}).pipe(Effect.scoped),
+)
+
+it.effect("stops observing files a newer activation no longer watches", () =>
+	Effect.gen(function* () {
+		const first = yield* Ref.make("first")
+		const { fs, subscriptions } = yield* sourceFiles(first)
+		yield* Effect.gen(function* () {
+			const source = yield* Source.make()
+			const previous = yield* Scope.make()
+			const next = yield* Scope.make()
+			yield* source.watch(
+				["file:///source/first.mjs", "file:///source/second.mjs"],
+				previous,
+			)
+			yield* source.watch(["file:///source/second.mjs"], next)
+			const changed = yield* source.changes.pipe(
+				Stream.runHead,
+				Effect.timeoutOption("1 minute"),
+				Effect.forkScoped,
+			)
+			yield* Queue.take(subscriptions)
+			yield* Ref.set(first, "edited")
+			yield* TestClock.adjust("2 minutes")
+			const event = yield* Fiber.join(changed)
+			assert.isTrue(Option.isNone(Option.flatten(event)))
 		}).pipe(Effect.provideService(FileSystem.FileSystem, fs))
 	}).pipe(Effect.scoped),
 )

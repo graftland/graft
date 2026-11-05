@@ -85,8 +85,10 @@ export interface ImportOptions {
 /** An entry-owned observation collection; successful imports replace old dependencies, failures retain them. */
 export interface Observation {
 	readonly scope: Scope.Scope
+	/** Files registered by one activation accumulate; the next activation's files replace them. */
 	readonly watch: (
 		files: ReadonlyArray<string>,
+		activation: Scope.Scope,
 	) => Effect.Effect<void, PlatformError.PlatformError>
 	readonly changes: Stream.Stream<void>
 }

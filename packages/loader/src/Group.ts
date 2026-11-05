@@ -373,7 +373,12 @@ const definition = Plugin.make({
 								intercept: [
 									...intercept,
 									Graft.intercept(CurrentId, () => Option.some(entry.id)),
-									Graft.intercept(CurrentObservation, () => source),
+									Graft.intercept(CurrentObservation, () =>
+										Option.map(source, (observation) => ({
+											observation,
+											activation: observationScope,
+										})),
+									),
 								],
 							})
 							yield* Ref.set(targetFork, Option.some(fork))

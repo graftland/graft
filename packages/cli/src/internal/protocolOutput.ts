@@ -5,7 +5,7 @@ import { Writable, finished } from "node:stream"
 import process from "node:process"
 
 // A peer that stops reading but keeps the pipe open must not hold shutdown forever.
-const flushTimeout = 2_000
+const flushTimeout = "2 seconds"
 const flushTimedOut = new Error(
 	"The protocol peer stopped reading during shutdown",
 )
@@ -43,32 +43,38 @@ export const reserve = <A, E, R>(program: Effect.Effect<A, E, R>) =>
 					return { original, stream, drain, error }
 				}),
 				({ original, stream, drain, error }) =>
-					Effect.callback<void>((resume) => {
-						// @effect-diagnostics-next-line globalTimersInEffect:off -- finalizers are uninterruptible, so only a native timer can bound the flush by destroying the stream.
-						const timer = setTimeout(() => {
-							stream.destroy(flushTimedOut)
-						}, flushTimeout)
-						const cleanup = finished(stream, (cause) => {
-							clearTimeout(timer)
-							cleanup()
-							const restore = () => {
-								process.stdout.off("error", error)
-								process.stderr.off("drain", drain)
-								process.stdout.write = original
-								// Unflushed bytes for a peer that stopped reading are dropped, not a cleanup failure.
-								resume(
-									cause == null || cause === flushTimedOut
-										? Effect.void
-										: Effect.die(cause),
-								)
-							}
-							// Keep the native error listener until every accepted write and delayed error has settled.
-							if (process.stdout.destroyed && !process.stdout.closed)
-								process.stdout.once("close", restore)
-							else restore()
-						})
-						stream.end()
-					}),
+					Effect.raceFirst(
+						Effect.callback<void>((resume) => {
+							const cleanup = finished(stream, (cause) => {
+								cleanup()
+								const timedOut = cause === flushTimedOut
+								const restore = () => {
+									// After a timeout, part of a frame may still be queued on stdout, so later
+									// output keeps going to stderr instead of corrupting the abandoned stream.
+									if (!timedOut) {
+										process.stdout.off("error", error)
+										process.stderr.off("drain", drain)
+										process.stdout.write = original
+									}
+									resume(
+										cause == null || timedOut ? Effect.void : Effect.die(cause),
+									)
+								}
+								// Keep the native error listener until every accepted write and delayed error has settled.
+								if (process.stdout.destroyed && !process.stdout.closed)
+									process.stdout.once("close", restore)
+								else restore()
+							})
+							stream.end()
+						}),
+						// Unflushed bytes for a peer that stopped reading are dropped, not a cleanup failure.
+						// Node cannot close stdio, so a clean exit still waits for the stalled peer; signals and failures exit.
+						Effect.sleep(flushTimeout).pipe(
+							Effect.andThen(Effect.sync(() => stream.destroy(flushTimedOut))),
+							Effect.andThen(Effect.never),
+							Effect.interruptible,
+						),
+					),
 			)
 			const reserved = {
 				...stdio,
