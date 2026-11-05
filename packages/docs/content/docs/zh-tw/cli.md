@@ -9,7 +9,7 @@ description: graft 命令及其子命令。
 | 命令                        | 作用                         | 章節                          |
 | --------------------------- | ---------------------------- | ----------------------------- |
 | `graft start [config]`      | 執行設定檔所描述的應用程式。 | [graft start](#graft-start)   |
-| `graft create <directory>`  | 建立新專案。                 | [graft create](#graft-create) |
+| `graft create [directory]`  | 建立新專案。                 | [graft create](#graft-create) |
 | `graft add <package...>`    | 新增相依套件並安裝。         | [graft add](#graft-add)       |
 | `graft remove <package...>` | 移除相依套件。               | [graft remove](#graft-remove) |
 
@@ -143,19 +143,56 @@ CLI 為項目的 `intercept` 設定登記了兩個 Reference，對該項目及�
 ## graft create
 
 ```sh
-graft create <directory> [--name <name>] [--install]
+npm create @graftland@latest [directory] [-- <options>]
+graft create [directory] [options]
 ```
 
-在空的或新的目錄中建立新專案。
+建立新專案。這兩個命令是同一個命令。在終端機中，它會問幾個問題，每個問題都有預設值，按
+<kbd>Enter</kbd> 即可接受。使用
+`--yes`，或 stdin、stdout 不是終端機時，它不提問，**每個問題都採用預設值**。
 
-| 建立的檔案     | 說明                                                            |
-| -------------- | --------------------------------------------------------------- |
-| `package.json` | 套件名稱預設為目錄名稱。它相依的 Graft 版本與建立它的命令相同。 |
-| `graft.yml`    | 設定檔。它指向該版本的 [Schema](../config-file/#編輯器支援)。   |
-| 範例外掛       | 一個起點。                                                      |
-| `.gitignore`   | 忽略 `node_modules` 和 `.env`。                                 |
+| 選項                                  | 問題                                   | 預設值                                               |
+| ------------------------------------- | -------------------------------------- | ---------------------------------------------------- |
+| `[directory]`                         | 專案建立在哪裡。                       | `graft-app`                                          |
+| `--template`, `-t`                    | 使用哪個[範本](#範本)。                | `app`                                                |
+| `--name <package>`                    | 只在 `plugin` 範本時詢問。             | 目錄名稱；`plugin` 範本為 `graft-plugin-<directory>` |
+| `--plugin <package>`                  | 不詢問。重複使用可加入多個外掛。       | 無                                                   |
+| `--package-manager <npm\|pnpm\|yarn>` | 不詢問。加上 `@<version>` 可記錄版本。 | 執行此命令的套件管理器，否則為 npm                   |
+| `--install`, `--no-install`           | 是否安裝相依套件。                     | 是                                                   |
+| `--git`, `--no-git`                   | 是否執行 `git init`。                  | 是                                                   |
+| `--yes`, `-y`                         | 全部採用預設值。                       |                                                      |
 
-使用 `--install` 時，Graft 之後會安裝專案的相依套件。
+| 規則                | 行為                                                                                                                                                                                                                     |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 目標目錄            | 必須是新目錄、空目錄，或只含 `.git` 和 `.DS_Store`，因此在剛複製的儲存庫中也能使用 `.`。否則它會要求換一個目錄；無法提問時以 `CreateError` 失敗。它從不刪除或取代檔案。                                                  |
+| 先問完再寫入        | 所有問題都在寫入任何內容之前提出。按 <kbd>Ctrl</kbd>+<kbd>C</kbd> 會輸出 `Cancelled`，以非零狀態碼結束，磁碟上不留下任何東西。                                                                                           |
+| `--plugin`          | 接受 `name` 或 `name@range`；短名稱的對應方式與 `graft add --plugin` 相同。套件加入 `dependencies`，並在 `graft.yml` 中得到一個 `- name:` 項目。未指定範圍時，Graft 自己的外掛使用 Graft 的版本，其他外掛使用 `latest`。 |
+| `--package-manager` | 帶版本時（例如 `pnpm@9.15.9`），版本會寫入 `package.json` 的 `packageManager` 欄位。                                                                                                                                     |
+| Git                 | 只執行 `git init`，不建立第一個 commit。專案位於儲存庫內或未安裝 git 時會略過，並說明原因。                                                                                                                              |
+| 完成之後            | 輸出接下來要執行的命令，例如 `cd my-app` 和 `pnpm dev`，包括被略過或失敗的安裝或 `git init`。安裝或 `git init` 失敗時會保留專案，並以非零狀態碼結束。                                                                    |
+
+### 範本
+
+| 範本      | 用途                                                     | `package.json` 與 `graft.yml` 以外的檔案                                                                                           |
+| --------- | -------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `app`     | 應用程式。`graft.yml` 載入範例外掛。                     | `src/hello.ts`、`tsconfig.json`、`README.md`、`.vscode/extensions.json`、`.gitignore`                                              |
+| `plugin`  | 要[發布](../plugins/#發布外掛)的外掛套件。               | `src/index.ts`、`test/index.test.ts`、`tsconfig.json`、`tsconfig.build.json`、`README.md`、`.vscode/extensions.json`、`.gitignore` |
+| `minimal` | 只有設定檔，除了 `--plugin` 加入的項目之外沒有其他項目。 | `.gitignore`                                                                                                                       |
+
+| 指令碼      | `app`                 | `plugin`                                   | `minimal`             |
+| ----------- | --------------------- | ------------------------------------------ | --------------------- |
+| `dev`       | `graft start --watch` | `graft start --watch`，載入 `src/index.ts` | `graft start --watch` |
+| `start`     | `graft start`         |                                            | `graft start`         |
+| `test`      |                       | `vitest run`                               |                       |
+| `typecheck` | `effect-tsgo tsc`     | `effect-tsgo tsc`                          |                       |
+| `build`     |                       | 將 `src` 編譯到 `dist`                     |                       |
+
+- 每個專案相依的 Graft 版本都與此命令相同，`graft.yml` 也指向該版本的
+  [Schema](../config-file/#編輯器支援)。
+- Node 直接執行 `app` 的 TypeScript，因此沒有建置步驟。`plugin`
+  套件需要建置，因為 Node 不會移除 `node_modules` 內檔案的型別。
+- `.vscode/extensions.json` 推薦 YAML 擴充功能，它會依 Schema 補全
+  `graft.yml`。TypeScript 專案還會在 `typecheck` 中回報 Effect 診斷。
 
 ## graft add
 
@@ -177,9 +214,10 @@ graft remove <package...>
 
 ## 套件管理器
 
-`add`、`remove` 和 `create --install` 使用專案的套件管理器。
+`add` 和 `remove` 使用專案的套件管理器。`create` 使用
+`--package-manager`，否則使用執行它的套件管理器，再否則使用 npm。
 
-Graft 依下列順序偵測：
+`add` 和 `remove` 依下列順序偵測：
 
 1. `package.json` 的 `packageManager` 欄位。
 2. 鎖定檔。
@@ -192,8 +230,8 @@ Graft 依下列順序偵測：
 
 安裝在完成之前（包括復原）需要獨佔專案的寫入權限。
 
-- 在 `add`、`remove` 或 `create --install`
-  期間，請不要編輯專案檔案或執行其他安裝程式。
+- 在 `add`、`remove` 或 `create`
+  安裝期間，請不要編輯專案檔案或執行其他安裝程式。
 - 透過同一個 PackageManager 的呼叫會依序執行。Graft 不會對其他管理器、編輯器或行程使用鎖。
 
 ### 還原

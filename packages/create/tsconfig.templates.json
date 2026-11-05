@@ -1,0 +1,10 @@
+{
+	// Checks the template sources; each template's own tsconfig.json is for the generated project.
+	"extends": "../../tsconfig.base.json",
+	"compilerOptions": {
+		"outDir": ".cache/templates-types",
+		"tsBuildInfoFile": ".cache/templates.tsbuildinfo",
+		"allowImportingTsExtensions": true
+	},
+	"include": ["templates/*/src", "templates/*/test"]
+}

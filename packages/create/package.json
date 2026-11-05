@@ -5,7 +5,7 @@
 	},
 	"version": "0.0.0",
 	"type": "module",
-	"description": "Generates a new Graft project. graft create uses it",
+	"description": "Generates a new Graft project: npm create @graftland, and graft create",
 	"license": "Apache-2.0",
 	"repository": {
 		"type": "git",
@@ -16,6 +16,7 @@
 	"files": [
 		"dist",
 		"src",
+		"templates",
 		"README.zh-CN.md",
 		"README.zh-TW.md"
 	],
@@ -23,6 +24,14 @@
 		".": {
 			"source": "./src/index.ts",
 			"default": "./dist/index.js"
+		},
+		"./bin": {
+			"source": "./src/bin.ts",
+			"default": "./dist/bin.js"
+		},
+		"./Command": {
+			"source": "./src/Command.ts",
+			"default": "./dist/Command.js"
 		},
 		"./package.json": "./package.json"
 	},
@@ -34,7 +43,6 @@
 		"effect": "4.1.*"
 	},
 	"devDependencies": {
-		"@effect/platform-node": "4.1.2",
 		"@effect/vitest": "4.1.2",
 		"@graftland/graft": "workspace:*",
 		"@graftland/loader": "workspace:*",
@@ -43,11 +51,17 @@
 		"yaml": "2.9.1"
 	},
 	"dependencies": {
-		"@graftland/package-manager": "workspace:*"
+		"@graftland/package-manager": "workspace:*",
+		"@effect/platform-node": "4.1.2"
+	},
+	"bin": {
+		"create": "./dist/bin.js"
 	},
 	"publishConfig": {
 		"exports": {
 			".": "./dist/index.js",
+			"./bin": "./dist/bin.js",
+			"./Command": "./dist/Command.js",
 			"./package.json": "./package.json"
 		}
 	}

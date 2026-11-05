@@ -5,20 +5,32 @@ English |
 |
 [繁體中文](https://github.com/graftland/graft/blob/main/packages/create/README.zh-TW.md)
 
-Generates a new Graft project. `graft create` uses it.
+Generates a new Graft project. The supported Node.js minimum is 22.19.
 
-The supported Node.js minimum is 22.19.
+```sh
+npm create @graftland@latest my-app
+```
+
+`npm create @graftland` runs this package's `create` command, which is also
+`graft create`. It asks a few questions, each with a default; `--yes`, or a
+terminal that cannot answer, takes every default. It writes one of three
+templates (`app`, `plugin` or `minimal`), then installs the dependencies and
+runs `git init`.
+
+To create projects from your own program, use `create` from this package. It
+asks nothing, installs nothing and does not run git:
 
 ```sh
 npm install @graftland/create effect
 ```
 
-`create` writes these files into an empty or new directory: a `package.json`, a
-`graft.yml`, an example plugin and a `.gitignore`.
+```ts
+yield * Create.create({ directory: "my-app", template: "plugin" })
+```
 
 ## Documentation
 
-- [Command line](https://graftland.github.io/graft/cli/)
+- [Command line](https://graftland.github.io/graft/cli/#graft-create)
 
 Part of [Graft](https://github.com/graftland/graft). Licensed under
 [Apache 2.0](https://github.com/graftland/graft/blob/main/LICENSE).

@@ -32,6 +32,9 @@
 			"path": "./packages/create/tsconfig.test.json"
 		},
 		{
+			"path": "./packages/create/tsconfig.templates.json"
+		},
+		{
 			"path": "./packages/cli"
 		},
 		{

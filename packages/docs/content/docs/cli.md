@@ -9,7 +9,7 @@ The `@graftland/cli` package provides the `graft` command. It needs Node.js
 | Command                     | What it does                                  | Section                       |
 | --------------------------- | --------------------------------------------- | ----------------------------- |
 | `graft start [config]`      | Runs the application a config file describes. | [graft start](#graft-start)   |
-| `graft create <directory>`  | Creates a new project.                        | [graft create](#graft-create) |
+| `graft create [directory]`  | Creates a new project.                        | [graft create](#graft-create) |
 | `graft add <package...>`    | Adds dependencies and installs them.          | [graft add](#graft-add)       |
 | `graft remove <package...>` | Removes dependencies.                         | [graft remove](#graft-remove) |
 
@@ -168,19 +168,60 @@ accepted values and an example. Invalid values fail the entry with
 ## graft create
 
 ```sh
-graft create <directory> [--name <name>] [--install]
+npm create @graftland@latest [directory] [-- <options>]
+graft create [directory] [options]
 ```
 
-Creates a new project in an empty or new directory.
+Creates a new project. Both commands are the same command. In a terminal it asks
+a few questions, each with a default you accept by pressing <kbd>Enter</kbd>.
+With `--yes`, or when stdin or stdout is not a terminal, it asks nothing and
+**every question takes its default**.
 
-| Created file      | What it is                                                                                                            |
-| ----------------- | --------------------------------------------------------------------------------------------------------------------- |
-| `package.json`    | The package name defaults to the directory name. It depends on the same Graft version as the command that created it. |
-| `graft.yml`       | The config file. It points to the [schema](../config-file/#editor-support) of that version.                           |
-| An example plugin | A starting point.                                                                                                     |
-| `.gitignore`      | Ignores `node_modules` and `.env`.                                                                                    |
+| Option                                | Question                                  | Default                                                     |
+| ------------------------------------- | ----------------------------------------- | ----------------------------------------------------------- |
+| `[directory]`                         | Where to create the project.              | `graft-app`                                                 |
+| `--template`, `-t`                    | Which [template](#templates).             | `app`                                                       |
+| `--name <package>`                    | Asked only for `plugin`.                  | The directory name; `graft-plugin-<directory>` for `plugin` |
+| `--plugin <package>`                  | Not asked. Repeat it for more plugins.    | None                                                        |
+| `--package-manager <npm\|pnpm\|yarn>` | Not asked. Add `@<version>` to record it. | The package manager that runs the command, otherwise npm    |
+| `--install`, `--no-install`           | Whether to install dependencies.          | Yes                                                         |
+| `--git`, `--no-git`                   | Whether to run `git init`.                | Yes                                                         |
+| `--yes`, `-y`                         | Takes every default.                      |                                                             |
 
-With `--install`, Graft installs the project's dependencies afterwards.
+| Rule                | Behavior                                                                                                                                                                                                                                |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Target directory    | Must be new, empty, or hold only `.git` and `.DS_Store`, so `.` works in a freshly cloned repository. Otherwise it asks for another directory, or fails with `CreateError` when it cannot ask. It never removes or replaces a file.     |
+| Questions first     | Every question comes before anything is written. <kbd>Ctrl</kbd>+<kbd>C</kbd> prints `Cancelled`, exits with a nonzero status and leaves nothing on disk.                                                                               |
+| `--plugin`          | Takes `name` or `name@range`; short names map as in `graft add --plugin`. The package goes into `dependencies` and gets a `- name:` entry in `graft.yml`. Without a range, Graft's own plugins use Graft's version and others `latest`. |
+| `--package-manager` | A version, as in `pnpm@9.15.9`, is written to the `packageManager` field of `package.json`.                                                                                                                                             |
+| Git                 | `git init` only, without a first commit. Skipped, with the reason, when the project is inside a repository or git is not installed.                                                                                                     |
+| Afterwards          | Prints the commands to run next, such as `cd my-app` and `pnpm dev`, including an install or `git init` that was skipped or failed. A failed install or `git init` keeps the project and exits with a nonzero status.                   |
+
+### Templates
+
+| Template  | For                                                                  | Files besides `package.json` and `graft.yml`                                                                                       |
+| --------- | -------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `app`     | An application. `graft.yml` loads the example plugin.                | `src/hello.ts`, `tsconfig.json`, `README.md`, `.vscode/extensions.json`, `.gitignore`                                              |
+| `plugin`  | A plugin package to [publish](../plugins/#publish-a-plugin).         | `src/index.ts`, `test/index.test.ts`, `tsconfig.json`, `tsconfig.build.json`, `README.md`, `.vscode/extensions.json`, `.gitignore` |
+| `minimal` | Only the config file, with no entries besides those from `--plugin`. | `.gitignore`                                                                                                                       |
+
+| Script      | `app`                 | `plugin`                                      | `minimal`             |
+| ----------- | --------------------- | --------------------------------------------- | --------------------- |
+| `dev`       | `graft start --watch` | `graft start --watch`, loading `src/index.ts` | `graft start --watch` |
+| `start`     | `graft start`         |                                               | `graft start`         |
+| `test`      |                       | `vitest run`                                  |                       |
+| `typecheck` | `effect-tsgo tsc`     | `effect-tsgo tsc`                             |                       |
+| `build`     |                       | Compiles `src` to `dist`                      |                       |
+
+- Every project depends on the same Graft version as the command, and
+  `graft.yml` points to the [schema](../config-file/#editor-support) of that
+  version.
+- Node runs the TypeScript of `app` directly, so it has no build step. A
+  `plugin` package is built, because Node does not strip types inside
+  `node_modules`.
+- `.vscode/extensions.json` recommends the YAML extension, which completes
+  `graft.yml` from its schema. The TypeScript projects also report Effect
+  diagnostics in `typecheck`.
 
 ## graft add
 
@@ -203,9 +244,10 @@ Removes dependencies from the project in the current directory.
 
 ## Package managers
 
-`add`, `remove` and `create --install` use the project's package manager.
+`add` and `remove` use the project's package manager. `create` uses
+`--package-manager`, otherwise the package manager that runs it, otherwise npm.
 
-Graft detects it in this order:
+`add` and `remove` detect it in this order:
 
 1. The `packageManager` field of `package.json`.
 2. The lockfile.
@@ -220,7 +262,7 @@ An install needs exclusive write access to the project until it finishes,
 including recovery.
 
 - Do not edit project files or run another installer during `add`, `remove` or
-  `create --install`.
+  the install of `create`.
 - Calls through one PackageManager run one after another. Graft does not use a
   lock against other managers, editors or processes.
 

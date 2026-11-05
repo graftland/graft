@@ -208,8 +208,46 @@ const decodePackageManager = Schema.decodeUnknownEffect(
 const decodeUserAgent = Schema.decodeUnknownOption(
 	Schema.TemplateLiteralParser([Executable, "/", Digits, Schema.String]),
 )
-const agentOf = (name: typeof Executable.Type, major: string): Agent =>
-	name === "yarn" ? (major === "1" ? "yarn-classic" : "yarn-berry") : name
+/**
+ * The agent that runs a package manager. Yarn 1 is Classic and later versions
+ * are Berry; without a version, `yarn` means the Classic global binary.
+ */
+export const agentFor = (
+	name: typeof PackageManagerName.Type,
+	version?: string,
+): Agent =>
+	name === "yarn"
+		? version === undefined || String.split(".")(version)[0] === "1"
+			? "yarn-classic"
+			: "yarn-berry"
+		: name
+
+/** A package manager and its version, as named by `npm_config_user_agent`. */
+export interface UserAgent {
+	readonly name: typeof PackageManagerName.Type
+	readonly version: string
+}
+const decodeUserAgentName = Schema.decodeUnknownOption(
+	Schema.TemplateLiteralParser([
+		Executable,
+		"/",
+		Schema.String.check(Schema.isMinLength(1)),
+	]),
+)
+/** The first `name/version` of a user agent; other package managers, such as Bun, are none. */
+export const parseUserAgent = (userAgent: string): Option.Option<UserAgent> =>
+	Option.map(
+		decodeUserAgentName(String.split(" ")(userAgent)[0] ?? ""),
+		([name, , version]) => ({ name, version }),
+	)
+
+/** What runs a project script, such as `npm run` in `npm run dev`. */
+export const runPrefix = (agent: Agent): string =>
+	agent === "npm" ? "npm run" : agent === "pnpm" ? "pnpm" : "yarn"
+
+/** The command that installs a project's dependencies. */
+export const installCommand = (agent: Agent): string =>
+	agent === "npm" ? "npm install" : agent === "pnpm" ? "pnpm install" : "yarn"
 
 /** packageManager, then lockfile, then caller user-agent, then npm. Conflicting lockfiles fail. */
 export const detectAgent = Effect.fnUntraced(function* (options: Options) {
@@ -233,7 +271,7 @@ export const detectAgent = Effect.fnUntraced(function* (options: Options) {
 				}),
 			),
 		)
-		return agentOf(name, `${version.major}`)
+		return agentFor(name, `${version.major}`)
 	}
 	const found = yield* Effect.filter(lockfiles, (file) =>
 		fs.exists(path.join(options.directory, file)),
@@ -278,7 +316,7 @@ export const detectAgent = Effect.fnUntraced(function* (options: Options) {
 	if (kinds[0] !== undefined) return kinds[0]
 	return Option.match(decodeUserAgent(options.userAgent ?? ""), {
 		onNone: () => "npm" as const,
-		onSome: ([name, , major]) => agentOf(name, major),
+		onSome: ([name, , major]) => agentFor(name, major),
 	})
 })
 

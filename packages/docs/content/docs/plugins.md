@@ -254,3 +254,19 @@ The loader and the CLI import plugins from modules.
   the plugin. Graft can release only what `apply` acquires.
 - **Reloading.** Automatic [hot reload](../hot-reload/) reimports modules
   affected by a change. Public `hmr.reload` forces a full reload.
+
+## Publish a plugin
+
+```sh
+npm create @graftland@latest review -- --template plugin
+```
+
+The [`plugin` template](../cli/#templates) creates a package that exports one
+plugin from `src/index.ts`, with a test and a `graft.yml` that runs it through
+`npm run dev`.
+
+| Rule                                                   | Why                                                                                                                                                                                      |
+| ------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Name it `graft-plugin-<name>`                          | Users can then load it by the short name `<name>`. Graft only tries `@graftland/plugin-<name>` and `graft-plugin-<name>`. `create` warns about other names; they must be listed in full. |
+| Make `@graftland/graft` and `effect` peer dependencies | The application provides them, so every plugin shares one copy.                                                                                                                          |
+| Publish JavaScript                                     | Node does not strip types inside `node_modules`. `npm publish` runs `build` first, which compiles `src` to `dist`.                                                                       |

@@ -124,4 +124,40 @@ describe("create boundaries", () => {
 				assert.deepStrictEqual(observed8, ["keep.txt"])
 			}).pipe(run),
 	)
+
+	it.effect(
+		"moves entries back when one cannot be moved beside a repository's .git",
+		() =>
+			Effect.gen(function* () {
+				const { fs, path, root, directory } = yield* setup
+				yield* fs.makeDirectory(path.join(directory, ".git"), {
+					recursive: true,
+				})
+				const exit = yield* Effect.exit(
+					create({ directory }).pipe(
+						Effect.provideService(FileSystem.FileSystem, {
+							...fs,
+							rename: (from, to) =>
+								to === path.join(directory, "package.json")
+									? Effect.fail(
+											PlatformError.systemError({
+												_tag: "PermissionDenied",
+												module: "FileSystem",
+												method: "rename",
+												pathOrDescriptor: to,
+											}),
+										)
+									: fs.rename(from, to),
+						}),
+					),
+				)
+				assert(Exit.isFailure(exit))
+				const observed9 = yield* fs.readDirectory(directory)
+
+				assert.deepStrictEqual(observed9, [".git"])
+				const observed10 = yield* fs.readDirectory(root)
+
+				assert.deepStrictEqual(observed10, ["example"])
+			}).pipe(run),
+	)
 })

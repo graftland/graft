@@ -1,5 +1,5 @@
 /**
- * Creating projects and changing their dependencies.
+ * Changing a project's dependencies.
  */
 import {
 	Array,
@@ -11,7 +11,6 @@ import {
 	Predicate,
 	Record,
 	Schema,
-	String,
 } from "effect"
 
 import * as Create from "@graftland/create"
@@ -65,22 +64,6 @@ const install = Effect.fn("Manage.install")(function* (
 	const manager = yield* PackageManager.make({ directory, userAgent })
 	const result = yield* manager.install(decoded)
 	yield* report(result)
-})
-
-export const create = Effect.fn("Manage.create")(function* (options: {
-	readonly directory: string
-	readonly name: Option.Option<string>
-	readonly install: boolean
-}) {
-	const project = yield* Create.create({
-		directory: options.directory,
-		...Option.match(options.name, {
-			onNone: () => ({}),
-			onSome: (name) => ({ name }),
-		}),
-	})
-	yield* Effect.logInfo(`Created ${project.name} in ${project.directory}`)
-	if (options.install) yield* install(project.directory, {})
 })
 
 export const add = Effect.fn("Manage.add")(function* (
@@ -161,10 +144,7 @@ export const addPlugin = Effect.fn("Manage.addPlugin")(function* (
 	const path = yield* Path.Path
 	const fs = yield* FileSystem.FileSystem
 	const directory = global ? yield* home : path.resolve(".")
-	const packageName =
-		String.startsWith("@")(name) || String.startsWith("graft-plugin-")(name)
-			? name
-			: `@graftland/plugin-${name}`
+	const packageName = Create.pluginPackage(name)
 	const module = `${packageName}/cli`
 	const file = path.join(directory, "graft.yml")
 	const text = yield* enabledConfig(file, module)

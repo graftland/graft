@@ -234,3 +234,19 @@ const storage = Plugin.layer(StorageLive, {
   `apply` 取得的資源。
 - **重載。** 自動[熱重載](../hot-reload/)會重新匯入受變更影響的模組；公開的
   `hmr.reload` 則強制完整重載。
+
+## 發布外掛
+
+```sh
+npm create @graftland@latest review -- --template plugin
+```
+
+[`plugin` 範本](../cli/#範本)建立一個從 `src/index.ts`
+匯出單一外掛的套件，附帶一個測試，以及一個可透過 `npm run dev` 執行它的
+`graft.yml`。
+
+| 規則                                                     | 原因                                                                                                                                                           |
+| -------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 命名為 `graft-plugin-<name>`                             | 使用者就能用短名稱 `<name>` 載入它。Graft 只會嘗試 `@graftland/plugin-<name>` 和 `graft-plugin-<name>`。其他名稱 `create` 會發出警告，使用時也必須寫完整名稱。 |
+| 將 `@graftland/graft` 和 `effect` 設為 peer dependencies | 由應用程式提供，所有外掛因此共用同一份。                                                                                                                       |
+| 發布 JavaScript                                          | Node 不會移除 `node_modules` 內檔案的型別。`npm publish` 會先執行 `build`，把 `src` 編譯到 `dist`。                                                            |

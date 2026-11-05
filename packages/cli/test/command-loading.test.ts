@@ -12,7 +12,7 @@ describe("built CLI command loading", () => {
 		["start", "--help"],
 		["add", "invalid!"],
 		["remove", "invalid!"],
-		["create", "project"],
+		["create", "project", "--no-install", "--no-git"],
 	]) {
 		it.live(
 			`loads only the selected handler for ${Array.join(args, " ")}`,
@@ -31,6 +31,7 @@ registerHooks({
  resolve(specifier, context, next) {
   if (specifier === "@graftland/hmr" || specifier === "@graftland/loader") throw new Error("Unexpected runtime dependency: " + specifier);
   if (specifier === "@graftland/create") return next(new URL("create/index.js", base).href, context);
+  if (specifier === "@graftland/create/Command") return next(new URL("create/Command.js", base).href, context);
   if (specifier === "@graftland/package-manager") return next(new URL("package-manager/index.js", base).href, context);
   if (specifier === "@graftland/package-manager/PackageManagerDeclaration") return next(new URL("package-manager/PackageManagerDeclaration.js", base).href, context);
   return next(specifier, context);
@@ -70,7 +71,7 @@ registerHooks({
 					assert.isFalse(String.includes("/Start.js")(output), output)
 					assert.strictEqual(
 						String.includes("/Manage.js")(output),
-						!Array.contains(args, "--help"),
+						args[0] === "add" || args[0] === "remove",
 						output,
 					)
 					if (Array.contains(args, "--help"))

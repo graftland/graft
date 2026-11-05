@@ -59,9 +59,9 @@ worker 或另一台機器上執行，使用它服務的外掛不必修改。
 ## 快速開始
 
 ```sh
-npx @graftland/cli create my-app --install
+npm create @graftland@latest my-app
 cd my-app
-npx graft start --watch
+npm run dev
 ```
 
 閱讀[文件](https://graftland.github.io/graft/zh-tw/)。和程式設計代理一起開發？[`graft` skill](skills/graft)
@@ -93,7 +93,7 @@ Graft 的外掛模型借鑑自
 | [`@graftland/loader`](packages/loader)                   | 從條目清單或 YAML 設定檔載入外掛。                                         |
 | [`@graftland/hmr`](packages/hmr)                         | 在 Node.js 上重載外掛模組，不需重新啟動行程。                              |
 | [`@graftland/cli`](packages/cli)                         | `graft` 命令：`start`、`create`、`add` 和 `remove`。                       |
-| [`@graftland/create`](packages/create)                   | 產生新的 Graft 專案。`graft create` 使用它。                               |
+| [`@graftland/create`](packages/create)                   | 產生新的 Graft 專案：`npm create @graftland` 與 `graft create`。           |
 | [`@graftland/package-manager`](packages/package-manager) | 用 npm、pnpm 或 Yarn 安裝相依套件，失敗時還原。                            |
 | [`@graftland/plugin-remote`](packages/plugin-remote)     | 讓外掛在子行程、worker 或另一台機器上執行；提供 `graft start runner.yml`。 |
 

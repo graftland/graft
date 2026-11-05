@@ -5,21 +5,31 @@
 [简体中文](https://github.com/graftland/graft/blob/main/packages/create/README.zh-CN.md)
 | 繁體中文
 
-產生新的 Graft 專案。`graft create` 使用它。
+產生新的 Graft 專案。支援的 Node.js 最低版本是 22.19。
 
-支援的 Node.js 最低版本是 22.19。
+```sh
+npm create @graftland@latest my-app
+```
+
+`npm create @graftland` 執行本套件的 `create` 命令，也就是
+`graft create`。它會問幾個問題，每個都有預設值；使用
+`--yes`，或終端機無法回答時，全部採用預設值。它寫入三種範本之一（`app`、`plugin`
+或 `minimal`），接著安裝相依套件並執行 `git init`。
+
+要在自己的程式中建立專案，請使用本套件的
+`create`。它不提問、不安裝，也不執行 git：
 
 ```sh
 npm install @graftland/create effect
 ```
 
-`create`
-會把這些檔案寫入空目錄或新目錄：`package.json`、`graft.yml`、一個範例外掛和
-`.gitignore`。
+```ts
+yield * Create.create({ directory: "my-app", template: "plugin" })
+```
 
 ## 文件
 
-- [命令列](https://graftland.github.io/graft/zh-tw/cli/)
+- [命令列](https://graftland.github.io/graft/zh-tw/cli/#graft-create)
 
 屬於 [Graft](https://github.com/graftland/graft)。採用
 [Apache 2.0](https://github.com/graftland/graft/blob/main/LICENSE) 授權。

@@ -15,7 +15,8 @@ import { ChildProcessSpawner } from "effect/process"
 import { NodeServices } from "@effect/platform-node"
 import { assert, it } from "@effect/vitest"
 
-import * as Manage from "../src/Manage.ts"
+import { create } from "../src/index.ts"
+import { install } from "../src/internal/install.ts"
 
 it.effect(
 	"reports retained snapshot cleanup without failing a committed installation",
@@ -43,11 +44,11 @@ it.effect(
 				getOutputFd: () => Stream.empty,
 				unref: Effect.succeed(Effect.void),
 			})
-			yield* Manage.create({
+			const project = yield* create({
 				directory: path.join(directory, "app"),
-				name: Option.some("example"),
-				install: true,
-			}).pipe(
+				name: "example",
+			})
+			yield* install(project.directory, "npm").pipe(
 				Effect.provideService(
 					ChildProcessSpawner.ChildProcessSpawner,
 					ChildProcessSpawner.make(() => Effect.succeed(handle)),

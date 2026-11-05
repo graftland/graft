@@ -1,0 +1,23 @@
+{
+	"compilerOptions": {
+		"target": "esnext",
+		"module": "nodenext",
+		"types": ["node"],
+		"strict": true,
+		"exactOptionalPropertyTypes": true,
+		"noUncheckedIndexedAccess": true,
+		"skipLibCheck": true,
+		"noEmit": true,
+		"allowImportingTsExtensions": true,
+		"erasableSyntaxOnly": true,
+		"verbatimModuleSyntax": true,
+		"plugins": [
+			{
+				"name": "@effect/language-service",
+				// Effect 4 marks many modules unstable, including @effect/vitest.
+				"diagnosticSeverity": { "unstableApiUsage": "off" }
+			}
+		]
+	},
+	"include": ["src", "test"]
+}

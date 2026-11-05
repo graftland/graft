@@ -68,9 +68,9 @@ documentation with Astro.
 ## Get started
 
 ```sh
-npx @graftland/cli create my-app --install
+npm create @graftland@latest my-app
 cd my-app
-npx graft start --watch
+npm run dev
 ```
 
 Read the [documentation](https://graftland.github.io/graft/) (also in
@@ -108,7 +108,7 @@ After those, larger applications show what Graft is for:
 | [`@graftland/loader`](packages/loader)                   | Loads plugins from a list of entries or a YAML config file.                                 |
 | [`@graftland/hmr`](packages/hmr)                         | Reloads plugin modules on Node.js without restarting the process.                           |
 | [`@graftland/cli`](packages/cli)                         | The `graft` command: `start`, `create`, `add` and `remove`.                                 |
-| [`@graftland/create`](packages/create)                   | Generates a new Graft project. `graft create` uses it.                                      |
+| [`@graftland/create`](packages/create)                   | Generates a new Graft project: `npm create @graftland` and `graft create`.                  |
 | [`@graftland/package-manager`](packages/package-manager) | Installs dependencies with npm, pnpm or Yarn, and rolls back on failure.                    |
 | [`@graftland/plugin-remote`](packages/plugin-remote)     | Runs a plugin in a child process, a worker or on another machine; `graft start runner.yml`. |
 

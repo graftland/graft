@@ -1,0 +1,13 @@
+{
+	// Node does not strip types inside node_modules, so the package ships JavaScript.
+	"extends": "./tsconfig.json",
+	"compilerOptions": {
+		"noEmit": false,
+		"allowImportingTsExtensions": false,
+		"rootDir": "src",
+		"outDir": "dist",
+		"declaration": true,
+		"sourceMap": true
+	},
+	"include": ["src"]
+}

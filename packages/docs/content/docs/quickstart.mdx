@@ -10,25 +10,29 @@ adapter needs. It also has `module.registerHooks`, which hot reload uses.
 
 <Steps>
 
-1. Create a project and install its dependencies:
+1. Create a project. Press <kbd>Enter</kbd> to accept each default; the command
+   installs the dependencies:
 
    ```sh
-   npx @graftland/cli create my-app --install
+   npm create @graftland@latest my-app
    cd my-app
    ```
 
-   The project has three files besides `package.json`:
+   The files to start with:
 
-   | File         | What it is                                       |
-   | ------------ | ------------------------------------------------ |
-   | `graft.yml`  | The config file: which plugins to load, and how. |
-   | `hello.mjs`  | An example plugin.                               |
-   | `.gitignore` | Ignores `node_modules` and `.env`.               |
+   | File            | What it is                                       |
+   | --------------- | ------------------------------------------------ |
+   | `graft.yml`     | The config file: which plugins to load, and how. |
+   | `src/hello.ts`  | An example plugin.                               |
+   | `tsconfig.json` | Type checking for `npm run typecheck`.           |
+
+   [`graft create`](../cli/#graft-create) lists the questions, the other
+   templates and the options that skip the questions.
 
 2. Start the application and watch for changes:
 
    ```sh
-   npx graft start --watch
+   npm run dev
    ```
 
    The `hello` plugin logs `Hello from Graft!`. The process keeps running until
@@ -39,7 +43,7 @@ adapter needs. It also has `module.registerHooks`, which hot reload uses.
 
    ```yaml
    - id: hello
-     name: ./hello.mjs
+     name: ./src/hello.ts
      config:
        message: Hello again!
    ```
@@ -47,7 +51,7 @@ adapter needs. It also has `module.registerHooks`, which hot reload uses.
    When you save, Graft unloads `hello` and loads it again with the new message.
    You see `Hello plugin stopped`, then `Hello again!`.
 
-4. Change the code while the app runs. Edit `hello.mjs` (for example, log the
+4. Change the code while the app runs. Edit `src/hello.ts` (for example, log the
    message twice) and save. Graft imports the new version of the module and
    replaces the running plugin with it. If the new code fails to import, the old
    version keeps running, and Graft logs the error.
@@ -56,7 +60,7 @@ adapter needs. It also has `module.registerHooks`, which hot reload uses.
 
 ## The example plugin
 
-```js title="hello.mjs"
+```ts title="src/hello.ts"
 import { Effect, Schema } from "effect"
 
 import { Plugin } from "@graftland/graft"
@@ -72,9 +76,10 @@ export default Plugin.make({
 })
 ```
 
-A plugin module exports its plugin as the default export, or as an export named
-`plugin`. Importing the module must not start anything. Open connections, timers
-and servers inside `apply`, so that Graft can release them. See
+Node runs the TypeScript file as it is, removing the types, so there is no build
+step. A plugin module exports its plugin as the default export, or as an export
+named `plugin`. Importing the module must not start anything. Open connections,
+timers and servers inside `apply`, so that Graft can release them. See
 [Plugins](../plugins/).
 
 ## Add a plugin from npm

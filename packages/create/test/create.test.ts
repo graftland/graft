@@ -1,7 +1,10 @@
 import {
+	Array,
 	Effect,
 	Exit,
 	FileSystem,
+	Logger,
+	MutableList,
 	Path,
 	Schema,
 	String,
@@ -26,51 +29,239 @@ const setup = Effect.gen(function* () {
 	const directory = path.join(root, "example")
 	return { fs, path, root, directory }
 })
+const readText = (file: string) =>
+	Effect.gen(function* () {
+		const fs = yield* FileSystem.FileSystem
+		return yield* fs.readFileString(file)
+	})
+const readJson = (file: string) =>
+	Effect.flatMap(
+		readText(file),
+		Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown)),
+	)
+const readConfig = (file: string) =>
+	Effect.flatMap(readText(file), (yaml) =>
+		Schema.decodeUnknownEffect(Schema.Array(Entry.Entry))(parse(yaml)).pipe(
+			Effect.map((entries) => ({ yaml, entries })),
+		),
+	)
+/** Runs an effect, collecting the messages of the warnings it logs. */
+const warnings = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+	Effect.gen(function* () {
+		const logs = MutableList.make<string>()
+		const result = yield* effect.pipe(
+			Effect.provide(
+				Logger.layer([
+					Logger.make((entry) => {
+						if (entry.logLevel === "Warn")
+							MutableList.append(logs, `${Array.ensure(entry.message)[0]}`)
+					}),
+				]),
+			),
+		)
+		return { result, warnings: MutableList.toArray(logs) }
+	})
+const schemaComment =
+	"# yaml-language-server: $schema=https://cdn.jsdelivr.net/npm/@graftland/cli@0.0.0/schema.json"
+
 describe("create", () => {
-	it.effect("generates a loader-compatible project with an ESM example", () =>
+	it.effect("generates a TypeScript app that the loader accepts", () =>
 		Effect.gen(function* () {
-			const { fs, path, directory } = yield* setup
+			const { path, directory } = yield* setup
 			const result = yield* create({ directory, packageManager: "pnpm@9.15.9" })
 			assert.strictEqual(result.name, "example")
-			const yaml = yield* fs.readFileString(path.join(directory, "graft.yml"))
-			assert.strictEqual(
-				String.split("\n")(yaml)[0],
-				"# yaml-language-server: $schema=https://cdn.jsdelivr.net/npm/@graftland/cli@0.0.0/schema.json",
+			assert.strictEqual(result.template, "app")
+			assert.deepStrictEqual(result.files, [
+				".gitignore",
+				".vscode/extensions.json",
+				"README.md",
+				"graft.yml",
+				"package.json",
+				"src/hello.ts",
+				"tsconfig.json",
+			])
+			const { yaml, entries } = yield* readConfig(
+				path.join(directory, "graft.yml"),
 			)
-			const entries = yield* Schema.decodeUnknownEffect(
-				Schema.Array(Entry.Entry),
-			)(parse(yaml))
+			assert.strictEqual(String.split("\n")(yaml)[0], schemaComment)
 			assert.deepStrictEqual(entries, [
 				{
 					id: "hello",
-					name: "./hello.mjs",
+					name: "./src/hello.ts",
 					config: { message: "Hello from Graft!" },
 				},
 			])
-			const manifest = yield* fs
-				.readFileString(path.join(directory, "package.json"))
-				.pipe(
-					Effect.flatMap(
-						Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown)),
-					),
-				)
+			const manifest = yield* readJson(path.join(directory, "package.json"))
 			assert.deepStrictEqual(manifest, {
 				name: "example",
 				version: "0.0.0",
+				packageManager: "pnpm@9.15.9",
 				private: true,
 				type: "module",
-				packageManager: "pnpm@9.15.9",
-				scripts: { start: "graft start" },
+				engines: { node: ">=22.19.0" },
+				scripts: {
+					start: "graft start",
+					dev: "graft start --watch",
+					typecheck: "effect-tsgo tsc",
+				},
 				dependencies: {
 					"@graftland/graft": "0.0.0",
 					"@graftland/cli": "0.0.0",
 					effect: "4.1.2",
 				},
+				devDependencies: {
+					"@effect/tsgo": "^0.64.1",
+					"@types/node": "^22.0.0",
+					typescript: "^7.0.2",
+				},
 			})
-			const observed1 = yield* fs.exists(path.join(directory, "hello.mjs"))
-			assert.strictEqual(observed1, true)
 		}).pipe(run),
 	)
+
+	it.effect("generates a plugin package named for short-name loading", () =>
+		Effect.gen(function* () {
+			const { path, directory } = yield* setup
+			const { result, warnings: logged } = yield* warnings(
+				create({ directory, template: "plugin" }),
+			)
+			assert.strictEqual(result.name, "graft-plugin-example")
+			assert.deepStrictEqual(logged, [])
+			assert.deepStrictEqual(result.files, [
+				".gitignore",
+				".vscode/extensions.json",
+				"README.md",
+				"graft.yml",
+				"package.json",
+				"src/index.ts",
+				"test/index.test.ts",
+				"tsconfig.build.json",
+				"tsconfig.json",
+			])
+			const { entries } = yield* readConfig(path.join(directory, "graft.yml"))
+			assert.deepStrictEqual(entries, [
+				{ id: "greeter", name: "./src/index.ts", config: { name: "Graft" } },
+			])
+			const manifest = yield* readJson(path.join(directory, "package.json"))
+			assert.deepInclude(manifest, {
+				name: "graft-plugin-example",
+				keywords: ["graft-plugin"],
+				exports: {
+					".": { types: "./dist/index.d.ts", default: "./dist/index.js" },
+				},
+				files: ["dist"],
+				peerDependencies: {
+					"@graftland/graft": "^0.0.0",
+					effect: "~4.1.2",
+				},
+			})
+			const ignored = yield* readText(path.join(directory, ".gitignore"))
+			assert.include(ignored, "dist/")
+		}).pipe(run),
+	)
+
+	it.effect(
+		"keeps a plugin directory's prefix and warns about other names",
+		() =>
+			Effect.gen(function* () {
+				const { path, root } = yield* setup
+				const prefixed = yield* create({
+					directory: path.join(root, "graft-plugin-hello"),
+					template: "plugin",
+				})
+				assert.strictEqual(prefixed.name, "graft-plugin-hello")
+				const scoped = yield* warnings(
+					create({
+						directory: path.join(root, "official"),
+						template: "plugin",
+						name: "@graftland/plugin-official",
+					}),
+				)
+				assert.deepStrictEqual(scoped.warnings, [])
+				const other = yield* warnings(
+					create({
+						directory: path.join(root, "other"),
+						template: "plugin",
+						name: "@acme/greeter",
+					}),
+				)
+				assert.strictEqual(other.warnings.length, 1)
+				assert.include(other.warnings[0], "@acme/greeter")
+			}).pipe(run),
+	)
+
+	it.effect("generates a minimal project with an empty config", () =>
+		Effect.gen(function* () {
+			const { path, directory } = yield* setup
+			const result = yield* create({ directory, template: "minimal" })
+			assert.deepStrictEqual(result.files, [
+				".gitignore",
+				"graft.yml",
+				"package.json",
+			])
+			const { yaml, entries } = yield* readConfig(
+				path.join(directory, "graft.yml"),
+			)
+			assert.strictEqual(yaml, `${schemaComment}\n[]\n`)
+			assert.deepStrictEqual(entries, [])
+			const manifest = yield* readJson(path.join(directory, "package.json"))
+			assert.deepInclude(manifest, {
+				scripts: { start: "graft start", dev: "graft start --watch" },
+			})
+		}).pipe(run),
+	)
+
+	it.effect("depends on and loads each plugin, mapping short names", () =>
+		Effect.gen(function* () {
+			const { path, directory } = yield* setup
+			yield* create({
+				directory,
+				template: "minimal",
+				plugins: ["review", "graft-plugin-echo@^1.2.0", "@acme/audit"],
+			})
+			// The loader gives entries without an id one when it first reads the file.
+			const text = yield* readText(path.join(directory, "graft.yml"))
+			assert.deepStrictEqual(parse(text), [
+				{ name: "@graftland/plugin-review" },
+				{ name: "graft-plugin-echo" },
+				{ name: "@acme/audit" },
+			])
+			const manifest = yield* readJson(path.join(directory, "package.json"))
+			assert.deepInclude(manifest, {
+				dependencies: {
+					"@graftland/graft": "0.0.0",
+					"@graftland/cli": "0.0.0",
+					effect: "4.1.2",
+					"@graftland/plugin-review": "0.0.0",
+					"graft-plugin-echo": "^1.2.0",
+					"@acme/audit": "latest",
+				},
+			})
+			const app = path.join(path.dirname(directory), "app")
+			yield* create({ directory: app, plugins: ["review"] })
+			const appText = yield* readText(path.join(app, "graft.yml"))
+			assert.deepStrictEqual(parse(appText), [
+				{
+					id: "hello",
+					name: "./src/hello.ts",
+					config: { message: "Hello from Graft!" },
+				},
+				{ name: "@graftland/plugin-review" },
+			])
+		}).pipe(run),
+	)
+
+	it.effect("rejects an invalid plugin before creating files", () =>
+		Effect.gen(function* () {
+			const { fs, root, directory } = yield* setup
+			const exit = yield* Effect.exit(
+				create({ directory, plugins: ["Not Valid"] }),
+			)
+			assert(Exit.isFailure(exit))
+			const observed = yield* fs.readDirectory(root)
+			assert.deepStrictEqual(observed, [])
+		}).pipe(run),
+	)
+
 	it.effect("accepts an existing empty directory and version overrides", () =>
 		Effect.gen(function* () {
 			const { fs, path, directory } = yield* setup
@@ -101,20 +292,57 @@ describe("create", () => {
 			)
 		}).pipe(run),
 	)
+
+	it.effect("generates beside a repository's .git without touching it", () =>
+		Effect.gen(function* () {
+			const { fs, path, root, directory } = yield* setup
+			yield* fs.makeDirectory(path.join(directory, ".git"), {
+				recursive: true,
+			})
+			const head = path.join(directory, ".git", "HEAD")
+			yield* fs.writeFileString(head, "ref: refs/heads/main\n")
+			yield* fs.writeFileString(path.join(directory, ".DS_Store"), "")
+			const result = yield* create({ directory, template: "minimal" })
+			const observed = yield* fs.readDirectory(directory)
+			assert.deepStrictEqual(Array.sort(observed, String.Order), [
+				".DS_Store",
+				".git",
+				".gitignore",
+				"graft.yml",
+				"package.json",
+			])
+			assert.deepStrictEqual(result.files, [
+				".gitignore",
+				"graft.yml",
+				"package.json",
+			])
+			const kept = yield* fs.readFileString(head)
+			assert.strictEqual(kept, "ref: refs/heads/main\n")
+			const siblings = yield* fs.readDirectory(root)
+			assert.deepStrictEqual(siblings, ["example"])
+		}).pipe(run),
+	)
+
 	it.effect("refuses nonempty targets without touching their contents", () =>
 		Effect.gen(function* () {
 			const { fs, path, directory } = yield* setup
-			yield* fs.makeDirectory(directory)
+			yield* fs.makeDirectory(path.join(directory, ".git"), {
+				recursive: true,
+			})
 			const keep = path.join(directory, "keep.txt")
 			yield* fs.writeFileString(keep, "keep me")
 			const observed2 = yield* Effect.exit(create({ directory }))
 			assert(Exit.isFailure(observed2))
 			const observed3 = yield* fs.readDirectory(directory)
-			assert.deepStrictEqual(observed3, ["keep.txt"])
+			assert.deepStrictEqual(Array.sort(observed3, String.Order), [
+				".git",
+				"keep.txt",
+			])
 			const observed4 = yield* fs.readFileString(keep)
 			assert.strictEqual(observed4, "keep me")
 		}).pipe(run),
 	)
+
 	it.effect("validates names before creating files", () =>
 		Effect.gen(function* () {
 			const { fs, directory } = yield* setup

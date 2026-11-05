@@ -1,4 +1,4 @@
-import { writeFile } from "node:fs/promises"
+import { cp, writeFile } from "node:fs/promises"
 
 import { build } from "tsdown"
 
@@ -74,18 +74,26 @@ export default function setup() {
 					build({
 						...packageConfig,
 						config: false,
-						entry: [
-							new URL(
-								name === "cli" ? "../src/bin.ts" : `../../${name}/src/index.ts`,
-								import.meta.url,
-							).pathname,
-						],
+						entry: (name === "cli"
+							? ["../src/bin.ts"]
+							: name === "create"
+								? ["../../create/src/index.ts", "../../create/src/Command.ts"]
+								: [`../../${name}/src/index.ts`]
+						).map((entry) => new URL(entry, import.meta.url).pathname),
 						outDir: new URL(`../.cache/commands/${name}`, import.meta.url)
 							.pathname,
 						dts: false,
 						exports: false,
 					}),
 				),
+			),
+		)
+		.then(() =>
+			// Located relative to create's modules, as in the published package.
+			cp(
+				new URL("../../create/templates", import.meta.url),
+				new URL("../.cache/commands/templates", import.meta.url),
+				{ recursive: true },
 			),
 		)
 		.then(() =>

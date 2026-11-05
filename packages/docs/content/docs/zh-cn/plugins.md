@@ -234,3 +234,18 @@ const storage = Plugin.layer(StorageLive, {
   `apply` 获取的资源。
 - **重载。** 自动[热重载](../hot-reload/)会重新导入受变化影响的模块；公开的
   `hmr.reload` 则强制全量重载。
+
+## 发布插件
+
+```sh
+npm create @graftland@latest review -- --template plugin
+```
+
+[`plugin` 模板](../cli/#模板)创建一个包：它从 `src/index.ts`
+导出一个插件，附带一个测试，以及通过 `npm run dev` 运行该插件的 `graft.yml`。
+
+| 规则                                             | 原因                                                                                                                                                       |
+| ------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 命名为 `graft-plugin-<name>`                     | 用户就能用短名称 `<name>` 加载它。Graft 只会尝试 `@graftland/plugin-<name>` 和 `graft-plugin-<name>`。其他名称 `create` 会给出警告，用户必须写出完整包名。 |
+| 把 `@graftland/graft` 和 `effect` 设为 peer 依赖 | 它们由应用提供，所有插件共用同一份。                                                                                                                       |
+| 发布 JavaScript                                  | Node 不会剥离 `node_modules` 中的类型。`npm publish` 会先运行 `build`，把 `src` 编译到 `dist`。                                                            |

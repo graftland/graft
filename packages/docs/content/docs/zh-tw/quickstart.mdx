@@ -10,25 +10,28 @@ Node 轉接器要求的版本。該版本也提供熱重載所需的 `module.reg
 
 <Steps>
 
-1. 建立專案並安裝相依套件：
+1. 建立專案。按 <kbd>Enter</kbd> 接受每個預設值；命令會安裝相依套件：
 
    ```sh
-   npx @graftland/cli create my-app --install
+   npm create @graftland@latest my-app
    cd my-app
    ```
 
-   除了 `package.json`，專案還包含三個檔案：
+   先從這幾個檔案開始：
 
-   | 檔案         | 用途                               |
-   | ------------ | ---------------------------------- |
-   | `graft.yml`  | 設定檔，指定要載入的外掛及其設定。 |
-   | `hello.mjs`  | 範例外掛。                         |
-   | `.gitignore` | 忽略 `node_modules` 和 `.env`。    |
+   | 檔案            | 用途                                |
+   | --------------- | ----------------------------------- |
+   | `graft.yml`     | 設定檔，指定要載入的外掛及其設定。  |
+   | `src/hello.ts`  | 範例外掛。                          |
+   | `tsconfig.json` | 供 `npm run typecheck` 做型別檢查。 |
+
+   [`graft create`](../cli/#graft-create)
+   列出了所有問題、其他範本，以及跳過提問的選項。
 
 2. 啟動應用程式並監看檔案變更：
 
    ```sh
-   npx graft start --watch
+   npm run dev
    ```
 
    `hello` 外掛會輸出 `Hello from Graft!`。行程會持續執行，直到你按下
@@ -39,7 +42,7 @@ Node 轉接器要求的版本。該版本也提供熱重載所需的 `module.reg
 
    ```yaml
    - id: hello
-     name: ./hello.mjs
+     name: ./src/hello.ts
      config:
        message: Hello again!
    ```
@@ -48,13 +51,13 @@ Node 轉接器要求的版本。該版本也提供熱重載所需的 `module.reg
    `Hello plugin stopped`，然後是 `Hello again!`。
 
 4. 在應用程式執行期間修改程式碼。編輯
-   `hello.mjs`（例如讓訊息輸出兩次）並儲存。Graft 會匯入模組的新版本，並用它取代執行中的外掛。如果新程式碼匯入失敗，舊版本會繼續執行，Graft 並記錄錯誤。
+   `src/hello.ts`（例如讓訊息輸出兩次）並儲存。Graft 會匯入模組的新版本，並用它取代執行中的外掛。如果新程式碼匯入失敗，舊版本會繼續執行，Graft 並記錄錯誤。
 
 </Steps>
 
 ## 範例外掛
 
-```js title="hello.mjs"
+```ts title="src/hello.ts"
 import { Effect, Schema } from "effect"
 
 import { Plugin } from "@graftland/graft"
@@ -70,8 +73,8 @@ export default Plugin.make({
 })
 ```
 
-外掛模組以預設匯出，或以名為 `plugin`
-的匯出來提供它的外掛。匯入模組時不得啟動任何東西。請在 `apply`
+Node 會移除型別後直接執行這個 TypeScript 檔案，因此不需要建置步驟。外掛模組以預設匯出，或以名為
+`plugin` 的匯出來提供它的外掛。匯入模組時不得啟動任何東西。請在 `apply`
 內開啟連線、計時器和伺服器，這樣 Graft 才能釋放它們。請參閱[外掛](../plugins/)。
 
 ## 從 npm 新增外掛

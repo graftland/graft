@@ -10,8 +10,8 @@
 npm install @graftland/cli effect
 ```
 
-用 `npx @graftland/cli create my-app --install` 建立專案，然後用
-`npx graft start --watch` 執行它。需要 Node.js 22.19 或更新版本。
+用 `npm create @graftland@latest my-app` 建立專案，它執行的是同一個 `create`
+命令。然後用 `npm run dev` 執行它。需要 Node.js 22.19 或更新版本。
 
 ## 文件
 

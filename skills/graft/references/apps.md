@@ -6,11 +6,13 @@ is `graft start`; your own Effect program can be one too.
 ## Start a project
 
 ```sh
-npx @graftland/cli create my-app --install
+npm create @graftland@latest my-app
 cd my-app
-npx graft start --watch
+npm run dev
 ```
 
+`-t plugin` creates a plugin package to publish, `-t minimal` only the config;
+`--plugin <name>` adds plugins to either, and `--yes` skips the questions.
 `graft add <package>` installs a plugin package with the project's package
 manager and rolls back on failure; then add an entry for it.
 

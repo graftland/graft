@@ -6,6 +6,7 @@ import { Array, Effect, Layer, Logger, Option, Stdio } from "effect"
 import { Argument, CliError, Command, Flag } from "effect/cli"
 import { NodeRuntime } from "@effect/platform-node"
 
+import { command as create } from "@graftland/create/Command"
 import { Graft } from "@graftland/graft"
 
 import { version } from "../package.json" with { type: "json" }
@@ -44,28 +45,6 @@ const start = Command.make(
 ).pipe(
 	Command.withDescription("Run the application described by a config file"),
 )
-
-const create = Command.make(
-	"create",
-	{
-		directory: Argument.String("directory").pipe(
-			Argument.withDescription("Where to create the project"),
-		),
-		name: Flag.String("name").pipe(
-			Flag.withDescription("Package name; defaults to the directory name"),
-			Flag.optional,
-		),
-		install: Flag.Boolean("install").pipe(
-			Flag.withDescription("Install dependencies afterwards"),
-			Flag.withDefault(false),
-		),
-	},
-	(options) =>
-		Effect.promise(() => import("./Manage")).pipe(
-			Effect.uninterruptible,
-			Effect.flatMap((Manage) => Manage.create(options)),
-		),
-).pipe(Command.withDescription("Create a new Graft project"))
 
 const add = Command.make(
 	"add",

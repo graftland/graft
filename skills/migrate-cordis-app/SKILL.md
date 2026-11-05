@@ -94,7 +94,7 @@ work.
 | `@cordisjs/plugin-fs-node` (`ctx.fs`)                | Effect `FileSystem` / `Path`, provided by `graft start`                                                                            |
 | `@cordisjs/plugin-timer` (`ctx.timer`)               | Effect `Clock`, `Schedule`, `Effect.sleep`; nothing to load                                                                        |
 | `@cordisjs/plugin-package-manager`                   | `graft add <pkg>` / `graft remove <pkg>`                                                                                           |
-| `@cordisjs/create`                                   | `graft create <dir>` (useful as a reference layout)                                                                                |
+| `@cordisjs/create`                                   | `npm create @graftland` or `graft create [dir]` (useful as a reference layout)                                                     |
 | `ctx.loader.create / update / remove`                | The `Loader` service from `@graftland/loader`: `create`, `update`, `remove`, `ready`, `retry`                                      |
 
 ## Behavior differences to tell the user

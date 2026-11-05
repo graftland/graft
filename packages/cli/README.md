@@ -11,8 +11,9 @@ The `graft` command: `start`, `create`, `add` and `remove`.
 npm install @graftland/cli effect
 ```
 
-Create a project with `npx @graftland/cli create my-app --install`. Then run it
-with `npx graft start --watch`. You need Node.js 22.19 or later.
+Create a project with `npm create @graftland@latest my-app`, which runs the same
+`create` command. Then run it with `npm run dev`. You need Node.js 22.19 or
+later.
 
 ## Documentation
 

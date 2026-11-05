@@ -10,25 +10,28 @@ Node 适配器要求的版本。该版本也提供热重载所需的 `module.reg
 
 <Steps>
 
-1. 创建项目并安装依赖：
+1. 创建项目。每个问题按 <kbd>Enter</kbd> 接受默认值即可，命令会安装依赖：
 
    ```sh
-   npx @graftland/cli create my-app --install
+   npm create @graftland@latest my-app
    cd my-app
    ```
 
-   除了 `package.json`，项目还包含三个文件：
+   先看这几个文件：
 
-   | 文件         | 用途                                 |
-   | ------------ | ------------------------------------ |
-   | `graft.yml`  | 配置文件，指定要加载的插件及其配置。 |
-   | `hello.mjs`  | 示例插件。                           |
-   | `.gitignore` | 忽略 `node_modules` 和 `.env`。      |
+   | 文件            | 用途                                 |
+   | --------------- | ------------------------------------ |
+   | `graft.yml`     | 配置文件，指定要加载的插件及其配置。 |
+   | `src/hello.ts`  | 示例插件。                           |
+   | `tsconfig.json` | 供 `npm run typecheck` 做类型检查。  |
+
+   [`graft create`](../cli/#graft-create)
+   列出了各个问题、其他模板，以及跳过提问的选项。
 
 2. 启动应用并监听文件变化：
 
    ```sh
-   npx graft start --watch
+   npm run dev
    ```
 
    `hello` 插件会输出 `Hello from Graft!`。进程会持续运行，直到你按下
@@ -39,7 +42,7 @@ Node 适配器要求的版本。该版本也提供热重载所需的 `module.reg
 
    ```yaml
    - id: hello
-     name: ./hello.mjs
+     name: ./src/hello.ts
      config:
        message: Hello again!
    ```
@@ -48,13 +51,13 @@ Node 适配器要求的版本。该版本也提供热重载所需的 `module.reg
    `Hello plugin stopped`，然后是 `Hello again!`。
 
 4. 在应用运行期间修改代码。编辑
-   `hello.mjs`（例如让它输出两次消息），然后保存。Graft 会导入模块的新版本，用它替换正在运行的插件。如果新代码导入失败，旧版本会继续运行，Graft 会把错误记录到日志中。
+   `src/hello.ts`（例如让它输出两次消息），然后保存。Graft 会导入模块的新版本，用它替换正在运行的插件。如果新代码导入失败，旧版本会继续运行，Graft 会把错误记录到日志中。
 
 </Steps>
 
 ## 示例插件
 
-```js title="hello.mjs"
+```ts title="src/hello.ts"
 import { Effect, Schema } from "effect"
 
 import { Plugin } from "@graftland/graft"
@@ -70,9 +73,9 @@ export default Plugin.make({
 })
 ```
 
-插件模块通过默认导出或名为 `plugin`
-的导出提供插件。导入模块时不应启动任何工作。连接、定时器和服务器都应在 `apply`
-内启动，以便 Graft 能够释放这些资源。参见[插件](../plugins/)。
+Node 直接运行这个 TypeScript 文件，只去掉类型，因此没有构建步骤。插件模块通过默认导出或名为
+`plugin` 的导出提供插件。导入模块时不应启动任何工作。连接、定时器和服务器都应在
+`apply` 内启动，以便 Graft 能够释放这些资源。参见[插件](../plugins/)。
 
 ## 从 npm 添加插件
 
