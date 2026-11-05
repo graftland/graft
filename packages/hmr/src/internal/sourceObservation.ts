@@ -48,16 +48,23 @@ export const make = Effect.fnUntraced(function* () {
 					]),
 			),
 		)
+	// One entry may start several remote plugins; each call refreshes its own files and keeps the others'.
 	const watch = (files: ReadonlyArray<string>) =>
 		Effect.forEach(files, read).pipe(
 			Effect.flatMap((entries) =>
-				SubscriptionRef.update(sources, (current) => ({
-					...current,
-					explicit: HashMap.fromIterable(entries),
-					imports: HashMap.filter(current.imports, (_, root) =>
-						Array.contains(files, root),
-					),
-				})),
+				SubscriptionRef.update(sources, (current) => {
+					const explicit = HashMap.union(
+						current.explicit,
+						HashMap.fromIterable(entries),
+					)
+					return {
+						...current,
+						explicit,
+						imports: HashMap.filter(current.imports, (_, root) =>
+							HashMap.has(explicit, root),
+						),
+					}
+				}),
 			),
 			Effect.onError(() =>
 				SubscriptionRef.update(sources, (current) => ({

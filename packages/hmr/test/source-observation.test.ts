@@ -173,3 +173,55 @@ it.effect("retains failed dependencies and replaces them after success", () =>
 		}).pipe(Effect.provideService(FileSystem.FileSystem, fs))
 	}).pipe(Effect.scoped),
 )
+
+it.effect("keeps every watched file set when one entry watches several", () =>
+	Effect.gen(function* () {
+		const first = yield* Ref.make("first")
+		const subscriptions = yield* Queue.unbounded<void>()
+		const fs = FileSystem.makeNoop({
+			realPath: (path) => Effect.succeed(path),
+			stat: (path) =>
+				Effect.succeed({
+					type: String.endsWith(".mjs")(path) ? "File" : "Directory",
+					size: ByteSize.bytes(5),
+					mtime: Option.none(),
+					ino: Option.none(),
+					atime: Option.none(),
+					birthtime: Option.none(),
+					dev: 0n,
+					mode: 0,
+					nlink: Option.some(1n),
+					uid: Option.none(),
+					gid: Option.none(),
+					rdev: Option.some(0n),
+					blksize: Option.none(),
+					blocks: Option.none(),
+				}),
+			readFile: (path) =>
+				(path === "/source/first.mjs"
+					? Ref.get(first)
+					: Effect.succeed("second")
+				).pipe(Effect.map((text) => new TextEncoder().encode(text))),
+			watch: () =>
+				Stream.fromEffect(Queue.offer(subscriptions, undefined)).pipe(
+					Stream.drain,
+					Stream.concat(Stream.never),
+				),
+		})
+		yield* Effect.gen(function* () {
+			const source = yield* Source.make()
+			yield* source.watch(["file:///source/first.mjs"])
+			yield* source.watch(["file:///source/second.mjs"])
+			const changed = yield* source.changes.pipe(
+				Stream.runHead,
+				Effect.forkScoped,
+			)
+			yield* Queue.take(subscriptions)
+			yield* Ref.set(first, "edited")
+			// The fake stat stays unchanged; advance the retained digest audit.
+			yield* TestClock.adjust("12 seconds")
+			const event = yield* Fiber.join(changed)
+			assert.isTrue(Option.isSome(event))
+		}).pipe(Effect.provideService(FileSystem.FileSystem, fs))
+	}).pipe(Effect.scoped),
+)
