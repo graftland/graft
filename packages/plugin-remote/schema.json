@@ -1,0 +1,2269 @@
+[
+	{
+		"names": [
+			"remote",
+			"@graftland/plugin-remote"
+		],
+		"schema": {
+			"type": "object",
+			"properties": {
+				"contract": {
+					"type": "string"
+				},
+				"connect": {
+					"anyOf": [
+						{
+							"type": "object",
+							"properties": {
+								"url": {
+									"type": "string"
+								},
+								"unix": {
+									"not": {}
+								},
+								"command": {
+									"not": {}
+								},
+								"stdio": {
+									"not": {}
+								},
+								"local": {
+									"not": {}
+								},
+								"worker": {
+									"not": {}
+								},
+								"transport": {
+									"not": {}
+								},
+								"instance": {
+									"type": "string"
+								},
+								"lease": {
+									"type": "string"
+								},
+								"margin": {
+									"type": "string"
+								},
+								"expect": {
+									"type": "object",
+									"properties": {
+										"version": {
+											"type": "string"
+										},
+										"digest": {
+											"type": "string"
+										}
+									},
+									"additionalProperties": false
+								},
+								"auth": {
+									"anyOf": [
+										{
+											"type": "object",
+											"properties": {
+												"name": {
+													"type": "string"
+												},
+												"config": {},
+												"mtls": {
+													"not": {}
+												},
+												"bearer": {
+													"not": {}
+												},
+												"jwt": {
+													"not": {}
+												},
+												"none": {
+													"not": {}
+												}
+											},
+											"required": [
+												"name"
+											],
+											"additionalProperties": false
+										},
+										{
+											"type": "object",
+											"properties": {
+												"name": {
+													"not": {}
+												},
+												"config": {
+													"not": {}
+												},
+												"mtls": {
+													"type": "object",
+													"properties": {
+														"cert": {
+															"type": "string"
+														},
+														"key": {
+															"type": "string"
+														}
+													},
+													"required": [
+														"cert",
+														"key"
+													],
+													"additionalProperties": false
+												},
+												"bearer": {
+													"not": {}
+												},
+												"jwt": {
+													"not": {}
+												},
+												"none": {
+													"not": {}
+												}
+											},
+											"required": [
+												"mtls"
+											],
+											"additionalProperties": false
+										},
+										{
+											"type": "object",
+											"properties": {
+												"name": {
+													"not": {}
+												},
+												"config": {
+													"not": {}
+												},
+												"mtls": {
+													"not": {}
+												},
+												"bearer": {
+													"type": "object",
+													"properties": {
+														"token": {
+															"anyOf": [
+																{
+																	"type": "string"
+																},
+																{
+																	"type": "object",
+																	"properties": {
+																		"file": {
+																			"type": "string"
+																		}
+																	},
+																	"required": [
+																		"file"
+																	],
+																	"additionalProperties": false
+																}
+															]
+														}
+													},
+													"required": [
+														"token"
+													],
+													"additionalProperties": false
+												},
+												"jwt": {
+													"not": {}
+												},
+												"none": {
+													"not": {}
+												}
+											},
+											"required": [
+												"bearer"
+											],
+											"additionalProperties": false
+										},
+										{
+											"type": "object",
+											"properties": {
+												"name": {
+													"not": {}
+												},
+												"config": {
+													"not": {}
+												},
+												"mtls": {
+													"not": {}
+												},
+												"bearer": {
+													"not": {}
+												},
+												"jwt": {
+													"type": "object",
+													"properties": {
+														"token": {
+															"anyOf": [
+																{
+																	"type": "string"
+																},
+																{
+																	"type": "object",
+																	"properties": {
+																		"file": {
+																			"type": "string"
+																		}
+																	},
+																	"required": [
+																		"file"
+																	],
+																	"additionalProperties": false
+																}
+															]
+														}
+													},
+													"required": [
+														"token"
+													],
+													"additionalProperties": false
+												},
+												"none": {
+													"not": {}
+												}
+											},
+											"required": [
+												"jwt"
+											],
+											"additionalProperties": false
+										},
+										{
+											"type": "object",
+											"properties": {
+												"name": {
+													"not": {}
+												},
+												"config": {
+													"not": {}
+												},
+												"mtls": {
+													"not": {}
+												},
+												"bearer": {
+													"not": {}
+												},
+												"jwt": {
+													"not": {}
+												},
+												"none": {
+													"type": "object",
+													"properties": {
+														"identity": {
+															"type": "string"
+														}
+													},
+													"additionalProperties": false
+												}
+											},
+											"required": [
+												"none"
+											],
+											"additionalProperties": false
+										}
+									]
+								},
+								"ca": {
+									"type": "string"
+								},
+								"servername": {
+									"type": "string"
+								}
+							},
+							"required": [
+								"url"
+							],
+							"additionalProperties": false
+						},
+						{
+							"type": "object",
+							"properties": {
+								"url": {
+									"not": {}
+								},
+								"unix": {
+									"type": "string"
+								},
+								"command": {
+									"not": {}
+								},
+								"stdio": {
+									"not": {}
+								},
+								"local": {
+									"not": {}
+								},
+								"worker": {
+									"not": {}
+								},
+								"transport": {
+									"not": {}
+								},
+								"instance": {
+									"type": "string"
+								},
+								"lease": {
+									"type": "string"
+								},
+								"margin": {
+									"type": "string"
+								},
+								"expect": {
+									"type": "object",
+									"properties": {
+										"version": {
+											"type": "string"
+										},
+										"digest": {
+											"type": "string"
+										}
+									},
+									"additionalProperties": false
+								},
+								"auth": {
+									"anyOf": [
+										{
+											"type": "object",
+											"properties": {
+												"name": {
+													"type": "string"
+												},
+												"config": {},
+												"mtls": {
+													"not": {}
+												},
+												"bearer": {
+													"not": {}
+												},
+												"jwt": {
+													"not": {}
+												},
+												"none": {
+													"not": {}
+												}
+											},
+											"required": [
+												"name"
+											],
+											"additionalProperties": false
+										},
+										{
+											"type": "object",
+											"properties": {
+												"name": {
+													"not": {}
+												},
+												"config": {
+													"not": {}
+												},
+												"mtls": {
+													"type": "object",
+													"properties": {
+														"cert": {
+															"type": "string"
+														},
+														"key": {
+															"type": "string"
+														}
+													},
+													"required": [
+														"cert",
+														"key"
+													],
+													"additionalProperties": false
+												},
+												"bearer": {
+													"not": {}
+												},
+												"jwt": {
+													"not": {}
+												},
+												"none": {
+													"not": {}
+												}
+											},
+											"required": [
+												"mtls"
+											],
+											"additionalProperties": false
+										},
+										{
+											"type": "object",
+											"properties": {
+												"name": {
+													"not": {}
+												},
+												"config": {
+													"not": {}
+												},
+												"mtls": {
+													"not": {}
+												},
+												"bearer": {
+													"type": "object",
+													"properties": {
+														"token": {
+															"anyOf": [
+																{
+																	"type": "string"
+																},
+																{
+																	"type": "object",
+																	"properties": {
+																		"file": {
+																			"type": "string"
+																		}
+																	},
+																	"required": [
+																		"file"
+																	],
+																	"additionalProperties": false
+																}
+															]
+														}
+													},
+													"required": [
+														"token"
+													],
+													"additionalProperties": false
+												},
+												"jwt": {
+													"not": {}
+												},
+												"none": {
+													"not": {}
+												}
+											},
+											"required": [
+												"bearer"
+											],
+											"additionalProperties": false
+										},
+										{
+											"type": "object",
+											"properties": {
+												"name": {
+													"not": {}
+												},
+												"config": {
+													"not": {}
+												},
+												"mtls": {
+													"not": {}
+												},
+												"bearer": {
+													"not": {}
+												},
+												"jwt": {
+													"type": "object",
+													"properties": {
+														"token": {
+															"anyOf": [
+																{
+																	"type": "string"
+																},
+																{
+																	"type": "object",
+																	"properties": {
+																		"file": {
+																			"type": "string"
+																		}
+																	},
+																	"required": [
+																		"file"
+																	],
+																	"additionalProperties": false
+																}
+															]
+														}
+													},
+													"required": [
+														"token"
+													],
+													"additionalProperties": false
+												},
+												"none": {
+													"not": {}
+												}
+											},
+											"required": [
+												"jwt"
+											],
+											"additionalProperties": false
+										},
+										{
+											"type": "object",
+											"properties": {
+												"name": {
+													"not": {}
+												},
+												"config": {
+													"not": {}
+												},
+												"mtls": {
+													"not": {}
+												},
+												"bearer": {
+													"not": {}
+												},
+												"jwt": {
+													"not": {}
+												},
+												"none": {
+													"type": "object",
+													"properties": {
+														"identity": {
+															"type": "string"
+														}
+													},
+													"additionalProperties": false
+												}
+											},
+											"required": [
+												"none"
+											],
+											"additionalProperties": false
+										}
+									]
+								}
+							},
+							"required": [
+								"unix"
+							],
+							"additionalProperties": false
+						},
+						{
+							"type": "object",
+							"properties": {
+								"url": {
+									"not": {}
+								},
+								"unix": {
+									"not": {}
+								},
+								"command": {
+									"type": "array",
+									"minItems": 1,
+									"items": [
+										{
+											"type": "string"
+										}
+									],
+									"additionalItems": {
+										"type": "string"
+									}
+								},
+								"stdio": {
+									"not": {}
+								},
+								"local": {
+									"not": {}
+								},
+								"worker": {
+									"not": {}
+								},
+								"transport": {
+									"not": {}
+								},
+								"instance": {
+									"type": "string"
+								},
+								"lease": {
+									"type": "string"
+								},
+								"margin": {
+									"type": "string"
+								},
+								"expect": {
+									"type": "object",
+									"properties": {
+										"version": {
+											"type": "string"
+										},
+										"digest": {
+											"type": "string"
+										}
+									},
+									"additionalProperties": false
+								},
+								"auth": {
+									"not": {}
+								},
+								"cwd": {
+									"type": "string"
+								},
+								"env": {
+									"type": "object",
+									"additionalProperties": {
+										"type": "string"
+									}
+								}
+							},
+							"required": [
+								"command"
+							],
+							"additionalProperties": false
+						},
+						{
+							"type": "object",
+							"properties": {
+								"url": {
+									"not": {}
+								},
+								"unix": {
+									"not": {}
+								},
+								"command": {
+									"not": {}
+								},
+								"stdio": {
+									"not": {}
+								},
+								"local": {
+									"type": "object",
+									"properties": {
+										"command": {
+											"type": "array",
+											"minItems": 1,
+											"items": [
+												{
+													"type": "string"
+												}
+											],
+											"additionalItems": {
+												"type": "string"
+											}
+										}
+									},
+									"additionalProperties": false
+								},
+								"worker": {
+									"not": {}
+								},
+								"transport": {
+									"not": {}
+								},
+								"auth": {
+									"not": {}
+								}
+							},
+							"required": [
+								"local"
+							],
+							"additionalProperties": false
+						},
+						{
+							"type": "object",
+							"properties": {
+								"url": {
+									"not": {}
+								},
+								"unix": {
+									"not": {}
+								},
+								"command": {
+									"not": {}
+								},
+								"stdio": {
+									"not": {}
+								},
+								"local": {
+									"not": {}
+								},
+								"worker": {
+									"type": "object",
+									"properties": {
+										"execArgv": {
+											"type": "array",
+											"items": {
+												"type": "string"
+											}
+										}
+									},
+									"additionalProperties": false
+								},
+								"transport": {
+									"not": {}
+								},
+								"auth": {
+									"not": {}
+								}
+							},
+							"required": [
+								"worker"
+							],
+							"additionalProperties": false
+						},
+						{
+							"type": "object",
+							"properties": {
+								"url": {
+									"not": {}
+								},
+								"unix": {
+									"not": {}
+								},
+								"command": {
+									"not": {}
+								},
+								"stdio": {
+									"not": {}
+								},
+								"local": {
+									"not": {}
+								},
+								"worker": {
+									"not": {}
+								},
+								"transport": {
+									"type": "object",
+									"properties": {
+										"name": {
+											"type": "string"
+										},
+										"config": {}
+									},
+									"required": [
+										"name"
+									],
+									"additionalProperties": false
+								},
+								"instance": {
+									"type": "string"
+								},
+								"lease": {
+									"type": "string"
+								},
+								"margin": {
+									"type": "string"
+								},
+								"expect": {
+									"type": "object",
+									"properties": {
+										"version": {
+											"type": "string"
+										},
+										"digest": {
+											"type": "string"
+										}
+									},
+									"additionalProperties": false
+								},
+								"auth": {
+									"anyOf": [
+										{
+											"type": "object",
+											"properties": {
+												"name": {
+													"type": "string"
+												},
+												"config": {},
+												"mtls": {
+													"not": {}
+												},
+												"bearer": {
+													"not": {}
+												},
+												"jwt": {
+													"not": {}
+												},
+												"none": {
+													"not": {}
+												}
+											},
+											"required": [
+												"name"
+											],
+											"additionalProperties": false
+										},
+										{
+											"type": "object",
+											"properties": {
+												"name": {
+													"not": {}
+												},
+												"config": {
+													"not": {}
+												},
+												"mtls": {
+													"type": "object",
+													"properties": {
+														"cert": {
+															"type": "string"
+														},
+														"key": {
+															"type": "string"
+														}
+													},
+													"required": [
+														"cert",
+														"key"
+													],
+													"additionalProperties": false
+												},
+												"bearer": {
+													"not": {}
+												},
+												"jwt": {
+													"not": {}
+												},
+												"none": {
+													"not": {}
+												}
+											},
+											"required": [
+												"mtls"
+											],
+											"additionalProperties": false
+										},
+										{
+											"type": "object",
+											"properties": {
+												"name": {
+													"not": {}
+												},
+												"config": {
+													"not": {}
+												},
+												"mtls": {
+													"not": {}
+												},
+												"bearer": {
+													"type": "object",
+													"properties": {
+														"token": {
+															"anyOf": [
+																{
+																	"type": "string"
+																},
+																{
+																	"type": "object",
+																	"properties": {
+																		"file": {
+																			"type": "string"
+																		}
+																	},
+																	"required": [
+																		"file"
+																	],
+																	"additionalProperties": false
+																}
+															]
+														}
+													},
+													"required": [
+														"token"
+													],
+													"additionalProperties": false
+												},
+												"jwt": {
+													"not": {}
+												},
+												"none": {
+													"not": {}
+												}
+											},
+											"required": [
+												"bearer"
+											],
+											"additionalProperties": false
+										},
+										{
+											"type": "object",
+											"properties": {
+												"name": {
+													"not": {}
+												},
+												"config": {
+													"not": {}
+												},
+												"mtls": {
+													"not": {}
+												},
+												"bearer": {
+													"not": {}
+												},
+												"jwt": {
+													"type": "object",
+													"properties": {
+														"token": {
+															"anyOf": [
+																{
+																	"type": "string"
+																},
+																{
+																	"type": "object",
+																	"properties": {
+																		"file": {
+																			"type": "string"
+																		}
+																	},
+																	"required": [
+																		"file"
+																	],
+																	"additionalProperties": false
+																}
+															]
+														}
+													},
+													"required": [
+														"token"
+													],
+													"additionalProperties": false
+												},
+												"none": {
+													"not": {}
+												}
+											},
+											"required": [
+												"jwt"
+											],
+											"additionalProperties": false
+										},
+										{
+											"type": "object",
+											"properties": {
+												"name": {
+													"not": {}
+												},
+												"config": {
+													"not": {}
+												},
+												"mtls": {
+													"not": {}
+												},
+												"bearer": {
+													"not": {}
+												},
+												"jwt": {
+													"not": {}
+												},
+												"none": {
+													"type": "object",
+													"properties": {
+														"identity": {
+															"type": "string"
+														}
+													},
+													"additionalProperties": false
+												}
+											},
+											"required": [
+												"none"
+											],
+											"additionalProperties": false
+										}
+									]
+								}
+							},
+							"required": [
+								"transport"
+							],
+							"additionalProperties": false
+						}
+					]
+				},
+				"config": {}
+			},
+			"required": [
+				"contract",
+				"connect"
+			],
+			"additionalProperties": false
+		},
+		"required": true
+	},
+	{
+		"names": [
+			"remote/runner",
+			"@graftland/plugin-remote/runner"
+		],
+		"schema": {
+			"type": "object",
+			"properties": {
+				"root": {
+					"type": "string"
+				},
+				"state": {
+					"type": "string"
+				},
+				"lease": {
+					"type": "string"
+				},
+				"grace": {
+					"type": "string"
+				},
+				"listen": {
+					"type": "array",
+					"items": {
+						"anyOf": [
+							{
+								"type": "object",
+								"properties": {
+									"url": {
+										"type": "string",
+										"pattern": "^ws:\\/\\/"
+									},
+									"unix": {
+										"not": {}
+									},
+									"command": {
+										"not": {}
+									},
+									"stdio": {
+										"not": {}
+									},
+									"local": {
+										"not": {}
+									},
+									"worker": {
+										"not": {}
+									},
+									"transport": {
+										"not": {}
+									},
+									"auth": {
+										"anyOf": [
+											{
+												"type": "object",
+												"properties": {
+													"name": {
+														"type": "string"
+													},
+													"config": {},
+													"mtls": {
+														"not": {}
+													},
+													"bearer": {
+														"not": {}
+													},
+													"jwt": {
+														"not": {}
+													},
+													"none": {
+														"not": {}
+													}
+												},
+												"required": [
+													"name"
+												],
+												"additionalProperties": false
+											},
+											{
+												"type": "object",
+												"properties": {
+													"name": {
+														"not": {}
+													},
+													"config": {
+														"not": {}
+													},
+													"mtls": {
+														"type": "object",
+														"properties": {
+															"ca": {
+																"type": "string"
+															}
+														},
+														"required": [
+															"ca"
+														],
+														"additionalProperties": false
+													},
+													"bearer": {
+														"not": {}
+													},
+													"jwt": {
+														"not": {}
+													},
+													"none": {
+														"not": {}
+													}
+												},
+												"required": [
+													"mtls"
+												],
+												"additionalProperties": false
+											},
+											{
+												"type": "object",
+												"properties": {
+													"name": {
+														"not": {}
+													},
+													"config": {
+														"not": {}
+													},
+													"mtls": {
+														"not": {}
+													},
+													"bearer": {
+														"type": "object",
+														"properties": {
+															"tokens": {
+																"type": "string"
+															}
+														},
+														"required": [
+															"tokens"
+														],
+														"additionalProperties": false
+													},
+													"jwt": {
+														"not": {}
+													},
+													"none": {
+														"not": {}
+													}
+												},
+												"required": [
+													"bearer"
+												],
+												"additionalProperties": false
+											},
+											{
+												"type": "object",
+												"properties": {
+													"name": {
+														"not": {}
+													},
+													"config": {
+														"not": {}
+													},
+													"mtls": {
+														"not": {}
+													},
+													"bearer": {
+														"not": {}
+													},
+													"jwt": {
+														"type": "object",
+														"properties": {
+															"issuer": {
+																"type": "string",
+																"minLength": 1
+															},
+															"audience": {
+																"type": "array",
+																"minItems": 1,
+																"items": [
+																	{
+																		"type": "string",
+																		"minLength": 1
+																	}
+																],
+																"additionalItems": {
+																	"type": "string",
+																	"minLength": 1
+																}
+															},
+															"algorithms": {
+																"type": "array",
+																"minItems": 1,
+																"items": [
+																	{
+																		"type": "string",
+																		"enum": [
+																			"RS256",
+																			"RS384",
+																			"RS512",
+																			"PS256",
+																			"PS384",
+																			"PS512",
+																			"ES256",
+																			"ES384",
+																			"ES512",
+																			"EdDSA"
+																		]
+																	}
+																],
+																"additionalItems": {
+																	"type": "string",
+																	"enum": [
+																		"RS256",
+																		"RS384",
+																		"RS512",
+																		"PS256",
+																		"PS384",
+																		"PS512",
+																		"ES256",
+																		"ES384",
+																		"ES512",
+																		"EdDSA"
+																	]
+																}
+															},
+															"identityClaim": {
+																"type": "string",
+																"minLength": 1
+															},
+															"clockTolerance": {
+																"type": "string"
+															},
+															"keys": {
+																"anyOf": [
+																	{
+																		"type": "object",
+																		"properties": {
+																			"jwksUrl": {
+																				"type": "string"
+																			},
+																			"publicKey": {
+																				"not": {}
+																			}
+																		},
+																		"required": [
+																			"jwksUrl"
+																		],
+																		"additionalProperties": false
+																	},
+																	{
+																		"type": "object",
+																		"properties": {
+																			"publicKey": {
+																				"type": "string"
+																			},
+																			"jwksUrl": {
+																				"not": {}
+																			}
+																		},
+																		"required": [
+																			"publicKey"
+																		],
+																		"additionalProperties": false
+																	}
+																]
+															}
+														},
+														"required": [
+															"issuer",
+															"audience",
+															"algorithms",
+															"keys"
+														],
+														"additionalProperties": false
+													},
+													"none": {
+														"not": {}
+													}
+												},
+												"required": [
+													"jwt"
+												],
+												"additionalProperties": false
+											},
+											{
+												"type": "object",
+												"properties": {
+													"name": {
+														"not": {}
+													},
+													"config": {
+														"not": {}
+													},
+													"mtls": {
+														"not": {}
+													},
+													"bearer": {
+														"not": {}
+													},
+													"jwt": {
+														"not": {}
+													},
+													"none": {
+														"type": "object",
+														"properties": {
+															"identity": {
+																"type": "string"
+															}
+														},
+														"additionalProperties": false
+													}
+												},
+												"required": [
+													"none"
+												],
+												"additionalProperties": false
+											}
+										]
+									},
+									"cert": {
+										"not": {}
+									},
+									"key": {
+										"not": {}
+									}
+								},
+								"required": [
+									"url"
+								],
+								"additionalProperties": false
+							},
+							{
+								"type": "object",
+								"properties": {
+									"url": {
+										"type": "string",
+										"pattern": "^wss:\\/\\/"
+									},
+									"unix": {
+										"not": {}
+									},
+									"command": {
+										"not": {}
+									},
+									"stdio": {
+										"not": {}
+									},
+									"local": {
+										"not": {}
+									},
+									"worker": {
+										"not": {}
+									},
+									"transport": {
+										"not": {}
+									},
+									"auth": {
+										"anyOf": [
+											{
+												"type": "object",
+												"properties": {
+													"name": {
+														"type": "string"
+													},
+													"config": {},
+													"mtls": {
+														"not": {}
+													},
+													"bearer": {
+														"not": {}
+													},
+													"jwt": {
+														"not": {}
+													},
+													"none": {
+														"not": {}
+													}
+												},
+												"required": [
+													"name"
+												],
+												"additionalProperties": false
+											},
+											{
+												"type": "object",
+												"properties": {
+													"name": {
+														"not": {}
+													},
+													"config": {
+														"not": {}
+													},
+													"mtls": {
+														"type": "object",
+														"properties": {
+															"ca": {
+																"type": "string"
+															}
+														},
+														"required": [
+															"ca"
+														],
+														"additionalProperties": false
+													},
+													"bearer": {
+														"not": {}
+													},
+													"jwt": {
+														"not": {}
+													},
+													"none": {
+														"not": {}
+													}
+												},
+												"required": [
+													"mtls"
+												],
+												"additionalProperties": false
+											},
+											{
+												"type": "object",
+												"properties": {
+													"name": {
+														"not": {}
+													},
+													"config": {
+														"not": {}
+													},
+													"mtls": {
+														"not": {}
+													},
+													"bearer": {
+														"type": "object",
+														"properties": {
+															"tokens": {
+																"type": "string"
+															}
+														},
+														"required": [
+															"tokens"
+														],
+														"additionalProperties": false
+													},
+													"jwt": {
+														"not": {}
+													},
+													"none": {
+														"not": {}
+													}
+												},
+												"required": [
+													"bearer"
+												],
+												"additionalProperties": false
+											},
+											{
+												"type": "object",
+												"properties": {
+													"name": {
+														"not": {}
+													},
+													"config": {
+														"not": {}
+													},
+													"mtls": {
+														"not": {}
+													},
+													"bearer": {
+														"not": {}
+													},
+													"jwt": {
+														"type": "object",
+														"properties": {
+															"issuer": {
+																"type": "string",
+																"minLength": 1
+															},
+															"audience": {
+																"type": "array",
+																"minItems": 1,
+																"items": [
+																	{
+																		"type": "string",
+																		"minLength": 1
+																	}
+																],
+																"additionalItems": {
+																	"type": "string",
+																	"minLength": 1
+																}
+															},
+															"algorithms": {
+																"type": "array",
+																"minItems": 1,
+																"items": [
+																	{
+																		"type": "string",
+																		"enum": [
+																			"RS256",
+																			"RS384",
+																			"RS512",
+																			"PS256",
+																			"PS384",
+																			"PS512",
+																			"ES256",
+																			"ES384",
+																			"ES512",
+																			"EdDSA"
+																		]
+																	}
+																],
+																"additionalItems": {
+																	"type": "string",
+																	"enum": [
+																		"RS256",
+																		"RS384",
+																		"RS512",
+																		"PS256",
+																		"PS384",
+																		"PS512",
+																		"ES256",
+																		"ES384",
+																		"ES512",
+																		"EdDSA"
+																	]
+																}
+															},
+															"identityClaim": {
+																"type": "string",
+																"minLength": 1
+															},
+															"clockTolerance": {
+																"type": "string"
+															},
+															"keys": {
+																"anyOf": [
+																	{
+																		"type": "object",
+																		"properties": {
+																			"jwksUrl": {
+																				"type": "string"
+																			},
+																			"publicKey": {
+																				"not": {}
+																			}
+																		},
+																		"required": [
+																			"jwksUrl"
+																		],
+																		"additionalProperties": false
+																	},
+																	{
+																		"type": "object",
+																		"properties": {
+																			"publicKey": {
+																				"type": "string"
+																			},
+																			"jwksUrl": {
+																				"not": {}
+																			}
+																		},
+																		"required": [
+																			"publicKey"
+																		],
+																		"additionalProperties": false
+																	}
+																]
+															}
+														},
+														"required": [
+															"issuer",
+															"audience",
+															"algorithms",
+															"keys"
+														],
+														"additionalProperties": false
+													},
+													"none": {
+														"not": {}
+													}
+												},
+												"required": [
+													"jwt"
+												],
+												"additionalProperties": false
+											},
+											{
+												"type": "object",
+												"properties": {
+													"name": {
+														"not": {}
+													},
+													"config": {
+														"not": {}
+													},
+													"mtls": {
+														"not": {}
+													},
+													"bearer": {
+														"not": {}
+													},
+													"jwt": {
+														"not": {}
+													},
+													"none": {
+														"type": "object",
+														"properties": {
+															"identity": {
+																"type": "string"
+															}
+														},
+														"additionalProperties": false
+													}
+												},
+												"required": [
+													"none"
+												],
+												"additionalProperties": false
+											}
+										]
+									},
+									"cert": {
+										"type": "string"
+									},
+									"key": {
+										"type": "string"
+									}
+								},
+								"required": [
+									"url",
+									"cert",
+									"key"
+								],
+								"additionalProperties": false
+							},
+							{
+								"type": "object",
+								"properties": {
+									"url": {
+										"not": {}
+									},
+									"unix": {
+										"type": "string"
+									},
+									"command": {
+										"not": {}
+									},
+									"stdio": {
+										"not": {}
+									},
+									"local": {
+										"not": {}
+									},
+									"worker": {
+										"not": {}
+									},
+									"transport": {
+										"not": {}
+									},
+									"auth": {
+										"anyOf": [
+											{
+												"type": "object",
+												"properties": {
+													"name": {
+														"type": "string"
+													},
+													"config": {},
+													"mtls": {
+														"not": {}
+													},
+													"bearer": {
+														"not": {}
+													},
+													"jwt": {
+														"not": {}
+													},
+													"none": {
+														"not": {}
+													}
+												},
+												"required": [
+													"name"
+												],
+												"additionalProperties": false
+											},
+											{
+												"type": "object",
+												"properties": {
+													"name": {
+														"not": {}
+													},
+													"config": {
+														"not": {}
+													},
+													"mtls": {
+														"type": "object",
+														"properties": {
+															"ca": {
+																"type": "string"
+															}
+														},
+														"required": [
+															"ca"
+														],
+														"additionalProperties": false
+													},
+													"bearer": {
+														"not": {}
+													},
+													"jwt": {
+														"not": {}
+													},
+													"none": {
+														"not": {}
+													}
+												},
+												"required": [
+													"mtls"
+												],
+												"additionalProperties": false
+											},
+											{
+												"type": "object",
+												"properties": {
+													"name": {
+														"not": {}
+													},
+													"config": {
+														"not": {}
+													},
+													"mtls": {
+														"not": {}
+													},
+													"bearer": {
+														"type": "object",
+														"properties": {
+															"tokens": {
+																"type": "string"
+															}
+														},
+														"required": [
+															"tokens"
+														],
+														"additionalProperties": false
+													},
+													"jwt": {
+														"not": {}
+													},
+													"none": {
+														"not": {}
+													}
+												},
+												"required": [
+													"bearer"
+												],
+												"additionalProperties": false
+											},
+											{
+												"type": "object",
+												"properties": {
+													"name": {
+														"not": {}
+													},
+													"config": {
+														"not": {}
+													},
+													"mtls": {
+														"not": {}
+													},
+													"bearer": {
+														"not": {}
+													},
+													"jwt": {
+														"type": "object",
+														"properties": {
+															"issuer": {
+																"type": "string",
+																"minLength": 1
+															},
+															"audience": {
+																"type": "array",
+																"minItems": 1,
+																"items": [
+																	{
+																		"type": "string",
+																		"minLength": 1
+																	}
+																],
+																"additionalItems": {
+																	"type": "string",
+																	"minLength": 1
+																}
+															},
+															"algorithms": {
+																"type": "array",
+																"minItems": 1,
+																"items": [
+																	{
+																		"type": "string",
+																		"enum": [
+																			"RS256",
+																			"RS384",
+																			"RS512",
+																			"PS256",
+																			"PS384",
+																			"PS512",
+																			"ES256",
+																			"ES384",
+																			"ES512",
+																			"EdDSA"
+																		]
+																	}
+																],
+																"additionalItems": {
+																	"type": "string",
+																	"enum": [
+																		"RS256",
+																		"RS384",
+																		"RS512",
+																		"PS256",
+																		"PS384",
+																		"PS512",
+																		"ES256",
+																		"ES384",
+																		"ES512",
+																		"EdDSA"
+																	]
+																}
+															},
+															"identityClaim": {
+																"type": "string",
+																"minLength": 1
+															},
+															"clockTolerance": {
+																"type": "string"
+															},
+															"keys": {
+																"anyOf": [
+																	{
+																		"type": "object",
+																		"properties": {
+																			"jwksUrl": {
+																				"type": "string"
+																			},
+																			"publicKey": {
+																				"not": {}
+																			}
+																		},
+																		"required": [
+																			"jwksUrl"
+																		],
+																		"additionalProperties": false
+																	},
+																	{
+																		"type": "object",
+																		"properties": {
+																			"publicKey": {
+																				"type": "string"
+																			},
+																			"jwksUrl": {
+																				"not": {}
+																			}
+																		},
+																		"required": [
+																			"publicKey"
+																		],
+																		"additionalProperties": false
+																	}
+																]
+															}
+														},
+														"required": [
+															"issuer",
+															"audience",
+															"algorithms",
+															"keys"
+														],
+														"additionalProperties": false
+													},
+													"none": {
+														"not": {}
+													}
+												},
+												"required": [
+													"jwt"
+												],
+												"additionalProperties": false
+											},
+											{
+												"type": "object",
+												"properties": {
+													"name": {
+														"not": {}
+													},
+													"config": {
+														"not": {}
+													},
+													"mtls": {
+														"not": {}
+													},
+													"bearer": {
+														"not": {}
+													},
+													"jwt": {
+														"not": {}
+													},
+													"none": {
+														"type": "object",
+														"properties": {
+															"identity": {
+																"type": "string"
+															}
+														},
+														"additionalProperties": false
+													}
+												},
+												"required": [
+													"none"
+												],
+												"additionalProperties": false
+											}
+										]
+									}
+								},
+								"required": [
+									"unix"
+								],
+								"additionalProperties": false
+							},
+							{
+								"type": "object",
+								"properties": {
+									"url": {
+										"not": {}
+									},
+									"unix": {
+										"not": {}
+									},
+									"command": {
+										"not": {}
+									},
+									"stdio": {
+										"type": "boolean",
+										"enum": [
+											true
+										]
+									},
+									"local": {
+										"not": {}
+									},
+									"worker": {
+										"not": {}
+									},
+									"transport": {
+										"not": {}
+									},
+									"auth": {
+										"not": {}
+									},
+									"identity": {
+										"type": "string"
+									}
+								},
+								"required": [
+									"stdio"
+								],
+								"additionalProperties": false
+							},
+							{
+								"type": "object",
+								"properties": {
+									"url": {
+										"not": {}
+									},
+									"unix": {
+										"not": {}
+									},
+									"command": {
+										"not": {}
+									},
+									"stdio": {
+										"not": {}
+									},
+									"local": {
+										"not": {}
+									},
+									"worker": {
+										"not": {}
+									},
+									"transport": {
+										"type": "object",
+										"properties": {
+											"name": {
+												"type": "string"
+											},
+											"config": {}
+										},
+										"required": [
+											"name"
+										],
+										"additionalProperties": false
+									},
+									"auth": {
+										"anyOf": [
+											{
+												"type": "object",
+												"properties": {
+													"name": {
+														"type": "string"
+													},
+													"config": {},
+													"mtls": {
+														"not": {}
+													},
+													"bearer": {
+														"not": {}
+													},
+													"jwt": {
+														"not": {}
+													},
+													"none": {
+														"not": {}
+													}
+												},
+												"required": [
+													"name"
+												],
+												"additionalProperties": false
+											},
+											{
+												"type": "object",
+												"properties": {
+													"name": {
+														"not": {}
+													},
+													"config": {
+														"not": {}
+													},
+													"mtls": {
+														"type": "object",
+														"properties": {
+															"ca": {
+																"type": "string"
+															}
+														},
+														"required": [
+															"ca"
+														],
+														"additionalProperties": false
+													},
+													"bearer": {
+														"not": {}
+													},
+													"jwt": {
+														"not": {}
+													},
+													"none": {
+														"not": {}
+													}
+												},
+												"required": [
+													"mtls"
+												],
+												"additionalProperties": false
+											},
+											{
+												"type": "object",
+												"properties": {
+													"name": {
+														"not": {}
+													},
+													"config": {
+														"not": {}
+													},
+													"mtls": {
+														"not": {}
+													},
+													"bearer": {
+														"type": "object",
+														"properties": {
+															"tokens": {
+																"type": "string"
+															}
+														},
+														"required": [
+															"tokens"
+														],
+														"additionalProperties": false
+													},
+													"jwt": {
+														"not": {}
+													},
+													"none": {
+														"not": {}
+													}
+												},
+												"required": [
+													"bearer"
+												],
+												"additionalProperties": false
+											},
+											{
+												"type": "object",
+												"properties": {
+													"name": {
+														"not": {}
+													},
+													"config": {
+														"not": {}
+													},
+													"mtls": {
+														"not": {}
+													},
+													"bearer": {
+														"not": {}
+													},
+													"jwt": {
+														"type": "object",
+														"properties": {
+															"issuer": {
+																"type": "string",
+																"minLength": 1
+															},
+															"audience": {
+																"type": "array",
+																"minItems": 1,
+																"items": [
+																	{
+																		"type": "string",
+																		"minLength": 1
+																	}
+																],
+																"additionalItems": {
+																	"type": "string",
+																	"minLength": 1
+																}
+															},
+															"algorithms": {
+																"type": "array",
+																"minItems": 1,
+																"items": [
+																	{
+																		"type": "string",
+																		"enum": [
+																			"RS256",
+																			"RS384",
+																			"RS512",
+																			"PS256",
+																			"PS384",
+																			"PS512",
+																			"ES256",
+																			"ES384",
+																			"ES512",
+																			"EdDSA"
+																		]
+																	}
+																],
+																"additionalItems": {
+																	"type": "string",
+																	"enum": [
+																		"RS256",
+																		"RS384",
+																		"RS512",
+																		"PS256",
+																		"PS384",
+																		"PS512",
+																		"ES256",
+																		"ES384",
+																		"ES512",
+																		"EdDSA"
+																	]
+																}
+															},
+															"identityClaim": {
+																"type": "string",
+																"minLength": 1
+															},
+															"clockTolerance": {
+																"type": "string"
+															},
+															"keys": {
+																"anyOf": [
+																	{
+																		"type": "object",
+																		"properties": {
+																			"jwksUrl": {
+																				"type": "string"
+																			},
+																			"publicKey": {
+																				"not": {}
+																			}
+																		},
+																		"required": [
+																			"jwksUrl"
+																		],
+																		"additionalProperties": false
+																	},
+																	{
+																		"type": "object",
+																		"properties": {
+																			"publicKey": {
+																				"type": "string"
+																			},
+																			"jwksUrl": {
+																				"not": {}
+																			}
+																		},
+																		"required": [
+																			"publicKey"
+																		],
+																		"additionalProperties": false
+																	}
+																]
+															}
+														},
+														"required": [
+															"issuer",
+															"audience",
+															"algorithms",
+															"keys"
+														],
+														"additionalProperties": false
+													},
+													"none": {
+														"not": {}
+													}
+												},
+												"required": [
+													"jwt"
+												],
+												"additionalProperties": false
+											},
+											{
+												"type": "object",
+												"properties": {
+													"name": {
+														"not": {}
+													},
+													"config": {
+														"not": {}
+													},
+													"mtls": {
+														"not": {}
+													},
+													"bearer": {
+														"not": {}
+													},
+													"jwt": {
+														"not": {}
+													},
+													"none": {
+														"type": "object",
+														"properties": {
+															"identity": {
+																"type": "string"
+															}
+														},
+														"additionalProperties": false
+													}
+												},
+												"required": [
+													"none"
+												],
+												"additionalProperties": false
+											}
+										]
+									}
+								},
+								"required": [
+									"transport"
+								],
+								"additionalProperties": false
+							}
+						]
+					}
+				}
+			},
+			"required": [
+				"root",
+				"state",
+				"listen"
+			],
+			"additionalProperties": false
+		},
+		"required": true
+	},
+	{
+		"names": [
+			"remote/cli",
+			"@graftland/plugin-remote/cli"
+		],
+		"schema": {
+			"not": {
+				"type": "null"
+			}
+		}
+	}
+]
