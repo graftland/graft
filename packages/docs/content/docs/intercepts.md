@@ -15,8 +15,16 @@ references, for example the annotations added to every log line.
 
 ## Change a reference
 
-```ts
-import { References } from "effect"
+```ts import.meta.vitest name="intercepts: change a reference"
+import { Effect, References, Schema, Stream } from "effect"
+
+import { Graft, Plugin } from "@graftland/graft"
+
+const tenant = Plugin.make({
+	name: "tenant",
+	config: Schema.Struct({ name: Schema.String }),
+	apply: () => Effect.log("ready"),
+})
 
 const tenantA = Graft.plugin(
 	tenant,
@@ -30,6 +38,19 @@ const tenantA = Graft.plugin(
 		],
 	},
 )
+
+const [line] = await Effect.runPromise(
+	Effect.gen(function* () {
+		yield* (yield* tenantA).await
+		return yield* Graft.logs.pipe(Stream.take(1), Stream.runCollect)
+	}).pipe(
+		Effect.annotateLogs({ app: "shop" }),
+		Effect.scoped,
+		Effect.provide(Graft.layer),
+	),
+)
+line?.annotations["tenant"] // => "a"
+line?.annotations["app"] // => "shop"
 ```
 
 The function receives the value from outside, so intercepts nest. Every log line
@@ -42,16 +63,52 @@ Use references for settings that a service should read from its caller. A
 service method that returns an Effect runs in the caller's fiber, so it sees the
 caller's intercepts:
 
-```ts
+```ts import.meta.vitest name="intercepts: settings that follow the caller"
+import { Context, Effect, Stream } from "effect"
+
+import { Graft, Plugin } from "@graftland/graft"
+
 const Formal = Context.Reference<boolean>("app/Formal", {
 	defaultValue: () => false,
 })
 
-// Inside the Greeter service:
-const greet = (name: string) =>
-	Effect.flatMap(Formal, (formal) =>
-		Effect.log(formal ? `Good day, ${name}.` : `Hi, ${name}!`),
-	)
+class Greeter extends Context.Service<
+	Greeter,
+	{ readonly greet: (name: string) => Effect.Effect<void> }
+>()("app/Greeter") {}
+
+const greeter = Plugin.make({
+	name: "greeter",
+	apply: () =>
+		Graft.provide(Greeter, {
+			greet: (name) =>
+				Effect.flatMap(Formal, (formal) =>
+					Effect.log(formal ? `Good day, ${name}.` : `Hi, ${name}!`),
+				),
+		}),
+})
+
+const hello = Plugin.make({
+	name: "hello",
+	inject: [Greeter],
+	apply: () => Effect.flatMap(Greeter, (greeter) => greeter.greet("Ada")),
+})
+
+const messages = await Effect.runPromise(
+	Effect.gen(function* () {
+		yield* Graft.plugin(greeter)
+		yield* (yield* Graft.plugin(hello)).await
+		const formal = Graft.intercept(Formal, () => true)
+		yield* (yield* Graft.plugin(hello, undefined, { intercept: [formal] }))
+			.await
+		return yield* Graft.logs.pipe(
+			Stream.take(2),
+			Stream.map((line) => line.message),
+			Stream.runCollect,
+		)
+	}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
+)
+messages // => [["Hi, Ada!"], ["Good day, Ada."]]
 ```
 
 A plugin loaded with `Graft.intercept(Formal, () => true)` gets formal greetings
@@ -80,13 +137,14 @@ Each registration has three parts:
 | Schema         | Decodes the configured input.               |
 | Merge function | A typed function `(outer, patch) => value`. |
 
-Register them at application start:
+Register them in the environment that runs the loader, next to its plugin
+resolver and any other platform services:
 
-```ts
-import { Context, Layer, Schema } from "effect"
+```ts import.meta.vitest name="intercepts: register a reference"
+import { Context, Effect, Layer, Schema, Stream } from "effect"
 
-import { Graft } from "@graftland/graft"
-import { Intercept, ModuleResolver } from "@graftland/loader"
+import { Graft, Plugin } from "@graftland/graft"
+import { Intercept, Loader, ModuleResolver } from "@graftland/loader"
 
 const Settings = Context.Reference("app/Settings", {
 	defaultValue: () => ({ color: "blue", size: 12 }),
@@ -103,20 +161,38 @@ const references = Intercept.layer([
 	),
 ])
 
-const environment = Layer.merge(references, ModuleResolver.fromRecord({}))
+const show = Plugin.make({
+	name: "show",
+	apply: () => Effect.flatMap(Settings, Effect.log),
+})
+
+const environment = Layer.merge(references, ModuleResolver.fromRecord({ show }))
 const runtime = Layer.provideMerge(Graft.layer, environment)
+
+const [line] = await Effect.runPromise(
+	Effect.gen(function* () {
+		yield* Graft.plugin(Loader.plugin, [
+			{
+				id: "show",
+				name: "show",
+				intercept: { "app/Settings": { color: "red" } },
+			},
+		])
+		return yield* Graft.logs.pipe(Stream.take(1), Stream.runCollect)
+	}).pipe(Effect.scoped, Effect.provide(runtime)),
+)
+line?.message // => [{ color: "red", size: 12 }]
 ```
 
-Run the loader in this runtime, and add its plugin resolver and any other
-platform services to `environment`. Then an entry can contain:
+In `graft.yml`, the same entry is:
 
-```yaml
-intercept:
-  app/Settings:
-    color: red
+```yaml title="graft.yml"
+- id: show
+  name: show
+  intercept:
+    app/Settings:
+      color: red
 ```
-
-The result is `{ color: "red", size: 12 }`.
 
 How values combine:
 

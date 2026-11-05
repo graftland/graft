@@ -29,6 +29,17 @@ Remote 讓外掛的程式碼在應用程式行程之外執行：放在子行程�
 要在別處執行的外掛分成兩部分。**契約**給出外掛名稱、設定 schema 與跨越邊界的服務，雙方都會匯入它。**實作**就是外掛本身，建置為 JavaScript，只有外掛行程會匯入。
 
 ```ts title="src/contract.ts"
+import { Context, Effect, Schema } from "effect"
+
+import { Contract } from "@graftland/plugin-remote"
+
+export class Greeter extends Context.Service<
+	Greeter,
+	{ readonly greet: (name: string) => Effect.Effect<string> }
+>()("app/Greeter") {}
+
+declare const greeter: Contract.Service
+
 export const config = Schema.Struct({ greeting: Schema.String })
 
 export const contract = Contract.make({
@@ -40,6 +51,12 @@ export const contract = Contract.make({
 ```
 
 ```ts title="src/greeter.ts"
+import { Effect } from "effect"
+
+import { Graft, Plugin } from "@graftland/graft"
+
+import { config, Greeter } from "./contract.ts"
+
 export default Plugin.make({
 	name: "greeter",
 	config,

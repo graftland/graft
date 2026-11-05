@@ -8,8 +8,18 @@ description: 載入外掛、觀察狀態，並在執行期間修改外掛。
 `Graft.plugin` 載入外掛並回傳它的 fork（請參閱
 [fork 控制代碼](../fork-handle/)）：
 
-```ts
-const app = Plugin.make({
+```ts title="app.ts"
+import { Effect, Schema } from "effect"
+
+import { Graft, Plugin } from "@graftland/graft"
+
+const greeter = Plugin.make({
+	name: "greeter",
+	config: Schema.Struct({ greeting: Schema.String }),
+	apply: ({ greeting }) => Effect.log(`${greeting}, world`),
+})
+
+export const app = Plugin.make({
 	name: "app",
 	apply: () =>
 		Effect.gen(function* () {
@@ -99,16 +109,22 @@ fork 會自動在這些狀態之間切換：
 是一個串流，描述整棵 fork 樹，並在每次變化時再次送出。每個節點包含 fork 的
 `id`、`name`、`input`、`state` 和 `children`：
 
-```ts
-const inspector = Plugin.make({
-	name: "inspector",
-	apply: () =>
-		Graft.forks.pipe(
-			Stream.runForEach((trees) => Effect.log(trees)),
-			Plugin.fork,
-			Effect.asVoid,
-		),
-})
+```ts import.meta.vitest name="lifecycle: read the fork tree"
+import { Effect, Option, Stream } from "effect"
+
+import { Fork, Graft } from "@graftland/graft"
+
+import { app } from "./app.ts"
+
+const trees = await Effect.runPromise(
+	Effect.gen(function* () {
+		const fork = yield* Graft.plugin(app)
+		yield* fork.stable
+		return yield* Stream.runHead(Graft.forks)
+	}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
+)
+
+trees // => Option.some([{ id: 1, name: "app", input: undefined, state: Fork.ForkState.Active(), children: [{ id: 2, name: "greeter", input: { greeting: "Hello" }, state: Fork.ForkState.Active(), children: [] }] }])
 ```
 
 ### 日誌
@@ -118,11 +134,13 @@ const inspector = Plugin.make({
 - 新的訂閱者會先收到最近的 1000 筆日誌。
 - 外掛執行時送出的日誌帶有 `graft.fork` 和 `graft.plugin` 註解。
 - 宿主日誌保留自己的註解，Graft 不會替它們捏造外掛身分。因此讀取日誌時，應允許這些註解缺少。
+- 日誌層級、自訂註解和 span，請見[日誌與追蹤](../best-practices/observability/)。
 
 ## 相關頁面
 
-| 頁面                             | 內容                                                |
-| -------------------------------- | --------------------------------------------------- |
-| [fork 控制代碼](../fork-handle/) | `await`、`stable`、`update`、`restart`、`dispose`。 |
-| [取代外掛](../replace/)          | 在一次交易中把外掛換成新版本。                      |
-| [錯誤](../errors/)               | 所有具名的錯誤，以及該如何處理。                    |
+| 頁面                                           | 內容                                                |
+| ---------------------------------------------- | --------------------------------------------------- |
+| [fork 控制代碼](../fork-handle/)               | `await`、`stable`、`update`、`restart`、`dispose`。 |
+| [取代外掛](../replace/)                        | 在一次交易中把外掛換成新版本。                      |
+| [錯誤](../errors/)                             | 所有具名的錯誤，以及該如何處理。                    |
+| [疑難排解](../best-practices/troubleshooting/) | 找出 fork 為何沒有啟動或什麼也不做。                |

@@ -37,6 +37,17 @@ it. The **implementation** is the plugin itself, built to JavaScript; only the
 plugin process imports it.
 
 ```ts title="src/contract.ts"
+import { Context, Effect, Schema } from "effect"
+
+import { Contract } from "@graftland/plugin-remote"
+
+export class Greeter extends Context.Service<
+	Greeter,
+	{ readonly greet: (name: string) => Effect.Effect<string> }
+>()("app/Greeter") {}
+
+declare const greeter: Contract.Service
+
 export const config = Schema.Struct({ greeting: Schema.String })
 
 export const contract = Contract.make({
@@ -48,6 +59,12 @@ export const contract = Contract.make({
 ```
 
 ```ts title="src/greeter.ts"
+import { Effect } from "effect"
+
+import { Graft, Plugin } from "@graftland/graft"
+
+import { config, Greeter } from "./contract.ts"
+
 export default Plugin.make({
 	name: "greeter",
 	config,

@@ -6,8 +6,31 @@ description: 在一次交易中把外掛換成新版本。
 `Graft.replace`
 把外掛換成新版本。舊外掛的每個 fork 都會使用新版本重新啟動，之後再載入舊外掛，也會載入新版本：
 
-```ts
-const upgrade = Graft.replace([[greeterV1, greeterV2]])
+```ts import.meta.vitest name="replace: swap a plugin for a new version"
+import { Array, Effect, Option, Stream } from "effect"
+
+import { Graft, Plugin } from "@graftland/graft"
+
+const greeterV1 = Plugin.make({ name: "greeter v1", apply: () => Effect.void })
+const greeterV2 = Plugin.make({ name: "greeter v2", apply: () => Effect.void })
+
+const names = await Effect.runPromise(
+	Effect.gen(function* () {
+		const running = yield* Graft.plugin(greeterV1)
+		yield* running.await
+		yield* Graft.replace([[greeterV1, greeterV2]])
+		const later = yield* Graft.plugin(greeterV1)
+		yield* later.await
+		// Wait until the running fork has restarted as well.
+		return yield* Graft.forks.pipe(
+			Stream.map(Array.map((fork) => fork.name)),
+			Stream.filter(Array.every((name) => name === "greeter v2")),
+			Stream.runHead,
+		)
+	}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
+)
+
+names // => Option.some(["greeter v2", "greeter v2"])
 ```
 
 ## 型別規則

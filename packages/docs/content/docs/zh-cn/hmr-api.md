@@ -7,8 +7,13 @@ description: 在自己的程序中使用 @graftland/hmr，无需 CLI。
 包可以脱离 CLI 使用。热重载本身的行为请参阅[热重载](../hot-reload/)。
 
 ```ts
+import { Effect } from "effect"
+
+import { Graft } from "@graftland/graft"
 import * as Hmr from "@graftland/hmr"
 import { ModuleResolver } from "@graftland/loader"
+
+declare const directory: string
 
 const program = Effect.gen(function* () {
 	const hmr = yield* Hmr.make({ base: import.meta.url })
@@ -28,13 +33,13 @@ const program = Effect.gen(function* () {
 
 ## 成员
 
-| 成员                                  | 作用                                                                                                                                                                               |
-| ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `make({ base, include })`             | `base` 是解析名称所依据的模块 URL，通常是 `import.meta.url`。`include(url)` 决定哪些文件获得新版本：默认是 `node_modules` 之外的所有文件。                                         |
-| `importer(specifier)`                 | 导入插件模块，登记持续到 HMR 会话关闭。                                                                                                                                            |
-| `importerScoped(specifier, options?)` | 返回需要 `Scope` 的 Effect。每次调用的入口租约持续到该 scope 关闭。参见[带 scope 的 importer](#带-scope-的-importer)。                                                             |
-| `reload`                              | 强制全量重载所有已注册入口及其受跟踪的依赖。返回包含已重载模块的 `Reloaded`，或在需要重启时返回 `Skipped`。模块无法导入或没有导出插件时以 `HmrError` 失败，其 `cause` 是原始错误。 |
-| `watch(paths, options)`               | 一个流：`paths` 下已观察文件的内容或本地解析变化后，增量重载受影响的入口。先等待 `debounce`（默认 50 毫秒）收集更多变化，然后重载。失败的重载以带原因的 `Failed` 发出，监听继续。  |
+| 成员                                  | 作用                                                                                                                                                                                                                  |
+| ------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `make({ base, include })`             | `base` 是解析名称所依据的模块 URL，通常是 `import.meta.url`。`include(url)` 决定哪些文件获得新版本：默认是 `node_modules` 之外的所有文件。                                                                            |
+| `importer(specifier)`                 | 导入插件模块，登记持续到 HMR 会话关闭。                                                                                                                                                                               |
+| `importerScoped(specifier, options?)` | 返回需要 `Scope` 的 Effect。每次调用的入口租约持续到该 scope 关闭。参见[带 scope 的 importer](#带-scope-的-importer)。                                                                                                |
+| `reload`                              | 强制全量重载所有已注册入口及其受跟踪的依赖。返回包含已重载入口的 `Reloaded`；变化[无法生效](../hot-reload/#重载未生效的情形)时返回 `Skipped`。模块无法导入或没有导出插件时以 `HmrError` 失败，其 `cause` 是原始错误。 |
+| `watch(paths, options)`               | 一个流：`paths` 下已观察文件的内容或本地解析变化后，增量重载受影响的入口。先等待 `debounce`（默认 50 毫秒）收集更多变化，然后重载。失败的重载以带原因的 `Failed` 发出，监听继续。                                     |
 
 ## 带 scope 的 importer
 
@@ -67,9 +72,16 @@ const program = Effect.gen(function* () {
 | `onReady`              | 表示监听已安装，不保证操作系统会交付每一个事件。                                     |
 
 ```ts
-hmr.watch([directory], {
+import { String } from "effect"
+
+import type * as Hmr from "@graftland/hmr"
+
+declare const hmr: Hmr.Hmr
+declare const directory: string
+
+const results = hmr.watch([directory], {
 	recursive: true,
-	filter: (path) => path.endsWith(".mjs"),
+	filter: String.endsWith(".mjs"),
 })
 ```
 

@@ -55,15 +55,18 @@ Graft adds no parallel vocabulary. It maps directly onto Effect:
 | Reference-based settings | `Context.Reference`                |
 
 Graft adds only what Effect does not have: services that come and go at run
-time, the plugin tree, events, config files and hot reload.
+time, the plugin tree, events, config files and hot reload. For habits that keep
+plugin code within these mappings, see
+[Effect in plugins](../best-practices/effect/).
 
 ## Where to go next
 
-| I want to…                       | Read                           |
-| -------------------------------- | ------------------------------ |
-| Run something now                | [Quickstart](../quickstart/)   |
-| Write a plugin                   | [Plugins](../plugins/)         |
-| Know why a plugin is not running | [Lifecycle](../lifecycle/)     |
-| Configure an app without code    | [Config file](../config-file/) |
-| Understand an error name         | [Errors](../errors/)           |
-| Run a plugin in another process  | [Remote](../remote/overview/)  |
+| I want to…                       | Read                                               |
+| -------------------------------- | -------------------------------------------------- |
+| Run something now                | [Quickstart](../quickstart/)                       |
+| Write a plugin                   | [Plugins](../plugins/)                             |
+| Know why a plugin is not running | [Lifecycle](../lifecycle/)                         |
+| Configure an app without code    | [Config file](../config-file/)                     |
+| Understand an error name         | [Errors](../errors/)                               |
+| Run a plugin in another process  | [Remote](../remote/overview/)                      |
+| Plan the parts of an application | [Design an application](../best-practices/design/) |

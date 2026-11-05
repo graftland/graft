@@ -200,20 +200,30 @@ Effect 匯入器會為每個候選模組在獨立的 scope 中取得資源：
 如果外掛想使用 Effect 的 `Config` 工具（例如預設值和後備值），可以在 `apply`
 內用它們讀取自己的輸入：
 
-```ts
+```ts import.meta.vitest name="config-file: read the input with Config"
+import { Config, ConfigProvider, Effect, Schema } from "effect"
+
+import { Plugin } from "@graftland/graft"
+
 const Settings = Config.all({
 	port: Config.Port("port").pipe(Config.withDefault(8080)),
 })
+
+const readSettings = (input: unknown) =>
+	Settings.parse(ConfigProvider.fromUnknown(input))
 
 export default Plugin.make({
 	name: "server",
 	config: Schema.Record(Schema.String, Schema.Unknown),
 	apply: (input) =>
 		Effect.gen(function* () {
-			const settings = yield* Settings.parse(ConfigProvider.fromUnknown(input))
-			// ...
+			const settings = yield* readSettings(input)
+			yield* Effect.log(`Listening on port ${settings.port}`)
 		}),
 })
+
+Effect.runSync(readSettings({ port: "3000" })) // => { port: 3000 }
+Effect.runSync(readSettings({})) // => { port: 8080 }
 ```
 
 外掛的 Schema 仍然描述該項目接受什麼。外掛自行從環境提供者讀取的 `Config` 值不是

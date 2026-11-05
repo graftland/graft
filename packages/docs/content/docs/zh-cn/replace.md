@@ -6,8 +6,31 @@ description: 在一个事务中把插件替换为新版本。
 `Graft.replace`
 将插件替换为新版本。旧插件的每个 fork 都会使用替换后的插件重启；之后再加载旧插件，也会加载新插件：
 
-```ts
-const upgrade = Graft.replace([[greeterV1, greeterV2]])
+```ts import.meta.vitest name="replace: swap a plugin for a new version"
+import { Array, Effect, Option, Stream } from "effect"
+
+import { Graft, Plugin } from "@graftland/graft"
+
+const greeterV1 = Plugin.make({ name: "greeter v1", apply: () => Effect.void })
+const greeterV2 = Plugin.make({ name: "greeter v2", apply: () => Effect.void })
+
+const names = await Effect.runPromise(
+	Effect.gen(function* () {
+		const running = yield* Graft.plugin(greeterV1)
+		yield* running.await
+		yield* Graft.replace([[greeterV1, greeterV2]])
+		const later = yield* Graft.plugin(greeterV1)
+		yield* later.await
+		// Wait until the running fork has restarted as well.
+		return yield* Graft.forks.pipe(
+			Stream.map(Array.map((fork) => fork.name)),
+			Stream.filter(Array.every((name) => name === "greeter v2")),
+			Stream.runHead,
+		)
+	}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
+)
+
+names // => Option.some(["greeter v2", "greeter v2"])
 ```
 
 ## 类型规则

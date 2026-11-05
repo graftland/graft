@@ -6,8 +6,11 @@ description: 從外掛和程式碼讀取與編輯設定項目，以及每次編�
 載入器會發布一個 `Loader`
 服務。外掛注入它，就能讀取並編輯[設定檔](../config-file/)中的項目：
 
-```ts
-import { Loader } from "@graftland/loader"
+```ts import.meta.vitest name="loader-api: edit entries from a plugin"
+import { Deferred, Effect, Layer } from "effect"
+
+import { Graft, Plugin } from "@graftland/graft"
+import { Entry, Loader, ModuleResolver } from "@graftland/loader"
 
 const admin = Plugin.make({
 	name: "admin",
@@ -20,6 +23,39 @@ const admin = Plugin.make({
 			yield* loader.update("api", { disabled: true })
 		}),
 })
+
+const cron = Plugin.make({ name: "cron", apply: () => Effect.void })
+const api = Plugin.make({ name: "api", apply: () => Effect.void })
+const resolver = ModuleResolver.fromRecord({ "./plugins/cron.mjs": cron, api })
+
+const entries = await Effect.runPromise(
+	Effect.gen(function* () {
+		const loaderFork = yield* Graft.plugin(Loader.plugin, [
+			{ id: "api", name: "api" },
+		])
+		yield* loaderFork.await
+		const fork = yield* Graft.plugin(admin)
+		yield* fork.await
+		const read = yield* Deferred.make<ReadonlyArray<Entry.Entry>>()
+		const probe = Plugin.make({
+			name: "probe",
+			inject: [Loader.Loader],
+			apply: () =>
+				Loader.Loader.pipe(
+					Effect.flatMap((loader) => Deferred.into(loader.entries, read)),
+					Effect.asVoid,
+				),
+		})
+		yield* Graft.plugin(probe)
+		return yield* Deferred.await(read)
+	}).pipe(
+		Effect.scoped,
+		Effect.provide(Layer.provideMerge(Graft.layer, resolver)),
+	),
+)
+
+entries[0]?.disabled // => true
+entries[1]?.config // => { every: "5 minutes" }
 ```
 
 ## 透過程式碼編輯設定項目

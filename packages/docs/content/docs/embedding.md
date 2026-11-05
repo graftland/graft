@@ -13,6 +13,7 @@ your own Effect program in the same way.
 | Load plugins from a YAML file       | `Include.Include`                      | [Load a config file](#load-a-config-file)         |
 | Reload code without the CLI         | `@graftland/hmr`                       | [HMR API](../hmr-api/)                            |
 | Run a plugin in another process     | `Remote.plugin`                        | [Run a plugin elsewhere](#run-a-plugin-elsewhere) |
+| Test plugins                        | `@effect/vitest` and `Graft.layer`     | [Testing](../best-practices/testing/)             |
 
 ## Run plugins directly
 
@@ -24,6 +25,8 @@ import { Effect, Layer } from "effect"
 import { NodeRuntime, NodeServices } from "@effect/platform-node"
 
 import { Graft } from "@graftland/graft"
+
+import { greeter, hello } from "./plugins.ts"
 
 const program = Effect.gen(function* () {
 	yield* Graft.plugin(greeter, { greeting: "Hello" })
@@ -42,24 +45,68 @@ Services in the layer's environment are available to every plugin. Here these
 are the Node.js services. See
 [Services from the environment](../services/#services-from-the-environment).
 
+`greeter` and `hello` are ordinary plugins, and the other examples on this page
+load them too. `greeter` publishes a `Greeter` service and `hello` injects it:
+
+```ts title="plugins.ts"
+import { Context, Effect, Schema } from "effect"
+
+import { Graft, Plugin } from "@graftland/graft"
+
+export class Greeter extends Context.Service<
+	Greeter,
+	{ readonly greeting: string }
+>()("app/Greeter") {}
+
+export const greeter = Plugin.make({
+	name: "greeter",
+	config: Schema.Struct({ greeting: Schema.String }),
+	apply: (config) => Graft.provide(Greeter, config),
+})
+
+export const hello = Plugin.make({
+	name: "hello",
+	inject: [Greeter],
+	apply: () =>
+		Effect.flatMap(Greeter, ({ greeting }) =>
+			Effect.log(`${greeting}, world!`),
+		),
+})
+```
+
 ## Load entries
 
 `Loader.plugin` runs a list of [entries](../config-file/#entry-fields) kept in
 memory. Edits made through the `Loader` service change only that list. The
 entries need a `ModuleResolver` to turn names into plugins:
 
-```ts
+```ts import.meta.vitest name="embedding: load entries"
+import { Effect, Layer, Option, Stream } from "effect"
+
+import { Graft } from "@graftland/graft"
 import { Loader, ModuleResolver } from "@graftland/loader"
+
+import { greeter, hello } from "./plugins.ts"
 
 const program = Effect.gen(function* () {
 	yield* Graft.plugin(Loader.plugin, [
 		{ id: "greeter", name: "greeter", config: { greeting: "Hello" } },
 		{ id: "hello", name: "hello" },
 	])
-	return yield* Effect.never
+	return yield* Graft.logs.pipe(
+		Stream.map((log) => log.message),
+		Stream.runHead,
+	)
 })
 
 const resolver = ModuleResolver.fromRecord({ greeter, hello })
+
+await Effect.runPromise(
+	program.pipe(
+		Effect.scoped,
+		Effect.provide(Layer.provideMerge(Graft.layer, resolver)),
+	),
+) // => Option.some(["Hello, world!"])
 ```
 
 ### Choosing a resolver
@@ -72,9 +119,19 @@ const resolver = ModuleResolver.fromRecord({ greeter, hello })
 Usually `importer` is `(specifier) => import(specifier)` written in your
 application, so that it finds your application's dependencies.
 
-Provide the resolver in the environment, next to the Node.js services:
+In an application, provide the resolver in the environment, next to the Node.js
+services:
 
 ```ts
+import { Effect, Layer, type Scope } from "effect"
+import { NodeRuntime, NodeServices } from "@effect/platform-node"
+
+import { Graft } from "@graftland/graft"
+import type { ModuleResolver } from "@graftland/loader"
+
+declare const program: Effect.Effect<never, never, Graft.Graft | Scope.Scope>
+declare const resolver: Layer.Layer<ModuleResolver.ModuleResolver>
+
 program.pipe(
 	Effect.scoped,
 	Effect.provide(
@@ -119,6 +176,9 @@ writes edits back to it. With `watch: true`, it also picks up changes that you
 make by hand:
 
 ```ts
+import { Effect } from "effect"
+
+import { Graft } from "@graftland/graft"
 import { Include } from "@graftland/loader"
 
 const program = Effect.gen(function* () {
@@ -142,11 +202,18 @@ contract's implementation in a child process, a worker or on a runner. Load it
 with `Graft.plugin` like any other plugin:
 
 ```ts
+import { Effect, Layer, type Schema } from "effect"
 import { SecureRandom } from "effect/crypto"
+import { NodeRuntime, NodeServices } from "@effect/platform-node"
 
+import { Graft } from "@graftland/graft"
 import * as Remote from "@graftland/plugin-remote"
 
-import { contract } from "./contract.js"
+import { hello } from "./plugins.ts"
+
+declare const contract: Remote.Contract.Contract<
+	Schema.Struct<{ readonly greeting: Schema.String }>
+>
 
 const greeter = Remote.plugin(contract, {
 	contractModule: new URL("./contract.js", import.meta.url).href,

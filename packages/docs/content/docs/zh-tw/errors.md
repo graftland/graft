@@ -4,7 +4,7 @@ description: Graft 中所有具名的錯誤和失敗狀態，以及該如何處�
 ---
 
 Graft 會保留每個失敗的完整 `Cause`
-並記錄日誌。本頁依來源分組，列出你可能遇到的錯誤。
+並記錄日誌。本頁依來源分組，列出你可能遇到的錯誤。若要從 fork 的狀態或症狀而非錯誤名稱著手，請見[疑難排解](../best-practices/troubleshooting/)。
 
 ## fork 失敗
 
@@ -41,7 +41,7 @@ Graft 會保留每個失敗的完整 `Cause`
 | `UnregisteredReference` | 設定檔中的 `intercept` 鍵尚未註冊。               |
 | `InvalidIntercept`      | 值未通過已註冊的 schema。`cause` 是 schema 錯誤。 |
 
-兩種情況下，該項目的外掛都不會啟動。請參閱 [Intercept](../intercepts/)。
+兩種情況下，該項目的外掛都不會啟動。請參閱[設定檔 intercept](../intercepts/#設定檔-intercept)。
 
 ## Loader 與設定檔
 
@@ -64,7 +64,7 @@ Graft 會保留每個失敗的完整 `Cause`
 | `Skipped` / `identity-conflict` | 取代的身分與執行階段的 alias 不相容。                    |
 | `Failed`                        | 重載失敗。值中包含完整的 `Cause`；舊外掛繼續執行。       |
 
-請參閱[熱重載](../hot-reload/)。
+請參閱[重載不適用的情況](../hot-reload/#重載不適用的情況)。
 
 ## Remote
 

@@ -11,6 +11,23 @@ description: 用契约描述远程插件，并从 YAML 或 TypeScript 加载它�
 `RpcGroup`，以及两个函数。
 
 ```ts title="src/contract.ts"
+import { Context, Effect, Schema } from "effect"
+import { Rpc, RpcGroup } from "effect/rpc"
+
+import { Contract } from "@graftland/plugin-remote"
+
+export class GreetingUnavailable extends Schema.TaggedError<
+	GreetingUnavailable,
+	{ readonly brand: unique symbol }
+>()("GreetingUnavailable", { cause: Schema.Defect() }) {}
+
+export class Greeter extends Context.Service<
+	Greeter,
+	{
+		readonly greet: (name: string) => Effect.Effect<string, GreetingUnavailable>
+	}
+>()("app/Greeter") {}
+
 const api = RpcGroup.make(
 	Rpc.make("Greet", {
 		payload: { name: Schema.String },
@@ -32,12 +49,19 @@ const greeter = Contract.service(Greeter, api, {
 				),
 	}),
 })
+
+export const contract = Contract.make({
+	name: "greeter",
+	config: Schema.Struct({ greeting: Schema.String }),
+	module: new URL("./greeter.js", import.meta.url).href,
+	provides: [greeter],
+})
 ```
 
 `toHandlers` 在服务实现的一侧运行，`fromClient` 在使用服务的一侧运行。在
 `fromClient` 中映射
-`RpcClientError`，连接断开时调用方看到的就是他们本来就会处理的错误。然后把描述交给
-`Contract.make`：
+`RpcClientError`，连接断开时调用方看到的就是他们本来就会处理的错误。`Contract.make`
+再把这些描述汇总成契约：
 
 | 字段       | 含义                                                                    |
 | ---------- | ----------------------------------------------------------------------- |
@@ -77,7 +101,7 @@ const greeter = Contract.service(Greeter, api, {
 
 | `connect` 形式                | 插件运行在                             | 其他字段                                                                          |
 | ----------------------------- | -------------------------------------- | --------------------------------------------------------------------------------- |
-| `local: {}`                   | 宿主上的子进程。                       | `local.command` 替换自带的 内部 child 入口，如 `[node, /path/to/childMain.js]`。  |
+| `local: {}`                   | 宿主上的子进程。                       | `local.command` 替换自带的内部 child 入口，如 `[node, /path/to/childMain.js]`。   |
 | `worker: {}`                  | 宿主进程中的 Node worker。             | `worker.execArgv`：传给 worker 的 Node 选项。                                     |
 | `url: wss://…` 或 `ws://…`    | runner 的 WebSocket listener。         | `ca`：代替 Node 内置 CA 的信任 CA 文件。`servername`：代替 URL 主机名的校验名称。 |
 | `unix: path`                  | runner 的 Unix 套接字。                | —                                                                                 |
@@ -98,16 +122,25 @@ const greeter = Contract.service(Greeter, api, {
 `Remote.plugin` 在代码中构建同样的插件，交给 `Graft.plugin`：
 
 ```ts title="src/entry.ts"
+import { Effect } from "effect"
+
+import { Graft } from "@graftland/graft"
+import * as Remote from "@graftland/plugin-remote"
+
+import { contract } from "./contract.ts"
+
 const greeter = Remote.plugin(contract, {
 	contractModule: new URL("./contract.js", import.meta.url).href,
 	connect: { local: {} },
 	shutdownTimeout: "5 seconds",
 })
 
-const fork = yield * Graft.plugin(greeter, { greeting: "Hello" })
-yield * fork.await
-yield * fork.update({ greeting: "Hi" })
-yield * fork.await
+export const program = Effect.gen(function* () {
+	const fork = yield* Graft.plugin(greeter, { greeting: "Hello" })
+	yield* fork.await
+	yield* fork.update({ greeting: "Hi" })
+	yield* fork.await
+})
 ```
 
 工厂只固定部署选项。业务配置传给 `Graft.plugin`；调用 `fork.update`

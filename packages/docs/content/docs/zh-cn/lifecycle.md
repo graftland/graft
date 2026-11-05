@@ -7,8 +7,18 @@ description: 加载插件、观察状态，并在运行期间修改插件。
 
 `Graft.plugin` 加载插件并返回它的 fork（参见 [fork 句柄](../fork-handle/)）：
 
-```ts
-const app = Plugin.make({
+```ts title="app.ts"
+import { Effect, Schema } from "effect"
+
+import { Graft, Plugin } from "@graftland/graft"
+
+const greeter = Plugin.make({
+	name: "greeter",
+	config: Schema.Struct({ greeting: Schema.String }),
+	apply: ({ greeting }) => Effect.log(`${greeting}, world`),
+})
+
+export const app = Plugin.make({
 	name: "app",
 	apply: () =>
 		Effect.gen(function* () {
@@ -96,16 +106,22 @@ fork 会自动在这些状态之间切换：
 `Graft.forks` 是整棵 fork 树的流，每次变化都会再次发出。每个节点包含 fork 的
 `id`、`name`、`input`、`state` 和 `children`：
 
-```ts
-const inspector = Plugin.make({
-	name: "inspector",
-	apply: () =>
-		Graft.forks.pipe(
-			Stream.runForEach((trees) => Effect.log(trees)),
-			Plugin.fork,
-			Effect.asVoid,
-		),
-})
+```ts import.meta.vitest name="lifecycle: read the fork tree"
+import { Effect, Option, Stream } from "effect"
+
+import { Fork, Graft } from "@graftland/graft"
+
+import { app } from "./app.ts"
+
+const trees = await Effect.runPromise(
+	Effect.gen(function* () {
+		const fork = yield* Graft.plugin(app)
+		yield* fork.stable
+		return yield* Stream.runHead(Graft.forks)
+	}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
+)
+
+trees // => Option.some([{ id: 1, name: "app", input: undefined, state: Fork.ForkState.Active(), children: [{ id: 2, name: "greeter", input: { greeting: "Hello" }, state: Fork.ForkState.Active(), children: [] }] }])
 ```
 
 ### 日志
@@ -115,11 +131,13 @@ const inspector = Plugin.make({
 - 新订阅者会先收到最近的 1000 条日志。
 - 插件运行时发出的日志带有 `graft.fork` 和 `graft.plugin` 注解。
 - 宿主日志保留自己的注解。Graft 不会替它们补造插件身份，因此读取日志时应允许这些注解缺失。
+- 日志级别、自定义注解和 span，见[日志与追踪](../best-practices/observability/)。
 
 ## 相关页面
 
-| 页面                         | 内容                                                |
-| ---------------------------- | --------------------------------------------------- |
-| [Fork 句柄](../fork-handle/) | `await`、`stable`、`update`、`restart`、`dispose`。 |
-| [替换插件](../replace/)      | 在一个事务中把插件替换为新版本。                    |
-| [错误](../errors/)           | 所有具名的错误以及应对方法。                        |
+| 页面                                           | 内容                                                |
+| ---------------------------------------------- | --------------------------------------------------- |
+| [Fork 句柄](../fork-handle/)                   | `await`、`stable`、`update`、`restart`、`dispose`。 |
+| [替换插件](../replace/)                        | 在一个事务中把插件替换为新版本。                    |
+| [错误](../errors/)                             | 所有具名的错误以及应对方法。                        |
+| [故障排查](../best-practices/troubleshooting/) | 找出 fork 为何没有启动或什么也不做。                |

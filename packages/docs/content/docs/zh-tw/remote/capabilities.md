@@ -73,13 +73,42 @@ connector 與 listener 會宣告屬性。Remote 相信這些宣告，用它們�
 一個給受信任本機通道使用的 authenticator，只發放一個身分，並且和 `none`
 一樣不檢查任何東西：
 
-```ts title="authenticator.ts"
-export default Plugin.make({
+```ts import.meta.vitest name="remote/capabilities: a fixed identity"
+import { Deferred, Effect, Schema } from "effect"
+
+import { Graft, Plugin } from "@graftland/graft"
+import {
+	Authenticator,
+	type AuthenticatorApi,
+} from "@graftland/plugin-remote/Auth"
+
+const fixedLocalIdentity = Plugin.make({
 	name: "fixed-local-identity",
 	config: Schema.Struct({ identity: Schema.NonEmptyString }),
 	apply: ({ identity }) =>
 		Graft.provide(Authenticator, { _tag: "None", identity }),
 })
+export default fixedLocalIdentity
+
+const published = await Effect.runPromise(
+	Effect.gen(function* () {
+		const found = yield* Deferred.make<AuthenticatorApi>()
+		yield* Graft.plugin(fixedLocalIdentity, { identity: "local" })
+		yield* Graft.plugin(
+			Plugin.make({
+				name: "reader",
+				inject: [Authenticator],
+				apply: () =>
+					Effect.gen(function* () {
+						const authenticator = yield* Authenticator
+						yield* Deferred.succeed(found, authenticator)
+					}),
+			}),
+		)
+		return yield* Deferred.await(found)
+	}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
+)
+published // => { _tag: "None", identity: "local" }
 ```
 
 ## 一致性檢查
@@ -87,11 +116,23 @@ export default Plugin.make({
 `@graftland/plugin-remote/Testing` 收錄內建能力通過的檢查，不需要任何測試框架。
 
 ```ts
+import type { Effect, Scope } from "effect"
+import { layer } from "@effect/vitest"
+
+import { Graft } from "@graftland/graft"
+import * as Testing from "@graftland/plugin-remote/Testing"
+import type { Channel } from "@graftland/plugin-remote/Transport"
+
+declare const plugins: Testing.Capabilities
+declare const openEchoSession: (
+	plugins: Testing.Capabilities,
+) => Effect.Effect<Channel, never, Graft.Graft | Scope.Scope>
+
 const checks = Testing.transport(plugins, openEchoSession)
 
-it.live("preserves bytes", () =>
-	checks.chunks.pipe(Effect.scoped, Effect.provide(runtime)),
-)
+layer(Graft.layer, { excludeTestServices: true })((it) => {
+	it.effect("preserves bytes", () => checks.chunks)
+})
 ```
 
 | 檢查                                          | 驗證內容                                                                                                                                            |

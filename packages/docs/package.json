@@ -11,7 +11,8 @@
 		"build": "astro build",
 		"dev": "astro dev",
 		"preview": "astro preview",
-		"test": "node --test *.test.mjs"
+		"test": "node --test *.test.mjs && vitest run",
+		"snippets": "node snippets.mjs"
 	},
 	"dependencies": {
 		"@astrojs/starlight": "0.42.6",
@@ -19,11 +20,22 @@
 		"starlight-llms-txt": "0.12.0"
 	},
 	"devDependencies": {
+		"@effect/doctest": "4.1.2",
+		"@effect/platform-node": "4.1.2",
+		"@effect/vitest": "4.1.2",
+		"@graftland/cli": "workspace:*",
+		"@graftland/graft": "workspace:*",
+		"@graftland/hmr": "workspace:*",
+		"@graftland/loader": "workspace:*",
+		"@graftland/plugin-remote": "workspace:*",
+		"effect": "4.1.2",
 		"github-slugger": "2.0.0",
 		"prettier": "3.9.10",
 		"starlight-typedoc": "0.23.2",
 		"typedoc": "0.28.20",
 		"typedoc-plugin-markdown": "4.14.1",
-		"typescript": "5.9.3"
+		"typescript": "5.9.3",
+		"vite": "8.3.5",
+		"vitest": "5.1.0"
 	}
 }

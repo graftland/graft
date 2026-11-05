@@ -8,8 +8,11 @@ description:
 The loader publishes a `Loader` service. Plugins inject it to read and edit the
 entries of a [config file](../config-file/):
 
-```ts
-import { Loader } from "@graftland/loader"
+```ts import.meta.vitest name="loader-api: edit entries from a plugin"
+import { Deferred, Effect, Layer } from "effect"
+
+import { Graft, Plugin } from "@graftland/graft"
+import { Entry, Loader, ModuleResolver } from "@graftland/loader"
 
 const admin = Plugin.make({
 	name: "admin",
@@ -22,6 +25,39 @@ const admin = Plugin.make({
 			yield* loader.update("api", { disabled: true })
 		}),
 })
+
+const cron = Plugin.make({ name: "cron", apply: () => Effect.void })
+const api = Plugin.make({ name: "api", apply: () => Effect.void })
+const resolver = ModuleResolver.fromRecord({ "./plugins/cron.mjs": cron, api })
+
+const entries = await Effect.runPromise(
+	Effect.gen(function* () {
+		const loaderFork = yield* Graft.plugin(Loader.plugin, [
+			{ id: "api", name: "api" },
+		])
+		yield* loaderFork.await
+		const fork = yield* Graft.plugin(admin)
+		yield* fork.await
+		const read = yield* Deferred.make<ReadonlyArray<Entry.Entry>>()
+		const probe = Plugin.make({
+			name: "probe",
+			inject: [Loader.Loader],
+			apply: () =>
+				Loader.Loader.pipe(
+					Effect.flatMap((loader) => Deferred.into(loader.entries, read)),
+					Effect.asVoid,
+				),
+		})
+		yield* Graft.plugin(probe)
+		return yield* Deferred.await(read)
+	}).pipe(
+		Effect.scoped,
+		Effect.provide(Layer.provideMerge(Graft.layer, resolver)),
+	),
+)
+
+entries[0]?.disabled // => true
+entries[1]?.config // => { every: "5 minutes" }
 ```
 
 ## Edit entries from code

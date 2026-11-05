@@ -13,19 +13,22 @@ two guarantees:
 
 Call `Graft.provide` inside `apply`:
 
-```ts
-import { Context, Effect } from "effect"
+```ts title="clock.ts"
+import { Context, DateTime, Effect } from "effect"
 
 import { Graft, Plugin } from "@graftland/graft"
 
-class Clock extends Context.Service<
+export class Clock extends Context.Service<
 	Clock,
 	{ readonly now: Effect.Effect<number> }
 >()("app/Clock") {}
 
-const clock = Plugin.make({
+export const clock = Plugin.make({
 	name: "clock",
-	apply: () => Graft.provide(Clock, { now: Effect.sync(() => Date.now()) }),
+	apply: () =>
+		Graft.provide(Clock, {
+			now: Effect.map(DateTime.now, DateTime.toEpochMillis),
+		}),
 })
 ```
 
@@ -41,7 +44,13 @@ const clock = Plugin.make({
 
 List the key in `inject` and read it with `yield*`:
 
-```ts
+```ts import.meta.vitest name="services: use a service"
+import { Effect, Option, Stream } from "effect"
+
+import { Fork, Graft, Plugin } from "@graftland/graft"
+
+import { Clock, clock } from "./clock.ts"
+
 const uptime = Plugin.make({
 	name: "uptime",
 	inject: [Clock],
@@ -56,6 +65,17 @@ const uptime = Plugin.make({
 			)
 		}),
 })
+
+const state = await Effect.runPromise(
+	Effect.gen(function* () {
+		const provider = yield* Graft.plugin(clock)
+		yield* provider.await
+		const fork = yield* Graft.plugin(uptime)
+		yield* fork.await
+		return yield* Stream.runHead(fork.state)
+	}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
+)
+state // => Option.some(Fork.ForkState.Active())
 ```
 
 The finalizer above calls `clock` while the plugin stops. This is safe: a
@@ -126,10 +146,28 @@ Services in the environment where `Graft.layer` is built are visible to every
 plugin. They can satisfy `inject`, and they live as long as that environment.
 Use the environment for services that live as long as the whole application:
 
-```ts
+```ts import.meta.vitest name="services: services from the environment"
+import { Effect, FileSystem, Layer, Option, Path, Stream } from "effect"
 import { NodeServices } from "@effect/platform-node"
 
+import { Fork, Graft, Plugin } from "@graftland/graft"
+
 const layer = Layer.provideMerge(Graft.layer, NodeServices.layer)
+
+const files = Plugin.make({
+	name: "files",
+	inject: [FileSystem.FileSystem, Path.Path],
+	apply: () => Effect.void,
+})
+
+const state = await Effect.runPromise(
+	Effect.gen(function* () {
+		const fork = yield* Graft.plugin(files)
+		yield* fork.await
+		return yield* Stream.runHead(fork.state)
+	}).pipe(Effect.scoped, Effect.provide(layer)),
+)
+state // => Option.some(Fork.ForkState.Active())
 ```
 
 With this layer, a plugin can inject `FileSystem.FileSystem` or `Path.Path`

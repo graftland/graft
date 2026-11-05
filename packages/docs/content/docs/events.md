@@ -10,14 +10,18 @@ An event is a typed token. Its type fixes three things:
 - The result of each handler.
 - The errors that handlers may fail with.
 
-```ts
+```ts title="events.ts"
+import { Option } from "effect"
+
 import { Event } from "@graftland/graft"
 
 // Handlers take a message and return nothing.
-const Message = Event.make<[text: string]>("app/message")
+export const Message = Event.make<[text: string]>("app/message")
 
 // Handlers take a command and may answer it.
-const Command = Event.make<[name: string], Option.Option<string>>("app/command")
+export const Command = Event.make<[name: string], Option.Option<string>>(
+	"app/command",
+)
 ```
 
 ## Handle an event
@@ -25,11 +29,30 @@ const Command = Event.make<[name: string], Option.Option<string>>("app/command")
 `Event.on` registers a handler until the current scope closes. Inside `apply`,
 that means until the plugin stops:
 
-```ts
-const logger = Plugin.make({
-	name: "logger",
-	apply: () => Event.on(Message, (text) => Effect.log(text)),
-})
+```ts import.meta.vitest name="events: handle an event"
+import { Effect, Ref } from "effect"
+
+import { Event, Graft, Plugin } from "@graftland/graft"
+
+import { Message } from "./events.ts"
+
+const heard = await Effect.runPromise(
+	Effect.gen(function* () {
+		const texts = yield* Ref.make<ReadonlyArray<string>>([])
+		const listener = Plugin.make({
+			name: "listener",
+			apply: () =>
+				Event.on(Message, (text) => Ref.update(texts, (all) => [...all, text])),
+		})
+		const fork = yield* Graft.plugin(listener)
+		yield* fork.await
+		yield* Event.emit(Message, "Hello")
+		yield* fork.dispose
+		yield* Event.emit(Message, "Bye")
+		return yield* Ref.get(texts)
+	}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
+)
+heard // => ["Hello"]
 ```
 
 ### Options
@@ -72,12 +95,21 @@ that dispatched the event.
 | `Event.bail`      | One after another        | The first `Some` a handler returns.                 |
 | `Event.waterfall` | As a chain of middleware | The output of the chain.                            |
 
-```ts
+```ts import.meta.vitest name="events: dispatch an event"
+import { Effect, Option } from "effect"
+
+import { Event, Graft } from "@graftland/graft"
+
+import { Command } from "./events.ts"
+
 const status = Effect.gen(function* () {
-	yield* Event.emit(Message, "Hello")
-	const answer = yield* Event.bail(Command, "status")
-	return Option.getOrElse(answer, () => "Nobody answered")
+	yield* Event.on(Command, () => Effect.succeedNone)
+	yield* Event.on(Command, (name) => Effect.succeedSome(`${name}: running`))
+	yield* Event.on(Command, () => Effect.succeedSome("never asked"))
+	return yield* Event.bail(Command, "status")
 })
+
+await Effect.runPromise(status.pipe(Effect.scoped, Effect.provide(Graft.layer))) // => Option.some("status: running")
 ```
 
 ### Removal and cancellation during dispatch
@@ -105,18 +137,23 @@ receives the input and `next`, and may:
 
 `waterfall` ends the chain with `last`:
 
-```ts
+```ts import.meta.vitest name="events: middleware"
+import { Effect, String } from "effect"
+
+import { Event, Graft } from "@graftland/graft"
+
 const Render = Event.middleware<string, string>("app/render")
 
 const render = Effect.gen(function* () {
 	yield* Event.on(Render, (input, next) =>
-		Effect.map(next(input.trim()), (output) => `<p>${output}</p>`),
+		Effect.map(next(String.trim(input)), (output) => `<p>${output}</p>`),
 	)
-	// "<p>HI</p>"
 	return yield* Event.waterfall(Render, "  hi  ", (input) =>
-		Effect.succeed(input.toUpperCase()),
+		Effect.succeed(String.toUpperCase(input)),
 	)
 })
+
+await Effect.runPromise(render.pipe(Effect.scoped, Effect.provide(Graft.layer))) // => "<p>HI</p>"
 ```
 
 ### Where each part runs
@@ -160,10 +197,33 @@ For finer control, `Event.filtered` adds a filter to a dispatch. The filter
 receives the context that each handler was registered in, so it can check any
 service or reference there:
 
-```ts
+```ts import.meta.vitest name="events: filter a dispatch"
+import { Context, Effect, Ref } from "effect"
+
+import { Event, Graft } from "@graftland/graft"
+
+import { Message } from "./events.ts"
+
+const Formal = Context.Reference<boolean>("app/Formal", {
+	defaultValue: () => false,
+})
+
 const formalOnly = Event.emit(Message, "Hello").pipe(
 	Event.filtered((owner) => Context.get(owner, Formal)),
 )
+
+const heard = await Effect.runPromise(
+	Effect.gen(function* () {
+		const names = yield* Ref.make<ReadonlyArray<string>>([])
+		const listen = (name: string) =>
+			Event.on(Message, () => Ref.update(names, (all) => [...all, name]))
+		yield* listen("casual")
+		yield* listen("formal").pipe(Effect.provideService(Formal, true))
+		yield* formalOnly
+		return yield* Ref.get(names)
+	}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
+)
+heard // => ["formal"]
 ```
 
 Handlers registered with `global: true` skip both realms and filters.

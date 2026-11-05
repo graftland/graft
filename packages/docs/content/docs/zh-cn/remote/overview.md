@@ -28,6 +28,17 @@ Remote 让插件的代码在应用进程之外运行：放进子进程、Node wo
 在别处运行的插件要拆成两部分。**契约**给出插件名、配置 schema 和跨越边界的服务，双方都导入它。**实现**是插件本身，构建为 JavaScript，只有插件进程导入它。
 
 ```ts title="src/contract.ts"
+import { Context, Effect, Schema } from "effect"
+
+import { Contract } from "@graftland/plugin-remote"
+
+export class Greeter extends Context.Service<
+	Greeter,
+	{ readonly greet: (name: string) => Effect.Effect<string> }
+>()("app/Greeter") {}
+
+declare const greeter: Contract.Service
+
 export const config = Schema.Struct({ greeting: Schema.String })
 
 export const contract = Contract.make({
@@ -39,6 +50,12 @@ export const contract = Contract.make({
 ```
 
 ```ts title="src/greeter.ts"
+import { Effect } from "effect"
+
+import { Graft, Plugin } from "@graftland/graft"
+
+import { config, Greeter } from "./contract.ts"
+
 export default Plugin.make({
 	name: "greeter",
 	config,

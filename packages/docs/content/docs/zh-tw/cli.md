@@ -128,7 +128,8 @@ YAML 和模組監看器使用原生檔案系統通知，不做輪詢。YAML 監�
 
 ### 日誌與 intercept
 
-日誌以易讀的格式輸出。外掛寫出的每一行都帶有外掛的名稱和 fork id。
+日誌以易讀的格式輸出。外掛寫出的每一行都帶有外掛的名稱和 fork
+id。如需 JSON 輸出或匯出 span，請嵌入 Graft，見[在宿主中選擇輸出](../best-practices/observability/#在宿主中選擇輸出)。
 
 CLI 為項目的 `intercept` 設定登記了兩個 Reference，對該項目及其子外掛生效：
 

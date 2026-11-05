@@ -7,8 +7,13 @@ The `@graftland/hmr` package works without the CLI. For what hot reload does,
 see [Hot reload](../hot-reload/).
 
 ```ts
+import { Effect } from "effect"
+
+import { Graft } from "@graftland/graft"
 import * as Hmr from "@graftland/hmr"
 import { ModuleResolver } from "@graftland/loader"
+
+declare const directory: string
 
 const program = Effect.gen(function* () {
 	const hmr = yield* Hmr.make({ base: import.meta.url })
@@ -29,13 +34,13 @@ nothing.
 
 ## Members
 
-| Member                                | What it does                                                                                                                                                                                                                                                                    |
-| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `make({ base, include })`             | `base` is the module URL that names are resolved from, usually `import.meta.url`. `include(url)` picks the files that get new versions. By default it picks every file outside `node_modules`.                                                                                  |
-| `importer(specifier)`                 | Imports a plugin module and keeps it registered until the HMR session closes.                                                                                                                                                                                                   |
-| `importerScoped(specifier, options?)` | Returns an Effect that needs a `Scope`. Each call holds an entry lease until that scope closes. See [Scoped importers](#scoped-importers).                                                                                                                                      |
-| `reload`                              | Forces a full reload of all registered entries and tracked dependencies. Returns `Reloaded` with the reloaded modules, or `Skipped` when a restart is needed. Fails with `HmrError` if a module does not import or does not export a plugin. Its `cause` is the original error. |
-| `watch(paths, options)`               | A stream that incrementally reloads affected entries when observed contents or local resolutions under `paths` change. It first waits `debounce` (50 ms by default) for more changes. A failed reload is emitted as `Failed` with its cause, and watching goes on.              |
+| Member                                | What it does                                                                                                                                                                                                                                                                                                                       |
+| ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `make({ base, include })`             | `base` is the module URL that names are resolved from, usually `import.meta.url`. `include(url)` picks the files that get new versions. By default it picks every file outside `node_modules`.                                                                                                                                     |
+| `importer(specifier)`                 | Imports a plugin module and keeps it registered until the HMR session closes.                                                                                                                                                                                                                                                      |
+| `importerScoped(specifier, options?)` | Returns an Effect that needs a `Scope`. Each call holds an entry lease until that scope closes. See [Scoped importers](#scoped-importers).                                                                                                                                                                                         |
+| `reload`                              | Forces a full reload of all registered entries and tracked dependencies. Returns `Reloaded` with the reloaded entries, or `Skipped` when the change [cannot apply](../hot-reload/#when-a-reload-does-not-apply). Fails with `HmrError` if a module does not import or does not export a plugin. Its `cause` is the original error. |
+| `watch(paths, options)`               | A stream that incrementally reloads affected entries when observed contents or local resolutions under `paths` change. It first waits `debounce` (50 ms by default) for more changes. A failed reload is emitted as `Failed` with its cause, and watching goes on.                                                                 |
 
 ## Scoped importers
 
@@ -73,9 +78,16 @@ active, pending or reused graphs still need them.
 | `onReady`              | Reports that the watcher is installed. It does not promise that the operating system delivers every event.                               |
 
 ```ts
-hmr.watch([directory], {
+import { String } from "effect"
+
+import type * as Hmr from "@graftland/hmr"
+
+declare const hmr: Hmr.Hmr
+declare const directory: string
+
+const results = hmr.watch([directory], {
 	recursive: true,
-	filter: (path) => path.endsWith(".mjs"),
+	filter: String.endsWith(".mjs"),
 })
 ```
 

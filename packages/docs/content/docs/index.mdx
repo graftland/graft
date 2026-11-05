@@ -60,10 +60,10 @@ import { Card, CardGrid } from "@astrojs/starlight/components"
 
 ## A first graft
 
-```ts
-import { Context, Effect, Schema } from "effect"
+```ts import.meta.vitest name="index: a first graft"
+import { Context, Effect, Option, Schema, Stream } from "effect"
 
-import { Graft, Plugin } from "@graftland/graft"
+import { Fork, Graft, Plugin } from "@graftland/graft"
 
 class Greeter extends Context.Service<
 	Greeter,
@@ -86,6 +86,24 @@ const hello = Plugin.make({
 	inject: [Greeter],
 	apply: () => Effect.flatMap(Greeter, (greeter) => greeter.greet("world")),
 })
+
+const states = await Effect.runPromise(
+	Effect.gen(function* () {
+		const helloFork = yield* Graft.plugin(hello)
+		yield* helloFork.await
+		const waiting = yield* Stream.runHead(helloFork.state)
+
+		yield* Graft.plugin(greeter, { greeting: "Hello" })
+		const started = yield* helloFork.state.pipe(
+			Stream.filter(
+				(state) => state._tag !== "Pending" && state._tag !== "Loading",
+			),
+			Stream.runHead,
+		)
+		return [waiting, started]
+	}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
+)
+states // => [Option.some(Fork.ForkState.Pending({ missing: ["app/Greeter"] })), Option.some(Fork.ForkState.Active())]
 ```
 
 ## Find your way

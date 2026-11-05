@@ -200,20 +200,30 @@ Effect importer 的每个模块候选都有独立的子 scope 来取得资源：
 插件如果想用 Effect `Config` 的组合子（例如默认值和备选来源），可以在 `apply`
 里用它们读取自己的输入：
 
-```ts
+```ts import.meta.vitest name="config-file: read the input with Config"
+import { Config, ConfigProvider, Effect, Schema } from "effect"
+
+import { Plugin } from "@graftland/graft"
+
 const Settings = Config.all({
 	port: Config.Port("port").pipe(Config.withDefault(8080)),
 })
+
+const readSettings = (input: unknown) =>
+	Settings.parse(ConfigProvider.fromUnknown(input))
 
 export default Plugin.make({
 	name: "server",
 	config: Schema.Record(Schema.String, Schema.Unknown),
 	apply: (input) =>
 		Effect.gen(function* () {
-			const settings = yield* Settings.parse(ConfigProvider.fromUnknown(input))
-			// ...
+			const settings = yield* readSettings(input)
+			yield* Effect.log(`Listening on port ${settings.port}`)
 		}),
 })
+
+Effect.runSync(readSettings({ port: "3000" })) // => { port: 3000 }
+Effect.runSync(readSettings({})) // => { port: 8080 }
 ```
 
 插件的 Schema 仍然描述配置项接受什么。插件自行从环境中的 provider 读取的

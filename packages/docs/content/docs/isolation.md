@@ -25,7 +25,32 @@ and an event reaches every handler.
 The `isolate` option gives a fork, and everything below it, its own realm for
 some keys:
 
-```ts
+```ts import.meta.vitest name="isolation: realms"
+import { Context, Effect, Schema, Stream } from "effect"
+
+import { Graft, Plugin } from "@graftland/graft"
+
+class Database extends Context.Service<Database, { readonly url: string }>()(
+	"app/Database",
+) {}
+
+const app = Plugin.make({
+	name: "app",
+	inject: [Database],
+	apply: () =>
+		Effect.flatMap(Database, (db) => Effect.log(`app uses ${db.url}`)),
+})
+
+const tenant = Plugin.make({
+	name: "tenant",
+	config: Schema.Struct({ name: Schema.String }),
+	apply: ({ name }) =>
+		Effect.gen(function* () {
+			yield* Graft.provide(Database, { url: `postgres://${name}` })
+			yield* Graft.plugin(app)
+		}),
+})
+
 const tenants = Plugin.make({
 	name: "tenants",
 	apply: () =>
@@ -34,6 +59,18 @@ const tenants = Plugin.make({
 			yield* Graft.plugin(tenant, { name: "b" }, { isolate: [Database] })
 		}),
 })
+
+const messages = await Effect.runPromise(
+	Effect.gen(function* () {
+		yield* Graft.plugin(tenants)
+		return yield* Graft.logs.pipe(
+			Stream.take(2),
+			Stream.map((line) => line.message),
+			Stream.runCollect,
+		)
+	}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
+)
+messages // => [["app uses postgres://a"], ["app uses postgres://b"]]
 ```
 
 Here, each `tenant` fork can publish its own `Database`.
@@ -49,11 +86,53 @@ Here, each `tenant` fork can publish its own `Database`.
 
 A label puts forks into one shared realm instead of a private one:
 
-```ts
+```ts import.meta.vitest name="isolation: shared realms"
+import { Context, Effect, Stream } from "effect"
+
+import { Graft, Plugin } from "@graftland/graft"
+
+class Database extends Context.Service<Database, { readonly url: string }>()(
+	"app/Database",
+) {}
+
+const database = Plugin.service(
+	Database,
+	Effect.succeed({ url: "postgres://staging" }),
+	{ name: "database" },
+)
+
+const api = Plugin.make({
+	name: "api",
+	inject: [Database],
+	apply: () =>
+		Effect.flatMap(Database, (db) => Effect.log(`api uses ${db.url}`)),
+})
+
+const worker = Plugin.make({
+	name: "worker",
+	inject: [Database],
+	apply: () =>
+		Effect.flatMap(Database, (db) => Effect.log(`worker uses ${db.url}`)),
+})
+
 const staging = Effect.gen(function* () {
+	yield* Graft.plugin(database, undefined, { isolate: [[Database, "staging"]] })
 	yield* Graft.plugin(api, undefined, { isolate: [[Database, "staging"]] })
 	yield* Graft.plugin(worker, undefined, { isolate: [[Database, "staging"]] })
 })
+
+const messages = await Effect.runPromise(
+	Effect.gen(function* () {
+		yield* Graft.provide(Database, { url: "postgres://production" })
+		yield* staging
+		return yield* Graft.logs.pipe(
+			Stream.take(2),
+			Stream.map((line) => line.message),
+			Stream.runCollect,
+		)
+	}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
+)
+messages // => [["api uses postgres://staging"], ["worker uses postgres://staging"]]
 ```
 
 `api` and `worker` share the `Database` of the `staging` realm, wherever they

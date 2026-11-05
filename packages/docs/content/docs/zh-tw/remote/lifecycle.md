@@ -32,12 +32,38 @@ description: 遠端外掛如何停止、如何被替換，以及如何撐過網�
 runner 為實例的每次啟動分配一個
 **generation**：一個存在磁碟上、只增不減的數字。外掛從 `Instance` 讀取自己的值：
 
-```ts
-Effect.gen(function* () {
-	const { id, generation } = yield* Instance
-	yield* ledger.claim({ owner: id, generation })
+```ts import.meta.vitest name="remote/lifecycle: read the instance"
+import { Effect, Ref } from "effect"
+
+import { Graft, Plugin } from "@graftland/graft"
+import { Instance } from "@graftland/plugin-remote"
+
+const claimed = Ref.makeUnsafe({ owner: "", generation: -1 })
+const ledger = {
+	claim: (claim: { owner: string; generation: number }) =>
+		Ref.set(claimed, claim),
+}
+
+const writer = Plugin.make({
+	name: "writer",
+	apply: () =>
+		Effect.gen(function* () {
+			const { id, generation } = yield* Instance
+			yield* ledger.claim({ owner: id, generation })
+		}),
 })
+
+await Effect.runPromise(
+	Effect.gen(function* () {
+		const fork = yield* Graft.plugin(writer)
+		yield* fork.await
+	}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
+)
+
+await Effect.runPromise(Ref.get(claimed)) // => { owner: "local", generation: 0 }
 ```
+
+像這裡這樣不經 Remote 載入時，讀到的是 `local` 與 `0`：
 
 | 執行於           | `id`                | `generation`     |
 | ---------------- | ------------------- | ---------------- |

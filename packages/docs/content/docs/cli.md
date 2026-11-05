@@ -151,7 +151,8 @@ target change.
 ### Logs and intercepts
 
 Logs are printed in a readable format. Each line a plugin writes has the
-plugin's name and fork id.
+plugin's name and fork id. For JSON output or exported spans, embed Graft; see
+[Choose the output in your host](../best-practices/observability/#choose-the-output-in-your-host).
 
 The CLI registers two references for the `intercept` setting of entries,
 applying to the entry and its child plugins:

@@ -129,7 +129,8 @@ watcher 安装后会重新读取文件，以捕获安装期间的变化。任一
 
 ### 日志与 intercept
 
-日志以便于阅读的格式输出。插件写出的每行日志都带有插件名称和 fork id。
+日志以便于阅读的格式输出。插件写出的每行日志都带有插件名称和 fork
+id。如需 JSON 输出或导出 span，请嵌入 Graft，见[在宿主中选择输出](../best-practices/observability/#在宿主中选择输出)。
 
 CLI 为配置项的 `intercept` 设置登记了两个 Reference，对该项及其子插件生效：
 

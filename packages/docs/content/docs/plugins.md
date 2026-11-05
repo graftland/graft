@@ -15,12 +15,12 @@ creates a **fork**: one running instance with its own configuration and its own
 
 ## Define a plugin
 
-```ts
-import { Effect, Schedule, Schema } from "effect"
+```ts import.meta.vitest name="plugins: define a plugin"
+import { Duration, Effect, Option, Schedule, Schema, Stream } from "effect"
 
-import { Plugin } from "@graftland/graft"
+import { Fork, Graft, Plugin } from "@graftland/graft"
 
-export const ticker = Plugin.make({
+const ticker = Plugin.make({
 	name: "ticker",
 	config: Schema.Struct({ every: Schema.Duration }),
 	apply: ({ every }) =>
@@ -30,6 +30,14 @@ export const ticker = Plugin.make({
 			Effect.asVoid,
 		),
 })
+
+await Effect.runPromise(
+	Effect.gen(function* () {
+		const fork = yield* Graft.plugin(ticker, { every: Duration.seconds(1) })
+		yield* fork.await
+		yield* Stream.runHead(fork.state) // => Option.some(Fork.ForkState.Active())
+	}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
+)
 ```
 
 ### Options
@@ -125,7 +133,21 @@ asynchronous or needs services.
 `inject` lists the services a plugin needs. The plugin starts only when all of
 them exist, and stops before any of them goes away.
 
-```ts
+```ts import.meta.vitest name="plugins: dependencies"
+import { Context, Effect, Option, Stream } from "effect"
+
+import { Fork, Graft, Plugin } from "@graftland/graft"
+
+class Database extends Context.Service<
+	Database,
+	{ readonly query: (sql: string) => Effect.Effect<ReadonlyArray<string>> }
+>()("app/Database") {}
+
+class Cache extends Context.Service<
+	Cache,
+	{ readonly get: (key: string) => Effect.Effect<Option.Option<string>> }
+>()("app/Cache") {}
+
 const report = Plugin.make({
 	name: "report",
 	inject: [Database, Plugin.optional(Cache)],
@@ -133,9 +155,29 @@ const report = Plugin.make({
 		Effect.gen(function* () {
 			const database = yield* Database
 			const cache = yield* Effect.serviceOption(Cache)
-			// ...
+			const rows = yield* database.query("select * from sales")
+			yield* Effect.log(`${rows.length} rows, cache: ${Option.isSome(cache)}`)
 		}),
 })
+
+const database = Plugin.service(
+	Database,
+	Effect.succeed({ query: () => Effect.succeed(["north", "south"]) }),
+	{ name: "database" },
+)
+
+await Effect.runPromise(
+	Effect.gen(function* () {
+		const fork = yield* Graft.plugin(report)
+		yield* fork.await
+		yield* Stream.runHead(fork.state) // => Option.some(Fork.ForkState.Pending({ missing: ["app/Database"] }))
+		yield* Graft.plugin(database)
+		yield* fork.state.pipe(
+			Stream.filter(({ _tag }) => _tag !== "Pending" && _tag !== "Loading"),
+			Stream.runHead,
+		) // => Option.some(Fork.ForkState.Active())
+	}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
+)
 ```
 
 | Kind         | Declared as              | Read with              | When the service is missing                             |
@@ -163,7 +205,16 @@ an update function.
 | Returns `true`                                  | The change was applied.     |
 | Returns `false`                                 | Restart the plugin instead. |
 
-```ts
+```ts import.meta.vitest name="plugins: update in place"
+import { Array, Effect, Ref, Schema } from "effect"
+
+import { Graft, Plugin } from "@graftland/graft"
+
+// Stands in for a real server: it records the port of every start.
+const starts = Ref.makeUnsafe<ReadonlyArray<number>>([])
+const startServer = (port: number, banner: Ref.Ref<string>) =>
+	Ref.update(starts, Array.append(port))
+
 const server = Plugin.make({
 	name: "server",
 	config: Schema.Struct({ port: Schema.Int, banner: Schema.String }),
@@ -177,6 +228,17 @@ const server = Plugin.make({
 					: Effect.succeed(false)
 		}),
 })
+
+await Effect.runPromise(
+	Effect.gen(function* () {
+		const fork = yield* Graft.plugin(server, { port: 8080, banner: "Hello" })
+		yield* fork.await
+		yield* fork.update({ port: 8080, banner: "Welcome" })
+		yield* fork.update({ port: 8081, banner: "Welcome" })
+		yield* fork.stable
+		yield* Ref.get(starts) // => [8080, 8081]
+	}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
+)
 ```
 
 The update function is a closure, so it can use anything `apply` created, such
@@ -212,12 +274,40 @@ Then the fork waits. It tries again when any of these happens:
 - One of its dependencies changes.
 - Its `retry` schedule fires.
 
-```ts
+```ts import.meta.vitest name="plugins: failures and retries"
+import { Effect, Ref, Schedule, Schema, Stream } from "effect"
+
+import { Fork, Graft, Plugin } from "@graftland/graft"
+
+class ConnectionError extends Schema.TaggedError<
+	ConnectionError,
+	{ readonly brand: unique symbol }
+>()("ConnectionError", {}) {}
+
+// Stands in for a connection that fails on the first attempt.
+const attempts = Ref.makeUnsafe(0)
+const connect = Effect.flatMap(
+	Ref.updateAndGet(attempts, (n) => n + 1),
+	(attempt) => (attempt === 1 ? ConnectionError.make({}) : Effect.void),
+)
+
 const client = Plugin.make({
 	name: "client",
 	retry: Schedule.exponential("1 second"),
 	apply: () => connect,
 })
+
+await Effect.runPromise(
+	Effect.gen(function* () {
+		const fork = yield* Graft.plugin(client)
+		yield* Effect.flip(fork.await) // => ConnectionError.make({})
+		yield* fork.state.pipe(
+			Stream.filter(Fork.ForkState.$is("Active")),
+			Stream.runHead,
+		)
+		yield* Ref.get(attempts) // => 2
+	}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
+)
 ```
 
 ## Plugins from services and layers
@@ -229,19 +319,80 @@ Two shorthands cover plugins that only publish services.
 | `Plugin.service` | One service       | That service.                      |
 | `Plugin.layer`   | An Effect `Layer` | The services listed in `provides`. |
 
-```ts
-const database = Plugin.service(Database, openDatabase, { name: "database" })
+```ts title="database.ts"
+import { Context, Effect } from "effect"
+
+import { Plugin } from "@graftland/graft"
+
+export class Database extends Context.Service<
+	Database,
+	{ readonly query: (sql: string) => Effect.Effect<ReadonlyArray<string>> }
+>()("app/Database") {}
+
+const openDatabase = Effect.acquireRelease(
+	Effect.succeed({ query: () => Effect.succeed(["north", "south"]) }),
+	() => Effect.log("Database closed"),
+)
+
+export const database = Plugin.service(Database, openDatabase, {
+	name: "database",
+})
 ```
 
 `Plugin.layer` builds the layer from scratch for each fork and tears it down
 with the fork:
 
-```ts
+```ts import.meta.vitest name="plugins: plugin from a layer"
+import { Context, Effect, Layer, Option, Stream } from "effect"
+
+import { Fork, Graft, Plugin } from "@graftland/graft"
+
+import { Database, database } from "./database.ts"
+
+class Storage extends Context.Service<
+	Storage,
+	{ readonly list: Effect.Effect<ReadonlyArray<string>> }
+>()("app/Storage") {}
+
+class StorageAdmin extends Context.Service<
+	StorageAdmin,
+	{ readonly clear: Effect.Effect<void> }
+>()("app/StorageAdmin") {}
+
+const StorageLive = Layer.mergeAll(
+	Layer.effect(
+		Storage,
+		Effect.map(Effect.service(Database), (database) => ({
+			list: database.query("select name from files"),
+		})),
+	),
+	Layer.succeed(StorageAdmin, { clear: Effect.void }),
+)
+
 const storage = Plugin.layer(StorageLive, {
 	name: "storage",
 	inject: [Database],
 	provides: [Storage, StorageAdmin],
 })
+
+// Starts only once both services are published.
+const files = Plugin.make({
+	name: "files",
+	inject: [Storage, StorageAdmin],
+	apply: () => Effect.void,
+})
+
+await Effect.runPromise(
+	Effect.gen(function* () {
+		const provider = yield* Graft.plugin(database)
+		yield* provider.await
+		const layer = yield* Graft.plugin(storage)
+		yield* layer.await
+		const consumer = yield* Graft.plugin(files)
+		yield* consumer.await
+		yield* Stream.runHead(consumer.state) // => Option.some(Fork.ForkState.Active())
+	}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
+)
 ```
 
 ## Plugin modules
@@ -270,3 +421,6 @@ plugin from `src/index.ts`, with a test and a `graft.yml` that runs it through
 | Name it `graft-plugin-<name>`                          | Users can then load it by the short name `<name>`. Graft only tries `@graftland/plugin-<name>` and `graft-plugin-<name>`. `create` warns about other names; they must be listed in full. |
 | Make `@graftland/graft` and `effect` peer dependencies | The application provides them, so every plugin shares one copy.                                                                                                                          |
 | Publish JavaScript                                     | Node does not strip types inside `node_modules`. `npm publish` runs `build` first, which compiles `src` to `dist`.                                                                       |
+
+The rest of what a published package needs is in
+[Plugin packages](../best-practices/packaging/).

@@ -74,7 +74,11 @@ graft remote certificates --out certs --server runner.example --identity billing
 证书、私钥和 CA 始终是文件路径，相对于配置文件。
 
 ```ts
-connect: {
+import { Config } from "effect"
+
+import type * as Remote from "@graftland/plugin-remote"
+
+export const connect: Remote.Connect = {
 	url: "wss://runner.example:7443",
 	instance: "greeter",
 	auth: { jwt: { token: Config.Redacted("RUNNER_TOKEN") } },

@@ -5,7 +5,9 @@ description:
 ---
 
 Graft keeps the full `Cause` of every failure and logs it. This page lists the
-errors you may meet, grouped by where they come from.
+errors you may meet, grouped by where they come from. To start from a fork's
+state or a symptom instead of an error name, see
+[Troubleshooting](../best-practices/troubleshooting/).
 
 ## Fork failures
 

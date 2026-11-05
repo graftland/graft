@@ -80,7 +80,11 @@ runner and the hosts.
 Certificates, keys and CAs are always file paths, relative to the config file.
 
 ```ts
-connect: {
+import { Config } from "effect"
+
+import type * as Remote from "@graftland/plugin-remote"
+
+export const connect: Remote.Connect = {
 	url: "wss://runner.example:7443",
 	instance: "greeter",
 	auth: { jwt: { token: Config.Redacted("RUNNER_TOKEN") } },

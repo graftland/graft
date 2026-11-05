@@ -100,6 +100,19 @@ export default defineConfig({
 					],
 				},
 				{
+					label: "Best practices",
+					translations: { "zh-CN": "最佳实践", "zh-TW": "最佳實務" },
+					items: [
+						"best-practices/design",
+						"best-practices/effect",
+						"best-practices/testing",
+						"best-practices/observability",
+						"best-practices/packaging",
+						"best-practices/production",
+						"best-practices/troubleshooting",
+					],
+				},
+				{
 					label: "API guides",
 					translations: { "zh-CN": "API 使用说明", "zh-TW": "API 使用說明" },
 					items: ["fork-handle", "loader-api", "hmr-api", "errors"],

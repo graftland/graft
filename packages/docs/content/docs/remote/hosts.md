@@ -13,6 +13,23 @@ Describe each service that crosses the boundary with `Contract.service`: its
 key, an Effect `RpcGroup` of its calls, and two functions.
 
 ```ts title="src/contract.ts"
+import { Context, Effect, Schema } from "effect"
+import { Rpc, RpcGroup } from "effect/rpc"
+
+import { Contract } from "@graftland/plugin-remote"
+
+export class GreetingUnavailable extends Schema.TaggedError<
+	GreetingUnavailable,
+	{ readonly brand: unique symbol }
+>()("GreetingUnavailable", { cause: Schema.Defect() }) {}
+
+export class Greeter extends Context.Service<
+	Greeter,
+	{
+		readonly greet: (name: string) => Effect.Effect<string, GreetingUnavailable>
+	}
+>()("app/Greeter") {}
+
 const api = RpcGroup.make(
 	Rpc.make("Greet", {
 		payload: { name: Schema.String },
@@ -34,12 +51,19 @@ const greeter = Contract.service(Greeter, api, {
 				),
 	}),
 })
+
+export const contract = Contract.make({
+	name: "greeter",
+	config: Schema.Struct({ greeting: Schema.String }),
+	module: new URL("./greeter.js", import.meta.url).href,
+	provides: [greeter],
+})
 ```
 
 `toHandlers` runs where the service is implemented, and `fromClient` where it is
 used. Map `RpcClientError` in `fromClient`, so a broken connection reaches
-callers as an error they already handle. Then pass the description to
-`Contract.make`:
+callers as an error they already handle. `Contract.make` collects the
+descriptions into the contract:
 
 | Field      | Meaning                                                                                |
 | ---------- | -------------------------------------------------------------------------------------- |
@@ -78,14 +102,14 @@ Replace the plugin's entry with a `remote` entry. `name: remote` loads
 | `connect`  | Where the plugin runs. One of the forms below.                                                                        |
 | `config`   | The plugin's config in encoded JSON form, checked against the contract's schema before anything starts. Default `{}`. |
 
-| `connect` form                | Runs the plugin                                 | Other fields                                                                                            |
-| ----------------------------- | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
-| `local: {}`                   | In a child process on the host.                 | `local.command` replaces the bundled the internal child entry, such as `[node, /path/to/childMain.js]`. |
-| `worker: {}`                  | In a Node worker in the host process.           | `worker.execArgv`: Node options for the worker.                                                         |
-| `url: wss://…` or `ws://…`    | On a runner's WebSocket listener.               | `ca`: CA file to trust instead of Node's. `servername`: name to verify instead of the URL host.         |
-| `unix: path`                  | On a runner's Unix socket.                      | —                                                                                                       |
-| `command: [program, args…]`   | On a runner started by a command, such as SSH.  | `cwd`, `env`.                                                                                           |
-| `transport: { name, config }` | Through a [custom connector](../capabilities/). | —                                                                                                       |
+| `connect` form                | Runs the plugin                                 | Other fields                                                                                    |
+| ----------------------------- | ----------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `local: {}`                   | In a child process on the host.                 | `local.command` replaces the bundled child entry, such as `[node, /path/to/childMain.js]`.      |
+| `worker: {}`                  | In a Node worker in the host process.           | `worker.execArgv`: Node options for the worker.                                                 |
+| `url: wss://…` or `ws://…`    | On a runner's WebSocket listener.               | `ca`: CA file to trust instead of Node's. `servername`: name to verify instead of the URL host. |
+| `unix: path`                  | On a runner's Unix socket.                      | —                                                                                               |
+| `command: [program, args…]`   | On a runner started by a command, such as SSH.  | `cwd`, `env`.                                                                                   |
+| `transport: { name, config }` | Through a [custom connector](../capabilities/). | —                                                                                               |
 
 - `local` and `worker` take no other fields: no `auth`, `instance`, `lease`,
   `margin` or `expect`.
@@ -101,16 +125,25 @@ Replace the plugin's entry with a `remote` entry. `name: remote` loads
 `Remote.plugin` builds the same plugin in code, for `Graft.plugin`:
 
 ```ts title="src/entry.ts"
+import { Effect } from "effect"
+
+import { Graft } from "@graftland/graft"
+import * as Remote from "@graftland/plugin-remote"
+
+import { contract } from "./contract.ts"
+
 const greeter = Remote.plugin(contract, {
 	contractModule: new URL("./contract.js", import.meta.url).href,
 	connect: { local: {} },
 	shutdownTimeout: "5 seconds",
 })
 
-const fork = yield * Graft.plugin(greeter, { greeting: "Hello" })
-yield * fork.await
-yield * fork.update({ greeting: "Hi" })
-yield * fork.await
+export const program = Effect.gen(function* () {
+	const fork = yield* Graft.plugin(greeter, { greeting: "Hello" })
+	yield* fork.await
+	yield* fork.update({ greeting: "Hi" })
+	yield* fork.await
+})
 ```
 
 The factory fixes deployment options. Pass business config to `Graft.plugin`;

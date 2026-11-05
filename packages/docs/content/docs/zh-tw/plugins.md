@@ -15,12 +15,12 @@ description: 使用 Plugin.make、Plugin.service 和 Plugin.layer 定義外掛�
 
 ## 定義外掛
 
-```ts
-import { Effect, Schedule, Schema } from "effect"
+```ts import.meta.vitest name="plugins: define a plugin"
+import { Duration, Effect, Option, Schedule, Schema, Stream } from "effect"
 
-import { Plugin } from "@graftland/graft"
+import { Fork, Graft, Plugin } from "@graftland/graft"
 
-export const ticker = Plugin.make({
+const ticker = Plugin.make({
 	name: "ticker",
 	config: Schema.Struct({ every: Schema.Duration }),
 	apply: ({ every }) =>
@@ -30,6 +30,14 @@ export const ticker = Plugin.make({
 			Effect.asVoid,
 		),
 })
+
+await Effect.runPromise(
+	Effect.gen(function* () {
+		const fork = yield* Graft.plugin(ticker, { every: Duration.seconds(1) })
+		yield* fork.await
+		yield* Stream.runHead(fork.state) // => Option.some(Fork.ForkState.Active())
+	}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
+)
 ```
 
 ### 選項
@@ -115,7 +123,21 @@ export const ticker = Plugin.make({
 `inject`
 列出外掛需要的服務。只有這些服務全部存在時，外掛才會啟動；任何一個服務消失之前，外掛都會先停止。
 
-```ts
+```ts import.meta.vitest name="plugins: dependencies"
+import { Context, Effect, Option, Stream } from "effect"
+
+import { Fork, Graft, Plugin } from "@graftland/graft"
+
+class Database extends Context.Service<
+	Database,
+	{ readonly query: (sql: string) => Effect.Effect<ReadonlyArray<string>> }
+>()("app/Database") {}
+
+class Cache extends Context.Service<
+	Cache,
+	{ readonly get: (key: string) => Effect.Effect<Option.Option<string>> }
+>()("app/Cache") {}
+
 const report = Plugin.make({
 	name: "report",
 	inject: [Database, Plugin.optional(Cache)],
@@ -123,9 +145,29 @@ const report = Plugin.make({
 		Effect.gen(function* () {
 			const database = yield* Database
 			const cache = yield* Effect.serviceOption(Cache)
-			// ...
+			const rows = yield* database.query("select * from sales")
+			yield* Effect.log(`${rows.length} rows, cache: ${Option.isSome(cache)}`)
 		}),
 })
+
+const database = Plugin.service(
+	Database,
+	Effect.succeed({ query: () => Effect.succeed(["north", "south"]) }),
+	{ name: "database" },
+)
+
+await Effect.runPromise(
+	Effect.gen(function* () {
+		const fork = yield* Graft.plugin(report)
+		yield* fork.await
+		yield* Stream.runHead(fork.state) // => Option.some(Fork.ForkState.Pending({ missing: ["app/Database"] }))
+		yield* Graft.plugin(database)
+		yield* fork.state.pipe(
+			Stream.filter(({ _tag }) => _tag !== "Pending" && _tag !== "Loading"),
+			Stream.runHead,
+		) // => Option.some(Fork.ForkState.Active())
+	}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
+)
 ```
 
 | 種類     | 宣告方式                 | 讀取方式               | 服務缺少時                             |
@@ -149,7 +191,16 @@ const report = Plugin.make({
 | 回傳 `true`                | 已套用變更。       |
 | 回傳 `false`               | 改為重新啟動外掛。 |
 
-```ts
+```ts import.meta.vitest name="plugins: update in place"
+import { Array, Effect, Ref, Schema } from "effect"
+
+import { Graft, Plugin } from "@graftland/graft"
+
+// Stands in for a real server: it records the port of every start.
+const starts = Ref.makeUnsafe<ReadonlyArray<number>>([])
+const startServer = (port: number, banner: Ref.Ref<string>) =>
+	Ref.update(starts, Array.append(port))
+
 const server = Plugin.make({
 	name: "server",
 	config: Schema.Struct({ port: Schema.Int, banner: Schema.String }),
@@ -163,6 +214,17 @@ const server = Plugin.make({
 					: Effect.succeed(false)
 		}),
 })
+
+await Effect.runPromise(
+	Effect.gen(function* () {
+		const fork = yield* Graft.plugin(server, { port: 8080, banner: "Hello" })
+		yield* fork.await
+		yield* fork.update({ port: 8080, banner: "Welcome" })
+		yield* fork.update({ port: 8081, banner: "Welcome" })
+		yield* fork.stable
+		yield* Ref.get(starts) // => [8080, 8081]
+	}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
+)
 ```
 
 更新函式是一個閉包，可以使用 `apply` 建立的任何值，例如這裡的 `banner`。
@@ -193,12 +255,40 @@ const server = Plugin.make({
 - 它的某個相依項目變更。
 - 它的 `retry` 排程觸發。
 
-```ts
+```ts import.meta.vitest name="plugins: failures and retries"
+import { Effect, Ref, Schedule, Schema, Stream } from "effect"
+
+import { Fork, Graft, Plugin } from "@graftland/graft"
+
+class ConnectionError extends Schema.TaggedError<
+	ConnectionError,
+	{ readonly brand: unique symbol }
+>()("ConnectionError", {}) {}
+
+// Stands in for a connection that fails on the first attempt.
+const attempts = Ref.makeUnsafe(0)
+const connect = Effect.flatMap(
+	Ref.updateAndGet(attempts, (n) => n + 1),
+	(attempt) => (attempt === 1 ? ConnectionError.make({}) : Effect.void),
+)
+
 const client = Plugin.make({
 	name: "client",
 	retry: Schedule.exponential("1 second"),
 	apply: () => connect,
 })
+
+await Effect.runPromise(
+	Effect.gen(function* () {
+		const fork = yield* Graft.plugin(client)
+		yield* Effect.flip(fork.await) // => ConnectionError.make({})
+		yield* fork.state.pipe(
+			Stream.filter(Fork.ForkState.$is("Active")),
+			Stream.runHead,
+		)
+		yield* Ref.get(attempts) // => 2
+	}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
+)
 ```
 
 ## 從服務和 Layer 建立外掛
@@ -210,18 +300,79 @@ const client = Plugin.make({
 | `Plugin.service` | 一個服務            | 該服務。                  |
 | `Plugin.layer`   | 一個 Effect `Layer` | `provides` 中列出的服務。 |
 
-```ts
-const database = Plugin.service(Database, openDatabase, { name: "database" })
+```ts title="database.ts"
+import { Context, Effect } from "effect"
+
+import { Plugin } from "@graftland/graft"
+
+export class Database extends Context.Service<
+	Database,
+	{ readonly query: (sql: string) => Effect.Effect<ReadonlyArray<string>> }
+>()("app/Database") {}
+
+const openDatabase = Effect.acquireRelease(
+	Effect.succeed({ query: () => Effect.succeed(["north", "south"]) }),
+	() => Effect.log("Database closed"),
+)
+
+export const database = Plugin.service(Database, openDatabase, {
+	name: "database",
+})
 ```
 
 `Plugin.layer` 為每個 fork 從頭建構 Layer，並在 fork 停止時銷毀它：
 
-```ts
+```ts import.meta.vitest name="plugins: plugin from a layer"
+import { Context, Effect, Layer, Option, Stream } from "effect"
+
+import { Fork, Graft, Plugin } from "@graftland/graft"
+
+import { Database, database } from "./database.ts"
+
+class Storage extends Context.Service<
+	Storage,
+	{ readonly list: Effect.Effect<ReadonlyArray<string>> }
+>()("app/Storage") {}
+
+class StorageAdmin extends Context.Service<
+	StorageAdmin,
+	{ readonly clear: Effect.Effect<void> }
+>()("app/StorageAdmin") {}
+
+const StorageLive = Layer.mergeAll(
+	Layer.effect(
+		Storage,
+		Effect.map(Effect.service(Database), (database) => ({
+			list: database.query("select name from files"),
+		})),
+	),
+	Layer.succeed(StorageAdmin, { clear: Effect.void }),
+)
+
 const storage = Plugin.layer(StorageLive, {
 	name: "storage",
 	inject: [Database],
 	provides: [Storage, StorageAdmin],
 })
+
+// Starts only once both services are published.
+const files = Plugin.make({
+	name: "files",
+	inject: [Storage, StorageAdmin],
+	apply: () => Effect.void,
+})
+
+await Effect.runPromise(
+	Effect.gen(function* () {
+		const provider = yield* Graft.plugin(database)
+		yield* provider.await
+		const layer = yield* Graft.plugin(storage)
+		yield* layer.await
+		const consumer = yield* Graft.plugin(files)
+		yield* consumer.await
+		yield* Stream.runHead(consumer.state) // => Option.some(Fork.ForkState.Active())
+	}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
+)
 ```
 
 ## 外掛模組
@@ -250,3 +401,5 @@ npm create @graftland@latest review -- --template plugin
 | 命名為 `graft-plugin-<name>`                             | 使用者就能用短名稱 `<name>` 載入它。Graft 只會嘗試 `@graftland/plugin-<name>` 和 `graft-plugin-<name>`。其他名稱 `create` 會發出警告，使用時也必須寫完整名稱。 |
 | 將 `@graftland/graft` 和 `effect` 設為 peer dependencies | 由應用程式提供，所有外掛因此共用同一份。                                                                                                                       |
 | 發布 JavaScript                                          | Node 不會移除 `node_modules` 內檔案的型別。`npm publish` 會先執行 `build`，把 `src` 編譯到 `dist`。                                                            |
+
+發布套件需要注意的其他事項見[外掛套件](../best-practices/packaging/)。

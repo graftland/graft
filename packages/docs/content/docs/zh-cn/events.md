@@ -9,14 +9,18 @@ description: 带类型的事件，处理函数归注册它的插件所有。
 - 每个处理函数的返回值。
 - 处理函数可能产生的错误。
 
-```ts
+```ts title="events.ts"
+import { Option } from "effect"
+
 import { Event } from "@graftland/graft"
 
 // Handlers take a message and return nothing.
-const Message = Event.make<[text: string]>("app/message")
+export const Message = Event.make<[text: string]>("app/message")
 
 // Handlers take a command and may answer it.
-const Command = Event.make<[name: string], Option.Option<string>>("app/command")
+export const Command = Event.make<[name: string], Option.Option<string>>(
+	"app/command",
+)
 ```
 
 ## 处理事件
@@ -24,11 +28,30 @@ const Command = Event.make<[name: string], Option.Option<string>>("app/command")
 `Event.on` 注册一个处理函数，在当前 `Scope` 关闭时移除。在 `apply`
 内注册时，它会一直保留到插件停止：
 
-```ts
-const logger = Plugin.make({
-	name: "logger",
-	apply: () => Event.on(Message, (text) => Effect.log(text)),
-})
+```ts import.meta.vitest name="events: handle an event"
+import { Effect, Ref } from "effect"
+
+import { Event, Graft, Plugin } from "@graftland/graft"
+
+import { Message } from "./events.ts"
+
+const heard = await Effect.runPromise(
+	Effect.gen(function* () {
+		const texts = yield* Ref.make<ReadonlyArray<string>>([])
+		const listener = Plugin.make({
+			name: "listener",
+			apply: () =>
+				Event.on(Message, (text) => Ref.update(texts, (all) => [...all, text])),
+		})
+		const fork = yield* Graft.plugin(listener)
+		yield* fork.await
+		yield* Event.emit(Message, "Hello")
+		yield* fork.dispose
+		yield* Event.emit(Message, "Bye")
+		return yield* Ref.get(texts)
+	}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
+)
+heard // => ["Hello"]
 ```
 
 ### 选项
@@ -66,12 +89,21 @@ const logger = Plugin.make({
 | `Event.bail`      | 依次调用       | 返回处理函数给出的第一个 `Some`。               |
 | `Event.waterfall` | 按中间件链调用 | 返回整条链的输出。                              |
 
-```ts
+```ts import.meta.vitest name="events: dispatch an event"
+import { Effect, Option } from "effect"
+
+import { Event, Graft } from "@graftland/graft"
+
+import { Command } from "./events.ts"
+
 const status = Effect.gen(function* () {
-	yield* Event.emit(Message, "Hello")
-	const answer = yield* Event.bail(Command, "status")
-	return Option.getOrElse(answer, () => "Nobody answered")
+	yield* Event.on(Command, () => Effect.succeedNone)
+	yield* Event.on(Command, (name) => Effect.succeedSome(`${name}: running`))
+	yield* Event.on(Command, () => Effect.succeedSome("never asked"))
+	return yield* Event.bail(Command, "status")
 })
+
+await Effect.runPromise(status.pipe(Effect.scoped, Effect.provide(Graft.layer))) // => Option.some("status: running")
 ```
 
 ### 派发期间的移除与取消
@@ -98,18 +130,23 @@ defect 报告，原始中断保存在它的 `cause`
 
 `waterfall` 使用 `last` 作为链的末端：
 
-```ts
+```ts import.meta.vitest name="events: middleware"
+import { Effect, String } from "effect"
+
+import { Event, Graft } from "@graftland/graft"
+
 const Render = Event.middleware<string, string>("app/render")
 
 const render = Effect.gen(function* () {
 	yield* Event.on(Render, (input, next) =>
-		Effect.map(next(input.trim()), (output) => `<p>${output}</p>`),
+		Effect.map(next(String.trim(input)), (output) => `<p>${output}</p>`),
 	)
-	// "<p>HI</p>"
 	return yield* Event.waterfall(Render, "  hi  ", (input) =>
-		Effect.succeed(input.toUpperCase()),
+		Effect.succeed(String.toUpperCase(input)),
 	)
 })
+
+await Effect.runPromise(render.pipe(Effect.scoped, Effect.provide(Graft.layer))) // => "<p>HI</p>"
 ```
 
 ### 各部分的运行上下文
@@ -145,10 +182,33 @@ const render = Effect.gen(function* () {
 需要更细致的控制时，可以用 `Event.filtered`
 为派发添加过滤器。过滤器会收到每个处理函数注册时的上下文，因此可以检查其中的任何服务或 Reference：
 
-```ts
+```ts import.meta.vitest name="events: filter a dispatch"
+import { Context, Effect, Ref } from "effect"
+
+import { Event, Graft } from "@graftland/graft"
+
+import { Message } from "./events.ts"
+
+const Formal = Context.Reference<boolean>("app/Formal", {
+	defaultValue: () => false,
+})
+
 const formalOnly = Event.emit(Message, "Hello").pipe(
 	Event.filtered((owner) => Context.get(owner, Formal)),
 )
+
+const heard = await Effect.runPromise(
+	Effect.gen(function* () {
+		const names = yield* Ref.make<ReadonlyArray<string>>([])
+		const listen = (name: string) =>
+			Event.on(Message, () => Ref.update(names, (all) => [...all, name]))
+		yield* listen("casual")
+		yield* listen("formal").pipe(Effect.provideService(Formal, true))
+		yield* formalOnly
+		return yield* Ref.get(names)
+	}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
+)
+heard // => ["formal"]
 ```
 
 以 `global: true` 注册的处理函数不受领域和过滤器限制。

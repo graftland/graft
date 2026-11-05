@@ -8,8 +8,18 @@ description: Load plugins, follow their state, and change them while they run.
 `Graft.plugin` loads a plugin and returns its fork (see the
 [fork handle](../fork-handle/)):
 
-```ts
-const app = Plugin.make({
+```ts title="app.ts"
+import { Effect, Schema } from "effect"
+
+import { Graft, Plugin } from "@graftland/graft"
+
+const greeter = Plugin.make({
+	name: "greeter",
+	config: Schema.Struct({ greeting: Schema.String }),
+	apply: ({ greeting }) => Effect.log(`${greeting}, world`),
+})
+
+export const app = Plugin.make({
 	name: "app",
 	apply: () =>
 		Effect.gen(function* () {
@@ -107,16 +117,22 @@ failure started the teardown, they are added to the final `Failed` state.
 `Graft.forks` is a stream of the whole fork tree. It emits again on every
 change. Each node has the fork's `id`, `name`, `input`, `state` and `children`:
 
-```ts
-const inspector = Plugin.make({
-	name: "inspector",
-	apply: () =>
-		Graft.forks.pipe(
-			Stream.runForEach((trees) => Effect.log(trees)),
-			Plugin.fork,
-			Effect.asVoid,
-		),
-})
+```ts import.meta.vitest name="lifecycle: read the fork tree"
+import { Effect, Option, Stream } from "effect"
+
+import { Fork, Graft } from "@graftland/graft"
+
+import { app } from "./app.ts"
+
+const trees = await Effect.runPromise(
+	Effect.gen(function* () {
+		const fork = yield* Graft.plugin(app)
+		yield* fork.stable
+		return yield* Stream.runHead(Graft.forks)
+	}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
+)
+
+trees // => Option.some([{ id: 1, name: "app", input: undefined, state: Fork.ForkState.Active(), children: [{ id: 2, name: "greeter", input: { greeting: "Hello" }, state: Fork.ForkState.Active(), children: [] }] }])
 ```
 
 ### Logs
@@ -129,11 +145,14 @@ including logs from the host application.
   annotations.
 - Host logs keep their own annotations. Graft does not invent a plugin identity
   for them, so readers of logs must allow these annotations to be missing.
+- For log levels, your own annotations and spans, see
+  [Logs and tracing](../best-practices/observability/).
 
 ## Related
 
-| Page                           | Covers                                                |
-| ------------------------------ | ----------------------------------------------------- |
-| [Fork handle](../fork-handle/) | `await`, `stable`, `update`, `restart`, `dispose`.    |
-| [Replace plugins](../replace/) | Swapping plugins for new versions in one transaction. |
-| [Errors](../errors/)           | Every named error and what to do about it.            |
+| Page                                                  | Covers                                                |
+| ----------------------------------------------------- | ----------------------------------------------------- |
+| [Fork handle](../fork-handle/)                        | `await`, `stable`, `update`, `restart`, `dispose`.    |
+| [Replace plugins](../replace/)                        | Swapping plugins for new versions in one transaction. |
+| [Errors](../errors/)                                  | Every named error and what to do about it.            |
+| [Troubleshooting](../best-practices/troubleshooting/) | Finding why a fork does not start or does nothing.    |

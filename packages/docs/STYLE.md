@@ -57,10 +57,40 @@ whichever is wrong.
 
 ## Code
 
-- The smallest example that works. Leave out imports a reader already has, and
-  never add type annotations a reader would not write.
+- The smallest example that works. Never add type annotations a reader would not
+  write.
 - One example per idea. Vary only what the section is about.
 - YAML and TypeScript show the same thing the same way across pages.
+- Examples follow the project's own rules: no `Date.now()`, `process.env`,
+  `setTimeout` or global `fetch` inside Effect code, unless the example shows
+  what not to do.
+
+### Checked examples
+
+Every `ts` block is a complete module that compiles, with its imports. The docs
+tests typecheck each block with the repository's settings and Effect
+diagnostics, and run the doctests with
+[`@effect/doctest`](https://www.npmjs.com/package/@effect/doctest).
+
+| Block                                       | Fence                                       | Checked by                    |
+| ------------------------------------------- | ------------------------------------------- | ----------------------------- |
+| Runs in a test process                      | ` ```ts import.meta.vitest name="page: …" ` | Typecheck, then run as a test |
+| Starts a process, opens a port, reads files | ` ```ts `                                   | Typecheck                     |
+| A module that later blocks import           | ` ```ts title="clock.ts" `                  | Typecheck; doctests import it |
+| Code that shows what not to do              | ` ```ts skip `                              | Nothing                       |
+
+- A doctest asserts the outcome the section is about with a trailing
+  `// => value` comment. Add no run code that the section does not need.
+- To build on an earlier block, give it `title="name.ts"`, export what later
+  blocks use, and import it with `import { Clock } from "./clock.ts"`. Titles
+  are unique within a page.
+- In a typecheck-only block, a dependency the example does not care about is a
+  `declare const`. A doctest defines a small fake instead.
+- The Chinese pages carry the English code blocks unchanged.
+  `node snippets.mjs sync <page.md>` copies them;
+  `node snippets.mjs check <page.md>` typechecks one page, and
+  `pnpm vitest run content/docs/<page.md>` runs its doctests, all from
+  `packages/docs`.
 
 ## Accuracy
 
@@ -80,4 +110,6 @@ whichever is wrong.
 ## Checks
 
 - `pnpm --filter @graftland/docs build` checks every local link and anchor.
-- `pnpm --filter @graftland/docs test` and `treefmt --fail-on-change` pass.
+- `pnpm --filter @graftland/docs test` typechecks every code block, checks that
+  the Chinese pages carry the same blocks, and runs the doctests; it and
+  `treefmt --fail-on-change` pass.

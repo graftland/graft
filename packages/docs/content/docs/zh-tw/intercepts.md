@@ -14,8 +14,16 @@ intercept 為一個 fork 及其所有後代修改 `Context.Reference`
 
 ## 修改 Reference
 
-```ts
-import { References } from "effect"
+```ts import.meta.vitest name="intercepts: change a reference"
+import { Effect, References, Schema, Stream } from "effect"
+
+import { Graft, Plugin } from "@graftland/graft"
+
+const tenant = Plugin.make({
+	name: "tenant",
+	config: Schema.Struct({ name: Schema.String }),
+	apply: () => Effect.log("ready"),
+})
 
 const tenantA = Graft.plugin(
 	tenant,
@@ -29,6 +37,19 @@ const tenantA = Graft.plugin(
 		],
 	},
 )
+
+const [line] = await Effect.runPromise(
+	Effect.gen(function* () {
+		yield* (yield* tenantA).await
+		return yield* Graft.logs.pipe(Stream.take(1), Stream.runCollect)
+	}).pipe(
+		Effect.annotateLogs({ app: "shop" }),
+		Effect.scoped,
+		Effect.provide(Graft.layer),
+	),
+)
+line?.annotations["tenant"] // => "a"
+line?.annotations["app"] // => "shop"
 ```
 
 函式接收外層的值，因此 intercept 可以巢狀使用：該 fork 及其後代外掛輸出的每行日誌都會帶上
@@ -38,16 +59,52 @@ const tenantA = Graft.plugin(
 
 如果某項設定需要由服務從呼叫端讀取，可以使用 Reference。回傳 Effect 的服務方法在呼叫端的 fiber 中執行，因此能讀到呼叫端的 intercept：
 
-```ts
+```ts import.meta.vitest name="intercepts: settings that follow the caller"
+import { Context, Effect, Stream } from "effect"
+
+import { Graft, Plugin } from "@graftland/graft"
+
 const Formal = Context.Reference<boolean>("app/Formal", {
 	defaultValue: () => false,
 })
 
-// Inside the Greeter service:
-const greet = (name: string) =>
-	Effect.flatMap(Formal, (formal) =>
-		Effect.log(formal ? `Good day, ${name}.` : `Hi, ${name}!`),
-	)
+class Greeter extends Context.Service<
+	Greeter,
+	{ readonly greet: (name: string) => Effect.Effect<void> }
+>()("app/Greeter") {}
+
+const greeter = Plugin.make({
+	name: "greeter",
+	apply: () =>
+		Graft.provide(Greeter, {
+			greet: (name) =>
+				Effect.flatMap(Formal, (formal) =>
+					Effect.log(formal ? `Good day, ${name}.` : `Hi, ${name}!`),
+				),
+		}),
+})
+
+const hello = Plugin.make({
+	name: "hello",
+	inject: [Greeter],
+	apply: () => Effect.flatMap(Greeter, (greeter) => greeter.greet("Ada")),
+})
+
+const messages = await Effect.runPromise(
+	Effect.gen(function* () {
+		yield* Graft.plugin(greeter)
+		yield* (yield* Graft.plugin(hello)).await
+		const formal = Graft.intercept(Formal, () => true)
+		yield* (yield* Graft.plugin(hello, undefined, { intercept: [formal] }))
+			.await
+		return yield* Graft.logs.pipe(
+			Stream.take(2),
+			Stream.map((line) => line.message),
+			Stream.runCollect,
+		)
+	}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
+)
+messages // => [["Hi, Ada!"], ["Good day, Ada."]]
 ```
 
 載入外掛時使用 `Graft.intercept(Formal, () => true)`，就能讓它從大家共用的同一個
@@ -73,13 +130,13 @@ Reference 也可以列在 `inject` 中。
 | Schema    | 解碼設定的輸入。                         |
 | 合併函式  | 有型別的函式 `(outer, patch) => value`。 |
 
-請在應用程式啟動時註冊：
+請在執行載入器的環境中註冊，與外掛解析器和其他平台服務放在一起：
 
-```ts
-import { Context, Layer, Schema } from "effect"
+```ts import.meta.vitest name="intercepts: register a reference"
+import { Context, Effect, Layer, Schema, Stream } from "effect"
 
-import { Graft } from "@graftland/graft"
-import { Intercept, ModuleResolver } from "@graftland/loader"
+import { Graft, Plugin } from "@graftland/graft"
+import { Intercept, Loader, ModuleResolver } from "@graftland/loader"
 
 const Settings = Context.Reference("app/Settings", {
 	defaultValue: () => ({ color: "blue", size: 12 }),
@@ -96,20 +153,38 @@ const references = Intercept.layer([
 	),
 ])
 
-const environment = Layer.merge(references, ModuleResolver.fromRecord({}))
+const show = Plugin.make({
+	name: "show",
+	apply: () => Effect.flatMap(Settings, Effect.log),
+})
+
+const environment = Layer.merge(references, ModuleResolver.fromRecord({ show }))
 const runtime = Layer.provideMerge(Graft.layer, environment)
+
+const [line] = await Effect.runPromise(
+	Effect.gen(function* () {
+		yield* Graft.plugin(Loader.plugin, [
+			{
+				id: "show",
+				name: "show",
+				intercept: { "app/Settings": { color: "red" } },
+			},
+		])
+		return yield* Graft.logs.pipe(Stream.take(1), Stream.runCollect)
+	}).pipe(Effect.scoped, Effect.provide(runtime)),
+)
+line?.message // => [{ color: "red", size: 12 }]
 ```
 
-在此 runtime 中執行載入器，並將實際的外掛解析器和其他所需的平台服務加入
-`environment`。之後設定項目可以這樣寫：
+在 `graft.yml` 中，同一個設定項目寫成：
 
-```yaml
-intercept:
-  app/Settings:
-    color: red
+```yaml title="graft.yml"
+- id: show
+  name: show
+  intercept:
+    app/Settings:
+      color: red
 ```
-
-結果為 `{ color: "red", size: 12 }`。
 
 值的合併方式：
 

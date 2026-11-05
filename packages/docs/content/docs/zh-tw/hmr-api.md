@@ -7,8 +7,13 @@ description: 在自己的程式中使用 @graftland/hmr，無需 CLI。
 套件無需 CLI 也能運作。熱重載做了什麼，請參閱[熱重載](../hot-reload/)。
 
 ```ts
+import { Effect } from "effect"
+
+import { Graft } from "@graftland/graft"
 import * as Hmr from "@graftland/hmr"
 import { ModuleResolver } from "@graftland/loader"
+
+declare const directory: string
 
 const program = Effect.gen(function* () {
 	const hmr = yield* Hmr.make({ base: import.meta.url })
@@ -28,13 +33,13 @@ const program = Effect.gen(function* () {
 
 ## 成員
 
-| 成員                                  | 作用                                                                                                                                                                                             |
-| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `make({ base, include })`             | `base` 是解析名稱時的模組 URL，通常是 `import.meta.url`。`include(url)` 選出要取得新版本的檔案，預設選出 `node_modules` 之外的所有檔案。                                                         |
-| `importer(specifier)`                 | 匯入外掛模組，並保持註冊直到 HMR 工作階段關閉。                                                                                                                                                  |
-| `importerScoped(specifier, options?)` | 回傳需要 `Scope` 的 Effect。每次呼叫都持有一個項目租約，直到該 scope 關閉。請參閱[具 scope 的匯入器](#具-scope-的匯入器)。                                                                       |
-| `reload`                              | 強制完整重載所有已註冊的項目和被追蹤的相依項目。傳回帶有已重載模組的 `Reloaded`，或在需要重新啟動時傳回 `Skipped`。如果模組無法匯入或沒有匯出外掛，會以 `HmrError` 失敗，其 `cause` 是原始錯誤。 |
-| `watch(paths, options)`               | 當 `paths` 下被觀察的內容或本機解析結果變更時，增量重載受影響項目的串流。它會先等待 `debounce`（預設 50 ms）以收集更多變更。失敗的重載會以帶有 cause 的 `Failed` 發出，監看繼續進行。            |
+| 成員                                  | 作用                                                                                                                                                                                                                            |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `make({ base, include })`             | `base` 是解析名稱時的模組 URL，通常是 `import.meta.url`。`include(url)` 選出要取得新版本的檔案，預設選出 `node_modules` 之外的所有檔案。                                                                                        |
+| `importer(specifier)`                 | 匯入外掛模組，並保持註冊直到 HMR 工作階段關閉。                                                                                                                                                                                 |
+| `importerScoped(specifier, options?)` | 回傳需要 `Scope` 的 Effect。每次呼叫都持有一個項目租約，直到該 scope 關閉。請參閱[具 scope 的匯入器](#具-scope-的匯入器)。                                                                                                      |
+| `reload`                              | 強制完整重載所有已註冊的項目和被追蹤的相依項目。傳回帶有已重載項目的 `Reloaded`；變更[無法套用](../hot-reload/#重載不適用的情況)時傳回 `Skipped`。如果模組無法匯入或沒有匯出外掛，會以 `HmrError` 失敗，其 `cause` 是原始錯誤。 |
+| `watch(paths, options)`               | 當 `paths` 下被觀察的內容或本機解析結果變更時，增量重載受影響項目的串流。它會先等待 `debounce`（預設 50 ms）以收集更多變更。失敗的重載會以帶有 cause 的 `Failed` 發出，監看繼續進行。                                           |
 
 ## 具 scope 的匯入器
 
@@ -67,9 +72,16 @@ const program = Effect.gen(function* () {
 | `onReady`              | 回報監看器已安裝。它不保證作業系統會送出每一個事件。                                     |
 
 ```ts
-hmr.watch([directory], {
+import { String } from "effect"
+
+import type * as Hmr from "@graftland/hmr"
+
+declare const hmr: Hmr.Hmr
+declare const directory: string
+
+const results = hmr.watch([directory], {
 	recursive: true,
-	filter: (path) => path.endsWith(".mjs"),
+	filter: String.endsWith(".mjs"),
 })
 ```
 

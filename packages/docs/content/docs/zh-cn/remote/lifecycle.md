@@ -33,12 +33,38 @@ runner 给实例的每次启动分配一个
 **generation**（代次）：一个存在磁盘上、只增不减的数字。插件从 `Instance`
 读取自己的 generation：
 
-```ts
-Effect.gen(function* () {
-	const { id, generation } = yield* Instance
-	yield* ledger.claim({ owner: id, generation })
+```ts import.meta.vitest name="remote/lifecycle: read the instance"
+import { Effect, Ref } from "effect"
+
+import { Graft, Plugin } from "@graftland/graft"
+import { Instance } from "@graftland/plugin-remote"
+
+const claimed = Ref.makeUnsafe({ owner: "", generation: -1 })
+const ledger = {
+	claim: (claim: { owner: string; generation: number }) =>
+		Ref.set(claimed, claim),
+}
+
+const writer = Plugin.make({
+	name: "writer",
+	apply: () =>
+		Effect.gen(function* () {
+			const { id, generation } = yield* Instance
+			yield* ledger.claim({ owner: id, generation })
+		}),
 })
+
+await Effect.runPromise(
+	Effect.gen(function* () {
+		const fork = yield* Graft.plugin(writer)
+		yield* fork.await
+	}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
+)
+
+await Effect.runPromise(Ref.get(claimed)) // => { owner: "local", generation: 0 }
 ```
+
+像这里这样不经 Remote 加载时，读到的是 `local` 和 `0`：
 
 | 运行在           | `id`                | `generation`     |
 | ---------------- | ------------------- | ---------------- |

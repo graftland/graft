@@ -14,8 +14,16 @@ intercept 为一个 fork 及其所有后代修改 `Context.Reference`
 
 ## 修改 Reference
 
-```ts
-import { References } from "effect"
+```ts import.meta.vitest name="intercepts: change a reference"
+import { Effect, References, Schema, Stream } from "effect"
+
+import { Graft, Plugin } from "@graftland/graft"
+
+const tenant = Plugin.make({
+	name: "tenant",
+	config: Schema.Struct({ name: Schema.String }),
+	apply: () => Effect.log("ready"),
+})
 
 const tenantA = Graft.plugin(
 	tenant,
@@ -29,6 +37,19 @@ const tenantA = Graft.plugin(
 		],
 	},
 )
+
+const [line] = await Effect.runPromise(
+	Effect.gen(function* () {
+		yield* (yield* tenantA).await
+		return yield* Graft.logs.pipe(Stream.take(1), Stream.runCollect)
+	}).pipe(
+		Effect.annotateLogs({ app: "shop" }),
+		Effect.scoped,
+		Effect.provide(Graft.layer),
+	),
+)
+line?.annotations["tenant"] // => "a"
+line?.annotations["app"] // => "shop"
 ```
 
 函数接收外层的值，因此 intercept 可以嵌套：该 fork 及其后代插件输出的每行日志都会带上
@@ -38,16 +59,52 @@ const tenantA = Graft.plugin(
 
 如果某项设置需要由服务从调用者处读取，可以使用 Reference。返回 Effect 的服务方法在调用者的 fiber 中运行，因此能读到调用者的 intercept：
 
-```ts
+```ts import.meta.vitest name="intercepts: settings that follow the caller"
+import { Context, Effect, Stream } from "effect"
+
+import { Graft, Plugin } from "@graftland/graft"
+
 const Formal = Context.Reference<boolean>("app/Formal", {
 	defaultValue: () => false,
 })
 
-// Inside the Greeter service:
-const greet = (name: string) =>
-	Effect.flatMap(Formal, (formal) =>
-		Effect.log(formal ? `Good day, ${name}.` : `Hi, ${name}!`),
-	)
+class Greeter extends Context.Service<
+	Greeter,
+	{ readonly greet: (name: string) => Effect.Effect<void> }
+>()("app/Greeter") {}
+
+const greeter = Plugin.make({
+	name: "greeter",
+	apply: () =>
+		Graft.provide(Greeter, {
+			greet: (name) =>
+				Effect.flatMap(Formal, (formal) =>
+					Effect.log(formal ? `Good day, ${name}.` : `Hi, ${name}!`),
+				),
+		}),
+})
+
+const hello = Plugin.make({
+	name: "hello",
+	inject: [Greeter],
+	apply: () => Effect.flatMap(Greeter, (greeter) => greeter.greet("Ada")),
+})
+
+const messages = await Effect.runPromise(
+	Effect.gen(function* () {
+		yield* Graft.plugin(greeter)
+		yield* (yield* Graft.plugin(hello)).await
+		const formal = Graft.intercept(Formal, () => true)
+		yield* (yield* Graft.plugin(hello, undefined, { intercept: [formal] }))
+			.await
+		return yield* Graft.logs.pipe(
+			Stream.take(2),
+			Stream.map((line) => line.message),
+			Stream.runCollect,
+		)
+	}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
+)
+messages // => [["Hi, Ada!"], ["Good day, Ada."]]
 ```
 
 加载插件时使用 `Graft.intercept(Formal, () => true)`，就能让它从大家共用的同一个
@@ -73,13 +130,13 @@ Reference 也可以列在 `inject` 中。
 | Schema    | 解码配置的输入。                       |
 | 合并函数  | 类型化函数 `(outer, patch) => value`。 |
 
-在应用启动时登记：
+在运行加载器的环境中登记，与插件解析器和其他平台服务放在一起：
 
-```ts
-import { Context, Layer, Schema } from "effect"
+```ts import.meta.vitest name="intercepts: register a reference"
+import { Context, Effect, Layer, Schema, Stream } from "effect"
 
-import { Graft } from "@graftland/graft"
-import { Intercept, ModuleResolver } from "@graftland/loader"
+import { Graft, Plugin } from "@graftland/graft"
+import { Intercept, Loader, ModuleResolver } from "@graftland/loader"
 
 const Settings = Context.Reference("app/Settings", {
 	defaultValue: () => ({ color: "blue", size: 12 }),
@@ -96,20 +153,38 @@ const references = Intercept.layer([
 	),
 ])
 
-const environment = Layer.merge(references, ModuleResolver.fromRecord({}))
+const show = Plugin.make({
+	name: "show",
+	apply: () => Effect.flatMap(Settings, Effect.log),
+})
+
+const environment = Layer.merge(references, ModuleResolver.fromRecord({ show }))
 const runtime = Layer.provideMerge(Graft.layer, environment)
+
+const [line] = await Effect.runPromise(
+	Effect.gen(function* () {
+		yield* Graft.plugin(Loader.plugin, [
+			{
+				id: "show",
+				name: "show",
+				intercept: { "app/Settings": { color: "red" } },
+			},
+		])
+		return yield* Graft.logs.pipe(Stream.take(1), Stream.runCollect)
+	}).pipe(Effect.scoped, Effect.provide(runtime)),
+)
+line?.message // => [{ color: "red", size: 12 }]
 ```
 
-在此 runtime 中运行加载器，并将实际的插件解析器和其他所需平台服务加入
-`environment`。之后配置项可以写成：
+在 `graft.yml` 中，同一配置项写作：
 
-```yaml
-intercept:
-  app/Settings:
-    color: red
+```yaml title="graft.yml"
+- id: show
+  name: show
+  intercept:
+    app/Settings:
+      color: red
 ```
-
-结果为 `{ color: "red", size: 12 }`。
 
 值的合并规则：
 

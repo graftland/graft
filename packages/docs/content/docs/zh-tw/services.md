@@ -12,19 +12,22 @@ Graft 中的服務就是一般的 Effect `Context` 鍵及其對應的值。Graft
 
 在 `apply` 內呼叫 `Graft.provide`：
 
-```ts
-import { Context, Effect } from "effect"
+```ts title="clock.ts"
+import { Context, DateTime, Effect } from "effect"
 
 import { Graft, Plugin } from "@graftland/graft"
 
-class Clock extends Context.Service<
+export class Clock extends Context.Service<
 	Clock,
 	{ readonly now: Effect.Effect<number> }
 >()("app/Clock") {}
 
-const clock = Plugin.make({
+export const clock = Plugin.make({
 	name: "clock",
-	apply: () => Graft.provide(Clock, { now: Effect.sync(() => Date.now()) }),
+	apply: () =>
+		Graft.provide(Clock, {
+			now: Effect.map(DateTime.now, DateTime.toEpochMillis),
+		}),
 })
 ```
 
@@ -40,7 +43,13 @@ const clock = Plugin.make({
 
 將服務鍵列入 `inject`，然後透過 `yield*` 讀取：
 
-```ts
+```ts import.meta.vitest name="services: use a service"
+import { Effect, Option, Stream } from "effect"
+
+import { Fork, Graft, Plugin } from "@graftland/graft"
+
+import { Clock, clock } from "./clock.ts"
+
 const uptime = Plugin.make({
 	name: "uptime",
 	inject: [Clock],
@@ -55,6 +64,17 @@ const uptime = Plugin.make({
 			)
 		}),
 })
+
+const state = await Effect.runPromise(
+	Effect.gen(function* () {
+		const provider = yield* Graft.plugin(clock)
+		yield* provider.await
+		const fork = yield* Graft.plugin(uptime)
+		yield* fork.await
+		return yield* Stream.runHead(fork.state)
+	}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
+)
+state // => Option.some(Fork.ForkState.Active())
 ```
 
 上面的終結器在外掛停止時呼叫
@@ -113,10 +133,28 @@ const uptime = Plugin.make({
 建構 `Graft.layer` 時所在環境中的服務對所有外掛可見。它們可以滿足 `inject`
 宣告，生命週期與該環境一致。與整個應用程式生命週期一致的服務適合放在環境中：
 
-```ts
+```ts import.meta.vitest name="services: services from the environment"
+import { Effect, FileSystem, Layer, Option, Path, Stream } from "effect"
 import { NodeServices } from "@effect/platform-node"
 
+import { Fork, Graft, Plugin } from "@graftland/graft"
+
 const layer = Layer.provideMerge(Graft.layer, NodeServices.layer)
+
+const files = Plugin.make({
+	name: "files",
+	inject: [FileSystem.FileSystem, Path.Path],
+	apply: () => Effect.void,
+})
+
+const state = await Effect.runPromise(
+	Effect.gen(function* () {
+		const fork = yield* Graft.plugin(files)
+		yield* fork.await
+		return yield* Stream.runHead(fork.state)
+	}).pipe(Effect.scoped, Effect.provide(layer)),
+)
+state // => Option.some(Fork.ForkState.Active())
 ```
 
 使用這個 Layer 後，外掛可以直接注入 `FileSystem.FileSystem` 或 `Path.Path`。

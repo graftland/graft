@@ -5,13 +5,14 @@ description: 在自己的 Effect 程式中執行外掛，無需 CLI。
 
 CLI 是建立在這些函式庫之上的一個小程式。你可以用同樣的方式，在自己的 Effect 程式中執行 Graft。
 
-| 你想要…                  | 使用                                | 章節                              |
-| ------------------------ | ----------------------------------- | --------------------------------- |
-| 從程式碼載入少量外掛     | `Graft.layer` 和 `Graft.plugin`     | [直接執行外掛](#直接執行外掛)     |
-| 從一份項目清單載入外掛   | `Loader.plugin` 和 `ModuleResolver` | [載入設定項目](#載入設定項目)     |
-| 從 YAML 檔案載入外掛     | `Include.Include`                   | [載入設定檔](#載入設定檔)         |
-| 不使用 CLI 而重載程式碼  | `@graftland/hmr`                    | [HMR API](../hmr-api/)            |
-| 讓外掛在另一個行程中執行 | `Remote.plugin`                     | [在別處執行外掛](#在別處執行外掛) |
+| 你想要…                  | 使用                                | 章節                               |
+| ------------------------ | ----------------------------------- | ---------------------------------- |
+| 從程式碼載入少量外掛     | `Graft.layer` 和 `Graft.plugin`     | [直接執行外掛](#直接執行外掛)      |
+| 從一份項目清單載入外掛   | `Loader.plugin` 和 `ModuleResolver` | [載入設定項目](#載入設定項目)      |
+| 從 YAML 檔案載入外掛     | `Include.Include`                   | [載入設定檔](#載入設定檔)          |
+| 不使用 CLI 而重載程式碼  | `@graftland/hmr`                    | [HMR API](../hmr-api/)             |
+| 讓外掛在另一個行程中執行 | `Remote.plugin`                     | [在別處執行外掛](#在別處執行外掛)  |
+| 測試外掛                 | `@effect/vitest` 和 `Graft.layer`   | [測試](../best-practices/testing/) |
 
 ## 直接執行外掛
 
@@ -22,6 +23,8 @@ import { Effect, Layer } from "effect"
 import { NodeRuntime, NodeServices } from "@effect/platform-node"
 
 import { Graft } from "@graftland/graft"
+
+import { greeter, hello } from "./plugins.ts"
 
 const program = Effect.gen(function* () {
 	yield* Graft.plugin(greeter, { greeting: "Hello" })
@@ -38,24 +41,68 @@ program.pipe(
 
 Layer 環境中的服務對每個外掛都可用，這裡就是 Node.js 的服務。請參閱[來自環境的服務](../services/#來自環境的服務)。
 
+`greeter` 和 `hello` 都是一般的外掛，本頁其他範例也會載入它們。`greeter` 發布
+`Greeter` 服務，`hello` 注入它：
+
+```ts title="plugins.ts"
+import { Context, Effect, Schema } from "effect"
+
+import { Graft, Plugin } from "@graftland/graft"
+
+export class Greeter extends Context.Service<
+	Greeter,
+	{ readonly greeting: string }
+>()("app/Greeter") {}
+
+export const greeter = Plugin.make({
+	name: "greeter",
+	config: Schema.Struct({ greeting: Schema.String }),
+	apply: (config) => Graft.provide(Greeter, config),
+})
+
+export const hello = Plugin.make({
+	name: "hello",
+	inject: [Greeter],
+	apply: () =>
+		Effect.flatMap(Greeter, ({ greeting }) =>
+			Effect.log(`${greeting}, world!`),
+		),
+})
+```
+
 ## 載入設定項目
 
 `Loader.plugin`
 執行保存在記憶體中的[設定項目](../config-file/#設定項目欄位)清單。透過 `Loader`
 服務所做的編輯只會改變這份清單。這些項目需要 `ModuleResolver` 把名稱轉成外掛：
 
-```ts
+```ts import.meta.vitest name="embedding: load entries"
+import { Effect, Layer, Option, Stream } from "effect"
+
+import { Graft } from "@graftland/graft"
 import { Loader, ModuleResolver } from "@graftland/loader"
+
+import { greeter, hello } from "./plugins.ts"
 
 const program = Effect.gen(function* () {
 	yield* Graft.plugin(Loader.plugin, [
 		{ id: "greeter", name: "greeter", config: { greeting: "Hello" } },
 		{ id: "hello", name: "hello" },
 	])
-	return yield* Effect.never
+	return yield* Graft.logs.pipe(
+		Stream.map((log) => log.message),
+		Stream.runHead,
+	)
 })
 
 const resolver = ModuleResolver.fromRecord({ greeter, hello })
+
+await Effect.runPromise(
+	program.pipe(
+		Effect.scoped,
+		Effect.provide(Layer.provideMerge(Graft.layer, resolver)),
+	),
+) // => Option.some(["Hello, world!"])
 ```
 
 ### 選擇解析器
@@ -68,9 +115,18 @@ const resolver = ModuleResolver.fromRecord({ greeter, hello })
 通常 `importer` 是寫在你應用程式中的
 `(specifier) => import(specifier)`，這樣它才能找到你應用程式的相依套件。
 
-把解析器提供在環境中，與 Node.js 服務放在一起：
+在應用程式中，把解析器提供在環境中，與 Node.js 服務放在一起：
 
 ```ts
+import { Effect, Layer, type Scope } from "effect"
+import { NodeRuntime, NodeServices } from "@effect/platform-node"
+
+import { Graft } from "@graftland/graft"
+import type { ModuleResolver } from "@graftland/loader"
+
+declare const program: Effect.Effect<never, never, Graft.Graft | Scope.Scope>
+declare const resolver: Layer.Layer<ModuleResolver.ModuleResolver>
+
 program.pipe(
 	Effect.scoped,
 	Effect.provide(
@@ -110,6 +166,9 @@ program.pipe(
 時，它也會接收你手動所做的變更：
 
 ```ts
+import { Effect } from "effect"
+
+import { Graft } from "@graftland/graft"
 import { Include } from "@graftland/loader"
 
 const program = Effect.gen(function* () {
@@ -133,11 +192,18 @@ const program = Effect.gen(function* () {
 `Graft.plugin` 載入它：
 
 ```ts
+import { Effect, Layer, type Schema } from "effect"
 import { SecureRandom } from "effect/crypto"
+import { NodeRuntime, NodeServices } from "@effect/platform-node"
 
+import { Graft } from "@graftland/graft"
 import * as Remote from "@graftland/plugin-remote"
 
-import { contract } from "./contract.js"
+import { hello } from "./plugins.ts"
+
+declare const contract: Remote.Contract.Contract<
+	Schema.Struct<{ readonly greeting: Schema.String }>
+>
 
 const greeter = Remote.plugin(contract, {
 	contractModule: new URL("./contract.js", import.meta.url).href,

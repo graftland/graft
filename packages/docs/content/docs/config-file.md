@@ -219,20 +219,30 @@ only describes the value it needs.
 A plugin that wants Effect's `Config` tools, such as defaults and fallbacks, can
 use them inside `apply` to read its own input:
 
-```ts
+```ts import.meta.vitest name="config-file: read the input with Config"
+import { Config, ConfigProvider, Effect, Schema } from "effect"
+
+import { Plugin } from "@graftland/graft"
+
 const Settings = Config.all({
 	port: Config.Port("port").pipe(Config.withDefault(8080)),
 })
+
+const readSettings = (input: unknown) =>
+	Settings.parse(ConfigProvider.fromUnknown(input))
 
 export default Plugin.make({
 	name: "server",
 	config: Schema.Record(Schema.String, Schema.Unknown),
 	apply: (input) =>
 		Effect.gen(function* () {
-			const settings = yield* Settings.parse(ConfigProvider.fromUnknown(input))
-			// ...
+			const settings = yield* readSettings(input)
+			yield* Effect.log(`Listening on port ${settings.port}`)
 		}),
 })
+
+Effect.runSync(readSettings({ port: "3000" })) // => { port: 3000 }
+Effect.runSync(readSettings({})) // => { port: 8080 }
 ```
 
 The plugin's schema still describes what the entry accepts. `Config` values that

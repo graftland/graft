@@ -4,7 +4,7 @@ description: Graft 中所有具名的错误和失败状态，以及应对方法�
 ---
 
 Graft 会保留每次失败的完整 `Cause`
-并记录日志。本页按来源分组，列出你可能遇到的错误。
+并记录日志。本页按来源分组，列出你可能遇到的错误。若要从 fork 的状态或症状而非错误名称入手，见[故障排查](../best-practices/troubleshooting/)。
 
 ## Fork 失败
 
@@ -41,7 +41,7 @@ Graft 会保留每次失败的完整 `Cause`
 | `UnregisteredReference` | 配置文件中的 `intercept` 键未注册。               |
 | `InvalidIntercept`      | 值未通过已注册的 schema。`cause` 是 schema 错误。 |
 
-两种情况下，该条目的插件都不会启动。参见[配置文件中的 intercept](../intercepts/)。
+两种情况下，该条目的插件都不会启动。参见[配置文件中的 intercept](../intercepts/#配置文件中的-intercept)。
 
 ## 加载器与配置文件
 
@@ -64,7 +64,7 @@ Graft 会保留每次失败的完整 `Cause`
 | `Skipped` / `identity-conflict` | 替换身份无法用运行时的 alias 表达。                      |
 | `Failed`                        | 重载失败。值中保存完整的 `Cause`；旧插件继续运行。       |
 
-参见[热重载](../hot-reload/)。
+参见[重载未生效的情形](../hot-reload/#重载未生效的情形)。
 
 ## Remote
 
