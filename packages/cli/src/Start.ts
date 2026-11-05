@@ -66,21 +66,19 @@ export const run = (
 		const protocol = yield* Semaphore.make(1)
 		yield* Graft.provide(Application, {
 			claimProtocol: Effect.acquireRelease(
-				protocol
-					.takeIfAvailable(1)
-					.pipe(
-						Effect.flatMap((acquired) =>
-							acquired
-								? Effect.void
-								: Effect.fail(
-										ApplicationError.make({
-											cause: Cause.fail(
-												"Only one runner may own the process stdio channel",
-											),
-										}),
-									),
-						),
+				protocol.takeIfAvailable(1).pipe(
+					Effect.flatMap((acquired) =>
+						acquired
+							? Effect.void
+							: Effect.fail(
+									ApplicationError.make({
+										cause: Cause.fail(
+											"Only one runner may own the process stdio channel",
+										),
+									}),
+								),
 					),
+				),
 				() => protocol.release(1),
 			),
 			finish: (exit) =>
