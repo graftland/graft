@@ -1207,6 +1207,61 @@ export default Plugin.make({ name: 'required', apply: () => Effect.sync(() => re
 			}).pipe(run),
 	)
 
+	it.live(
+		"fails an importer with a restart cause when its entry is retargeted mid-import",
+		() =>
+			Effect.gen(function* () {
+				const { fs, directory, base, hmr, write, entry } = yield* setup
+				const entered = yield* Deferred.make<void>()
+				const release = Promise.withResolvers<void>()
+				const key = `graft-first-import:${directory}`
+				const keySource = yield* quote(key)
+				yield* Effect.acquireRelease(
+					Effect.sync(() => {
+						Reflect.set(globalThis, key, {
+							enter: () => Deferred.doneUnsafe(entered, Exit.void),
+							release: release.promise,
+						})
+					}),
+					() =>
+						Effect.sync(() => {
+							release.resolve()
+							Reflect.deleteProperty(globalThis, key)
+						}),
+				)
+				yield* write("dependency.mjs", "export const value = 1")
+				yield* write(
+					"one.mjs",
+					`globalThis[${keySource}].enter(); await globalThis[${keySource}].release;\n${entry("one")}`,
+				)
+				yield* write("two.mjs", entry("two"))
+				yield* fs.symlink("one.mjs", `${directory}/plugin.mjs`)
+				const importing = yield* hmr
+					.importerScoped("./plugin.mjs")
+					.pipe(Effect.exit, Effect.forkChild)
+				yield* Deferred.await(entered)
+				yield* fs.remove(`${directory}/plugin.mjs`)
+				yield* fs.symlink("two.mjs", `${directory}/plugin.mjs`)
+				release.resolve()
+				const exit = yield* Fiber.join(importing)
+				const error = Option.getOrThrow(Exit.findErrorOption(exit))
+				assert.strictEqual(error._tag, "HmrError")
+				assert.strictEqual(error.stage, "import")
+				const cause = error.cause
+				assert(
+					Predicate.hasProperty(cause, "_tag") &&
+						Predicate.hasProperty(cause, "url"),
+				)
+				assert.deepStrictEqual(
+					{ _tag: cause._tag, url: cause.url },
+					{
+						_tag: "RestartRequired",
+						url: new URL("./plugin.mjs", base).href,
+					},
+				)
+			}).pipe(run),
+	)
+
 	it.effect.each(["committed", "failed"])(
 		"reconciles a reverted snapshot against the %s import attempt",
 		(outcome) =>

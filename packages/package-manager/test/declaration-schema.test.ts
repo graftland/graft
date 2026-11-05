@@ -80,3 +80,29 @@ it.effect(
 			}
 		}).pipe(run),
 )
+
+it.effect(
+	"reports which constraint an unsupported packageManager declaration fails",
+	() =>
+		Effect.gen(function* () {
+			const { directory, write } = yield* setup
+			for (const [declaration, reason] of [
+				[
+					`pnpm@9.15.9+sha512.${String.repeat(128)("A")}`,
+					"lowercase hexadecimal",
+				],
+				["yarn@4.0.0+build.1", "lowercase hexadecimal"],
+			] as const) {
+				const text = yield* Schema.encodeEffect(
+					Schema.fromJsonString(
+						Schema.Struct({ packageManager: Schema.String }),
+					),
+				)({ packageManager: declaration })
+				yield* write("package.json", text)
+				const error = yield* Effect.flip(detectAgent({ directory }))
+				assert.strictEqual(error._tag, "PackageManagerError")
+				assert.include(error.message, declaration)
+				assert.include(error.message, reason)
+			}
+		}).pipe(run),
+)

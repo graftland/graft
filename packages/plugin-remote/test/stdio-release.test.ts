@@ -74,28 +74,27 @@ for (const location of ["output", "session"]) {
 						Plugin.make({
 							name: "stdio session",
 							inject: [Listener],
-							apply: () =>
-								Effect.gen(function* () {
-									const listener = yield* Listener
-									const serving = yield* listener.bind(Option.none())
-									yield* Plugin.fork(
-										serving.serve(() =>
-											Effect.succeed((channel: Channel) =>
-												Effect.gen(function* () {
-													if (location === "session") {
-														yield* Effect.addFinalizer(() => cleanup)
-														yield* Deferred.succeed(entered, undefined)
-													}
-													return yield* accept(
-														supervisor,
-														execution,
-														channel,
-													).pipe(Effect.provideService(Peer, "test"))
-												}),
-											),
+							apply: Effect.fnUntraced(function* () {
+								const listener = yield* Listener
+								const serving = yield* listener.bind(Option.none())
+								yield* Plugin.fork(
+									serving.serve(() =>
+										Effect.succeed(
+											Effect.fnUntraced(function* (channel: Channel) {
+												if (location === "session") {
+													yield* Effect.addFinalizer(() => cleanup)
+													yield* Deferred.succeed(entered, undefined)
+												}
+												return yield* accept(
+													supervisor,
+													execution,
+													channel,
+												).pipe(Effect.provideService(Peer, "test"))
+											}),
 										),
-									)
-								}),
+									),
+								)
+							}),
 						}),
 					)
 					yield* Deferred.await(entered)

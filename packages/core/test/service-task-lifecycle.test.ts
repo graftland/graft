@@ -50,12 +50,11 @@ const serve = Effect.gen(function* () {
 })
 
 // The stopped signal makes a broken implementation fail without hanging in an uninterruptible finalizer.
-const cleanupPing = (rpc: Rpc["Service"]) =>
-	Effect.gen(function* () {
-		if (yield* Deferred.isDone(rpc.stopped)) return false
-		yield* rpc.ping
-		return true
-	})
+const cleanupPing = Effect.fn("cleanupPing")(function* (rpc: Rpc["Service"]) {
+	if (yield* Deferred.isDone(rpc.stopped)) return false
+	yield* rpc.ping
+	return true
+})
 
 describe("service task leases", () => {
 	it.effect.each(["dispose", "restart", "replace"] as const)(

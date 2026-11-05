@@ -25,17 +25,16 @@ declare module "vitest" {
 		remoteTls: string
 	}
 }
-const credentials = (name: string) =>
-	Effect.gen(function* () {
-		const fs = yield* FileSystem.FileSystem
-		const root = inject("remoteTls")
-		const key = yield* fs.readFileString(`${root}/${name}.key`)
-		return {
-			key: Redacted.make(key),
-			cert: yield* fs.readFileString(`${root}/${name}.crt`),
-			ca: yield* fs.readFileString(`${root}/ca.crt`),
-		}
-	})
+const credentials = Effect.fnUntraced(function* (name: string) {
+	const fs = yield* FileSystem.FileSystem
+	const root = inject("remoteTls")
+	const key = yield* fs.readFileString(`${root}/${name}.key`)
+	return {
+		key: Redacted.make(key),
+		cert: yield* fs.readFileString(`${root}/${name}.crt`),
+		ca: yield* fs.readFileString(`${root}/ca.crt`),
+	}
+})
 const bytes = (value: string) => new TextEncoder().encode(value)
 const text = (value: Uint8Array) => new TextDecoder().decode(value)
 const server = Effect.gen(function* () {
@@ -50,39 +49,38 @@ const server = Effect.gen(function* () {
 	return { listener, port: listener.address.port }
 })
 
-const httpResponse = (
+const httpResponse = Effect.fnUntraced(function* (
 	port: number,
 	tls: Websocket.Credentials,
 	path: string,
 	protocol?: string,
-) =>
-	Effect.gen(function* () {
-		const socket = yield* NodeSocket.makeTls({
-			host: "127.0.0.1",
-			port,
-			servername: "localhost",
-			ca: tls.ca,
-			cert: tls.cert,
-			key: Redacted.value(tls.key),
-			rejectUnauthorized: true,
-		})
-		const reader = yield* socket.reader
-		const writer = yield* socket.writer
-		yield* writer.write(
-			`GET ${path} HTTP/1.1\r\nHost: localhost\r\n` +
-				(protocol === undefined
-					? "Connection: close\r\n"
-					: `Connection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Protocol: ${protocol}\r\n`) +
-				"\r\n",
-		)
-		const response = yield* reader.pull
-		return Array.join(
-			Array.map(response, (value) =>
-				typeof value === "string" ? value : text(value),
-			),
-			"",
-		)
-	}).pipe(Effect.scoped)
+) {
+	const socket = yield* NodeSocket.makeTls({
+		host: "127.0.0.1",
+		port,
+		servername: "localhost",
+		ca: tls.ca,
+		cert: tls.cert,
+		key: Redacted.value(tls.key),
+		rejectUnauthorized: true,
+	})
+	const reader = yield* socket.reader
+	const writer = yield* socket.writer
+	yield* writer.write(
+		`GET ${path} HTTP/1.1\r\nHost: localhost\r\n` +
+			(protocol === undefined
+				? "Connection: close\r\n"
+				: `Connection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Protocol: ${protocol}\r\n`) +
+			"\r\n",
+	)
+	const response = yield* reader.pull
+	return Array.join(
+		Array.map(response, (value) =>
+			typeof value === "string" ? value : text(value),
+		),
+		"",
+	)
+}, Effect.scoped)
 
 describe("runner WebSocket mutual TLS", () => {
 	it.live("rejects a plain TLS HTTP request without a WebSocket upgrade", () =>
@@ -140,8 +138,8 @@ describe("runner WebSocket mutual TLS", () => {
 			const { listener, port } = yield* server
 			const rejected = yield* Deferred.make<string>()
 			yield* listener
-				.run((socket) =>
-					Effect.gen(function* () {
+				.run(
+					Effect.fnUntraced(function* (socket) {
 						const peer = yield* Websocket.multiplex(socket)
 						yield* peer.take(0).pipe(
 							Effect.flatMap((payload) => peer.send(0, payload)),
@@ -224,8 +222,8 @@ describe("runner WebSocket mutual TLS", () => {
 				const { listener, port } = yield* server
 				const identity = yield* Deferred.make<string>()
 				yield* listener
-					.run((socket) =>
-						Effect.gen(function* () {
+					.run(
+						Effect.fnUntraced(function* (socket) {
 							const authenticated = yield* Peer
 							yield* Deferred.succeed(identity, authenticated)
 							const peer = yield* Websocket.multiplex(socket)
@@ -259,8 +257,8 @@ describe("runner WebSocket mutual TLS", () => {
 				const { listener, port } = yield* server
 				const accepted = yield* Deferred.make<void>()
 				yield* listener
-					.run((socket) =>
-						Effect.gen(function* () {
+					.run(
+						Effect.fnUntraced(function* (socket) {
 							yield* Deferred.succeed(accepted, undefined)
 							const peer = yield* Websocket.multiplex(socket)
 							yield* peer.send(0, bytes("accepted"))
@@ -351,8 +349,8 @@ describe("runner WebSocket mutual TLS", () => {
 				const { listener, port } = yield* server
 				const rejected = yield* Deferred.make<string>()
 				yield* listener
-					.run((socket) =>
-						Effect.gen(function* () {
+					.run(
+						Effect.fnUntraced(function* (socket) {
 							const peer = yield* Websocket.multiplex(socket)
 							const failure = yield* Effect.flip(peer.await)
 							yield* Deferred.succeed(rejected, Cause.pretty(failure.cause))
@@ -380,8 +378,8 @@ describe("runner WebSocket mutual TLS", () => {
 			Effect.gen(function* () {
 				const { listener, port } = yield* server
 				yield* listener
-					.run((socket) =>
-						Effect.gen(function* () {
+					.run(
+						Effect.fnUntraced(function* (socket) {
 							const identity = yield* Peer
 							const peer = yield* Websocket.multiplex(socket)
 							yield* peer.send(0, bytes(identity))
@@ -389,19 +387,18 @@ describe("runner WebSocket mutual TLS", () => {
 						}),
 					)
 					.pipe(Effect.forkScoped)
-				const identities = yield* Effect.forEach(["client", "other"], (name) =>
-					Effect.scoped(
-						Effect.gen(function* () {
-							const socket = yield* Websocket.connect({
-								port,
-								servername: "localhost",
-								tls: yield* credentials(name),
-							})
-							const peer = yield* Websocket.multiplex(socket)
-							const identity = yield* peer.take(0)
-							return text(identity)
-						}),
-					),
+				const identities = yield* Effect.forEach(
+					["client", "other"],
+					Effect.fnUntraced(function* (name) {
+						const socket = yield* Websocket.connect({
+							port,
+							servername: "localhost",
+							tls: yield* credentials(name),
+						})
+						const peer = yield* Websocket.multiplex(socket)
+						const identity = yield* peer.take(0)
+						return text(identity)
+					}, Effect.scoped),
 				)
 				assert.deepEqual(identities, ["graft://test-host", "graft://test-host"])
 			}).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
@@ -421,8 +418,8 @@ it.live("authenticates a signed identity quoted by Node's SAN formatter", () =>
 		})
 		const { listener, port } = yield* server
 		yield* listener
-			.run((channel) =>
-				Effect.gen(function* () {
+			.run(
+				Effect.fnUntraced(function* (channel) {
 					const identity = yield* Peer
 					const peer = yield* Websocket.multiplex(channel)
 					yield* peer.send(0, bytes(identity))

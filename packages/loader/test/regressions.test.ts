@@ -1,6 +1,6 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Graft, Plugin } from "@graftland/graft"
-import { Effect, Exit, FileSystem, Layer, Path, Ref } from "effect"
+import { Effect, FileSystem, Layer, Path, Ref } from "effect"
 import { Entry, Include, Loader, ModuleResolver } from "../src/index.ts"
 import { echo, loaderService, makeJournal, run } from "./utils.ts"
 
@@ -124,10 +124,7 @@ describe("empty config files", () => {
 				yield* Graft.plugin(Include.Include, { path: file })
 				const loader = yield* loaderService
 				yield* loader.ready
-				const created = yield* Effect.exit(
-					loader.create({ name: "echo", config: { text: "first" } }),
-				)
-				assert.isTrue(Exit.isSuccess(created))
+				yield* loader.create({ name: "echo", config: { text: "first" } })
 				yield* loader.ready
 				yield* journal.expect(["start first"])
 				const text = yield* fs.readFileString(file)

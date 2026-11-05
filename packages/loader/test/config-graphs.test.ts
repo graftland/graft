@@ -26,19 +26,20 @@ const flatten = (
 	trees: ReadonlyArray<Fork.ForkTree>,
 ): ReadonlyArray<Fork.ForkTree> =>
 	Array.flatMap(trees, (tree) => [tree, ...flatten(tree.children)])
-const expectCyclicEntry = (name: string) =>
-	Effect.gen(function* () {
-		const trees = yield* Stream.runHead(Graft.forks)
-		const node = Option.getOrThrow(
-			Array.findFirst(
-				flatten(Option.getOrThrow(trees)),
-				(node) => node.name === name && node.state._tag === "Failed",
-			),
-		)
-		assert(node.state._tag === "Failed")
-		const error = Option.getOrThrow(Cause.findErrorOption(node.state.cause))
-		assert(Schema.is(Entry.CyclicConfig)(error))
-	})
+const expectCyclicEntry = Effect.fn("expectCyclicEntry")(function* (
+	name: string,
+) {
+	const trees = yield* Stream.runHead(Graft.forks)
+	const node = Option.getOrThrow(
+		Array.findFirst(
+			flatten(Option.getOrThrow(trees)),
+			(node) => node.name === name && node.state._tag === "Failed",
+		),
+	)
+	assert(node.state._tag === "Failed")
+	const error = Option.getOrThrow(Cause.findErrorOption(node.state.cause))
+	assert(Schema.is(Entry.CyclicConfig)(error))
+})
 
 describe("configuration graphs", () => {
 	it.effect("isolates a cyclic group when Group is used without Loader", () =>

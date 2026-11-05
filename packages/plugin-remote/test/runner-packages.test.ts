@@ -1,7 +1,8 @@
 import { assert, describe, it } from "@effect/vitest"
 import { NodeServices } from "@effect/platform-node"
-import { Cause, Effect, Exit, FileSystem, Ref, Schema } from "effect"
+import { Effect, FileSystem, Ref, Schema } from "effect"
 import * as Packages from "../src/internal/runner/Packages"
+import { PackageError } from "../src/internal/runner/model"
 
 const setup = Effect.gen(function* () {
 	const fs = yield* FileSystem.FileSystem
@@ -127,7 +128,7 @@ describe("runner installed packages", () => {
 					{ version: "9.0.0" },
 					{ digest: "incorrect" },
 				]) {
-					const result = yield* Effect.exit(
+					const error = yield* Effect.flip(
 						Packages.resolve(
 							root,
 							"remote-fixture",
@@ -138,9 +139,9 @@ describe("runner installed packages", () => {
 							),
 						),
 					)
-					assert.isTrue(Exit.isFailure(result))
-					if (Exit.isFailure(result))
-						assert.include(Cause.pretty(result.cause), "mismatch")
+					assert.isTrue(Schema.is(PackageError)(error))
+					if (Schema.is(PackageError)(error))
+						assert.include(error.detail, "mismatch")
 				}
 			}).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 		30_000,

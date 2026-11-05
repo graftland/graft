@@ -6,7 +6,7 @@ import { Signature } from "effect/crypto"
 import { HttpClient } from "effect/http"
 import { Authenticator } from "../../Auth"
 import { ConfigDirectory } from "@graftland/loader"
-import { AuthenticationFailed } from "../../Errors"
+import { AuthenticationFailed, AuthenticatorUnavailable } from "../../Errors"
 import * as Token from "../../internal/auth/token"
 
 export { ClockTolerance } from "../../internal/auth/config"
@@ -64,12 +64,16 @@ export default Plugin.make({
 									verified.claims[config.identityClaim],
 								),
 							),
+							// An unreachable key set says nothing about the token; the client must not discard it.
 							Effect.mapError((error) =>
-								AuthenticationFailed.make({
-									reason: "invalid",
-									challenge: 'Bearer error="invalid_token"',
-									cause: Cause.fail(error),
-								}),
+								error._tag === "JoseError" &&
+								error.reason._tag === "KeySetUnavailable"
+									? AuthenticatorUnavailable.make({ cause: Cause.fail(error) })
+									: AuthenticationFailed.make({
+											reason: "invalid",
+											challenge: 'Bearer error="invalid_token"',
+											cause: Cause.fail(error),
+										}),
 							),
 							Effect.provideService(Signature.Signature, signature),
 							Effect.provideContext(services),

@@ -5,22 +5,5 @@
 		"tsBuildInfoFile": ".cache/test.tsbuildinfo",
 		"allowImportingTsExtensions": true
 	},
-	"include": ["src", "test", "package.json"],
-	"references": [
-		{
-			"path": "../core"
-		},
-		{
-			"path": "../loader"
-		},
-		{
-			"path": "../hmr"
-		},
-		{
-			"path": "../create"
-		},
-		{
-			"path": "../package-manager"
-		}
-	]
+	"include": ["src", "test", "package.json"]
 }

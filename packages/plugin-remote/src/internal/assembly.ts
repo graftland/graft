@@ -63,6 +63,14 @@ export class CapabilityFailed extends Schema.TaggedError<
 	cause: Schema.Cause(Schema.Unknown, Schema.Unknown),
 }) {}
 
+/** Every failure class assembly raises; host error classification reads this list. */
+export const errors = [
+	ListenerConfigError,
+	CapabilityContractError,
+	CapabilityCombinationError,
+	CapabilityFailed,
+] as const
+
 const definition = Schema.declare(Plugin.isPlugin)
 /** Entries resolve capability modules before assembling their private providers. */
 export const Invocation = Schema.Struct({
@@ -235,16 +243,17 @@ export const directAuth = (properties: Properties, explicit: boolean) =>
 			)
 		: Effect.void
 
-export const connectWith = (explicitAuth = false) =>
-	Effect.gen(function* () {
-		const connector = yield* Connector
-		const credentials = yield* Credentials
-		yield* directAuth(connector.properties, explicitAuth)
-		yield* compatible(connector.properties, credentials.kind)
-		yield* warn(connector.properties, credentials.kind, "host")
-		const prepared = yield* credentials.read
-		return yield* connector.connect(prepared)
-	})
+export const connectWith = Effect.fnUntraced(function* (
+	explicitAuth: boolean = false,
+) {
+	const connector = yield* Connector
+	const credentials = yield* Credentials
+	yield* directAuth(connector.properties, explicitAuth)
+	yield* compatible(connector.properties, credentials.kind)
+	yield* warn(connector.properties, credentials.kind, "host")
+	const prepared = yield* credentials.read
+	return yield* connector.connect(prepared)
+})
 
 export const accept =
 	(

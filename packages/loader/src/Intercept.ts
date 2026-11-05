@@ -38,17 +38,16 @@ export const make = <A, P, I>(
 ): Registration => ({
 	key: reference.key,
 	schema,
-	resolve: (input) =>
-		Effect.gen(function* () {
-			const patch = yield* Schema.decodeUnknownEffect(schema)(input).pipe(
-				Effect.mapError((cause) =>
-					InvalidIntercept.make({ key: reference.key, cause }),
-				),
-			)
-			const outer = yield* reference
-			const value = merge(outer, patch)
-			return Graft.intercept(reference, () => value)
-		}),
+	resolve: Effect.fnUntraced(function* (input: unknown) {
+		const patch = yield* Schema.decodeUnknownEffect(schema)(input).pipe(
+			Effect.mapError((cause) =>
+				InvalidIntercept.make({ key: reference.key, cause }),
+			),
+		)
+		const outer = yield* reference
+		const value = merge(outer, patch)
+		return Graft.intercept(reference, () => value)
+	}),
 })
 
 /** Only registered references may be changed by config-file entries. */
@@ -70,17 +69,17 @@ export const layer = (registrations: ReadonlyArray<Registration>) =>
 		),
 	)
 
-export const resolve = (
+export const resolve = Effect.fnUntraced(function* (
 	registry: HashMap.HashMap<string, Registration>,
 	values: Readonly<Record<string, unknown>>,
-) =>
-	Effect.suspend(() =>
-		Effect.forEach(Record.toEntries(values), ([key, input]) =>
-			Effect.gen(function* () {
-				const registration = HashMap.get(registry, key)
-				if (Option.isNone(registration))
-					return yield* UnregisteredReference.make({ key })
-				return yield* registration.value.resolve(input)
-			}),
-		),
+) {
+	return yield* Effect.forEach(
+		Record.toEntries(values),
+		Effect.fnUntraced(function* ([key, input]: readonly [string, unknown]) {
+			const registration = HashMap.get(registry, key)
+			if (Option.isNone(registration))
+				return yield* UnregisteredReference.make({ key })
+			return yield* registration.value.resolve(input)
+		}),
 	)
+})

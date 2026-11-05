@@ -92,60 +92,64 @@ const setHandlers = (
 		? HashMap.remove(events, key)
 		: HashMap.set(events, key, handlers)
 
-const register = <Args extends ReadonlyArray<unknown>, Out, E, R>(
+const register = Effect.fnUntraced(function* <
+	Args extends ReadonlyArray<unknown>,
+	Out,
+	E,
+	R,
+>(
 	event: Event<Args, Out, E>,
 	handler: (
 		...args: NoInfer<Args>
 	) => Effect.Effect<NoInfer<Out>, NoInfer<E>, R>,
 	options: HandlerOptions & { readonly once: boolean },
-): Effect.Effect<void, never, Graft | Scope.Scope | R> =>
-	Effect.gen(function* () {
-		const { runtime } = yield* RuntimeContext
-		const realms = yield* Realms
-		const context = yield* Effect.context<R>()
-		const owner = yield* Effect.scope
-		const scope = yield* Scope.fork(owner)
-		const closing = yield* Deferred.make<number>()
-		const fibers = yield* FiberSet.make<Out, E>().pipe(Scope.provide(scope))
-		// This finalizer runs before FiberSet interrupts the group's invocations.
-		yield* Scope.addFinalizer(
-			scope,
-			Effect.withFiber((fiber) => Deferred.succeed(closing, fiber.id)),
-		)
-		const entry: Handler<Args, Out, E> = {
-			realm: realmOf(realms, event.key),
-			global: options.global === true,
-			once: options.once,
-			context,
-			fibers,
-			scope,
-			closing,
-			run: (args) =>
-				Effect.updateContext(
-					// Restore services first; the invocation then supplies its own Scope.
-					Release.scoped(Effect.suspend(() => handler(...args))),
-					(_: Context.Context<never>) => context,
-				),
-		}
-		const update = (
-			f: (handlers: ReadonlyArray<Handler>) => ReadonlyArray<Handler>,
-		) =>
-			TxRef.update(runtime.events, (events) =>
-				setHandlers(
-					events,
-					event.key,
-					f(Option.getOrElse(HashMap.get(events, event.key), () => [])),
-				),
-			)
-		yield* Effect.acquireRelease(
-			update((handlers) =>
-				options.prepend === true
-					? Array.prepend(handlers, entry)
-					: Array.append(handlers, entry),
+): Effect.fn.Return<void, never, Graft | Scope.Scope | R> {
+	const { runtime } = yield* RuntimeContext
+	const realms = yield* Realms
+	const context = yield* Effect.context<R>()
+	const owner = yield* Effect.scope
+	const scope = yield* Scope.fork(owner)
+	const closing = yield* Deferred.make<number>()
+	const fibers = yield* FiberSet.make<Out, E>().pipe(Scope.provide(scope))
+	// This finalizer runs before FiberSet interrupts the group's invocations.
+	yield* Scope.addFinalizer(
+		scope,
+		Effect.withFiber((fiber) => Deferred.succeed(closing, fiber.id)),
+	)
+	const entry: Handler<Args, Out, E> = {
+		realm: realmOf(realms, event.key),
+		global: options.global === true,
+		once: options.once,
+		context,
+		fibers,
+		scope,
+		closing,
+		run: (args) =>
+			Effect.updateContext(
+				// Restore services first; the invocation then supplies its own Scope.
+				Release.scoped(Effect.suspend(() => handler(...args))),
+				(_: Context.Context<never>) => context,
 			),
-			() => update(Array.filter((handler) => handler !== entry)),
-		).pipe(Scope.provide(scope))
-	}).pipe(Effect.uninterruptible)
+	}
+	const update = (
+		f: (handlers: ReadonlyArray<Handler>) => ReadonlyArray<Handler>,
+	) =>
+		TxRef.update(runtime.events, (events) =>
+			setHandlers(
+				events,
+				event.key,
+				f(Option.getOrElse(HashMap.get(events, event.key), () => [])),
+			),
+		)
+	yield* Effect.acquireRelease(
+		update((handlers) =>
+			options.prepend === true
+				? Array.prepend(handlers, entry)
+				: Array.append(handlers, entry),
+		),
+		() => update(Array.filter((handler) => handler !== entry)),
+	).pipe(Scope.provide(scope))
+}, Effect.uninterruptible)
 
 /** Registers a handler until the current scope closes. */
 export const on = <Args extends ReadonlyArray<unknown>, Out, E, R>(
@@ -171,25 +175,26 @@ export const once = <Args extends ReadonlyArray<unknown>, Out, E, R>(
 	register(event, handler, { ...options, once: true })
 
 /** The handlers a dispatch from the current context reaches, in order. */
-const handlersFor = <Args extends ReadonlyArray<unknown>, Out, E>(
-	event: Event<Args, Out, E>,
-) =>
-	Effect.gen(function* () {
-		const { runtime } = yield* RuntimeContext
-		const realms = yield* Realms
-		const filter = yield* Filter
-		const realm = realmOf(realms, event.key)
-		const events = yield* TxRef.get(runtime.events)
-		const handlers = Option.getOrElse(
-			HashMap.get(events, event.key),
-			() => [],
-		) as ReadonlyArray<Handler<Args, Out, E>>
-		return Array.filter(
-			handlers,
-			(handler) =>
-				handler.global || (handler.realm === realm && filter(handler.context)),
-		)
-	})
+const handlersFor = Effect.fnUntraced(function* <
+	Args extends ReadonlyArray<unknown>,
+	Out,
+	E,
+>(event: Event<Args, Out, E>) {
+	const { runtime } = yield* RuntimeContext
+	const realms = yield* Realms
+	const filter = yield* Filter
+	const realm = realmOf(realms, event.key)
+	const events = yield* TxRef.get(runtime.events)
+	const handlers = Option.getOrElse(
+		HashMap.get(events, event.key),
+		() => [],
+	) as ReadonlyArray<Handler<Args, Out, E>>
+	return Array.filter(
+		handlers,
+		(handler) =>
+			handler.global || (handler.realm === realm && filter(handler.context)),
+	)
+})
 
 /**
  * Runs one handler in its owner's fiber set. Resolves to `None` if the
@@ -301,77 +306,87 @@ export const emit = <Args extends ReadonlyArray<unknown>, Out, E>(
 export const parallel = <Args extends ReadonlyArray<unknown>, Out, E>(
 	event: Event<Args, Out, E>,
 	...args: Args
-): Effect.Effect<ReadonlyArray<Out>, E, Graft> =>
-	Effect.gen(function* () {
-		const handlers = yield* handlersFor(event)
-		return yield* Effect.acquireUseRelease(
-			Effect.forEach(handlers, (handler) =>
-				Effect.forkScoped(invoke(event, handler, args)),
-			),
-			(fibers) =>
-				Effect.forEach(fibers, Fiber.await).pipe(
-					Effect.map((exits) =>
-						Array.getSomes(
-							Array.map(
-								Array.filter(exits, Exit.isSuccess),
-								(exit) => exit.value,
-							),
+): Effect.Effect<ReadonlyArray<Out>, E, Graft> => dispatchParallel(event, args)
+
+// fnUntraced cannot carry a readonly variadic tuple, so the public entry point collects the arguments.
+const dispatchParallel = Effect.fnUntraced(function* <
+	Args extends ReadonlyArray<unknown>,
+	Out,
+	E,
+>(event: Event<Args, Out, E>, args: Args) {
+	const handlers = yield* handlersFor(event)
+	return yield* Effect.acquireUseRelease(
+		Effect.forEach(handlers, (handler) =>
+			Effect.forkScoped(invoke(event, handler, args)),
+		),
+		(fibers) =>
+			Effect.forEach(fibers, Fiber.await).pipe(
+				Effect.map((exits) =>
+					Array.getSomes(
+						Array.map(
+							Array.filter(exits, Exit.isSuccess),
+							(exit) => exit.value,
 						),
 					),
 				),
-			(fibers, used) =>
-				Effect.gen(function* () {
-					// Wait for every invocation; marked release failures survive cancellation of this dispatch.
-					yield* Fiber.interruptAll(fibers)
-					const exits = yield* Effect.forEach(fibers, Fiber.await)
-					const empty: Cause.Cause<E> = Cause.empty
-					const cause = Array.reduce(exits, empty, (cause, exit) =>
-						Exit.isFailure(exit) &&
-						(Exit.isSuccess(used) || !Cause.hasInterruptsOnly(exit.cause))
-							? Cause.combine(cause, exit.cause)
-							: cause,
-					)
-					if (cause.reasons.length > 0) return yield* Effect.failCause(cause)
-				}),
-		)
-	}).pipe(Release.scoped)
+			),
+		(fibers, used) =>
+			Effect.gen(function* () {
+				// Wait for every invocation; marked release failures survive cancellation of this dispatch.
+				yield* Fiber.interruptAll(fibers)
+				const exits = yield* Effect.forEach(fibers, Fiber.await)
+				const empty: Cause.Cause<E> = Cause.empty
+				const cause = Array.reduce(exits, empty, (cause, exit) =>
+					Exit.isFailure(exit) &&
+					(Exit.isSuccess(used) || !Cause.hasInterruptsOnly(exit.cause))
+						? Cause.combine(cause, exit.cause)
+						: cause,
+				)
+				if (cause.reasons.length > 0) return yield* Effect.failCause(cause)
+			}),
+	)
+}, Release.scoped)
 
 /** Calls handlers in order until one returns `Some`. */
 export const bail = <Args extends ReadonlyArray<unknown>, A, E>(
 	event: Event<Args, Option.Option<A>, E>,
 	...args: Args
-): Effect.Effect<Option.Option<A>, E, Graft> =>
-	Effect.gen(function* () {
-		const handlers = yield* handlersFor(event)
-		for (const handler of handlers) {
-			const result = yield* invoke(event, handler, args)
-			if (Option.isSome(result) && Option.isSome(result.value))
-				return result.value
-		}
-		return Option.none()
-	})
+): Effect.Effect<Option.Option<A>, E, Graft> => dispatchBail(event, args)
+
+const dispatchBail = Effect.fnUntraced(function* <
+	Args extends ReadonlyArray<unknown>,
+	A,
+	E,
+>(event: Event<Args, Option.Option<A>, E>, args: Args) {
+	const handlers = yield* handlersFor(event)
+	for (const handler of handlers) {
+		const result = yield* invoke(event, handler, args)
+		if (Option.isSome(result) && Option.isSome(result.value))
+			return result.value
+	}
+	return Option.none<A>()
+})
 
 /** Shares the first execution, including its failure or interruption, with all callers. */
-const shareNext = <I, O, E>(run: Next<I, O, E>) =>
-	Effect.gen(function* () {
-		const started = yield* Deferred.make<void>()
-		const result = yield* Deferred.make<O, E>()
-		return (input: I): Effect.Effect<O, E> =>
-			Effect.uninterruptibleMask((restore) =>
-				Effect.gen(function* () {
-					if (yield* Deferred.succeed(started, undefined)) {
-						yield* Deferred.complete(
-							result,
-							restore(Effect.suspend(() => run(input))),
-						)
-						// Completion guarantees this cannot suspend. Observe its full
-						// Cause before a pending interrupt can replace it.
-						return yield* Deferred.await(result)
-					}
-					return yield* restore(Deferred.await(result))
-				}),
-			)
-	})
+const shareNext = Effect.fnUntraced(function* <I, O, E>(run: Next<I, O, E>) {
+	const started = yield* Deferred.make<void>()
+	const result = yield* Deferred.make<O, E>()
+	return (input: I): Effect.Effect<O, E> =>
+		Effect.uninterruptibleMask((restore) =>
+			Effect.gen(function* () {
+				if (yield* Deferred.succeed(started, undefined)) {
+					yield* Deferred.complete(
+						result,
+						restore(Effect.suspend(() => run(input))),
+					)
+					// Completion guarantees this cannot suspend. Observe its full
+					// Cause before a pending interrupt can replace it.
+					return yield* Deferred.await(result)
+				}
+				return yield* restore(Deferred.await(result))
+			}),
+		)
+})
 
 /**
  * Passes `input` through every handler as middleware, ending with `last`.
@@ -382,16 +397,20 @@ const shareNext = <I, O, E>(run: Next<I, O, E>) =>
  * selects its input; later executions share the same success, failure, or
  * interruption. Cancelling that first execution does not retry downstream.
  */
-export const waterfall = <I, O, E, R>(
+export const waterfall: <I, O, E, R>(
 	event: Middleware<I, O, E>,
 	input: I,
 	last: (input: I) => Effect.Effect<O, E, R>,
-): Effect.Effect<O, E, Graft | Exclude<R, Scope.Scope>> =>
-	Effect.gen(function* () {
+) => Effect.Effect<O, E, Graft | Exclude<R, Scope.Scope>> = Effect.fnUntraced(
+	function* <I, O, E, R>(
+		event: Middleware<I, O, E>,
+		input: I,
+		last: (input: I) => Effect.Effect<O, E, R>,
+	) {
 		const handlers = yield* handlersFor(event)
 		const context = yield* Effect.context<Graft | Exclude<R, Scope.Scope>>()
-		const step = (index: number, input: I): Effect.Effect<O, E> =>
-			Effect.gen(function* () {
+		const step: (index: number, input: I) => Effect.Effect<O, E> =
+			Effect.fnUntraced(function* (index: number, input: I) {
 				const handler = handlers[index]
 				if (handler === undefined)
 					return yield* Effect.suspend(() => last(input)).pipe(
@@ -405,4 +424,5 @@ export const waterfall = <I, O, E, R>(
 				return Option.isSome(result) ? result.value : yield* next(input)
 			})
 		return yield* step(0, input)
-	})
+	},
+)

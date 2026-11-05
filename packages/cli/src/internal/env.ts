@@ -95,75 +95,74 @@ const logStopped =
  * Reloads the file when it changes and retries the loader's entries, which
  * reads `!env` again. A file that cannot be read keeps its previous values.
  */
-export const watchEnvFile = <E, R>(
+export const watchEnvFile = Effect.fnUntraced(function* <E, R>(
 	file: string,
 	reload: Effect.Effect<boolean, PlatformError.PlatformError>,
 	retry: Effect.Effect<void, E, R>,
-) =>
-	Effect.gen(function* () {
-		const fs = yield* FileSystem.FileSystem
-		const path = yield* Path.Path
-		const ready = yield* Deferred.make<void>()
-		// As in HMR, own the source scope inside the producer. Observe its
-		// complete Exit after cleanup, before merge can discard it.
-		const events = Stream.callback<
-			FileSystem.WatchEvent,
-			PlatformError.PlatformError
-		>(
-			(queue) =>
-				fs
-					.watch(path.dirname(file), {
-						onReady: () => Deferred.doneUnsafe(ready, Effect.void),
-					})
-					.pipe(
-						Stream.filter(
-							(event) => path.basename(event.path) === path.basename(file),
-						),
-						Stream.runForEachArray((events) => Queue.offerAll(queue, events)),
-						Effect.scoped,
-						(effect) =>
-							observeShutdown(
-								effect,
-								`Watching ${file} stopped with interrupted cleanup`,
-							),
-						Effect.onExit(logStopped(file)),
-						Effect.catchCauseIf(
-							(cause) => !Cause.hasInterrupts(cause),
-							(cause) => Effect.logError(`Watching ${file} failed`, cause),
-						),
-						// A failed native backend must not stop content reconciliation.
-						Effect.andThen(Effect.sleep("1 second")),
-						Effect.forever,
+) {
+	const fs = yield* FileSystem.FileSystem
+	const path = yield* Path.Path
+	const ready = yield* Deferred.make<void>()
+	// As in HMR, own the source scope inside the producer. Observe its
+	// complete Exit after cleanup, before merge can discard it.
+	const events = Stream.callback<
+		FileSystem.WatchEvent,
+		PlatformError.PlatformError
+	>(
+		(queue) =>
+			fs
+				.watch(path.dirname(file), {
+					onReady: () => Deferred.doneUnsafe(ready, Effect.void),
+				})
+				.pipe(
+					Stream.filter(
+						(event) => path.basename(event.path) === path.basename(file),
 					),
-			{ bufferSize: 16 },
-		)
-		// Native events accelerate updates. Poll the request too: its target
-		// may live outside this directory, change, or lose a notification.
-		yield* Stream.mergeAll(
-			[
-				Stream.as(events, undefined),
-				Stream.fromEffect(Deferred.await(ready)),
-				Stream.tick("1 second").pipe(Stream.drop(1)),
-			],
-			{ concurrency: "unbounded" },
-		).pipe(
-			Stream.runForEach(() =>
-				// Delay to let writes settle.
-				Effect.sleep("100 millis").pipe(
-					Effect.andThen(reload),
-					Effect.flatMap((changed) => (changed ? retry : Effect.void)),
+					Stream.runForEachArray((events) => Queue.offerAll(queue, events)),
+					Effect.scoped,
+					(effect) =>
+						observeShutdown(
+							effect,
+							`Watching ${file} stopped with interrupted cleanup`,
+						),
+					Effect.onExit(logStopped(file)),
 					Effect.catchCauseIf(
 						(cause) => !Cause.hasInterrupts(cause),
-						(cause) => Effect.logError(`Reloading ${file} failed`, cause),
+						(cause) => Effect.logError(`Watching ${file} failed`, cause),
 					),
+					// A failed native backend must not stop content reconciliation.
+					Effect.andThen(Effect.sleep("1 second")),
+					Effect.forever,
+				),
+		{ bufferSize: 16 },
+	)
+	// Native events accelerate updates. Poll the request too: its target
+	// may live outside this directory, change, or lose a notification.
+	yield* Stream.mergeAll(
+		[
+			Stream.as(events, undefined),
+			Stream.fromEffect(Deferred.await(ready)),
+			Stream.tick("1 second").pipe(Stream.drop(1)),
+		],
+		{ concurrency: "unbounded" },
+	).pipe(
+		Stream.runForEach(() =>
+			// Delay to let writes settle.
+			Effect.sleep("100 millis").pipe(
+				Effect.andThen(reload),
+				Effect.flatMap((changed) => (changed ? retry : Effect.void)),
+				Effect.catchCauseIf(
+					(cause) => !Cause.hasInterrupts(cause),
+					(cause) => Effect.logError(`Reloading ${file} failed`, cause),
 				),
 			),
-			Effect.catchCauseIf(
-				(cause) => !Cause.hasInterrupts(cause),
-				(cause) => Effect.logError(`Stopped watching ${file}`, cause),
-			),
-		)
-	}).pipe(
-		// Observe the whole watcher before forkScoped owns it.
+		),
+		Effect.catchCauseIf(
+			(cause) => !Cause.hasInterrupts(cause),
+			(cause) => Effect.logError(`Stopped watching ${file}`, cause),
+		),
+		// Observe the whole watcher before forkScoped owns it. The steps
+		// before the stream cannot fail, so this covers every failure.
 		Effect.onExit(logStopped(file)),
 	)
+})

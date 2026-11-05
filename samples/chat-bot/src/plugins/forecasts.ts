@@ -17,23 +17,22 @@ const table: Record<
 export default Plugin.make({
 	name: "forecasts",
 	config,
-	apply: ({ units }) =>
-		Effect.gen(function* () {
-			yield* Effect.acquireRelease(
-				Effect.log(`Connected to the weather service (${units})`),
-				() => Effect.log("Disconnected from the weather service"),
-			)
-			yield* Graft.provide(Forecasts, {
-				today: (city) =>
-					Effect.succeed(
-						Option.map(
-							Record.get(table, String.toLowerCase(city)),
-							({ sky, celsius }) =>
-								units === "celsius"
-									? `${sky}, ${celsius} °C`
-									: `${sky}, ${Math.round((celsius * 9) / 5 + 32)} °F`,
-						),
+	apply: Effect.fn("forecasts.apply")(function* ({ units }) {
+		yield* Effect.acquireRelease(
+			Effect.log(`Connected to the weather service (${units})`),
+			() => Effect.log("Disconnected from the weather service"),
+		)
+		yield* Graft.provide(Forecasts, {
+			today: (city) =>
+				Effect.succeed(
+					Option.map(
+						Record.get(table, String.toLowerCase(city)),
+						({ sky, celsius }) =>
+							units === "celsius"
+								? `${sky}, ${celsius} °C`
+								: `${sky}, ${Math.round((celsius * 9) / 5 + 32)} °F`,
 					),
-			})
-		}),
+				),
+		})
+	}),
 })

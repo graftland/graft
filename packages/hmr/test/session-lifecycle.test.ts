@@ -45,39 +45,38 @@ class ImportRejected extends Schema.TaggedError<
 	{ readonly brand: unique symbol }
 >()("ImportRejected", { cause: Schema.Unknown }) {}
 
-const setup = (owner?: Scope.Scope) =>
-	Effect.gen(function* () {
-		const fs = yield* FileSystem.FileSystem
-		const directory = yield* fs
-			.makeTempDirectoryScoped()
-			.pipe(Effect.flatMap(fs.realPath))
-		const path = yield* Path.Path
-		const base = (yield* path.toFileUrl(`${directory}/app.mjs`)).href
-		const make = Hmr.make({
-			base,
-			include: String.startsWith(new URL(".", base).href),
-		})
-		const hmr = yield* owner === undefined
-			? make
-			: Effect.provideService(make, Scope.Scope, owner)
-		const runtimeSource = yield* quote(runtimeUrl.href)
-		const effectSource = yield* quote(import.meta.resolve("effect"))
-		const source = (name: string) => `
+const setup = Effect.fnUntraced(function* (owner?: Scope.Scope) {
+	const fs = yield* FileSystem.FileSystem
+	const directory = yield* fs
+		.makeTempDirectoryScoped()
+		.pipe(Effect.flatMap(fs.realPath))
+	const path = yield* Path.Path
+	const base = (yield* path.toFileUrl(`${directory}/app.mjs`)).href
+	const make = Hmr.make({
+		base,
+		include: String.startsWith(new URL(".", base).href),
+	})
+	const hmr = yield* owner === undefined
+		? make
+		: Effect.provideService(make, Scope.Scope, owner)
+	const runtimeSource = yield* quote(runtimeUrl.href)
+	const effectSource = yield* quote(import.meta.resolve("effect"))
+	const source = (name: string) => `
 import { Plugin } from ${runtimeSource};
 import { Effect } from ${effectSource};
 export default Plugin.make({ name: '${name}', apply: () => Effect.void });
 `
-		const write = (name: string, text: string) =>
-			fs.writeFileString(`${directory}/${name}`, text)
-		const load = (name: string) =>
-			Effect.promise(() => hmr.importer(name)).pipe(
-				Effect.map((namespace) => {
-					assert(Predicate.hasProperty(namespace, "default"))
-					return namespace.default as PluginType.Plugin<void, void, never>
-				}),
-			)
-		return { hmr, source, write, load, directory }
-	})
+	const write = (name: string, text: string) =>
+		fs.writeFileString(`${directory}/${name}`, text)
+	const load = (name: string) =>
+		Effect.promise(() => hmr.importer(name)).pipe(
+			Effect.map((namespace) => {
+				assert(Predicate.hasProperty(namespace, "default"))
+				return namespace.default as PluginType.Plugin<void, void, never>
+			}),
+		)
+	return { hmr, source, write, load, directory }
+})
 
 describe("HMR session lifecycle", () => {
 	it.live.each(["scoped", "promise"])(

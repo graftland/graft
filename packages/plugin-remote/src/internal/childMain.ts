@@ -21,24 +21,23 @@ const child = Command.make(
 			Argument.withSchema(Schema.fromJsonString(Bootstrap)),
 		),
 	},
-	({ contract, session, bootstrap }) =>
-		Effect.gen(function* () {
-			const watchdog = yield* Watchdog.start
-			// The executable owns stdin; it must not retain the process after a supervisor stop.
-			yield* Effect.addFinalizer(() =>
-				Effect.sync(() => {
-					process.stdin.destroy()
-				}),
-			)
-			const begin = yield* Effect.raceFirst(
-				watchdog.begin.pipe(Effect.as(true)),
-				watchdog.stop.pipe(Effect.as(false)),
-			)
-			if (!begin) return
-			const definition = yield* load(pathToFileURL(contract).href)
-			const channel = yield* bytes
-			return yield* run(definition, channel, session, bootstrap, watchdog.stop)
-		}),
+	Effect.fnUntraced(function* ({ contract, session, bootstrap }) {
+		const watchdog = yield* Watchdog.start
+		// The executable owns stdin; it must not retain the process after a supervisor stop.
+		yield* Effect.addFinalizer(() =>
+			Effect.sync(() => {
+				process.stdin.destroy()
+			}),
+		)
+		const begin = yield* Effect.raceFirst(
+			watchdog.begin.pipe(Effect.as(true)),
+			watchdog.stop.pipe(Effect.as(false)),
+		)
+		if (!begin) return
+		const definition = yield* load(pathToFileURL(contract).href)
+		const channel = yield* bytes
+		return yield* run(definition, channel, session, bootstrap, watchdog.stop)
+	}),
 )
 const cli = Command.make(
 	"remote-child",
@@ -46,17 +45,16 @@ const cli = Command.make(
 		contract: Argument.String("contract").pipe(Argument.optional),
 		session: Argument.String("session").pipe(Argument.withDefault("local")),
 	},
-	({ contract, session }) =>
-		Effect.gen(function* () {
-			if (Option.isNone(contract))
-				return yield* CliError.UserError.make({
-					cause: "Missing contract module",
-					userMessage: "A contract module or the child subcommand is required",
-				})
-			const definition = yield* load(contract.value)
-			const channel = yield* bytes
-			return yield* run(definition, channel, session)
-		}),
+	Effect.fnUntraced(function* ({ contract, session }) {
+		if (Option.isNone(contract))
+			return yield* CliError.UserError.make({
+				cause: "Missing contract module",
+				userMessage: "A contract module or the child subcommand is required",
+			})
+		const definition = yield* load(contract.value)
+		const channel = yield* bytes
+		return yield* run(definition, channel, session)
+	}),
 ).pipe(Command.withSubcommands([child]))
 
 NodeRuntime.runMain(

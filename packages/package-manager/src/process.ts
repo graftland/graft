@@ -49,51 +49,50 @@ export const groupExists = (pid: ChildProcessSpawner.ProcessId) =>
 	)
 
 /** Close the original group, including descendants that remain in it after leader exit. */
-export const closeProcess = (
+export const closeProcess = Effect.fnUntraced(function* (
 	process: ChildProcessSpawner.ChildProcessHandle,
 	options: ChildProcess.KillOptions,
 	probe: typeof groupExists = groupExists,
-) =>
-	Effect.gen(function* () {
-		const killed = yield* Effect.suspend(() => process.kill(options)).pipe(
-			Effect.exit,
+) {
+	const killed = yield* Effect.suspend(() => process.kill(options)).pipe(
+		Effect.exit,
+	)
+	// Windows retains its as-is adapter contract; POSIX requires group evidence.
+	if (NodeProcess.platform === "win32") return yield* killed
+	const checked = yield* Effect.suspend(() => probe(process.pid)).pipe(
+		Effect.exit,
+		Effect.repeat({
+			while: (exit) => Exit.isSuccess(exit) && exit.value,
+			times: 100,
+			schedule: Schedule.spaced("20 millis"),
+		}),
+	)
+	if (Exit.isFailure(checked))
+		return yield* Effect.failCause(
+			Exit.isFailure(killed)
+				? Cause.combine(killed.cause, checked.cause)
+				: checked.cause,
 		)
-		// Windows retains its as-is adapter contract; POSIX requires group evidence.
-		if (NodeProcess.platform === "win32") return yield* killed
-		const checked = yield* Effect.suspend(() => probe(process.pid)).pipe(
-			Effect.exit,
-			Effect.repeat({
-				while: (exit) => Exit.isSuccess(exit) && exit.value,
-				times: 100,
-				schedule: Schedule.spaced("20 millis"),
-			}),
+	if (checked.value) {
+		if (Exit.isFailure(killed)) return yield* Effect.failCause(killed.cause)
+		return yield* PlatformError.systemError({
+			_tag: "Unknown",
+			module: "ChildProcess",
+			method: "confirmGroupStopped",
+			description: `Process group ${process.pid} still exists after the two-second confirmation window`,
+		})
+	}
+	if (Exit.isFailure(killed)) {
+		// Absence resolves only a failed signal to a nonexistent group, not other cleanup failures.
+		const remaining = Array.filter(
+			killed.cause.reasons,
+			(reason) =>
+				!(Cause.isFailReason(reason) && isSignalFailure(reason.error)),
 		)
-		if (Exit.isFailure(checked))
-			return yield* Effect.failCause(
-				Exit.isFailure(killed)
-					? Cause.combine(killed.cause, checked.cause)
-					: checked.cause,
-			)
-		if (checked.value) {
-			if (Exit.isFailure(killed)) return yield* Effect.failCause(killed.cause)
-			return yield* PlatformError.systemError({
-				_tag: "Unknown",
-				module: "ChildProcess",
-				method: "confirmGroupStopped",
-				description: `Process group ${process.pid} still exists after the two-second confirmation window`,
-			})
-		}
-		if (Exit.isFailure(killed)) {
-			// Absence resolves only a failed signal to a nonexistent group, not other cleanup failures.
-			const remaining = Array.filter(
-				killed.cause.reasons,
-				(reason) =>
-					!(Cause.isFailReason(reason) && isSignalFailure(reason.error)),
-			)
-			if (remaining.length > 0)
-				return yield* Effect.failCause(Cause.fromReasons(remaining))
-		}
-	})
+		if (remaining.length > 0)
+			return yield* Effect.failCause(Cause.fromReasons(remaining))
+	}
+})
 
 export type Termination = Data.TaggedEnum<{
 	OriginalGroupStopped: {}

@@ -23,7 +23,7 @@ import {
 import { SecureRandom } from "effect/crypto"
 import { TestClock } from "effect/testing"
 import { pathToFileURL } from "node:url"
-import * as SourceObservation from "../../hmr/src/internal/sourceObservation"
+import * as Hmr from "@graftland/hmr"
 import * as Contract from "../src/Contract"
 import { host } from "../src/internal/entry"
 
@@ -135,7 +135,8 @@ it.effect(
 					),
 				importModule: () => Effect.succeed({ contract }),
 			}
-			const observation = SourceObservation.make().pipe(
+			const hmr = yield* Hmr.make({ base: import.meta.url })
+			const observation = hmr.observation.pipe(
 				Effect.provideService(
 					FileSystem.FileSystem,
 					FileSystem.makeNoop({

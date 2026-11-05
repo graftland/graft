@@ -23,30 +23,27 @@ interface Disk {
 	readonly writes: Ref.Ref<ReadonlyArray<string>>
 }
 
-const run = <A, E>(
+const run = Effect.fn("run")(function* <A, E>(
 	body: (disk: Disk) => Effect.Effect<A, E, Graft.Graft | Scope.Scope>,
-) =>
-	Effect.gen(function* () {
-		const files = yield* Ref.make(HashMap.empty<string, string>())
-		const writes = yield* Ref.make<ReadonlyArray<string>>([])
-		const filesystem = FileSystem.layerNoop({
-			exists: (file) => Ref.get(files).pipe(Effect.map(HashMap.has(file))),
-			readFileString: (file) =>
-				Ref.get(files).pipe(
-					Effect.map((entries) =>
-						Option.getOrThrow(HashMap.get(entries, file)),
-					),
-				),
-			writeFileString: (file, contents) =>
-				Ref.update(files, HashMap.set(file, contents)).pipe(
-					Effect.andThen(Ref.update(writes, Array.append(file))),
-				),
-		})
-		return yield* body({ files, writes }).pipe(
-			Effect.scoped,
-			Effect.provide(Layer.fresh(Layer.provide(Graft.layer, filesystem))),
-		)
+) {
+	const files = yield* Ref.make(HashMap.empty<string, string>())
+	const writes = yield* Ref.make<ReadonlyArray<string>>([])
+	const filesystem = FileSystem.layerNoop({
+		exists: (file) => Ref.get(files).pipe(Effect.map(HashMap.has(file))),
+		readFileString: (file) =>
+			Ref.get(files).pipe(
+				Effect.map((entries) => Option.getOrThrow(HashMap.get(entries, file))),
+			),
+		writeFileString: (file, contents) =>
+			Ref.update(files, HashMap.set(file, contents)).pipe(
+				Effect.andThen(Ref.update(writes, Array.append(file))),
+			),
 	})
+	return yield* body({ files, writes }).pipe(
+		Effect.scoped,
+		Effect.provide(Layer.fresh(Layer.provide(Graft.layer, filesystem))),
+	)
+})
 
 const startQuota = Effect.gen(function* () {
 	const fork = yield* Graft.plugin(quota)

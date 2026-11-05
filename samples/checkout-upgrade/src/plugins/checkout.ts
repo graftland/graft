@@ -9,23 +9,22 @@ import { Checkout, Database, Pricing } from "../Checkout.ts"
 export default Plugin.make({
 	name: "checkout",
 	inject: [Database, Pricing],
-	apply: () =>
-		Effect.gen(function* () {
-			const database = yield* Database
-			const pricing = yield* Pricing
-			yield* Effect.acquireRelease(
-				Effect.log(`Checkout up (pricing ${pricing.version}, ${database.url})`),
-				() => Effect.log("Checkout down"),
-			)
-			yield* Graft.provide(Checkout, {
-				place: (order) =>
-					Effect.flatMap(pricing.quote(order), (total) =>
-						database.insert({
-							order: order.id,
-							total,
-							pricing: pricing.version,
-						}),
-					),
-			})
-		}),
+	apply: Effect.fn("checkout.apply")(function* () {
+		const database = yield* Database
+		const pricing = yield* Pricing
+		yield* Effect.acquireRelease(
+			Effect.log(`Checkout up (pricing ${pricing.version}, ${database.url})`),
+			() => Effect.log("Checkout down"),
+		)
+		yield* Graft.provide(Checkout, {
+			place: (order) =>
+				Effect.flatMap(pricing.quote(order), (total) =>
+					database.insert({
+						order: order.id,
+						total,
+						pricing: pricing.version,
+					}),
+				),
+		})
+	}),
 })

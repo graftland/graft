@@ -156,16 +156,17 @@ export const start = Effect.fnUntraced(function* (store: Store) {
 		Stream.map((current) => current.version),
 		Stream.changes,
 		Stream.buffer({ capacity: 1, strategy: "sliding" }),
-		Stream.runForEach(() =>
-			Effect.gen(function* () {
-				const target = yield* SubscriptionRef.get(state)
-				if (target.version === target.reconciled) return
-				yield* root.update(withEpoch(copyGroup(target.entries), target.epoch))
-				yield* SubscriptionRef.update(state, (current) => ({
-					...current,
-					reconciled: target.version,
-				}))
-			}).pipe(
+		Stream.runForEach(
+			Effect.fnUntraced(
+				function* () {
+					const target = yield* SubscriptionRef.get(state)
+					if (target.version === target.reconciled) return
+					yield* root.update(withEpoch(copyGroup(target.entries), target.epoch))
+					yield* SubscriptionRef.update(state, (current) => ({
+						...current,
+						reconciled: target.version,
+					}))
+				},
 				Effect.catchCause((cause) =>
 					Effect.logError("Reconciling loader entries failed", cause),
 				),
@@ -199,8 +200,8 @@ export const start = Effect.fnUntraced(function* (store: Store) {
 		),
 		Effect.forkScoped,
 	)
-	yield* Effect.addFinalizer(() =>
-		Effect.gen(function* () {
+	yield* Effect.addFinalizer(
+		Effect.fnUntraced(function* () {
 			// End admission, then settle buffered jobs and offers already waiting for space.
 			yield* Queue.end(edits)
 			const pending = yield* Queue.collect(edits)
@@ -211,21 +212,20 @@ export const start = Effect.fnUntraced(function* (store: Store) {
 			)
 		}),
 	)
-	const edit = (op: Op) =>
-		Effect.gen(function* () {
-			// Capture before offering: the queue and worker must never retain caller-owned data.
-			const captured = Op.$match(op, {
-				Create: (create) =>
-					Op.Create({ ...create, entry: snapshot(create.entry) }),
-				Update: (update) =>
-					Op.Update({ ...update, patch: snapshot(update.patch) }),
-				Remove: (remove) => Op.Remove(remove),
-			})
-			const reply = yield* Deferred.make<void, EditError>()
-			const accepted = yield* Queue.offer(edits, { op: captured, reply })
-			if (!accepted) return yield* LoaderClosed.make()
-			return yield* Deferred.await(reply)
+	const edit = Effect.fnUntraced(function* (op: Op) {
+		// Capture before offering: the queue and worker must never retain caller-owned data.
+		const captured = Op.$match(op, {
+			Create: (create) =>
+				Op.Create({ ...create, entry: snapshot(create.entry) }),
+			Update: (update) =>
+				Op.Update({ ...update, patch: snapshot(update.patch) }),
+			Remove: (remove) => Op.Remove(remove),
 		})
+		const reply = yield* Deferred.make<void, EditError>()
+		const accepted = yield* Queue.offer(edits, { op: captured, reply })
+		if (!accepted) return yield* LoaderClosed.make()
+		return yield* Deferred.await(reply)
+	})
 	yield* Stream.suspend(() => store.external).pipe(
 		Stream.runForEach(() =>
 			Semaphore.withPermits(
@@ -258,8 +258,8 @@ export const start = Effect.fnUntraced(function* (store: Store) {
 		],
 		{ concurrency: "unbounded" },
 	).pipe(
-		Stream.filterEffect(() =>
-			Effect.gen(function* () {
+		Stream.filterEffect(
+			Effect.fnUntraced(function* () {
 				const before = yield* SubscriptionRef.get(state)
 				if (before.version !== before.reconciled) return false
 				if ((yield* SubscriptionRef.get(pending)) > 0) return false
@@ -310,18 +310,17 @@ export const start = Effect.fnUntraced(function* (store: Store) {
 			})),
 		),
 		ready,
-		create: (entry, options) =>
-			Effect.gen(function* () {
-				const id = entry.id ?? (yield* newId)
-				yield* edit(
-					Op.Create({
-						entry: { ...entry, id },
-						parent: Option.fromUndefinedOr(options?.parent),
-						position: Option.fromUndefinedOr(options?.position),
-					}),
-				)
-				return id
-			}),
+		create: Effect.fnUntraced(function* (entry, options) {
+			const id = entry.id ?? (yield* newId)
+			yield* edit(
+				Op.Create({
+					entry: { ...entry, id },
+					parent: Option.fromUndefinedOr(options?.parent),
+					position: Option.fromUndefinedOr(options?.position),
+				}),
+			)
+			return id
+		}),
 		update: (id, patch) => edit(Op.Update({ id, patch })),
 		remove: (id) => edit(Op.Remove({ id })),
 	})
@@ -331,19 +330,18 @@ export const start = Effect.fnUntraced(function* (store: Store) {
 export const plugin = Plugin.make({
 	name: "loader",
 	config: Schema.Array(Entry),
-	apply: (entries) =>
-		Effect.gen(function* () {
-			const initial = snapshot(entries)
-			const current = yield* Ref.make(initial)
-			yield* start({
-				initial,
-				apply: (op) =>
-					Ref.get(current).pipe(
-						Effect.flatMap((tree) => Effect.fromResult(apply(tree, op))),
-						Effect.tap((next) => Ref.set(current, next)),
-					),
-				refresh: Effect.succeedNone,
-				external: Stream.never,
-			})
-		}),
+	apply: Effect.fnUntraced(function* (entries) {
+		const initial = snapshot(entries)
+		const current = yield* Ref.make(initial)
+		yield* start({
+			initial,
+			apply: (op) =>
+				Ref.get(current).pipe(
+					Effect.flatMap((tree) => Effect.fromResult(apply(tree, op))),
+					Effect.tap((next) => Ref.set(current, next)),
+				),
+			refresh: Effect.succeedNone,
+			external: Stream.never,
+		})
+	}),
 })

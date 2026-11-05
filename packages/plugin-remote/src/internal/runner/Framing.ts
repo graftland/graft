@@ -27,16 +27,15 @@ export const maxPayload = 1024 * 1024
 const invalid = (detail: string) => FrameError.make({ detail })
 
 /** Version 2 carries only channel and length; request admission belongs to port. */
-export const encode = (frame: Frame) =>
-	Effect.gen(function* () {
-		if (frame.payload.byteLength > maxPayload)
-			return yield* invalid("Runner frame exceeds the payload limit")
-		const bytes = new Uint8Array(headerSize + frame.payload.byteLength)
-		bytes.set([2, frame.channel, 0, 0])
-		new DataView(bytes.buffer).setUint32(4, frame.payload.byteLength)
-		bytes.set(frame.payload, headerSize)
-		return bytes
-	})
+export const encode = Effect.fnUntraced(function* (frame: Frame) {
+	if (frame.payload.byteLength > maxPayload)
+		return yield* invalid("Runner frame exceeds the payload limit")
+	const bytes = new Uint8Array(headerSize + frame.payload.byteLength)
+	bytes.set([2, frame.channel, 0, 0])
+	new DataView(bytes.buffer).setUint32(4, frame.payload.byteLength)
+	bytes.set(frame.payload, headerSize)
+	return bytes
+})
 
 /** Check a message boundary; the decoder still validates the frame's contents. */
 export const isCompleteFrame = (bytes: Uint8Array): boolean =>

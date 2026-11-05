@@ -12,6 +12,7 @@ import {
 	Logger,
 	MutableList,
 	Ref,
+	Scheduler,
 	Schema,
 } from "effect"
 import { SecureRandom } from "effect/crypto"
@@ -42,7 +43,7 @@ const termination: Termination = {
 	exit: { code: null, signal: "SIGKILL" },
 	cause: Cause.empty,
 }
-const fake = (
+const fake = Effect.fnUntraced(function* (
 	options: {
 		readonly graceful?: boolean
 		readonly killExit?: boolean
@@ -51,71 +52,70 @@ const fake = (
 			child: ProcessIdentity,
 		) => Effect.Effect<Termination, ExecutionFailure>
 	} = {},
-) =>
-	Effect.gen(function* () {
-		const spawned = yield* Queue.bounded<{
-			readonly exit: Deferred.Deferred<ExitStatus>
-			readonly interrupted: Deferred.Deferred<void>
-			readonly killed: Deferred.Deferred<void>
-		}>(16)
-		const count = yield* Ref.make(0)
-		const closed = yield* Ref.make(0)
-		const driver = Execution.of({
-			spawn: () =>
-				Effect.gen(function* () {
-					const pid = yield* Ref.updateAndGet(count, (n) => n + 1)
-					const exit = yield* Deferred.make<ExitStatus>()
-					const interrupted = yield* Deferred.make<void>()
-					const killed = yield* Deferred.make<void>()
-					yield* Effect.addFinalizer(() => Ref.update(closed, (n) => n + 1))
-					return {
-						code,
-						renew: () => Effect.void,
-						start: Queue.offer(spawned, { exit, interrupted, killed }).pipe(
-							Effect.andThen(
-								options.gate === undefined
-									? Effect.void
-									: Deferred.await(options.gate),
-							),
-							Effect.asVoid,
-						),
-						identity: {
-							pid,
-							start: { born: "start-" + pid },
-						},
-						exited: Deferred.await(exit),
-						interrupt: Deferred.succeed(interrupted, undefined).pipe(
-							Effect.andThen(
-								options.graceful === false
-									? Effect.void
-									: Deferred.succeed(exit, exited),
-							),
-							Effect.asVoid,
-						),
-						kill: Deferred.succeed(killed, undefined).pipe(
-							Effect.andThen(
-								options.killExit === false
-									? Effect.void
-									: Deferred.succeed(exit, termination.exit),
-							),
-							Effect.asVoid,
-						),
-					}
-				}),
-			recover: options.recover ?? (() => Effect.succeed(termination)),
-		})
-		return { driver, spawned, count, closed }
+) {
+	const spawned = yield* Queue.bounded<{
+		readonly exit: Deferred.Deferred<ExitStatus>
+		readonly interrupted: Deferred.Deferred<void>
+		readonly killed: Deferred.Deferred<void>
+	}>(16)
+	const count = yield* Ref.make(0)
+	const closed = yield* Ref.make(0)
+	const driver = Execution.of({
+		spawn: Effect.fnUntraced(function* () {
+			const pid = yield* Ref.updateAndGet(count, (n) => n + 1)
+			const exit = yield* Deferred.make<ExitStatus>()
+			const interrupted = yield* Deferred.make<void>()
+			const killed = yield* Deferred.make<void>()
+			yield* Effect.addFinalizer(() => Ref.update(closed, (n) => n + 1))
+			return {
+				code,
+				renew: () => Effect.void,
+				start: Queue.offer(spawned, { exit, interrupted, killed }).pipe(
+					Effect.andThen(
+						options.gate === undefined
+							? Effect.void
+							: Deferred.await(options.gate),
+					),
+					Effect.asVoid,
+				),
+				identity: {
+					pid,
+					start: { born: "start-" + pid },
+				},
+				exited: Deferred.await(exit),
+				interrupt: Deferred.succeed(interrupted, undefined).pipe(
+					Effect.andThen(
+						options.graceful === false
+							? Effect.void
+							: Deferred.succeed(exit, exited),
+					),
+					Effect.asVoid,
+				),
+				kill: Deferred.succeed(killed, undefined).pipe(
+					Effect.andThen(
+						options.killExit === false
+							? Effect.void
+							: Deferred.succeed(exit, termination.exit),
+					),
+					Effect.asVoid,
+				),
+			}
+		}),
+		recover: options.recover ?? (() => Effect.succeed(termination)),
 	})
-const setup = (options: Parameters<typeof fake>[0] = {}) =>
-	Effect.gen(function* () {
-		const execution = yield* fake(options)
-		const store = yield* Stores.memory
-		const supervisor = yield* Supervisor.make().pipe(
-			Effect.provideService(Store, store),
-			Effect.provideService(Execution, execution.driver),
-		)
-		return { ...execution, store, supervisor }
-	})
+	return { driver, spawned, count, closed }
+})
+const setup = Effect.fnUntraced(function* (
+	options: Parameters<typeof fake>[0] = {},
+) {
+	const execution = yield* fake(options)
+	const store = yield* Stores.memory
+	const supervisor = yield* Supervisor.make().pipe(
+		Effect.provideService(Store, store),
+		Effect.provideService(Execution, execution.driver),
+	)
+	return { ...execution, store, supervisor }
+})
 const reason = <A>(
 	exit: Exit.Exit<A, SessionError>,
 	expected: SessionError["_tag"],
@@ -129,6 +129,7 @@ const reason = <A>(
 			),
 		)
 }
+const settle = Effect.yieldNow.pipe(Effect.repeat({ times: 1_000 }))
 const orphan: SessionRecord = {
 	version: 1,
 	handle: { key, token: "old-token", generation: 7 },
@@ -816,5 +817,42 @@ layer(SecureRandom.layerWebCrypto)("runner session supervisor", (it) => {
 						),
 					)
 			}).pipe(Effect.scoped),
+	)
+	it.effect(
+		"still expires the session when a renewal is interrupted at any step",
+		() =>
+			Effect.gen(function* () {
+				const outcomes = yield* Effect.forEach(
+					Array.range(0, 100),
+					Effect.fnUntraced(function* (steps) {
+						const { supervisor } = yield* setup()
+						const record = yield* supervisor.open({ key, requestId: "first" })
+						yield* TestClock.adjust("5 seconds")
+						// Three is the smallest budget that still makes progress: one step per scheduler turn.
+						const renewal = yield* Effect.forkScoped(
+							supervisor
+								.renew(record.handle)
+								.pipe(Effect.provideService(Scheduler.MaxOpsBeforeYield, 3)),
+						)
+						yield* Effect.yieldNow.pipe(Effect.repeat({ times: steps }))
+						yield* Fiber.interrupt(renewal)
+						const renewed = yield* Fiber.await(renewal)
+						// Timers forked by the renewal inherit its slow scheduling, so let them settle.
+						yield* settle
+						yield* TestClock.adjust("15 seconds")
+						yield* settle
+						const after = yield* supervisor.status(record.handle)
+						assert.strictEqual(
+							after.phase,
+							"Stopped",
+							"after " + steps + " steps",
+						)
+						return Exit.isSuccess(renewed)
+					}, Effect.scoped),
+				)
+				// The interruption must have landed both mid-renewal and after it finished.
+				assert.include(outcomes, true)
+				assert.include(outcomes, false)
+			}),
 	)
 })

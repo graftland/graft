@@ -26,7 +26,8 @@ import { Digest, Signature, SecureRandom } from "effect/crypto"
 import { Connector, Listener, type Channel } from "../src/Transport"
 import { Credentials } from "../src/Auth"
 import { Peer } from "../src/internal/Peer"
-import { TransportError } from "../src/Errors"
+import { CredentialsError, TransportError } from "../src/Errors"
+import { expectFailure } from "./errors"
 import { Supervisor } from "../src/internal/Supervisor"
 import websocket from "../src/host/websocket"
 import listener from "../src/runner/websocket"
@@ -191,13 +192,12 @@ const host = Effect.fnUntraced(function* (
 		consumer: Plugin.make({
 			name: "test-connection",
 			inject: [Connector, Credentials, Business],
-			apply: () =>
-				Effect.gen(function* () {
-					const value = yield* Business
-					yield* Deferred.succeed(business, value)
-					const channel = yield* Assembly.connect
-					yield* Deferred.succeed(found, channel)
-				}),
+			apply: Effect.fnUntraced(function* () {
+				const value = yield* Business
+				yield* Deferred.succeed(business, value)
+				const channel = yield* Assembly.connect
+				yield* Deferred.succeed(found, channel)
+			}),
 		}),
 	})
 	yield* ready(fork)
@@ -205,16 +205,17 @@ const host = Effect.fnUntraced(function* (
 	assert.equal(value, "inherited")
 	return yield* Deferred.await(found)
 })
-const connection = (plugins: Conformance.Capabilities) =>
-	Effect.gen(function* () {
-		yield* Graft.provide(Business, "inherited")
-		const provider = yield* Graft.plugin(supervisor)
-		yield* provider.await
-		const config = yield* pair("echo", plugins)
-		const server = yield* Assembly.runner(config.server)
-		yield* ready(server)
-		return yield* host(config.host)
-	})
+const connection = Effect.fnUntraced(function* (
+	plugins: Conformance.Capabilities,
+) {
+	yield* Graft.provide(Business, "inherited")
+	const provider = yield* Graft.plugin(supervisor)
+	yield* provider.await
+	const config = yield* pair("echo", plugins)
+	const server = yield* Assembly.runner(config.server)
+	yield* ready(server)
+	return yield* host(config.host)
+})
 const checks = Conformance.transport(implementations, connection)
 
 describe("capability conformance: websocket and mTLS", () => {
@@ -302,8 +303,9 @@ describe("capability conformance: websocket and mTLS", () => {
 					}),
 				})
 				const failure = yield* failed(wrong)
+				assert.equal(failure._tag, "Failed")
 				if (failure._tag === "Failed")
-					assert.include(Cause.pretty(failure.cause), "TransportError")
+					expectFailure(failure.cause, TransportError)
 			}).pipe(Effect.scoped, Effect.provide(runtime)),
 	)
 	it.live("waits for a nested provider after its parent becomes active", () =>
@@ -430,9 +432,13 @@ describe("capability conformance: websocket and mTLS", () => {
 					}),
 				})
 				const result = yield* failed(fork)
+				assert.equal(result._tag, "Failed")
 				if (result._tag === "Failed") {
-					assert.include(Cause.pretty(result.cause), "CapabilityContractError")
-					assert.include(Cause.pretty(result.cause), Connector.key)
+					const error = expectFailure(
+						result.cause,
+						Assembly.CapabilityContractError,
+					)
+					assert.equal(error.key, Connector.key)
 				}
 			}).pipe(Effect.scoped, Effect.provide(runtime)),
 	)
@@ -538,12 +544,9 @@ describe("capability conformance: websocket and mTLS", () => {
 				assert.equal(prepared._tag, "Certificate")
 				const fs = yield* FileSystem.FileSystem
 				yield* fs.remove(config.directory + "/client-rotate.key")
-				const result = yield* Effect.exit(api.read)
-				assert.equal(result._tag, "Failure")
-				if (result._tag === "Failure") {
-					assert.include(Cause.pretty(result.cause), "CredentialsError")
-					assert.include(Cause.pretty(result.cause), "client-rotate.key")
-				}
+				const error = yield* Effect.flip(api.read)
+				assert.isTrue(Schema.is(CredentialsError)(error))
+				assert.include(Cause.pretty(error.cause), "client-rotate.key")
 			}).pipe(Effect.scoped, Effect.provide(runtime)),
 	)
 	it.live(
@@ -590,8 +593,11 @@ describe("capability conformance: websocket and mTLS", () => {
 				const failure = yield* failed(assembly)
 				const policy = yield* Deferred.await(bound)
 				assert.isTrue(policy)
-				if (failure._tag === "Failed")
-					assert.include(Cause.pretty(failure.cause), "accept loop failed")
+				assert.equal(failure._tag, "Failed")
+				if (failure._tag === "Failed") {
+					const error = expectFailure(failure.cause, TransportError)
+					assert.include(Cause.pretty(error.cause), "accept loop failed")
+				}
 			}).pipe(Effect.scoped, Effect.provide(runtime)),
 	)
 
@@ -713,49 +719,48 @@ const tokenConfig = Effect.fnUntraced(function* (
 	}
 	return { host: {}, server: { identity: "echo" } }
 })
-const remainingConnection =
-	(name: string) => (plugins: Conformance.Capabilities) =>
-		Effect.gen(function* () {
-			yield* Graft.provide(Business, "inherited")
-			const provider = yield* Graft.plugin(supervisor)
-			yield* provider.await
-			const fs = yield* FileSystem.FileSystem
-			const directory = yield* fs.makeTempDirectoryScoped({
-				directory: "/tmp",
-				prefix: "graft-",
-			})
-			const auth = yield* tokenConfig(name, directory)
-			const address = yield* port
-			const config =
-				name === "unix/none"
-					? { path: directory + "/echo.sock" }
-					: { url: `ws://127.0.0.1:${address}` }
-			if (name !== "command/stdio") {
-				const server = yield* Assembly.runner({
-					transport: { plugin: plugins.listener, config },
-					auth: { plugin: plugins.authenticator, config: auth.server },
-				})
-				yield* ready(server)
-			}
-			return yield* host({
-				transport: {
-					plugin: plugins.connector,
-					config:
-						name === "command/stdio"
-							? {
-									argv: [
-										process.execPath,
-										new URL(
-											"../.cache/integration/stdio-echo.js",
-											import.meta.url,
-										).pathname,
-									],
-								}
-							: config,
-				},
-				auth: { plugin: plugins.credentials, config: auth.host },
-			})
+const remainingConnection = (name: string) =>
+	Effect.fnUntraced(function* (plugins: Conformance.Capabilities) {
+		yield* Graft.provide(Business, "inherited")
+		const provider = yield* Graft.plugin(supervisor)
+		yield* provider.await
+		const fs = yield* FileSystem.FileSystem
+		const directory = yield* fs.makeTempDirectoryScoped({
+			directory: "/tmp",
+			prefix: "graft-",
 		})
+		const auth = yield* tokenConfig(name, directory)
+		const address = yield* port
+		const config =
+			name === "unix/none"
+				? { path: directory + "/echo.sock" }
+				: { url: `ws://127.0.0.1:${address}` }
+		if (name !== "command/stdio") {
+			const server = yield* Assembly.runner({
+				transport: { plugin: plugins.listener, config },
+				auth: { plugin: plugins.authenticator, config: auth.server },
+			})
+			yield* ready(server)
+		}
+		return yield* host({
+			transport: {
+				plugin: plugins.connector,
+				config:
+					name === "command/stdio"
+						? {
+								argv: [
+									process.execPath,
+									new URL(
+										"../.cache/integration/stdio-echo.js",
+										import.meta.url,
+									).pathname,
+								],
+							}
+						: config,
+			},
+			auth: { plugin: plugins.credentials, config: auth.host },
+		})
+	})
 for (const implementation of remaining) {
 	const checks = Conformance.transport(
 		implementation,

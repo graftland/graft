@@ -41,17 +41,16 @@ export const resolve = Effect.fnUntraced(function* (
 	const directory = path.resolve(Option.getOrElse(source, () => "."))
 	const resolver = yield* Option.match(existing, {
 		onSome: Effect.succeed,
-		onNone: () =>
-			Effect.gen(function* () {
-				const importer = yield* Importer.make(directory)
-				return yield* ModuleResolver.make({
-					base: directory,
-					importer: (specifier) =>
-						String.startsWith("@graftland/plugin-remote/")(specifier)
-							? import(specifier)
-							: importer(specifier),
-				})
-			}),
+		onNone: Effect.fnUntraced(function* () {
+			const importer = yield* Importer.make(directory)
+			return yield* ModuleResolver.make({
+				base: directory,
+				importer: (specifier) =>
+					String.startsWith("@graftland/plugin-remote/")(specifier)
+						? import(specifier)
+						: importer(specifier),
+			})
+		}),
 	})
 	const fail = yield* boundary(field)
 	const plugin = yield* resolver

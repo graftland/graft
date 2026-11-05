@@ -1,7 +1,11 @@
 /** Credentials and authenticated identities shared by transport plugins. */
 import { Context } from "effect"
 import type { Effect, Redacted, Option, Scope } from "effect"
-import type { AuthenticationFailed, CredentialsError } from "./Errors"
+import type {
+	AuthenticationFailed,
+	AuthenticatorUnavailable,
+	CredentialsError,
+} from "./Errors"
 
 export interface ClientCertificate {
 	readonly cert: string
@@ -42,7 +46,10 @@ export type AuthenticatorApi =
 			readonly issuer?: string
 			readonly authenticate: (
 				header: Option.Option<Redacted.Redacted<string>>,
-			) => Effect.Effect<string, AuthenticationFailed>
+			) => Effect.Effect<
+				string,
+				AuthenticationFailed | AuthenticatorUnavailable
+			>
 	  }
 	| {
 			readonly _tag: "Mtls"

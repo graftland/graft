@@ -2,7 +2,6 @@ import { assert, describe, it } from "@effect/vitest"
 import { NodeServices, NodeSocketServer } from "@effect/platform-node"
 import { Graft, Plugin } from "@graftland/graft"
 import {
-	Cause,
 	Deferred,
 	Effect,
 	Exit,
@@ -103,10 +102,9 @@ describe("remote capability plugins", () => {
 				const rejected = yield* Schema.decodeEffect(WebsocketConfig)({
 					...config,
 					url: "wss://localhost:7443/other",
-				}).pipe(Effect.exit)
-				assert.isTrue(Exit.isFailure(rejected))
-				if (Exit.isFailure(rejected))
-					assert.include(Cause.pretty(rejected.cause), "no path or /graft")
+				}).pipe(Effect.flip)
+				assert.isTrue(Schema.isSchemaError(rejected))
+				assert.include(rejected.message, "no path or /graft")
 			}),
 	)
 

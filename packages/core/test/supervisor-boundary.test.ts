@@ -90,7 +90,7 @@ describe("supervisor failure boundary", () => {
 				undefined,
 				{ intercept: [{ apply: () => Effect.interrupt }] },
 			)
-			yield* TestClock.adjust("1 millis")
+			yield* reach(fork, "Failed")
 			const snapshot = yield* Stream.runHead(fork.state)
 			const state = Option.getOrThrow(snapshot)
 			assert.strictEqual(state._tag, "Failed")

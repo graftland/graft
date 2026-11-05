@@ -22,6 +22,7 @@ import {
 	Option,
 	String as Str,
 	Redacted,
+	Ref,
 	Schema,
 	Stream,
 } from "effect"
@@ -96,32 +97,32 @@ const listen = Effect.fnUntraced(function* () {
 	return port
 })
 
-const request = (port: number, authorization?: string) =>
-	Effect.scoped(
-		Effect.gen(function* () {
-			const socket = yield* NodeSocket.makeNet({ host: "127.0.0.1", port })
-			const reader = yield* socket.reader
-			const writer = yield* socket.writer
-			yield* writer.write(
-				"GET /graft HTTP/1.1\r\nHost: localhost\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Protocol: graft-remote.v1\r\n" +
-					(authorization === undefined
-						? ""
-						: "Authorization: " + authorization + "\r\n") +
-					"\r\n",
-			)
-			return yield* Stream.fromEffectRepeat(reader.pull).pipe(
-				Stream.flattenIterable,
-				Stream.map((bytes) =>
-					typeof bytes === "string" ? new TextEncoder().encode(bytes) : bytes,
-				),
-				Stream.decodeText(),
-				Stream.splitLines,
-				Stream.takeUntil((line) => line === ""),
-				Stream.map((line) => line + "\n"),
-				Stream.mkString,
-			)
-		}),
+const request = Effect.fnUntraced(function* (
+	port: number,
+	authorization?: string,
+) {
+	const socket = yield* NodeSocket.makeNet({ host: "127.0.0.1", port })
+	const reader = yield* socket.reader
+	const writer = yield* socket.writer
+	yield* writer.write(
+		"GET /graft HTTP/1.1\r\nHost: localhost\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Protocol: graft-remote.v1\r\n" +
+			(authorization === undefined
+				? ""
+				: "Authorization: " + authorization + "\r\n") +
+			"\r\n",
 	)
+	return yield* Stream.fromEffectRepeat(reader.pull).pipe(
+		Stream.flattenIterable,
+		Stream.map((bytes) =>
+			typeof bytes === "string" ? new TextEncoder().encode(bytes) : bytes,
+		),
+		Stream.decodeText(),
+		Stream.splitLines,
+		Stream.takeUntil((line) => line === ""),
+		Stream.map((line) => line + "\n"),
+		Stream.mkString,
+	)
+}, Effect.scoped)
 const refused = (response: string, missing = false) => {
 	assert.include(response, "HTTP/1.1 401")
 	assert.include(
@@ -136,31 +137,33 @@ const reject = (port: number, authorization?: string, missing = false) =>
 	request(port, authorization).pipe(
 		Effect.map((response) => refused(response, missing)),
 	)
-const capability = <I, A>(key: Context.Service<I, A>) =>
-	Effect.gen(function* () {
-		const found = yield* Deferred.make<A>()
-		const fork = yield* Graft.plugin(
-			Plugin.make({
-				name: "auth-test-consumer",
-				inject: [key],
-				apply: () =>
-					key.pipe(
-						Effect.flatMap((value) => Deferred.succeed(found, value)),
-						Effect.asVoid,
-					),
-			}),
-		)
-		yield* fork.await
-		return yield* Deferred.await(found)
-	})
-const identity = (channel: import("../src/Transport").Channel) =>
-	Effect.gen(function* () {
-		const first = yield* Stream.runHead(channel.input)
-		const bytes = yield* Effect.fromOption(first)
-		const frames = yield* Effect.fromResult(Framing.decoder().decode(bytes))
-		const frame = yield* Effect.fromOption(Array.head(frames))
-		return new TextDecoder().decode(frame.payload)
-	})
+const capability = Effect.fnUntraced(function* <I, A>(
+	key: Context.Service<I, A>,
+) {
+	const found = yield* Deferred.make<A>()
+	const fork = yield* Graft.plugin(
+		Plugin.make({
+			name: "auth-test-consumer",
+			inject: [key],
+			apply: () =>
+				key.pipe(
+					Effect.flatMap((value) => Deferred.succeed(found, value)),
+					Effect.asVoid,
+				),
+		}),
+	)
+	yield* fork.await
+	return yield* Deferred.await(found)
+})
+const identity = Effect.fnUntraced(function* (
+	channel: import("../src/Transport").Channel,
+) {
+	const first = yield* Stream.runHead(channel.input)
+	const bytes = yield* Effect.fromOption(first)
+	const frames = yield* Effect.fromResult(Framing.decoder().decode(bytes))
+	const frame = yield* Effect.fromOption(Array.head(frames))
+	return new TextDecoder().decode(frame.payload)
+})
 const withLogs = <A, E, R>(
 	use: (read: () => ReadonlyArray<string>) => Effect.Effect<A, E, R>,
 ) =>
@@ -212,8 +215,8 @@ describe("runner authentication", () => {
 	it.live(
 		"authenticates bearer headers and challenges invalid or missing tokens before upgrade",
 		() =>
-			withLogs((logs) =>
-				Effect.gen(function* () {
+			withLogs(
+				Effect.fnUntraced(function* (logs) {
 					const tokens = yield* tokenFile
 					const auth = yield* Graft.plugin(bearer, { tokens })
 					yield* auth.await
@@ -256,8 +259,8 @@ describe("runner authentication", () => {
 	it.live(
 		"authenticates bearer credentials over Unix sockets without transport warnings",
 		() =>
-			withLogs((logs) =>
-				Effect.gen(function* () {
+			withLogs(
+				Effect.fnUntraced(function* (logs) {
 					const tokens = yield* tokenFile
 					const auth = yield* Graft.plugin(bearer, { tokens })
 					yield* auth.await
@@ -418,8 +421,8 @@ describe("runner authentication", () => {
 	it.live(
 		"warns for anonymous websocket startup and every connection, but not for unix",
 		() =>
-			withLogs((logs) =>
-				Effect.gen(function* () {
+			withLogs(
+				Effect.fnUntraced(function* (logs) {
 					const auth = yield* Graft.plugin(none, { identity: "anonymous-host" })
 					yield* auth.await
 					// Raw upgrade requests close TCP without a WebSocket close frame. Drain that listener before measuring unix logs.
@@ -488,12 +491,11 @@ describe("runner authentication", () => {
 				Source,
 				{ readonly token: Effect.Effect<Redacted.Redacted<string>> }
 			>()("@graftland/plugin-remote/test/auth.test/Source") {}
-			const reads = MutableList.make<string>()
+			const reads = yield* Ref.make(0)
 			yield* Graft.provide(Source, {
-				token: Effect.sync(() => {
-					MutableList.append(reads, "read")
-					return Redacted.make("injected")
-				}),
+				token: Ref.update(reads, (n) => n + 1).pipe(
+					Effect.as(Redacted.make("injected")),
+				),
 			})
 
 			const connect = {
@@ -518,7 +520,8 @@ describe("runner authentication", () => {
 				)
 				yield* Effect.flip(fork.await)
 			}
-			assert.lengthOf(MutableList.toArray(reads), 2)
+			const count = yield* Ref.get(reads)
+			assert.strictEqual(count, 2)
 		}).pipe(Effect.scoped, Effect.provide(runtime)),
 	)
 

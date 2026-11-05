@@ -1,6 +1,6 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Graft } from "@graftland/graft"
-import { Array, Effect, Layer, Stream } from "effect"
+import { Array, Effect, Exit, Layer, Option, Stream } from "effect"
 import { TestClock } from "effect/testing"
 import greeter from "../src/greeter.ts"
 import ticker from "../src/ticker.ts"
@@ -50,6 +50,21 @@ describe("config-file", () => {
 			yield* TestClock.adjust("10 seconds")
 			const log = yield* messages
 			assert.deepStrictEqual(log, ["tick", "tick", "tick"])
+		}).pipe(Effect.scoped, Effect.provide(Layer.fresh(Graft.layer))),
+	)
+
+	it.effect("rejects a period that is not positive", () =>
+		Effect.gen(function* () {
+			const fork = yield* Graft.plugin(ticker, { seconds: 0 })
+			const exit = yield* Effect.exit(fork.await)
+			assert.isTrue(Exit.isFailure(exit))
+			const state = yield* Stream.runHead(fork.state)
+			assert.deepStrictEqual(
+				Option.map(state, (state) => state._tag),
+				Option.some("Failed"),
+			)
+			const log = yield* messages
+			assert.isFalse(Array.contains(log, "tick"))
 		}).pipe(Effect.scoped, Effect.provide(Layer.fresh(Graft.layer))),
 	)
 })

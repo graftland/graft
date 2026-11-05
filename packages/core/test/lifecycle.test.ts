@@ -84,7 +84,8 @@ describe("lifecycle", () => {
 					apply: ({ port }) => journal.record(`listen ${port}`),
 				})
 				const fork = yield* Graft.plugin(plugin, {
-					port: "80" as unknown as number,
+					// @ts-expect-error A string port must fail the typed input; the runtime decoder is checked below.
+					port: "80",
 				})
 				const exit = yield* Effect.exit(fork.await)
 				assert.isTrue(Exit.isFailure(exit))

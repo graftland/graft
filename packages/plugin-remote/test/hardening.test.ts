@@ -322,8 +322,8 @@ describe("local remote hardening", () => {
 				const count = yield* Ref.make(0)
 				const totalDropped = yield* Ref.make(0)
 				const logFiber = yield* client.Logs().pipe(
-					Stream.runForEach((event) =>
-						Effect.gen(function* () {
+					Stream.runForEach(
+						Effect.fnUntraced(function* (event) {
 							yield* Ref.set(totalDropped, event.dropped)
 							if (event._tag === "Log") {
 								yield* Ref.update(count, (n) => n + 1)
@@ -342,8 +342,8 @@ describe("local remote hardening", () => {
 						>
 					>()
 				yield* client.Events().pipe(
-					Stream.runForEach((event) =>
-						Effect.gen(function* () {
+					Stream.runForEach(
+						Effect.fnUntraced(function* (event) {
 							if (event._tag === "Stopped")
 								yield* Deferred.succeed(stopped, undefined)
 							else if (event._tag === "Failed") {

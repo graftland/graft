@@ -25,8 +25,9 @@ export const close = (
 ) =>
 	Effect.uninterruptible(
 		Scope.close(scope, exit).pipe(
-			Effect.catchCauseIf(Cause.hasInterruptsOnly, (cause) =>
-				Effect.gen(function* () {
+			Effect.catchCauseIf(
+				Cause.hasInterruptsOnly,
+				Effect.fnUntraced(function* (cause) {
 					// Re-entering interruptibility observes pending external cancellation without producing a self-interrupt.
 					// Read it after release so cancellation arriving during a finalizer is included too.
 					const pending = yield* Effect.exit(Effect.interruptible(Effect.void))

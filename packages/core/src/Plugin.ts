@@ -54,21 +54,20 @@ export type Update<Config, E = never, R = never> = (
 ) => Effect.Effect<boolean, never, Graft | Scope.Scope | R | Tasks<E>>
 
 /** Starts an activation-owned worker. Its unhandled errors belong to the plugin, not the launch operation. */
-export const fork = <A, E, R>(
+export const fork: <A, E, R>(
 	effect: Effect.Effect<A, E, R>,
-): Effect.Effect<
+) => Effect.Effect<
 	Fiber.Fiber<A, E>,
 	never,
 	Exclude<R, Scope.Scope> | Graft | Tasks<E>
-> =>
-	Effect.gen(function* () {
-		const { activation } = yield* RuntimeContext
-		if (Option.isNone(activation.tasks))
-			return yield* Effect.die(
-				new Error("Plugin.fork requires a plugin activation"),
-			)
-		return yield* TaskGroup.run(activation.tasks.value, effect)
-	})
+> = Effect.fnUntraced(function* <A, E, R>(effect: Effect.Effect<A, E, R>) {
+	const { activation } = yield* RuntimeContext
+	if (Option.isNone(activation.tasks))
+		return yield* Effect.die(
+			new Error("Plugin.fork requires a plugin activation"),
+		)
+	return yield* TaskGroup.run(activation.tasks.value, effect)
+})
 
 // A definition has one input/error contract even when referenced through aliases.
 export type Plugin<Config = any, Input = any, E = any> = 0 extends 1 & Input

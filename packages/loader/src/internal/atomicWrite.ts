@@ -47,55 +47,54 @@ export const atomicWrite = Effect.fnUntraced(function* (
 				fs
 					.open(temporary, { flag: "wx", mode: 0o600 })
 					.pipe(Effect.provideService(Scope.Scope, scope)),
-				(file) =>
-					Effect.gen(function* () {
-						// Native writes must settle before cancellation closes the file or removes its path.
-						yield* file
-							.writeAll(new TextEncoder().encode(text))
-							.pipe(Effect.uninterruptible)
-						if (Option.isSome(previous)) {
-							const current = yield* file.stat
-							const { uid, gid } = previous.value
-							if (
-								Option.isSome(uid) &&
-								Option.isSome(gid) &&
-								(!Equal.equals(uid, current.uid) ||
-									!Equal.equals(gid, current.gid))
-							) {
-								yield* fs
-									.chown(temporary, uid.value, gid.value)
-									.pipe(Effect.uninterruptible)
-							}
+				Effect.fnUntraced(function* (file) {
+					// Native writes must settle before cancellation closes the file or removes its path.
+					yield* file
+						.writeAll(new TextEncoder().encode(text))
+						.pipe(Effect.uninterruptible)
+					if (Option.isSome(previous)) {
+						const current = yield* file.stat
+						const { uid, gid } = previous.value
+						if (
+							Option.isSome(uid) &&
+							Option.isSome(gid) &&
+							(!Equal.equals(uid, current.uid) ||
+								!Equal.equals(gid, current.gid))
+						) {
+							yield* fs
+								.chown(temporary, uid.value, gid.value)
+								.pipe(Effect.uninterruptible)
 						}
-						const mode = Option.match(previous, {
-							onNone: () => 0o600,
-							onSome: (info) => info.mode & 0o7777,
-						})
-						yield* fs.chmod(temporary, mode).pipe(Effect.uninterruptible)
-						yield* file.sync.pipe(Effect.uninterruptible)
-						// Close the handle before committing; no fallible cleanup follows rename.
-						yield* Scope.close(scope, Exit.void)
-						if (expected !== undefined) {
-							const current = yield* fs.readFileString(target).pipe(
-								Effect.asSome,
-								Effect.catchCauseIf(
-									(cause) =>
-										isOnlyFailure(
-											cause,
-											(error) => error.reason._tag === "NotFound",
-										),
-									() => Effect.succeedNone,
-								),
-							)
-							if (!Equal.equals(current, expected))
-								return yield* WriteConflict.make({ path: target })
-						}
-						// Recheck the configured path too: a link may have changed targets
-						// while the temporary file was being prepared.
-						if (verifyTarget !== undefined) yield* verifyTarget
-						// Editors do not share our lock: checking and renaming cannot be atomic.
-						yield* fs.rename(temporary, target).pipe(Effect.uninterruptible)
-					}),
+					}
+					const mode = Option.match(previous, {
+						onNone: () => 0o600,
+						onSome: (info) => info.mode & 0o7777,
+					})
+					yield* fs.chmod(temporary, mode).pipe(Effect.uninterruptible)
+					yield* file.sync.pipe(Effect.uninterruptible)
+					// Close the handle before committing; no fallible cleanup follows rename.
+					yield* Scope.close(scope, Exit.void)
+					if (expected !== undefined) {
+						const current = yield* fs.readFileString(target).pipe(
+							Effect.asSome,
+							Effect.catchCauseIf(
+								(cause) =>
+									isOnlyFailure(
+										cause,
+										(error) => error.reason._tag === "NotFound",
+									),
+								() => Effect.succeedNone,
+							),
+						)
+						if (!Equal.equals(current, expected))
+							return yield* WriteConflict.make({ path: target })
+					}
+					// Recheck the configured path too: a link may have changed targets
+					// while the temporary file was being prepared.
+					if (verifyTarget !== undefined) yield* verifyTarget
+					// Editors do not share our lock: checking and renaming cannot be atomic.
+					yield* fs.rename(temporary, target).pipe(Effect.uninterruptible)
+				}),
 				(_, exit) =>
 					Exit.isSuccess(exit)
 						? Effect.void

@@ -24,13 +24,12 @@ export const makeClient = (attempts: Ref.Ref<number>) =>
 		name: "client",
 		// Try again 300 ms after each failure.
 		retry: Schedule.spaced("300 millis"),
-		apply: () =>
-			Effect.gen(function* () {
-				const attempt = yield* Ref.updateAndGet(attempts, (n) => n + 1)
-				yield* Effect.log(`Connecting, attempt ${attempt}`)
-				if (attempt < 3) return yield* ConnectionRefused.make({ attempt })
-				yield* Effect.log("Connected")
-			}),
+		apply: Effect.fn("client.apply")(function* () {
+			const attempt = yield* Ref.updateAndGet(attempts, (n) => n + 1)
+			yield* Effect.log(`Connecting, attempt ${attempt}`)
+			if (attempt < 3) return yield* ConnectionRefused.make({ attempt })
+			yield* Effect.log("Connected")
+		}),
 	})
 
 // Ticks in the background. `Plugin.fork` ties the task to the plugin: it

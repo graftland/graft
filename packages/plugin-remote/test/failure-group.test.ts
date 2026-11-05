@@ -43,8 +43,7 @@ describe("failure group", () => {
 						Effect.andThen(TxRef.get(capacity)),
 						Effect.andThen(Effect.txRetry),
 					),
-				).pipe(Effect.forkScoped)
-				yield* Effect.yieldNow
+				).pipe(Effect.forkScoped({ startImmediately: true }))
 				const error = Failed.make({ detail: "disconnected" })
 				yield* group.fail(error)
 				const failure = yield* Effect.flip(Fiber.join(waiting))

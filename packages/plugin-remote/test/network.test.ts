@@ -15,6 +15,7 @@ import {
 	Cause,
 	ConfigProvider,
 	Deferred,
+	Duration,
 	Effect,
 	Option,
 	Path,
@@ -42,6 +43,7 @@ import * as Model from "../src/internal/runner/model"
 import * as Processes from "../src/internal/runner/Processes"
 import { tcpProxy } from "./network-proxy"
 import { cliCommand as command } from "./application"
+import { expectFailure } from "./errors"
 import { ChildApi, HostApi, contract } from "./fixtures/services-contract"
 
 declare module "vitest" {
@@ -808,11 +810,10 @@ describe("network runner end to end", () => {
 					Effect.gen(function* () {
 						const { api, proxy, proxySocket } = yield* setup(10000, true)
 						const reply = yield* api.call(1)
-						const started = yield* Effect.sync(() => performance.now())
-						yield* proxySocket!.disconnect
-						const disposed = yield* Effect.exit(proxy.dispose)
-						const elapsed = yield* Effect.sync(
-							() => performance.now() - started,
+						const [elapsed, disposed] = yield* Effect.timed(
+							proxySocket!.disconnect.pipe(
+								Effect.andThen(Effect.exit(proxy.dispose)),
+							),
 						)
 						assert.isTrue(Exit.isFailure(disposed))
 						if (Exit.isFailure(disposed))
@@ -820,7 +821,7 @@ describe("network runner end to end", () => {
 								Cause.pretty(disposed.cause),
 								"RemoteTerminationUnconfirmed",
 							)
-						assert.isAtLeast(elapsed, 11000)
+						assert.isAtLeast(Duration.toMillis(elapsed), 11000)
 						yield* gone(reply.pid)
 					}).pipe(Effect.scoped, Effect.provide(runtime)),
 				)
@@ -947,10 +948,8 @@ describe("network runner end to end", () => {
 				const replacement = yield* Fiber.join(replacing)
 				assert.equal(replacement.handle.generation, 2)
 				yield* gone(pid)
-				const stale = yield* Effect.exit(first.Renew(opened.handle))
-				assert.isTrue(Exit.isFailure(stale))
-				if (Exit.isFailure(stale))
-					assert.include(Cause.pretty(stale.cause), "Unknown session")
+				const stale = yield* Effect.flip(first.Renew(opened.handle))
+				assert.isTrue(Schema.is(Model.StaleSession)(stale))
 				yield* second.Dispose(replacement.handle)
 				const expiring = yield* first.Open({
 					instance: "expiring",
@@ -963,10 +962,8 @@ describe("network runner end to end", () => {
 					first.Status(expiring.handle),
 					(record) => record.phase === "Stopped",
 				)
-				const late = yield* Effect.exit(first.Renew(expiring.handle))
-				assert.isTrue(Exit.isFailure(late))
-				if (Exit.isFailure(late))
-					assert.include(Cause.pretty(late.cause), "expired")
+				const late = yield* Effect.flip(first.Renew(expiring.handle))
+				assert.isTrue(Schema.is(Model.LeaseExpired)(late))
 			}).pipe(Effect.scoped, Effect.provide(runtime)),
 		90_000,
 	)
@@ -1081,13 +1078,19 @@ describe("network runner end to end", () => {
 					)
 					const failed = yield* Effect.exit(proxy.await)
 					assert.isTrue(Exit.isFailure(failed))
-					if (Exit.isFailure(failed))
-						assert.include(
-							Cause.pretty(failed.cause),
-							expect === undefined
-								? "a value with a length of at least 1"
-								: "mismatch",
-						)
+					if (Exit.isFailure(failed)) {
+						if (expect === undefined)
+							// The client rejects the empty id while encoding the request, as a defect.
+							assert.include(
+								Cause.pretty(failed.cause),
+								"a value with a length of at least 1",
+							)
+						else
+							assert.include(
+								expectFailure(failed.cause, Model.PackageError).detail,
+								"mismatch",
+							)
+					}
 					yield* proxy.dispose
 				}
 				const applied = yield* fs.exists(directory + "/pid")

@@ -1,6 +1,6 @@
 /** Executable worker: fd 4 and the lease timer remain independent of the plugin thread. */
 import { NodeRuntime, NodeStream } from "@effect/platform-node"
-import { Effect, FiberHandle, Ref, Schema, Stream } from "effect"
+import { Clock, Effect, FiberHandle, Ref, Schema, Stream } from "effect"
 import { Socket } from "node:net"
 import { parentPort } from "node:worker_threads"
 import process from "node:process"
@@ -17,14 +17,19 @@ const notify = (notice: typeof Notice.Type) =>
 			Effect.sync(() => parentPort?.postMessage(message)),
 		),
 	)
-const now = Effect.sync(() => performance.now())
-const expire = (deadline: number): Effect.Effect<never> =>
-	Effect.gen(function* () {
-		const remaining = deadline - (yield* now)
-		if (remaining <= 0) return yield* die
-		yield* Effect.sleep(Math.min(remaining, 2147483647))
-		return yield* expire(deadline)
-	})
+// Milliseconds on the monotonic clock, which the lease sleep also uses.
+const now = Clock.monotonicTimeNanos.pipe(
+	Effect.map((nanos) => Number(nanos) / 1_000_000),
+)
+const expire = Effect.fnUntraced(function* (
+	deadline: number,
+): Effect.fn.Return<never> {
+	const remaining = deadline - (yield* now)
+	if (remaining <= 0) return yield* die
+	// The clock splits sleeps longer than the platform timer limit.
+	yield* Effect.sleep(remaining)
+	return yield* expire(deadline)
+})
 const main = Effect.scoped(
 	Effect.gen(function* () {
 		const lease = yield* Ref.make({
@@ -45,8 +50,8 @@ const main = Effect.scoped(
 			Stream.decodeText(),
 			Stream.splitLines,
 			Stream.mapEffect((line) => Schema.decodeEffect(CommandJson)(line)),
-			Stream.runForEach((command) =>
-				Effect.gen(function* () {
+			Stream.runForEach(
+				Effect.fnUntraced(function* (command: typeof CommandJson.Type) {
 					if (command.kind === "start") return yield* notify("start")
 					if (command.kind === "stop") {
 						yield* Ref.update(lease, (state) => ({ ...state, stopped: true }))

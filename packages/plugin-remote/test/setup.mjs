@@ -17,7 +17,8 @@ export default async function setup(project) {
 	await build({
 		config: false,
 		entry: [new URL("../../cli/src/bin.ts", import.meta.url).pathname],
-		outDir: new URL("../../cli/dist", import.meta.url).pathname,
+		// Keep test builds out of dist: CI packs dist after the tests run.
+		outDir: new URL("../../cli/.cache/plugin-remote", import.meta.url).pathname,
 		format: "esm",
 		platform: "node",
 		fixedExtension: false,
@@ -111,7 +112,7 @@ export default async function setup(project) {
 		await import("../.cache/certificates-helper/certificates.js")
 	const directory = await certificates(
 		new URL("../.cache/certificates", import.meta.url).pathname,
-		new URL("../../cli/dist/bin.js", import.meta.url).pathname,
+		new URL("../../cli/.cache/plugin-remote/bin.js", import.meta.url).pathname,
 		new URL("../.cache/commands-app", import.meta.url).pathname,
 	)
 	project.provide("remoteTls", directory)

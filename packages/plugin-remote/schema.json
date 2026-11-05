@@ -1,6 +1,9 @@
 [
 	{
-		"names": ["remote", "@graftland/plugin-remote"],
+		"names": [
+			"remote",
+			"@graftland/plugin-remote"
+		],
 		"schema": {
 			"type": "object",
 			"properties": {
@@ -76,7 +79,9 @@
 													"not": {}
 												}
 											},
-											"required": ["name"],
+											"required": [
+												"name"
+											],
 											"additionalProperties": false
 										},
 										{
@@ -98,7 +103,10 @@
 															"type": "string"
 														}
 													},
-													"required": ["cert", "key"],
+													"required": [
+														"cert",
+														"key"
+													],
 													"additionalProperties": false
 												},
 												"bearer": {
@@ -111,7 +119,9 @@
 													"not": {}
 												}
 											},
-											"required": ["mtls"],
+											"required": [
+												"mtls"
+											],
 											"additionalProperties": false
 										},
 										{
@@ -141,13 +151,17 @@
 																			"type": "string"
 																		}
 																	},
-																	"required": ["file"],
+																	"required": [
+																		"file"
+																	],
 																	"additionalProperties": false
 																}
 															]
 														}
 													},
-													"required": ["token"],
+													"required": [
+														"token"
+													],
 													"additionalProperties": false
 												},
 												"jwt": {
@@ -157,7 +171,9 @@
 													"not": {}
 												}
 											},
-											"required": ["bearer"],
+											"required": [
+												"bearer"
+											],
 											"additionalProperties": false
 										},
 										{
@@ -190,20 +206,26 @@
 																			"type": "string"
 																		}
 																	},
-																	"required": ["file"],
+																	"required": [
+																		"file"
+																	],
 																	"additionalProperties": false
 																}
 															]
 														}
 													},
-													"required": ["token"],
+													"required": [
+														"token"
+													],
 													"additionalProperties": false
 												},
 												"none": {
 													"not": {}
 												}
 											},
-											"required": ["jwt"],
+											"required": [
+												"jwt"
+											],
 											"additionalProperties": false
 										},
 										{
@@ -234,7 +256,9 @@
 													"additionalProperties": false
 												}
 											},
-											"required": ["none"],
+											"required": [
+												"none"
+											],
 											"additionalProperties": false
 										}
 									]
@@ -246,7 +270,9 @@
 									"type": "string"
 								}
 							},
-							"required": ["url"],
+							"required": [
+								"url"
+							],
 							"additionalProperties": false
 						},
 						{
@@ -316,7 +342,9 @@
 													"not": {}
 												}
 											},
-											"required": ["name"],
+											"required": [
+												"name"
+											],
 											"additionalProperties": false
 										},
 										{
@@ -338,7 +366,10 @@
 															"type": "string"
 														}
 													},
-													"required": ["cert", "key"],
+													"required": [
+														"cert",
+														"key"
+													],
 													"additionalProperties": false
 												},
 												"bearer": {
@@ -351,7 +382,9 @@
 													"not": {}
 												}
 											},
-											"required": ["mtls"],
+											"required": [
+												"mtls"
+											],
 											"additionalProperties": false
 										},
 										{
@@ -381,13 +414,17 @@
 																			"type": "string"
 																		}
 																	},
-																	"required": ["file"],
+																	"required": [
+																		"file"
+																	],
 																	"additionalProperties": false
 																}
 															]
 														}
 													},
-													"required": ["token"],
+													"required": [
+														"token"
+													],
 													"additionalProperties": false
 												},
 												"jwt": {
@@ -397,7 +434,9 @@
 													"not": {}
 												}
 											},
-											"required": ["bearer"],
+											"required": [
+												"bearer"
+											],
 											"additionalProperties": false
 										},
 										{
@@ -430,20 +469,26 @@
 																			"type": "string"
 																		}
 																	},
-																	"required": ["file"],
+																	"required": [
+																		"file"
+																	],
 																	"additionalProperties": false
 																}
 															]
 														}
 													},
-													"required": ["token"],
+													"required": [
+														"token"
+													],
 													"additionalProperties": false
 												},
 												"none": {
 													"not": {}
 												}
 											},
-											"required": ["jwt"],
+											"required": [
+												"jwt"
+											],
 											"additionalProperties": false
 										},
 										{
@@ -474,13 +519,17 @@
 													"additionalProperties": false
 												}
 											},
-											"required": ["none"],
+											"required": [
+												"none"
+											],
 											"additionalProperties": false
 										}
 									]
 								}
 							},
-							"required": ["unix"],
+							"required": [
+								"unix"
+							],
 							"additionalProperties": false
 						},
 						{
@@ -550,7 +599,9 @@
 									}
 								}
 							},
-							"required": ["command"],
+							"required": [
+								"command"
+							],
 							"additionalProperties": false
 						},
 						{
@@ -596,7 +647,9 @@
 									"not": {}
 								}
 							},
-							"required": ["local"],
+							"required": [
+								"local"
+							],
 							"additionalProperties": false
 						},
 						{
@@ -636,7 +689,9 @@
 									"not": {}
 								}
 							},
-							"required": ["worker"],
+							"required": [
+								"worker"
+							],
 							"additionalProperties": false
 						},
 						{
@@ -668,7 +723,9 @@
 										},
 										"config": {}
 									},
-									"required": ["name"],
+									"required": [
+										"name"
+									],
 									"additionalProperties": false
 								},
 								"instance": {
@@ -714,7 +771,9 @@
 													"not": {}
 												}
 											},
-											"required": ["name"],
+											"required": [
+												"name"
+											],
 											"additionalProperties": false
 										},
 										{
@@ -736,7 +795,10 @@
 															"type": "string"
 														}
 													},
-													"required": ["cert", "key"],
+													"required": [
+														"cert",
+														"key"
+													],
 													"additionalProperties": false
 												},
 												"bearer": {
@@ -749,7 +811,9 @@
 													"not": {}
 												}
 											},
-											"required": ["mtls"],
+											"required": [
+												"mtls"
+											],
 											"additionalProperties": false
 										},
 										{
@@ -779,13 +843,17 @@
 																			"type": "string"
 																		}
 																	},
-																	"required": ["file"],
+																	"required": [
+																		"file"
+																	],
 																	"additionalProperties": false
 																}
 															]
 														}
 													},
-													"required": ["token"],
+													"required": [
+														"token"
+													],
 													"additionalProperties": false
 												},
 												"jwt": {
@@ -795,7 +863,9 @@
 													"not": {}
 												}
 											},
-											"required": ["bearer"],
+											"required": [
+												"bearer"
+											],
 											"additionalProperties": false
 										},
 										{
@@ -828,20 +898,26 @@
 																			"type": "string"
 																		}
 																	},
-																	"required": ["file"],
+																	"required": [
+																		"file"
+																	],
 																	"additionalProperties": false
 																}
 															]
 														}
 													},
-													"required": ["token"],
+													"required": [
+														"token"
+													],
 													"additionalProperties": false
 												},
 												"none": {
 													"not": {}
 												}
 											},
-											"required": ["jwt"],
+											"required": [
+												"jwt"
+											],
 											"additionalProperties": false
 										},
 										{
@@ -872,26 +948,36 @@
 													"additionalProperties": false
 												}
 											},
-											"required": ["none"],
+											"required": [
+												"none"
+											],
 											"additionalProperties": false
 										}
 									]
 								}
 							},
-							"required": ["transport"],
+							"required": [
+								"transport"
+							],
 							"additionalProperties": false
 						}
 					]
 				},
 				"config": {}
 			},
-			"required": ["contract", "connect"],
+			"required": [
+				"contract",
+				"connect"
+			],
 			"additionalProperties": false
 		},
 		"required": true
 	},
 	{
-		"names": ["remote/runner", "@graftland/plugin-remote/runner"],
+		"names": [
+			"remote/runner",
+			"@graftland/plugin-remote/runner"
+		],
 		"schema": {
 			"type": "object",
 			"properties": {
@@ -958,7 +1044,9 @@
 														"not": {}
 													}
 												},
-												"required": ["name"],
+												"required": [
+													"name"
+												],
 												"additionalProperties": false
 											},
 											{
@@ -977,7 +1065,9 @@
 																"type": "string"
 															}
 														},
-														"required": ["ca"],
+														"required": [
+															"ca"
+														],
 														"additionalProperties": false
 													},
 													"bearer": {
@@ -990,7 +1080,9 @@
 														"not": {}
 													}
 												},
-												"required": ["mtls"],
+												"required": [
+													"mtls"
+												],
 												"additionalProperties": false
 											},
 											{
@@ -1012,7 +1104,9 @@
 																"type": "string"
 															}
 														},
-														"required": ["tokens"],
+														"required": [
+															"tokens"
+														],
 														"additionalProperties": false
 													},
 													"jwt": {
@@ -1022,7 +1116,9 @@
 														"not": {}
 													}
 												},
-												"required": ["bearer"],
+												"required": [
+													"bearer"
+												],
 												"additionalProperties": false
 											},
 											{
@@ -1116,7 +1212,9 @@
 																				"not": {}
 																			}
 																		},
-																		"required": ["jwksUrl"],
+																		"required": [
+																			"jwksUrl"
+																		],
 																		"additionalProperties": false
 																	},
 																	{
@@ -1129,7 +1227,9 @@
 																				"not": {}
 																			}
 																		},
-																		"required": ["publicKey"],
+																		"required": [
+																			"publicKey"
+																		],
 																		"additionalProperties": false
 																	}
 																]
@@ -1147,7 +1247,9 @@
 														"not": {}
 													}
 												},
-												"required": ["jwt"],
+												"required": [
+													"jwt"
+												],
 												"additionalProperties": false
 											},
 											{
@@ -1178,7 +1280,9 @@
 														"additionalProperties": false
 													}
 												},
-												"required": ["none"],
+												"required": [
+													"none"
+												],
 												"additionalProperties": false
 											}
 										]
@@ -1190,7 +1294,9 @@
 										"not": {}
 									}
 								},
-								"required": ["url"],
+								"required": [
+									"url"
+								],
 								"additionalProperties": false
 							},
 							{
@@ -1240,7 +1346,9 @@
 														"not": {}
 													}
 												},
-												"required": ["name"],
+												"required": [
+													"name"
+												],
 												"additionalProperties": false
 											},
 											{
@@ -1259,7 +1367,9 @@
 																"type": "string"
 															}
 														},
-														"required": ["ca"],
+														"required": [
+															"ca"
+														],
 														"additionalProperties": false
 													},
 													"bearer": {
@@ -1272,7 +1382,9 @@
 														"not": {}
 													}
 												},
-												"required": ["mtls"],
+												"required": [
+													"mtls"
+												],
 												"additionalProperties": false
 											},
 											{
@@ -1294,7 +1406,9 @@
 																"type": "string"
 															}
 														},
-														"required": ["tokens"],
+														"required": [
+															"tokens"
+														],
 														"additionalProperties": false
 													},
 													"jwt": {
@@ -1304,7 +1418,9 @@
 														"not": {}
 													}
 												},
-												"required": ["bearer"],
+												"required": [
+													"bearer"
+												],
 												"additionalProperties": false
 											},
 											{
@@ -1398,7 +1514,9 @@
 																				"not": {}
 																			}
 																		},
-																		"required": ["jwksUrl"],
+																		"required": [
+																			"jwksUrl"
+																		],
 																		"additionalProperties": false
 																	},
 																	{
@@ -1411,7 +1529,9 @@
 																				"not": {}
 																			}
 																		},
-																		"required": ["publicKey"],
+																		"required": [
+																			"publicKey"
+																		],
 																		"additionalProperties": false
 																	}
 																]
@@ -1429,7 +1549,9 @@
 														"not": {}
 													}
 												},
-												"required": ["jwt"],
+												"required": [
+													"jwt"
+												],
 												"additionalProperties": false
 											},
 											{
@@ -1460,7 +1582,9 @@
 														"additionalProperties": false
 													}
 												},
-												"required": ["none"],
+												"required": [
+													"none"
+												],
 												"additionalProperties": false
 											}
 										]
@@ -1472,7 +1596,11 @@
 										"type": "string"
 									}
 								},
-								"required": ["url", "cert", "key"],
+								"required": [
+									"url",
+									"cert",
+									"key"
+								],
 								"additionalProperties": false
 							},
 							{
@@ -1521,7 +1649,9 @@
 														"not": {}
 													}
 												},
-												"required": ["name"],
+												"required": [
+													"name"
+												],
 												"additionalProperties": false
 											},
 											{
@@ -1540,7 +1670,9 @@
 																"type": "string"
 															}
 														},
-														"required": ["ca"],
+														"required": [
+															"ca"
+														],
 														"additionalProperties": false
 													},
 													"bearer": {
@@ -1553,7 +1685,9 @@
 														"not": {}
 													}
 												},
-												"required": ["mtls"],
+												"required": [
+													"mtls"
+												],
 												"additionalProperties": false
 											},
 											{
@@ -1575,7 +1709,9 @@
 																"type": "string"
 															}
 														},
-														"required": ["tokens"],
+														"required": [
+															"tokens"
+														],
 														"additionalProperties": false
 													},
 													"jwt": {
@@ -1585,7 +1721,9 @@
 														"not": {}
 													}
 												},
-												"required": ["bearer"],
+												"required": [
+													"bearer"
+												],
 												"additionalProperties": false
 											},
 											{
@@ -1679,7 +1817,9 @@
 																				"not": {}
 																			}
 																		},
-																		"required": ["jwksUrl"],
+																		"required": [
+																			"jwksUrl"
+																		],
 																		"additionalProperties": false
 																	},
 																	{
@@ -1692,7 +1832,9 @@
 																				"not": {}
 																			}
 																		},
-																		"required": ["publicKey"],
+																		"required": [
+																			"publicKey"
+																		],
 																		"additionalProperties": false
 																	}
 																]
@@ -1710,7 +1852,9 @@
 														"not": {}
 													}
 												},
-												"required": ["jwt"],
+												"required": [
+													"jwt"
+												],
 												"additionalProperties": false
 											},
 											{
@@ -1741,13 +1885,17 @@
 														"additionalProperties": false
 													}
 												},
-												"required": ["none"],
+												"required": [
+													"none"
+												],
 												"additionalProperties": false
 											}
 										]
 									}
 								},
-								"required": ["unix"],
+								"required": [
+									"unix"
+								],
 								"additionalProperties": false
 							},
 							{
@@ -1764,7 +1912,9 @@
 									},
 									"stdio": {
 										"type": "boolean",
-										"enum": [true]
+										"enum": [
+											true
+										]
 									},
 									"local": {
 										"not": {}
@@ -1782,7 +1932,9 @@
 										"type": "string"
 									}
 								},
-								"required": ["stdio"],
+								"required": [
+									"stdio"
+								],
 								"additionalProperties": false
 							},
 							{
@@ -1814,7 +1966,9 @@
 											},
 											"config": {}
 										},
-										"required": ["name"],
+										"required": [
+											"name"
+										],
 										"additionalProperties": false
 									},
 									"auth": {
@@ -1839,7 +1993,9 @@
 														"not": {}
 													}
 												},
-												"required": ["name"],
+												"required": [
+													"name"
+												],
 												"additionalProperties": false
 											},
 											{
@@ -1858,7 +2014,9 @@
 																"type": "string"
 															}
 														},
-														"required": ["ca"],
+														"required": [
+															"ca"
+														],
 														"additionalProperties": false
 													},
 													"bearer": {
@@ -1871,7 +2029,9 @@
 														"not": {}
 													}
 												},
-												"required": ["mtls"],
+												"required": [
+													"mtls"
+												],
 												"additionalProperties": false
 											},
 											{
@@ -1893,7 +2053,9 @@
 																"type": "string"
 															}
 														},
-														"required": ["tokens"],
+														"required": [
+															"tokens"
+														],
 														"additionalProperties": false
 													},
 													"jwt": {
@@ -1903,7 +2065,9 @@
 														"not": {}
 													}
 												},
-												"required": ["bearer"],
+												"required": [
+													"bearer"
+												],
 												"additionalProperties": false
 											},
 											{
@@ -1997,7 +2161,9 @@
 																				"not": {}
 																			}
 																		},
-																		"required": ["jwksUrl"],
+																		"required": [
+																			"jwksUrl"
+																		],
 																		"additionalProperties": false
 																	},
 																	{
@@ -2010,7 +2176,9 @@
 																				"not": {}
 																			}
 																		},
-																		"required": ["publicKey"],
+																		"required": [
+																			"publicKey"
+																		],
 																		"additionalProperties": false
 																	}
 																]
@@ -2028,7 +2196,9 @@
 														"not": {}
 													}
 												},
-												"required": ["jwt"],
+												"required": [
+													"jwt"
+												],
 												"additionalProperties": false
 											},
 											{
@@ -2059,26 +2229,37 @@
 														"additionalProperties": false
 													}
 												},
-												"required": ["none"],
+												"required": [
+													"none"
+												],
 												"additionalProperties": false
 											}
 										]
 									}
 								},
-								"required": ["transport"],
+								"required": [
+									"transport"
+								],
 								"additionalProperties": false
 							}
 						]
 					}
 				}
 			},
-			"required": ["root", "state", "listen"],
+			"required": [
+				"root",
+				"state",
+				"listen"
+			],
 			"additionalProperties": false
 		},
 		"required": true
 	},
 	{
-		"names": ["remote/cli", "@graftland/plugin-remote/cli"],
+		"names": [
+			"remote/cli",
+			"@graftland/plugin-remote/cli"
+		],
 		"schema": {
 			"not": {
 				"type": "null"

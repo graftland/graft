@@ -11,26 +11,25 @@ import { OrderQueue } from "../Orders.ts"
 export default Plugin.make({
 	name: "order-worker",
 	inject: [Checkout, OrderQueue],
-	apply: () =>
-		Effect.gen(function* () {
-			const checkout = yield* Checkout
-			const queue = yield* OrderQueue
-			yield* Effect.acquireRelease(Effect.log("Order worker started"), () =>
-				Effect.log("Order worker stopped"),
-			)
-			yield* Plugin.fork(
-				Effect.forever(
-					Effect.uninterruptibleMask((restore) =>
-						restore(Queue.take(queue)).pipe(
-							Effect.flatMap(checkout.place),
-							Effect.flatMap((receipt) =>
-								Effect.log(
-									`Order #${receipt.order}: $${receipt.total} (pricing ${receipt.pricing}, ${receipt.pool})`,
-								),
+	apply: Effect.fn("order-worker.apply")(function* () {
+		const checkout = yield* Checkout
+		const queue = yield* OrderQueue
+		yield* Effect.acquireRelease(Effect.log("Order worker started"), () =>
+			Effect.log("Order worker stopped"),
+		)
+		yield* Plugin.fork(
+			Effect.forever(
+				Effect.uninterruptibleMask((restore) =>
+					restore(Queue.take(queue)).pipe(
+						Effect.flatMap(checkout.place),
+						Effect.flatMap((receipt) =>
+							Effect.log(
+								`Order #${receipt.order}: $${receipt.total} (pricing ${receipt.pricing}, ${receipt.pool})`,
 							),
 						),
 					),
 				),
-			)
-		}),
+			),
+		)
+	}),
 })

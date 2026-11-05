@@ -234,34 +234,33 @@ describe("runner stream transports", () => {
 				const fs = yield* FileSystem.FileSystem
 				const directory = yield* fs.makeTempDirectoryScoped()
 				const state = directory + "/state"
-				const generations = yield* Effect.forEach([1, 2], (iteration) =>
-					Effect.scoped(
-						Effect.gen(function* () {
-							const running = yield* session(state)
-							assert.equal(running.record.handle.key.identity, "anonymous")
-							if (iteration === 1) {
-								const argv = yield* args(state)
-								const second = yield* spawn(argv)
-								const stdout = yield* second.child.stdout.pipe(
-									Stream.runCollect,
-									Effect.forkScoped,
-								)
-								const code = yield* second.child.exitCode
-								assert.notEqual(code, 0)
-								const errors = yield* Fiber.join(second.stderr)
-								assert.include(errors, "already owned or cannot be locked")
-								const output = yield* Fiber.join(stdout)
-								assert.lengthOf(output, 0)
-							}
-							yield* Stream.empty.pipe(Stream.run(running.child.stdin))
-							const code = yield* running.child.exitCode
-							assert.equal(code, 0)
-							yield* gone(running.unit.pid)
-							const stderr = yield* Fiber.join(running.stderr)
-							assert.notInclude(stderr, "ERROR")
-							return running.record.handle.generation
-						}),
-					),
+				const generations = yield* Effect.forEach(
+					[1, 2],
+					Effect.fnUntraced(function* (iteration) {
+						const running = yield* session(state)
+						assert.equal(running.record.handle.key.identity, "anonymous")
+						if (iteration === 1) {
+							const argv = yield* args(state)
+							const second = yield* spawn(argv)
+							const stdout = yield* second.child.stdout.pipe(
+								Stream.runCollect,
+								Effect.forkScoped,
+							)
+							const code = yield* second.child.exitCode
+							assert.notEqual(code, 0)
+							const errors = yield* Fiber.join(second.stderr)
+							assert.include(errors, "already owned or cannot be locked")
+							const output = yield* Fiber.join(stdout)
+							assert.lengthOf(output, 0)
+						}
+						yield* Stream.empty.pipe(Stream.run(running.child.stdin))
+						const code = yield* running.child.exitCode
+						assert.equal(code, 0)
+						yield* gone(running.unit.pid)
+						const stderr = yield* Fiber.join(running.stderr)
+						assert.notInclude(stderr, "ERROR")
+						return running.record.handle.generation
+					}, Effect.scoped),
 				)
 				assert.deepEqual(generations, [1, 2])
 			}).pipe(Effect.scoped, Effect.provide(platform)),

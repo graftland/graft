@@ -256,26 +256,25 @@ const isolation =
  * Changes a fork's spec and waits until its supervisor has acted on it:
  * updated in place, or begun restarting. A later change also counts.
  */
-const accept = (
+const accept = Effect.fnUntraced(function* (
 	status: ForkStatusHandle,
 	spec: TxRef.TxRef<Spec>,
 	f: (current: Spec) => Spec,
-): Effect.Effect<void> =>
-	Effect.gen(function* () {
-		const next = yield* TxRef.modify(spec, (current) => {
-			const next = f(current)
-			return [next, next]
-		})
-		yield* Effect.tx(
-			Effect.gen(function* () {
-				const snapshot = yield* TxSubscriptionRef.get(status.snapshot)
-				if (snapshot.disposed || snapshot.accepted === next) return
-				const current = yield* TxRef.get(spec)
-				if (current !== next) return
-				return yield* Effect.txRetry
-			}),
-		)
+) {
+	const next = yield* TxRef.modify(spec, (current) => {
+		const next = f(current)
+		return [next, next]
 	})
+	yield* Effect.tx(
+		Effect.gen(function* () {
+			const snapshot = yield* TxSubscriptionRef.get(status.snapshot)
+			if (snapshot.disposed || snapshot.accepted === next) return
+			const current = yield* TxRef.get(spec)
+			if (current !== next) return
+			return yield* Effect.txRetry
+		}),
+	)
+})
 
 const makeFork = <I, E>(
 	status: ForkStatusHandle,

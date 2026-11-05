@@ -27,7 +27,7 @@
 		"test": "vitest run",
 		"format": "treefmt",
 		"test:packages": "node --test scripts/packages.test.mjs",
-		"packages:pack": "node scripts/packages.mjs pack",
+		"packages:pack": "pnpm build && node scripts/packages.mjs pack",
 		"packages:publish": "node scripts/packages.mjs publish"
 	}
 }
