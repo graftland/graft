@@ -3,6 +3,7 @@ import { defineConfig } from "astro/config"
 import starlightLlmsTxt from "starlight-llms-txt"
 
 import { referenceLinkCheck } from "./check-links.mjs"
+import { hoverTypes } from "./hover-types.mjs"
 import { reference } from "./reference.mjs"
 
 // DOCS_URL is the public address of the site, such as
@@ -22,6 +23,7 @@ export default defineConfig({
 			favicon: "/favicon.svg",
 			logo: { src: "./src/assets/graft-mark.svg" },
 			customCss: ["./src/styles/garden.css"],
+			expressiveCode: { plugins: [hoverTypes()] },
 			head: [
 				{
 					tag: "link",

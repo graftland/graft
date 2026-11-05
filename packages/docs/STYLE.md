@@ -79,6 +79,9 @@ diagnostics, and run the doctests with
 | A module that later blocks import           | ` ```ts title="clock.ts" `                  | Typecheck; doctests import it |
 | Code that shows what not to do              | ` ```ts skip `                              | Nothing                       |
 
+- On the site, hovering a name in a checked block shows its type and the first
+  paragraph of its doc comment, taken from the same typecheck. A `ts skip` block
+  shows none.
 - A doctest asserts the outcome the section is about with a trailing
   `// => value` comment. Add no run code that the section does not need.
 - To build on an earlier block, give it `title="name.ts"`, export what later

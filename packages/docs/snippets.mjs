@@ -174,33 +174,54 @@ const listFiles = (folder) =>
 		: []
 
 /**
+ * The English code blocks of a page as the modules they are checked as. A
+ * block with `title="clock.ts"` is named after its title, so later blocks of
+ * the same page can import it as `./clock.ts`; the doctests resolve such
+ * imports here too. `prefix` is the header written before the block's own
+ * lines.
+ */
+export function modules(page) {
+	const folder = join(output, page.replace(/\.mdx?$/, ""))
+	const names = new Set()
+	return fences(readFileSync(join(content, page), "utf8")).map(
+		(block, index) => {
+			const name =
+				block.title ??
+				`block-${String(index + 1).padStart(2, "0")}-line-${block.start}.ts`
+			if (names.has(name))
+				throw new Error(`${page}: two code blocks are titled ${name}`)
+			names.add(name)
+			const body = block.body
+				.map((line) => line.slice(block.indent.length))
+				.join("\n")
+			return {
+				folder,
+				name,
+				file: join(folder, name),
+				body,
+				prefix: header(page, body),
+				skipped: skipped(block),
+			}
+		},
+	)
+}
+
+/**
  * Writes the English code blocks of the given pages to `.cache/snippets`, one
- * module each, and returns the files to typecheck. A block with
- * `title="clock.ts"` is written to that path within its page's folder, so
- * later blocks of the same page can import it as `./clock.ts`; the doctests
- * resolve such imports here too. Files are only rewritten when they change, so
- * several checks can run at once.
+ * module each, and returns the files to typecheck, relative to that folder.
+ * Files are only rewritten when they change, so several checks can run at
+ * once.
  */
 export function write(pages = englishPages()) {
 	const files = []
 	for (const page of pages) {
-		const folder = join(output, page.replace(/\.mdx?$/, ""))
-		const written = new Set()
-		for (const [index, block] of fences(
-			readFileSync(join(content, page), "utf8"),
-		).entries()) {
-			const name =
-				block.title ??
-				`block-${String(index + 1).padStart(2, "0")}-line-${block.start}.ts`
-			if (written.has(name))
-				throw new Error(`${page}: two code blocks are titled ${name}`)
-			written.add(name)
-			const body = block.body
-				.map((line) => line.slice(block.indent.length))
-				.join("\n")
-			writeIfChanged(join(folder, name), `${header(page, body)}${body}\n`)
-			if (!skipped(block)) files.push(relative(output, join(folder, name)))
+		const blocks = modules(page)
+		for (const block of blocks) {
+			writeIfChanged(block.file, `${block.prefix}${block.body}\n`)
+			if (!block.skipped) files.push(relative(output, block.file))
 		}
+		const written = new Set(blocks.map((block) => block.name))
+		const folder = join(output, page.replace(/\.mdx?$/, ""))
 		for (const stale of listFiles(folder)) {
 			if (!written.has(stale)) rmSync(join(folder, stale))
 		}
@@ -208,23 +229,31 @@ export function write(pages = englishPages()) {
 	return files
 }
 
-/** Typechecks the code blocks of the given pages. */
-export function check(pages = englishPages()) {
+/**
+ * Writes the code blocks of the given pages and the tsconfig that checks them,
+ * and returns the tsconfig's path and the number of blocks it checks.
+ */
+export function project(pages = englishPages()) {
 	const files = write(pages)
 	const all = pages.length === englishPages().length
 	const name = all
 		? "tsconfig.json"
 		: `tsconfig.${pages.map((page) => page.replace(/[\\/.]/g, "_")).join("+")}.json`
 	writeIfChanged(join(output, name), tsconfig(files))
+	return { path: join(output, name), files: files.length }
+}
+
+/** Typechecks the code blocks of the given pages. */
+export function check(pages = englishPages()) {
+	const { path, files } = project(pages)
 	const tsc = join(root, "..", "..", "node_modules", ".bin", "tsc")
-	const result = spawnSync(
-		tsc,
-		["--project", join(output, name), "--pretty", "false"],
-		{ cwd: output, encoding: "utf8" },
-	)
+	const result = spawnSync(tsc, ["--project", path, "--pretty", "false"], {
+		cwd: output,
+		encoding: "utf8",
+	})
 	if (result.error) throw result.error
 	return {
-		files: files.length,
+		files,
 		status: result.status,
 		output: `${result.stdout}${result.stderr}`,
 	}
