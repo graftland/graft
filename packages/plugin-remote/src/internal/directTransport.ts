@@ -29,6 +29,7 @@ export class LocalTransport extends Context.Service<
 	{
 		readonly start: (
 			options: LocalOptions,
+			onSpawn?: Effect.Effect<void>,
 		) => Effect.Effect<Execution, PlatformError.PlatformError, Scope.Scope>
 	}
 >()("@graftland/plugin-remote/internal/directTransport/LocalTransport") {}
@@ -45,6 +46,7 @@ export class WorkerTransport extends Context.Service<
 	{
 		readonly start: (
 			options: WorkerOptions,
+			onSpawn?: Effect.Effect<void>,
 		) => Effect.Effect<Execution, TransportError, Scope.Scope>
 	}
 >()("@graftland/plugin-remote/internal/directTransport/WorkerTransport") {}

@@ -6,9 +6,35 @@ description:
 
 `Graft.transition` coordinates replacement of one managed fork's execution unit.
 **Managed forks** register an execution driver and keep their contract service
-objects across generations. There is no built-in Remote transition driver yet;
-ordinary plugins, Remote plugins and runner targets return `Aborted` with
-`UnsupportedTarget`.
+objects across generations. Artifact-backed Remote plugins support direct
+Workers and child processes. Ordinary module deployments and runner targets
+return `Aborted(UnsupportedTarget)`.
+
+## Start a managed Remote plugin
+
+```ts
+import { Schema } from "effect"
+
+import * as Remote from "@graftland/plugin-remote"
+
+declare const contract: Remote.Contract.Contract<typeof Schema.String>
+declare const artifact: Remote.Artifact.Artifact
+
+export const integration = Remote.plugin(contract, {
+	artifact,
+	contractModule: "@acme/integration-contract",
+	target: { _tag: "Worker" },
+	maxInFlight: 16,
+	policy: { probes: ["health"] },
+})
+```
+
+Pass business input to `Graft.plugin(integration, input)`. Use
+`{ _tag: "Local" }` for a child process. The host runtime supplies filesystem,
+path, secure random and child-process services. Managed Remote contracts support
+unary operations and no injected host services. Graph-resolved host dependencies
+and automatic plugin retry are unsupported. Module-based `Remote.plugin` options
+continue to use ordinary restart behavior.
 
 ## Request a transition
 
@@ -22,22 +48,27 @@ declare const deployment: Remote.CandidateOptions
 export const request = Graft.transition({
 	fork: forkId,
 	candidate: Remote.candidate(deployment),
-	policy: { drain: 5_000, terminate: 5_000, probes: ["health"] },
+	policy: {
+		total: "5 minutes",
+		drain: "5 seconds",
+		terminate: "5 seconds",
+		probes: ["health"],
+	},
 })
 ```
 
 `Remote.candidate` constructs an inert description of a captured artifact,
 contract module, direct target and input. It neither verifies nor starts the
-artifact. [Capture and verification](../remote/artifacts/) remain explicit. This
-request currently returns `Aborted(UnsupportedTarget)` for Remote forks.
+artifact. [Capture](../remote/artifacts/) remains explicit; the driver verifies
+the captured bytes before launching each unit, including recovery.
 
-| Admission rule                                              | Result                                                                                        |
-| ----------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
-| Another transition is running, including its trial window   | `Aborted(Busy)`; nothing is queued.                                                           |
-| Target has no matching registered driver                    | `Aborted(UnsupportedTarget)` before allocating a unit.                                        |
-| A deadline is non-finite or not positive; trial is negative | `Aborted(InvalidPolicy)`. Zero trial is allowed.                                              |
-| A previous transition has unconfirmed termination           | `Aborted(Stuck)` until the runtime is disposed. Late exit evidence does not reopen admission. |
-| Caller cancels after admission                              | The fork owns completion and recovery; cancelling the wait does not cancel the transition.    |
+| Admission rule                                                                         | Result                                                                                        |
+| -------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| Another transition is running, including its trial window                              | `Aborted(Busy)`; nothing is queued.                                                           |
+| Target has no matching registered driver                                               | `Aborted(UnsupportedTarget)` before allocating a unit.                                        |
+| A normalized deadline is non-finite or not positive, or total cannot cover the reserve | `Aborted(InvalidPolicy)`. Zero trial is allowed.                                              |
+| A previous transition has unconfirmed termination                                      | `Aborted(Stuck)` until the runtime is disposed. Late exit evidence does not reopen admission. |
+| Caller cancels after admission                                                         | The fork owns completion and recovery; cancelling the wait does not cancel the transition.    |
 
 ## Outcomes and evidence
 
@@ -49,30 +80,58 @@ request currently returns `Aborted(UnsupportedTarget)` for Remote forks.
 | `RecoveryFailed` | Recovery failed; failed units have confirmed termination, and calls receive `Unavailable`.                                                                                    |
 | `Stuck`          | A required termination could not be confirmed. Calls receive `Unavailable`; later transitions are blocked.                                                                    |
 
-Outcomes carry the phase and evidence, including complete failure causes,
-deadlines and observed exits. A termination command, lost transport or closed
-scope is not exit evidence. Stopping or draining can time out without preventing
-`Accepted` if termination is confirmed; those failures remain in the evidence.
+`Transition.Outcome` provides tagged constructors and `$match`. Outcomes carry
+the phase and evidence, including complete failure causes, deadlines and
+observed exits. A termination command, lost transport or closed scope is not
+exit evidence. Stopping or draining can time out without preventing `Accepted`
+if termination is confirmed; those failures remain in the evidence. Direct-unit
+evidence distinguishes `Exited` from `NotStarted`: the latter proves startup
+settled before an execution was spawned. It never substitutes a lost connection
+or an acknowledged termination command for an exit.
 
 ## Policies and calls
 
-All durations are milliseconds. `startup` bounds each allocation, start,
-description, serving and readiness operation. `probe` bounds each requested
-probe. `trial`, `drain`, `stop` and `terminate` bound their respective stages.
-Defaults are 30 seconds for startup, 5 seconds for the other deadlines, no trial
-window and no probes. Drivers must declare overlap safe and provide every
-required `name@version` before cutover.
+Policy durations accept `Duration.Input`, such as `"5 seconds"`,
+`Duration.seconds(5)` or millisecond numbers. Converted deadlines must be finite
+and positive; trial may be zero.
+
+| Field                        | Bound                                                                | Default        |
+| ---------------------------- | -------------------------------------------------------------------- | -------------- |
+| `total`                      | Entire transition, including termination and recovery                | 5 minutes      |
+| `startup`                    | Each allocation, start, description, serving and readiness operation | 30 seconds     |
+| `probe`                      | Each requested probe                                                 | 5 seconds      |
+| `trial`                      | Candidate observation after cutover                                  | Zero           |
+| `drain`, `stop`, `terminate` | Calls, graceful stop, and each exit or host-release wait             | 5 seconds each |
+| `probes`                     | Names requested before cutover and during recovery                   | Empty          |
+
+Every stage wait is capped by the remaining total. Preparation and trial leave
+`5 × startup + probes.length × probe + drain + stop + 6 × terminate` for cleanup
+and recovery. Cleanup preserves the recovery allowance of
+`5 × startup + probes.length × probe + 2 × terminate`. Recovery preserves two
+termination waits until it succeeds or needs cleanup. The total must exceed the
+initial reserve; otherwise admission returns `Aborted(InvalidPolicy)`. Drivers
+must declare overlap safe and provide every required `name@version` before
+cutover.
 
 A facade selects its serving attempt when a call's Effect executes, even if the
 Effect was constructed earlier. Selection and admission are atomic with cutover.
 An admitted call stays on that attempt. New calls use the new attempt; old calls
 finish, are cancelled, or end when the old unit exits after the drain budget.
+`maxInFlight` limits admitted calls per attempt. The core registration default
+is 256; Remote defaults to 16 and accepts 1–16. Excess calls are rejected before
+admission with `AdmissionRejected`, without queuing. Remote reports coordinator
+call failures through `RpcClientError`, with the original error in its reason's
+cause. Cancelling a call releases its admission slot.
+
 Unit termination provides cleanup evidence; RPC response delivery alone does not
 prove server request-scope cleanup.
 
 `Fork.generations` observes starting, serving, draining, terminated and stuck
 generations. Unmanaged forks report an empty list. Recovery allocates a fresh
-unit and attempt; it does not reuse a failed attempt.
+unit and attempt from the pinned previous artifact and input; it does not reuse
+a failed attempt. Direct units attempt graceful exit after stopping; a stop
+timeout leads to forced termination. External runtime dependencies are not
+captured or pinned.
 
 ## Driver extension point
 

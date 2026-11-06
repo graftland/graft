@@ -36,6 +36,9 @@ export const capture = Effect.gen(function* () {
 验证发生在对应 Effect 执行时。传给 `Remote.plugin`
 的字符串仍是普通模块位置，不会请求捕获或后续验证。再次启动前需重新执行验证。
 
+向[受管理 Remote 插件](../../transitions/#启动受管理-remote-插件)传入 `artifact`
+后，驱动会在每次启动前验证工件，恢复时也会验证。
+
 ## 支持的目录
 
 | 要求     | 规则                                                                                                                       |

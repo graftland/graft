@@ -9,6 +9,8 @@ description: 用契约描述远程插件，并从 YAML 或 TypeScript 加载它�
 
 使用[制品快照](../artifacts/)可让构建好的实现不受后续源码修改影响。
 
+需要在升级时保留消费者服务对象的直接工件部署，请使用[受管理 Remote 插件](../../transitions/)。下面的模块配置采用普通重启行为。
+
 ## 从 YAML 加载
 
 把插件的条目换成 `remote` 条目。`name: remote` 会加载

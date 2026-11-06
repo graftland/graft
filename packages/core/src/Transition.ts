@@ -1,5 +1,13 @@
 /** Single-fork, stateless transitions and execution-driver extension points. */
-import { Context, Effect, Schema, type Cause, type Scope } from "effect"
+import {
+	Context,
+	Data,
+	Effect,
+	Schema,
+	type Cause,
+	type Duration,
+	type Scope,
+} from "effect"
 
 import * as Graft from "./Graft"
 import * as Coordinator from "./internal/transition"
@@ -27,18 +35,20 @@ export type Phase =
 	| "Recovery"
 	| "Complete"
 
-/** Every lifecycle deadline is finite. Durations are milliseconds. */
+/** Every lifecycle deadline is finite. The total includes cleanup and recovery. */
 export interface Policy {
-	readonly startup: number
-	readonly probe: number
-	readonly trial: number
-	readonly drain: number
-	readonly stop: number
-	readonly terminate: number
+	readonly total: Duration.Input
+	readonly startup: Duration.Input
+	readonly probe: Duration.Input
+	readonly trial: Duration.Input
+	readonly drain: Duration.Input
+	readonly stop: Duration.Input
+	readonly terminate: Duration.Input
 	readonly probes: ReadonlyArray<string>
 }
 
 export const defaultPolicy: Policy = {
+	total: "5 minutes",
 	startup: 30_000,
 	probe: 5_000,
 	trial: 0,
@@ -56,6 +66,8 @@ export interface Request {
 
 export interface Termination {
 	readonly unit: string
+	/** NotStarted proves startup settled without creating an execution. */
+	readonly state: "Exited" | "NotStarted"
 	/** The observed exit status, including an abnormal exit. */
 	readonly cause?: Cause.Cause<unknown>
 }
@@ -82,15 +94,14 @@ export interface Result {
 	readonly phase: Phase
 	readonly evidence: ReadonlyArray<Evidence>
 }
-export type Outcome =
-	| (Result & { readonly _tag: "Accepted" })
-	| (Result & { readonly _tag: "Aborted"; readonly reason: Reason })
-	| (Result & { readonly _tag: "Recovered"; readonly reason: Reason })
-	| (Result & { readonly _tag: "RecoveryFailed"; readonly reason: Reason })
-	| (Result & {
-			readonly _tag: "Stuck"
-			readonly reason: "UnconfirmedTermination"
-	  })
+export type Outcome = Data.TaggedEnum<{
+	Accepted: Result
+	Aborted: Result & { readonly reason: Reason }
+	Recovered: Result & { readonly reason: Reason }
+	RecoveryFailed: Result & { readonly reason: Reason }
+	Stuck: Result & { readonly reason: "UnconfirmedTermination" }
+}>
+export const Outcome = Data.taggedEnum<Outcome>()
 
 export interface Generation {
 	readonly generation: number
@@ -111,6 +122,16 @@ export class Unavailable extends Schema.TaggedError<
 	{ readonly brand: unique symbol }
 >()("Unavailable", {
 	fork: Schema.Finite,
+}) {}
+
+/** The attempt is at its admitted-call limit; this call was not admitted. */
+export class AdmissionRejected extends Schema.TaggedError<
+	AdmissionRejected,
+	{ readonly brand: unique symbol }
+>()("AdmissionRejected", {
+	fork: Schema.Finite,
+	attempt: Schema.Finite,
+	limit: Schema.Finite,
 }) {}
 
 /** A bypass would replace a coordinator-owned fork or one of its ancestors. */
@@ -153,7 +174,7 @@ export interface Invoke {
 	<I, S, A, E, R>(
 		key: Context.Key<I, S>,
 		use: (service: S) => Effect.Effect<A, E, R>,
-	): Effect.Effect<A, E | Unavailable | DriverError, R>
+	): Effect.Effect<A, E | Unavailable | DriverError | AdmissionRejected, R>
 }
 
 export interface Facade {
@@ -169,7 +190,7 @@ export const facade = <I, S>(
 	make: (
 		invoke: <A, E, R>(
 			use: (service: S) => Effect.Effect<A, E, R>,
-		) => Effect.Effect<A, E | Unavailable | DriverError, R>,
+		) => Effect.Effect<A, E | Unavailable | DriverError | AdmissionRejected, R>,
 	) => S,
 ): Facade => ({
 	key: key.key,
@@ -181,6 +202,8 @@ export const facade = <I, S>(
 })
 
 export interface Registration {
+	/** Positive per-attempt admission limit. Defaults to 256. */
+	readonly maxInFlight?: number | undefined
 	readonly initial: Candidate
 	readonly required: ReadonlyArray<OperationIdentity>
 	readonly facades: ReadonlyArray<Facade>

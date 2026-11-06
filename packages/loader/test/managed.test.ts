@@ -25,9 +25,10 @@ it.effect(
 									ready: Effect.succeed(Context.empty()),
 									probe: () => Effect.void,
 									stop: Effect.void,
-									terminate: Deferred.succeed(exit, { unit: "test" }).pipe(
-										Effect.asVoid,
-									),
+									terminate: Deferred.succeed(exit, {
+										unit: "test",
+										state: "Exited",
+									}).pipe(Effect.asVoid),
 									exited: Deferred.await(exit),
 									failure: Effect.never,
 								}

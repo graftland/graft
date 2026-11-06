@@ -1,8 +1,10 @@
 import {
 	Array,
 	Cause,
+	Clock,
 	Context,
 	Deferred,
+	Duration,
 	Effect,
 	Exit,
 	Fiber,
@@ -36,7 +38,8 @@ export interface Managed {
 	readonly driver: T.Driver
 	readonly facades: ReadonlyArray<T.Facade>
 	readonly required: ReadonlyArray<Plugin.OperationIdentity>
-	readonly policy: T.Policy
+	readonly policy: Deadlines
+	readonly maxInFlight: number
 	readonly scope: Scope.Closeable
 	readonly coordinatorScope: Scope.Closeable
 	readonly route: TxRef.TxRef<Option.Option<Attempt>>
@@ -46,17 +49,58 @@ export interface Managed {
 	readonly entry: ForkEntry
 }
 
-const policyOf = (policy?: Partial<T.Policy>): T.Policy => ({
-	...T.defaultPolicy,
-	...policy,
-})
-const valid = (policy: T.Policy) =>
+type Deadlines = {
+	readonly [K in keyof T.Policy]: K extends "probes" ? T.Policy[K] : number
+}
+const millis = (input: Duration.Input): number =>
+	typeof input === "number" && !Number.isFinite(input)
+		? Number.NaN
+		: Option.match(Duration.fromInput(input), {
+				onNone: () => Number.NaN,
+				onSome: (duration) =>
+					Duration.isFinite(duration)
+						? Duration.toMillis(duration)
+						: Number.NaN,
+			})
+const policyOf = (input?: Partial<T.Policy>): Deadlines => {
+	const policy = { ...T.defaultPolicy, ...input }
+	return {
+		total: millis(policy.total),
+		startup: millis(policy.startup),
+		probe: millis(policy.probe),
+		trial: millis(policy.trial),
+		drain: millis(policy.drain),
+		stop: millis(policy.stop),
+		terminate: millis(policy.terminate),
+		probes: policy.probes,
+	}
+}
+// Reserve all recovery startup operations and cleanup of an unsuccessful recovery unit.
+const recoveryReserve = (policy: Deadlines) =>
+	5 * policy.startup +
+	policy.probes.length * policy.probe +
+	2 * policy.terminate
+const safetyReserve = (policy: Deadlines) =>
+	recoveryReserve(policy) + policy.drain + policy.stop + 4 * policy.terminate
+const valid = (policy: Deadlines) =>
 	Array.every(
-		[policy.startup, policy.probe, policy.drain, policy.stop, policy.terminate],
+		[
+			policy.total,
+			policy.startup,
+			policy.probe,
+			policy.drain,
+			policy.stop,
+			policy.terminate,
+		],
 		(n) => Number.isFinite(n) && n > 0,
 	) &&
 	Number.isFinite(policy.trial) &&
-	policy.trial >= 0
+	policy.trial >= 0 &&
+	policy.total > safetyReserve(policy)
+interface Budget {
+	readonly started: bigint
+	readonly reserved: Ref.Ref<number>
+}
 
 /** Called in the same transaction as a bypass mutation. */
 export const check = Effect.fnUntraced(function* (
@@ -130,17 +174,38 @@ const failed = (value: Omit<Failed, "_tag">): Failed => ({
 
 const engine = (
 	managed: Managed,
-	policy: T.Policy,
+	policy: Deadlines,
 	evidence: Ref.Ref<ReadonlyArray<T.Evidence>>,
+	budget?: Budget,
 ) => {
 	const record = (item: T.Evidence) => Ref.update(evidence, Array.append(item))
 	const step = <A, E>(
 		attempt: number,
 		phase: T.Phase,
 		effect: Effect.Effect<A, E>,
-		budget: number,
+		limit: number,
 	): Effect.Effect<A, Failed> =>
 		Effect.gen(function* () {
+			const remaining =
+				budget === undefined
+					? limit
+					: Math.min(
+							limit,
+							policy.total -
+								Number((yield* Clock.monotonicTimeNanos) - budget.started) /
+									1_000_000 -
+								(yield* Ref.get(budget.reserved)),
+						)
+			if (remaining <= 0) {
+				yield* record({
+					attempt,
+					phase,
+					cause: Cause.die(
+						new Error(`Transition total budget exhausted during ${phase}`),
+					),
+				})
+				return yield* Effect.fail(failed({ reason: "TimedOut", phase }))
+			}
 			// Wait on an owned fiber, not on cancellation of a possibly stuck lifecycle operation.
 			const fiber = yield* Effect.forkIn(
 				effect.pipe(
@@ -155,7 +220,7 @@ const engine = (
 				),
 				managed.scope,
 			)
-			const result = yield* Effect.timeoutOption(Fiber.await(fiber), budget)
+			const result = yield* Effect.timeoutOption(Fiber.await(fiber), remaining)
 			if (Option.isNone(result)) {
 				yield* Effect.forkIn(Fiber.interrupt(fiber), managed.scope)
 				yield* record({
@@ -318,14 +383,22 @@ const engine = (
 		})
 		yield* Ref.set(attempt.terminated, true)
 		yield* generation(managed, attempt, "Terminated")
+		// Host release remains owned even when the total budget leaves no time to observe it.
+		const release = yield* Effect.forkIn(
+			Release.close(attempt.scope, Exit.void).pipe(
+				Effect.tapCause((cause) =>
+					record({ attempt: attempt.id, phase: "Terminating", cause }).pipe(
+						Effect.andThen(
+							Effect.logError("Execution host release failed", cause),
+						),
+					),
+				),
+			),
+			managed.scope,
+		)
 		// Scope release is separate from execution cleanup evidence; retain any host release failure.
 		yield* Effect.result(
-			step(
-				attempt.id,
-				"Terminating",
-				Release.close(attempt.scope, Exit.void),
-				policy.terminate,
-			),
+			step(attempt.id, "Terminating", Fiber.join(release), policy.terminate),
 		)
 		yield* Ref.update(
 			managed.attempts,
@@ -375,7 +448,14 @@ const invoke =
 						const selected = yield* TxRef.get(managed.route)
 						if (Option.isNone(selected))
 							return yield* T.Unavailable.make({ fork: managed.entry.id })
-						yield* TxRef.update(selected.value.calls, (n) => n + 1)
+						const calls = yield* TxRef.get(selected.value.calls)
+						if (calls >= managed.maxInFlight)
+							return yield* T.AdmissionRejected.make({
+								fork: managed.entry.id,
+								attempt: selected.value.id,
+								limit: managed.maxInFlight,
+							})
+						yield* TxRef.set(selected.value.calls, calls + 1)
 						return selected.value
 					}),
 				)
@@ -426,7 +506,13 @@ export const register = Effect.fnUntraced(function* (
 					),
 				})
 			const policy = policyOf(registration.policy)
-			if (!valid(policy) || driver.name !== registration.initial.driver)
+			const maxInFlight = registration.maxInFlight ?? 256
+			if (
+				!valid(policy) ||
+				!Number.isSafeInteger(maxInFlight) ||
+				maxInFlight < 1 ||
+				driver.name !== registration.initial.driver
+			)
 				return yield* T.DriverError.make({
 					cause: Cause.die(new Error("Invalid execution driver registration")),
 				})
@@ -435,6 +521,7 @@ export const register = Effect.fnUntraced(function* (
 				required: registration.required,
 				facades: registration.facades,
 				policy,
+				maxInFlight,
 				scope: yield* Scope.make(),
 				coordinatorScope: yield* Scope.make(),
 				route: yield* TxRef.make<Option.Option<Attempt>>(Option.none()),
@@ -468,7 +555,11 @@ export const register = Effect.fnUntraced(function* (
 				}),
 			)
 			const evidence = yield* Ref.make<ReadonlyArray<T.Evidence>>([])
-			const coordinator = engine(managed, policy, evidence)
+			const initializationReserve = yield* Ref.make(2 * policy.terminate)
+			const coordinator = engine(managed, policy, evidence, {
+				started: yield* Clock.monotonicTimeNanos,
+				reserved: initializationReserve,
+			})
 			const facadeActivation: Activation = {
 				...activation,
 				published: yield* TxRef.make<Option.Option<ReadonlyArray<Provision>>>(
@@ -484,7 +575,9 @@ export const register = Effect.fnUntraced(function* (
 					)
 					let cause = Exit.isFailure(stopped) ? stopped.cause : Cause.empty
 					for (const attempt of yield* Ref.get(managed.attempts)) {
-						if (!(yield* coordinator.terminate(attempt))) {
+						if (
+							!(yield* engine(managed, policy, evidence).terminate(attempt))
+						) {
 							const observed = yield* Ref.get(evidence)
 							cause = Cause.combine(
 								cause,
@@ -534,6 +627,7 @@ export const register = Effect.fnUntraced(function* (
 				}).pipe(
 					Effect.catchCause((cause) =>
 						Effect.gen(function* () {
+							yield* Ref.set(initializationReserve, 0)
 							yield* TxRef.set(managed.route, Option.none())
 							for (const attempt of yield* Ref.get(managed.attempts)) {
 								if (!(yield* coordinator.terminate(attempt)))
@@ -555,10 +649,14 @@ const execute = Effect.fnUntraced(function* (
 	runtime: Runtime,
 	managed: Managed,
 	request: T.Request,
-	policy: T.Policy,
+	policy: Deadlines,
 ): Effect.fn.Return<T.Outcome> {
 	const evidence = yield* Ref.make<ReadonlyArray<T.Evidence>>([])
-	const coordinator = engine(managed, policy, evidence)
+	const reserved = yield* Ref.make(safetyReserve(policy))
+	const coordinator = engine(managed, policy, evidence, {
+		started: yield* Clock.monotonicTimeNanos,
+		reserved,
+	})
 	const old = yield* TxRef.get(managed.route)
 	type Completion = {
 		[Tag in T.Outcome["_tag"]]: Omit<
@@ -567,7 +665,20 @@ const execute = Effect.fnUntraced(function* (
 		>
 	}[T.Outcome["_tag"]]
 	const finish = (outcome: Completion): Effect.Effect<T.Outcome> =>
-		Effect.map(Ref.get(evidence), (evidence) => ({ ...outcome, evidence }))
+		Effect.map(Ref.get(evidence), (evidence) => {
+			switch (outcome._tag) {
+				case "Accepted":
+					return T.Outcome.Accepted({ ...outcome, evidence })
+				case "Aborted":
+					return T.Outcome.Aborted({ ...outcome, evidence })
+				case "Recovered":
+					return T.Outcome.Recovered({ ...outcome, evidence })
+				case "RecoveryFailed":
+					return T.Outcome.RecoveryFailed({ ...outcome, evidence })
+				case "Stuck":
+					return T.Outcome.Stuck({ ...outcome, evidence })
+			}
+		})
 	const stuck = Effect.gen(function* () {
 		yield* TxRef.set(runtime.transitionStuck, true)
 		yield* TxRef.set(managed.route, Option.none())
@@ -590,6 +701,7 @@ const execute = Effect.fnUntraced(function* (
 		yield* TxRef.set(managed.route, Option.none())
 		if (!(yield* coordinator.retire(previous))) return yield* stuck
 
+		yield* Ref.set(reserved, 2 * policy.terminate)
 		const recovered = yield* Effect.result(
 			coordinator.allocate(previous.candidate),
 		)
@@ -601,6 +713,7 @@ const execute = Effect.fnUntraced(function* (
 			})
 		const restored = yield* Effect.result(coordinator.start(recovered.success))
 		if (restored._tag === "Failure") {
+			yield* Ref.set(reserved, 0)
 			if (!(yield* coordinator.terminate(recovered.success)))
 				return yield* stuck
 			return yield* finish({
@@ -617,6 +730,7 @@ const execute = Effect.fnUntraced(function* (
 		})
 	})
 	const abort = Effect.fnUntraced(function* (failure: Failed) {
+		yield* Ref.set(reserved, recoveryReserve(policy))
 		const healthy = yield* Effect.result(
 			coordinator.step(
 				previous.id,
@@ -640,6 +754,7 @@ const execute = Effect.fnUntraced(function* (
 	const next = allocation.success
 	const started = yield* Effect.result(coordinator.start(next))
 	if (started._tag === "Failure") {
+		yield* Ref.set(reserved, recoveryReserve(policy))
 		if (!(yield* coordinator.terminate(next))) return yield* stuck
 		return yield* abort(started.failure)
 	}
@@ -652,6 +767,7 @@ const execute = Effect.fnUntraced(function* (
 				Effect.asVoid(Effect.timeoutOption(next.failure, policy.trial)),
 				Math.max(policy.trial + 1, policy.startup),
 			)
+			yield* Ref.set(reserved, recoveryReserve(policy))
 			const retired = yield* coordinator.retire(old.value)
 			if (!retired) return false
 			yield* coordinator.step(
@@ -668,6 +784,7 @@ const execute = Effect.fnUntraced(function* (
 		return yield* finish({ _tag: "Accepted", phase: "Complete" })
 	}
 	yield* TxRef.set(managed.route, Option.none())
+	yield* Ref.set(reserved, recoveryReserve(policy))
 	// Cleanup evidence precedes every recovery attempt. Never reactivate an old attempt.
 	if (!(yield* coordinator.terminate(next))) return yield* stuck
 	if (!(yield* coordinator.retire(old.value))) return yield* stuck
@@ -682,12 +799,12 @@ export const transition = Effect.fnUntraced(function* (
 		Effect.gen(function* () {
 			const admitted = yield* Effect.tx(
 				Effect.gen(function* () {
-					const abort = (reason: T.Reason): T.Outcome => ({
-						_tag: "Aborted",
-						reason,
-						phase: "Admission",
-						evidence: [],
-					})
+					const abort = (reason: T.Reason): T.Outcome =>
+						T.Outcome.Aborted({
+							reason,
+							phase: "Admission",
+							evidence: [],
+						})
 					if (yield* TxRef.get(runtime.transitionBusy)) return abort("Busy")
 					if (yield* TxRef.get(runtime.transitionStuck)) return abort("Stuck")
 					const forks = yield* TxSubscriptionRef.get(runtime.forks)
@@ -724,14 +841,13 @@ export const transition = Effect.fnUntraced(function* (
 					if (Exit.isFailure(exit)) {
 						yield* TxRef.set(runtime.transitionStuck, true)
 						yield* TxRef.set(managed.route, Option.none())
-						outcome = {
-							_tag: "Stuck",
+						outcome = T.Outcome.Stuck({
 							reason: "UnconfirmedTermination",
 							phase: "Terminating",
 							evidence: [
 								{ attempt: 0, phase: "Terminating", cause: exit.cause },
 							],
-						}
+						})
 					} else outcome = exit.value
 					// Release admission before waking the waiter, once, so a subsequent owner cannot be cleared by our finalizer.
 					yield* TxRef.set(runtime.transitionBusy, false)

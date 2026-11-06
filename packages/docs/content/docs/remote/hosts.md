@@ -13,6 +13,10 @@ implementation independently in the entry.
 Use [captured artifacts](../artifacts/) to keep a built implementation separate
 from later source edits.
 
+For captured direct deployments that keep consumer service objects across
+upgrades, use [managed Remote plugins](../../transitions/). The module-based
+configuration below uses ordinary restart behavior.
+
 ## Load from YAML
 
 Replace the plugin's entry with a `remote` entry. `name: remote` loads

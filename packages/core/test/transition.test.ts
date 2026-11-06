@@ -1,9 +1,12 @@
 import {
 	Array,
 	Cause,
+	Clock,
 	Context,
 	Deferred,
+	Duration,
 	Effect,
+	Equal,
 	Exit,
 	Fiber,
 	Option,
@@ -20,7 +23,9 @@ class Value extends Context.Service<
 	{
 		readonly read: Effect.Effect<
 			string,
-			Transition.DriverError | Transition.Unavailable
+			| Transition.DriverError
+			| Transition.Unavailable
+			| Transition.AdmissionRejected
 		>
 	}
 >()("@graftland/graft/test/transition.test/Value") {}
@@ -33,6 +38,7 @@ const problem = Transition.DriverError.make({
 	cause: Cause.combine(Cause.fail("broken"), Cause.die("defect")),
 })
 const policy: Transition.Policy = {
+	total: 10_000,
 	startup: 100,
 	probe: 100,
 	trial: 0,
@@ -68,6 +74,7 @@ interface Script {
 }
 const setup = Effect.fnUntraced(function* (
 	script: (id: number) => Script = () => ({}),
+	maxInFlight = 256,
 ) {
 	const controls = yield* Ref.make<ReadonlyArray<Control>>([])
 	const allocations = yield* Ref.make(0)
@@ -98,9 +105,10 @@ const setup = Effect.fnUntraced(function* (
 						}),
 					serve: options.serve ?? Effect.void,
 					ready: (options.exitAtReadiness === true
-						? Deferred.succeed(control.exited, { unit: `unit-${id}` }).pipe(
-								Effect.andThen(Effect.never),
-							)
+						? Deferred.succeed(control.exited, {
+								unit: `unit-${id}`,
+								state: "Exited",
+							}).pipe(Effect.andThen(Effect.never))
 						: (options.ready ?? Effect.void)
 					).pipe(
 						Effect.as(
@@ -125,9 +133,10 @@ const setup = Effect.fnUntraced(function* (
 						Effect.andThen(
 							options.noExit === true
 								? Effect.void
-								: Deferred.succeed(control.exited, { unit: `unit-${id}` }).pipe(
-										Effect.asVoid,
-									),
+								: Deferred.succeed(control.exited, {
+										unit: `unit-${id}`,
+										state: "Exited",
+									}).pipe(Effect.asVoid),
 						),
 					),
 					exited: Deferred.await(control.exited),
@@ -142,6 +151,7 @@ const setup = Effect.fnUntraced(function* (
 				initial: candidate("old"),
 				required: [{ name: "read", version: 1 }],
 				policy,
+				maxInFlight,
 				facades: [
 					Transition.facade(Value, (invoke) => ({
 						read: invoke((service) => service.read),
@@ -368,7 +378,7 @@ it.effect(
 			const observed16 = yield* Ref.get(h.allocations)
 			assert.equal(observed16, 2)
 			const next = yield* h.control(2)
-			yield* Deferred.succeed(next.exited, { unit: "unit-2" })
+			yield* Deferred.succeed(next.exited, { unit: "unit-2", state: "Exited" })
 		}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
 )
 
@@ -604,7 +614,7 @@ it.effect("does not recover before a failed candidate has exit evidence", () =>
 		assert.equal(outcome._tag, "Stuck")
 		const allocated = yield* Ref.get(h.allocations)
 		assert.equal(allocated, 2)
-		yield* Deferred.succeed(next.exited, { unit: "unit-2" })
+		yield* Deferred.succeed(next.exited, { unit: "unit-2", state: "Exited" })
 	}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
 )
 
@@ -740,7 +750,7 @@ it.effect(
 			assert.equal(outcome._tag, "Stuck")
 			const unavailable = yield* Effect.flip(h.value.read)
 			assert.equal(unavailable._tag, "Unavailable")
-			yield* Deferred.succeed(old.exited, { unit: "unit-1" })
+			yield* Deferred.succeed(old.exited, { unit: "unit-1", state: "Exited" })
 		}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
 )
 
@@ -805,4 +815,163 @@ it.effect(
 			const count = yield* Ref.get(h.allocations)
 			assert.equal(count, 3)
 		}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
+)
+
+for (const field of [
+	"total",
+	"startup",
+	"probe",
+	"trial",
+	"drain",
+	"stop",
+	"terminate",
+] as const) {
+	it.effect(`rejects an infinite ${field} Duration before allocation`, () =>
+		Effect.gen(function* () {
+			const h = yield* setup()
+			const result = yield* h.request({ [field]: Duration.infinity })
+			assert.deepEqual(
+				result,
+				Transition.Outcome.Aborted({
+					phase: "Admission",
+					reason: "InvalidPolicy",
+					evidence: [],
+				}),
+			)
+			const allocations = yield* Ref.get(h.allocations)
+			assert.equal(allocations, 1)
+		}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
+	)
+}
+it.effect("accepts Duration inputs and constructs tagged outcomes", () =>
+	Effect.gen(function* () {
+		const h = yield* setup()
+		const result = yield* h.request({
+			total: { seconds: 20 },
+			startup: Duration.millis(100),
+			probe: "100 millis",
+			trial: Duration.zero,
+			drain: [0, 100_000_000],
+			stop: 100_000_000n,
+			terminate: { milliseconds: 100 },
+		})
+		assert.equal(result._tag, "Accepted")
+		assert.isTrue(
+			Equal.equals(
+				result,
+				Transition.Outcome.Accepted({
+					phase: result.phase,
+					evidence: result.evidence,
+				}),
+			),
+		)
+	}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
+)
+it.effect("rejects a total that cannot reserve cleanup and recovery", () =>
+	Effect.gen(function* () {
+		const h = yield* setup()
+		const result = yield* h.request({ total: 1400 })
+		assert.deepEqual(
+			result,
+			Transition.Outcome.Aborted({
+				phase: "Admission",
+				reason: "InvalidPolicy",
+				evidence: [],
+			}),
+		)
+	}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
+)
+it.effect(
+	"caps successive preparation waits by the total minus its safety reserve",
+	() =>
+		Effect.gen(function* () {
+			const h = yield* setup((id) =>
+				id === 2
+					? {
+							start: Effect.sleep(40),
+							describe: Effect.sleep(40).pipe(
+								Effect.as({
+									overlap: true,
+									provides: [{ name: "read", version: 1 }],
+								}),
+							),
+						}
+					: {},
+			)
+			const start = yield* Clock.currentTimeMillis
+			const running = yield* Effect.forkScoped(h.request({ total: 1450 }))
+			yield* waitFor(h, 2, "Starting")
+			yield* TestClock.adjust(50)
+			const result = yield* Fiber.join(running)
+			assert.equal(result._tag, "Aborted")
+			if (result._tag === "Aborted") {
+				assert.equal(result.phase, "Describing")
+				assert.equal(result.reason, "TimedOut")
+			}
+			const end = yield* Clock.currentTimeMillis
+			assert.equal(end - start, 50)
+			assert.isTrue(
+				Array.some(
+					result.evidence,
+					(item) => item.attempt === 2 && item.termination !== undefined,
+				),
+			)
+		}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
+)
+it.effect(
+	"reserves recovery when trial consumes the entire preparation allowance",
+	() =>
+		Effect.gen(function* () {
+			const h = yield* setup((id) =>
+				id === 3
+					? {
+							start: Effect.sleep(80),
+							ready: Effect.sleep(80),
+							probe: Effect.sleep(80),
+						}
+					: {},
+			)
+			const running = yield* Effect.forkScoped(
+				h.request({ total: 1450, trial: "1 second" }),
+			)
+			yield* waitFor(h, 2, "Serving")
+			yield* TestClock.adjust(350)
+			const result = yield* Fiber.join(running)
+			assert.equal(result._tag, "Recovered")
+			if (result._tag === "Recovered") assert.equal(result.reason, "TimedOut")
+			const value = yield* h.value.read
+			assert.equal(value, "old")
+			yield* waitFor(h, 3, "Serving")
+		}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
+)
+it.effect(
+	"rejects excess calls without consuming admission and releases capacity after cancellation",
+	() =>
+		Effect.gen(function* () {
+			const h = yield* setup(() => ({ holdRead: true }), 1)
+			const old = yield* h.control(1)
+			const call = yield* Effect.forkScoped(h.value.read)
+			yield* Deferred.await(old.entered)
+			const excess = yield* Effect.flip(h.value.read)
+			assert.equal(excess._tag, "AdmissionRejected")
+			yield* Fiber.interrupt(call)
+			yield* Deferred.succeed(old.read, "finished")
+			const value = yield* h.value.read
+			assert.equal(value, "finished")
+		}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
+)
+
+it.effect("rejects a NaN trial rather than normalizing it to zero", () =>
+	Effect.gen(function* () {
+		const h = yield* setup()
+		const result = yield* h.request({ trial: Number.NaN })
+		assert.deepEqual(
+			result,
+			Transition.Outcome.Aborted({
+				phase: "Admission",
+				reason: "InvalidPolicy",
+				evidence: [],
+			}),
+		)
+	}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
 )

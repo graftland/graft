@@ -36,6 +36,9 @@ export const capture = Effect.gen(function* () {
 驗證發生在對應 Effect 執行時。傳給 `Remote.plugin`
 的字串仍是一般模組位置，不會請求擷取或後續驗證。再次啟動前需重新執行驗證。
 
+向[受管理 Remote 外掛](../../transitions/#啟動受管理-remote-外掛)傳入 `artifact`
+後，驅動會在每次啟動前驗證工件，復原時也會驗證。
+
 ## 支援的目錄
 
 | 要求     | 規則                                                                                                                         |

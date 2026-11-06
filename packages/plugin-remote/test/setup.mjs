@@ -72,6 +72,8 @@ export default async function setup(project) {
 			"services-plugin",
 			"unit-contract",
 			"unit-plugin",
+			"transition-contract",
+			"transition-plugin",
 			"loader-entry",
 			"entry-host",
 			"stdio-echo",

@@ -25,6 +25,8 @@ export interface Options {
 	readonly contractModule: string
 	readonly artifact: Artifact.Artifact
 	readonly target: LocalTarget | WorkerTarget
+	readonly onSpawn?: Effect.Effect<void>
+	readonly onExecution?: (execution: Execution) => Effect.Effect<void>
 }
 
 /** An independently owned direct unit. Nothing publishes its clients into the host graph. */
@@ -46,13 +48,23 @@ export const open = Effect.fnUntraced(function* <
 		Execution,
 		import("effect").PlatformError.PlatformError | TransportError,
 		Scope.Scope
-	> = transport.start({
-		...options.target,
-		contractModule: options.contractModule,
-		implementation,
-		session,
-	})
-	const execution = yield* started.pipe(Scope.provide(process))
+	> = transport.start(
+		{
+			...options.target,
+			contractModule: options.contractModule,
+			implementation,
+			session,
+		},
+		options.onSpawn,
+	)
+	const execution = yield* Effect.uninterruptible(
+		started.pipe(
+			Scope.provide(process),
+			Effect.tap(
+				(execution) => options.onExecution?.(execution) ?? Effect.void,
+			),
+		),
+	)
 	const evidence = yield* Ref.make<Option.Option<ProcessExited>>(Option.none())
 	yield* Effect.addFinalizer(() =>
 		execution.terminate.pipe(

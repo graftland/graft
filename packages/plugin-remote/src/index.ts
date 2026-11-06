@@ -10,10 +10,9 @@ import {
 import { SecureRandom } from "effect/crypto"
 import { ChildProcessSpawner } from "effect/process"
 
-import { Plugin, type Transition } from "@graftland/graft"
+import { Plugin } from "@graftland/graft"
 import { ModuleResolver } from "@graftland/loader"
 
-import type * as ArtifactModule from "./Artifact"
 import * as Contract from "./Contract"
 import { MissingInstance, RemoteError, RemoteWithdrawn } from "./Errors"
 import * as Credential from "./host/credentials"
@@ -22,6 +21,10 @@ import { CapabilityFailed } from "./internal/assembly"
 import * as Configuration from "./internal/entryConfig"
 import { publicError } from "./internal/execution"
 import { follow } from "./internal/follow"
+import { managedPlugin, type ManagedOptions } from "./internal/transition"
+
+export type { ManagedOptions } from "./internal/transition"
+export { candidate, type CandidateOptions } from "./internal/candidate"
 
 export * as Artifact from "./Artifact"
 
@@ -75,7 +78,7 @@ const publicCause = <E extends Schema.Top>(
 	)
 
 /** Fixes deployment options; business config is plugin input, and updates restart the execution unit. */
-export const plugin = <
+const unmanagedPlugin = <
 	S extends Schema.Top & {
 		readonly Encoded: Schema.Json
 		readonly DecodingServices: never
@@ -117,7 +120,10 @@ export const plugin = <
 					connect:
 						auth === undefined
 							? options.connect
-							: { ...options.connect, auth: { name: "effect-credentials" } },
+							: {
+									...options.connect,
+									auth: { name: "effect-credentials" },
+								},
 					config,
 				})
 				yield* Schema.decodeEffect(contract.config)(input.config)
@@ -138,22 +144,28 @@ export const plugin = <
 	})
 export { default } from "./host/index"
 
-/** Deployment data for a captured direct-unit candidate. No Remote transition driver is available yet. */
-export interface CandidateOptions {
-	readonly artifact: ArtifactModule.Artifact
-	readonly contractModule: string
-	readonly target:
-		| { readonly _tag: "Worker"; readonly execArgv?: ReadonlyArray<string> }
-		| {
-				readonly _tag: "Local"
-				readonly command?: readonly [string, ...string[]]
-		  }
-	readonly input: Schema.Json
+/** Selects an ordinary module deployment or an artifact-backed managed direct deployment. */
+export function plugin<
+	S extends Contract.ConfigSchema,
+	E extends Contract.ErrorSchema,
+>(
+	contract: Contract.Contract<S, E>,
+	options: ManagedOptions,
+): ReturnType<typeof managedPlugin<S, E>>
+export function plugin<
+	S extends Contract.ConfigSchema,
+	E extends Contract.ErrorSchema,
+	const D extends ReadonlyArray<Plugin.Dependency> = readonly [],
+>(
+	contract: Contract.Contract<S, E>,
+	options: Options<D>,
+): ReturnType<typeof unmanagedPlugin<S, E, D>>
+export function plugin<
+	S extends Contract.ConfigSchema,
+	E extends Contract.ErrorSchema,
+	const D extends ReadonlyArray<Plugin.Dependency> = readonly [],
+>(contract: Contract.Contract<S, E>, options: Options<D> | ManagedOptions) {
+	return "artifact" in options
+		? managedPlugin(contract, options)
+		: unmanagedPlugin(contract, options)
 }
-
-/** Constructs an inert candidate; capture and verification remain explicit Effects. */
-export const candidate = (options: CandidateOptions): Transition.Candidate => ({
-	driver: "@graftland/plugin-remote/direct",
-	identity: `sha256-v${options.artifact.identity.version}:${options.artifact.identity.digest}:${options.artifact.identity.entry}`,
-	deployment: options,
-})

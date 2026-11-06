@@ -9,6 +9,8 @@ description: 用契約描述遠端外掛，並從 YAML 或 TypeScript 載入它�
 
 使用[成品快照](../artifacts/)可讓建置好的實作不受後續原始碼修改影響。
 
+需要在升級時保留消費者服務物件的直接工件部署，請使用[受管理 Remote 外掛](../../transitions/)。下面的模組設定採用一般重新啟動行為。
+
 ## 從 YAML 載入
 
 把外掛的設定項目換成 `remote` 設定項目。`name: remote` 會載入
