@@ -366,12 +366,13 @@ describe("local remote hardening", () => {
 					),
 					Effect.forkScoped,
 				)
-				const loaded = yield* client.Load({
+				const loaded = yield* client.Serve({
 					input: { directory, mode: "flood", value: 2 },
 				})
 				assert.isUndefined(loaded)
+				yield* client.Ready()
 				const duplicate = yield* Effect.flip(
-					client.Load({ input: { directory, mode: "flood", value: 2 } }),
+					client.Serve({ input: { directory, mode: "flood", value: 2 } }),
 				)
 				assert.isTrue(
 					Cause.isCause(duplicate) &&
@@ -394,9 +395,7 @@ describe("local remote hardening", () => {
 							reason._tag === "Fail" && Schema.is(Rejected)(reason.error),
 					),
 				)
-				const disposed = yield* client
-					.Dispose()
-					.pipe(Effect.timeout("2 seconds"))
+				const disposed = yield* client.Stop().pipe(Effect.timeout("2 seconds"))
 				assert.isUndefined(disposed)
 				yield* Deferred.await(stopped).pipe(Effect.timeout("2 seconds"))
 				assert.isTrue(logFiber.pollUnsafe() === undefined)

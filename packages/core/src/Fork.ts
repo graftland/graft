@@ -29,8 +29,22 @@ export class CleanupError extends Schema.TaggedError<
 	}
 }
 
+/** A probe was unavailable, duplicated, or failed; failures retain their complete cause. */
+export class ProbeError extends Schema.TaggedError<
+	ProbeError,
+	{ readonly brand: unique symbol }
+>()("ProbeError", {
+	probe: Schema.String,
+	reason: Schema.Literals(["Missing", "Duplicate", "Failed", "Unavailable"]),
+	cause: Schema.optionalKey(Schema.Cause(Schema.Unknown, Schema.Unknown)),
+}) {}
+
 export interface Fork<in Input = any, out E = any> {
 	readonly id: number
+	/** Names registered by the current serving attempt. */
+	readonly probes: Effect.Effect<ReadonlyArray<string>>
+	/** Runs a registered check in its own scope without restarting the fork on failure. */
+	readonly probe: (name: string) => Effect.Effect<void, ProbeError>
 	/** The current state followed by every change, ending with `Disposed`. */
 	readonly state: Stream.Stream<ForkState<E | Schema.SchemaError>>
 	/**

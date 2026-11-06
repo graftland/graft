@@ -21,6 +21,7 @@ export interface Execution {
 	readonly pid: Option.Option<number>
 	readonly threadId?: number
 	readonly exited: Effect.Effect<ProcessExited, TransportError>
+	readonly terminate: Effect.Effect<ProcessExited, TransportError>
 	readonly failure: Effect.Effect<never, TransportError>
 }
 export class LocalTransport extends Context.Service<

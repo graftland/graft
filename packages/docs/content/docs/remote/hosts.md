@@ -10,6 +10,9 @@ module the host imports; the implementation runs in the plugin process.
 Define the shared protocol in a [contract](../contracts/). Select its
 implementation independently in the entry.
 
+Use [captured artifacts](../artifacts/) to keep a built implementation separate
+from later source edits.
+
 ## Load from YAML
 
 Replace the plugin's entry with a `remote` entry. `name: remote` loads

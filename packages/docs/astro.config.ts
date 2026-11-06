@@ -80,7 +80,7 @@ export default defineConfig({
 				{
 					label: "Build plugins",
 					translations: { "zh-CN": "编写插件", "zh-TW": "編寫插件" },
-					items: ["plugins", "services", "events"],
+					items: ["plugins", "probes", "services", "events"],
 				},
 				{
 					label: "Structure",
@@ -110,6 +110,7 @@ export default defineConfig({
 						"remote/overview",
 						"remote/hosts",
 						"remote/contracts",
+						"remote/artifacts",
 						"remote/runners",
 						"remote/transport-auth",
 						"remote/lifecycle",

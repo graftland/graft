@@ -21,6 +21,10 @@
 			"source": "./src/index.ts",
 			"default": "./dist/index.js"
 		},
+		"./Artifact": {
+			"source": "./src/Artifact.ts",
+			"default": "./dist/Artifact.js"
+		},
 		"./Auth": {
 			"source": "./src/Auth.ts",
 			"default": "./dist/Auth.js"
@@ -155,6 +159,7 @@
 	"publishConfig": {
 		"exports": {
 			".": "./dist/index.js",
+			"./Artifact": "./dist/Artifact.js",
 			"./Auth": "./dist/Auth.js",
 			"./cli": "./dist/cli.js",
 			"./Config": "./dist/Config.js",

@@ -146,7 +146,7 @@ const waitFile = (path: string) =>
 	)
 describe("direct worker execution", () => {
 	it.live(
-		"calls a cross-boundary service at generation one and confirms exit after Dispose",
+		"calls a cross-boundary service at generation one and confirms exit after stopping",
 		() =>
 			Effect.gen(function* () {
 				const { proxy, execution, api, fs, directory } = yield* setup()
@@ -168,7 +168,7 @@ describe("direct worker execution", () => {
 			}).pipe(Effect.scoped, Effect.provide(runtime)),
 	)
 	it.live(
-		"terminates and observes a worker whose plugin thread ignores Dispose",
+		"terminates and observes a worker whose plugin thread ignores stop requests",
 		() =>
 			Effect.gen(function* () {
 				const { proxy, execution, api, directory } = yield* setup("100 millis")
@@ -187,7 +187,7 @@ describe("direct worker execution", () => {
 			}).pipe(Effect.scoped, Effect.provide(runtime)),
 	)
 	it.live(
-		"bounds exit after successful Dispose when a worker retains a Node handle",
+		"bounds exit after a successful stop when a worker retains a Node handle",
 		() =>
 			Effect.gen(function* () {
 				const fs = yield* FileSystem.FileSystem

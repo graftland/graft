@@ -32,6 +32,7 @@ import * as Aliases from "./internal/aliases"
 import { inheritContext } from "./internal/context"
 import { publicationCycle, resolutionChanged } from "./internal/dependencies"
 import * as ForkStatus from "./internal/forkState"
+import * as Probes from "./internal/probes"
 import * as Replacement from "./internal/replacement"
 import {
 	GraftKey,
@@ -294,6 +295,8 @@ const makeFork = <I, E>(
 	)
 	return {
 		id,
+		probes: Probes.names(status.probes),
+		probe: (name) => Probes.run(status.probes, name),
 		state,
 		await: state.pipe(
 			Stream.filter((state) => !ForkState.$is("Loading")(state)),

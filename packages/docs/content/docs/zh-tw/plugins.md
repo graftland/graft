@@ -52,6 +52,8 @@ await Effect.runPromise(
 | `apply`    | 啟動外掛，在 fork 的 `Scope` 內執行。                                                             |
 | `retry`    | 在 `apply` 或受監督任務失敗後重新啟動外掛的 `Schedule`。                                          |
 
+透過 [Plugin.probe](../probes/) 註冊屬於目前服務嘗試的健康檢查。
+
 ### 在 `apply` 內該用什麼
 
 `apply` 在外掛載入期間保持開啟的 `Scope` 中執行。請把每種工作交給負責它的工具：

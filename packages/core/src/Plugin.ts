@@ -20,7 +20,9 @@ import {
 } from "effect"
 import { identity } from "effect/Function"
 
+import { ProbeError } from "./Fork"
 import { Graft, provide, type ServiceConflict } from "./Graft"
+import * as Probes from "./internal/probes"
 import { RuntimeContext } from "./internal/runtimeContext"
 import * as TaskGroup from "./internal/tasks"
 import type { Tasks } from "./internal/tasks"
@@ -120,6 +122,21 @@ export const fork: <A, E, R>(
 		)
 	return yield* TaskGroup.run(activation.tasks.value, effect)
 })
+
+/** Registers a named health check for this serving attempt without running it. */
+export const probe: <A, E, R>(
+	name: string,
+	effect: Effect.Effect<A, E, R>,
+) => Effect.Effect<void, ProbeError, R | Graft | Scope.Scope> =
+	Effect.fnUntraced(function* <A, E, R>(
+		name: string,
+		effect: Effect.Effect<A, E, R>,
+	) {
+		const { activation } = yield* RuntimeContext
+		if (activation.status === undefined)
+			return yield* ProbeError.make({ probe: name, reason: "Unavailable" })
+		return yield* Probes.register(activation.status.probes, name, effect)
+	})
 
 // A definition has one input/error contract even when referenced through aliases.
 export type Plugin<Config = any, Input = any, E = any> = 0 extends 1 & Input

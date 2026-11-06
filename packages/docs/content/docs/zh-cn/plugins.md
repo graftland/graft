@@ -52,6 +52,8 @@ await Effect.runPromise(
 | `apply`    | 启动插件，在 fork 的 `Scope` 内运行。                                                             |
 | `retry`    | 在 `apply` 或受监督任务失败后重启插件的 `Schedule`。                                              |
 
+通过 [Plugin.probe](../probes/) 注册属于当前服务尝试的健康检查。
+
 ### 在 `apply` 内使用什么
 
 `apply` 在插件加载期间保持打开的 `Scope` 中运行。每一类工作都交给对应的工具：

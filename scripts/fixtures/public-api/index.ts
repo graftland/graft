@@ -146,3 +146,13 @@ export const commands = Plugin.make({
 			commands.register(Command.make("example", {}, () => Effect.void)),
 		),
 })
+
+export const capture = Remote.Artifact.capture({
+	directory: "./built-plugin",
+	entry: "index.js",
+	store: "./artifacts",
+})
+export const probePlugin = Plugin.make({
+	name: "public-probe",
+	apply: () => Plugin.probe("health", Effect.void),
+})

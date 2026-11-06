@@ -67,6 +67,25 @@ const start: typeof WorkerTransport.Service.start = Effect.fnUntraced(
 			pid: Option.none(),
 			threadId,
 			failure: failures.await,
+			terminate: Effect.tryPromise({
+				try: () => worker.terminate(),
+				catch: (cause) => TransportError.make({ cause: Cause.die(cause) }),
+			}).pipe(
+				Effect.andThen(Deferred.await(exited)),
+				Effect.flatMap((exitCode) =>
+					failures.cause.pipe(
+						Effect.map((statusCause) =>
+							ProcessExited.make({
+								pid: Option.none(),
+								threadId,
+								exitCode,
+								stderr: "",
+								statusCause,
+							}),
+						),
+					),
+				),
+			),
 			exited: Deferred.await(exited).pipe(
 				Effect.flatMap((exitCode) =>
 					failures.cause.pipe(

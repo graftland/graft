@@ -75,8 +75,11 @@ export const run: (
 				telemetry,
 			)
 			const handlers = yield* contract.control.toHandlers({
-				Load: ({ input }) => instance.load(input),
-				Dispose: () => instance.dispose,
+				Describe: () => instance.describe,
+				Serve: ({ input }) => instance.serve(input),
+				Ready: () => instance.ready,
+				Probe: ({ name }) => instance.probe(name),
+				Stop: () => instance.stop,
 				Events: () => telemetry.eventStream,
 				Logs: () => telemetry.logStream,
 			})

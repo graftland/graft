@@ -52,6 +52,8 @@ await Effect.runPromise(
 | `apply`    | Starts the plugin. It runs inside the fork's `Scope`.                                                                |
 | `retry`    | A `Schedule` for restarting after `apply` or a supervised task fails.                                                |
 
+Register attempt-scoped health checks with [Plugin.probe](../probes/).
+
 ### What to use inside `apply`
 
 `apply` runs in a `Scope` that stays open while the plugin is loaded. Put each

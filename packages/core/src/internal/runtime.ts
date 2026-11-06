@@ -90,6 +90,7 @@ export interface LocalSnapshot<out E = unknown> {
 /** Loading counts include the fork itself and its live descendants. */
 export interface ForkStatus {
 	readonly snapshot: TxSubscriptionRef.TxSubscriptionRef<LocalSnapshot>
+	readonly probes: import("./probes").Registry
 	readonly loading: TxRef.TxRef<number>
 	readonly parent: ForkStatus | undefined
 }

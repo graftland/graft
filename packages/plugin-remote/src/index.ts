@@ -22,6 +22,8 @@ import * as Configuration from "./internal/entryConfig"
 import { publicError } from "./internal/execution"
 import { follow } from "./internal/follow"
 
+export * as Artifact from "./Artifact"
+
 export { Contract }
 export { Instance } from "./Instance"
 export { RemoteTerminationUnconfirmed } from "./internal/runner/model"

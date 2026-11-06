@@ -1,6 +1,7 @@
 import { Effect, HashMap, TxRef, TxSubscriptionRef } from "effect"
 
 import { ForkState } from "../Fork"
+import * as Probes from "./probes"
 import type { ForkStatus, LocalSnapshot, Runtime, Spec } from "./runtime"
 
 /** Update ancestors in the same transaction as the state or topology change. */
@@ -23,6 +24,7 @@ export const make = Effect.fnUntraced(function* (
 ) {
 	const status: ForkStatus = {
 		parent,
+		probes: yield* Probes.make,
 		loading: yield* TxRef.make(0),
 		snapshot: yield* TxSubscriptionRef.make<LocalSnapshot>({
 			state: ForkState.Loading(),

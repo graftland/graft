@@ -169,18 +169,18 @@ export const load = <E extends ErrorSchema>(
 	race(
 		active.connection,
 		Effect.raceFirst(
-			active.client
-				.Load({ input })
-				.pipe(
-					Effect.catchIf(
-						(
-							cause,
-						): cause is Cause.Cause<
-							E["Type"] | ContractModule.UndeclaredFailure | ChildFailure
-						> => Cause.isCause(cause),
-						Effect.failCause,
-					),
+			active.client.Serve({ input }).pipe(
+				Effect.andThen(active.client.Ready()),
+				Effect.asVoid,
+				Effect.catchIf(
+					(
+						cause,
+					): cause is Cause.Cause<
+						E["Type"] | ContractModule.UndeclaredFailure | ChildFailure
+					> => Cause.isCause(cause),
+					Effect.failCause,
 				),
+			),
 			active.remoteFailure.await,
 		),
 	)
@@ -189,7 +189,7 @@ export const dispose = Effect.fnUntraced(function* <E extends ErrorSchema>(
 ) {
 	const result = yield* race(
 		active.connection,
-		active.client.Dispose().pipe(Effect.catchIf(Cause.isCause, Effect.succeed)),
+		active.client.Stop().pipe(Effect.catchIf(Cause.isCause, Effect.succeed)),
 	)
 	const cause = Cause.isCause(result) ? result : Cause.empty
 	// A remote cleanup failure still permits the bounded event and log tail to drain.

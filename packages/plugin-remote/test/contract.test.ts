@@ -51,7 +51,15 @@ describe("contract endpoint validation", () => {
 		)
 	})
 	it("allows matching RPC and control tags on separate service endpoints", () => {
-		for (const tag of ["Load", "Dispose", "Events", "Logs"]) {
+		for (const tag of [
+			"Describe",
+			"Serve",
+			"Ready",
+			"Probe",
+			"Stop",
+			"Events",
+			"Logs",
+		]) {
 			const contract = Contract.make({
 				...options,
 				provides: [service(First, tag), service(Second, tag)],

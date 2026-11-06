@@ -7,6 +7,8 @@ description: 用契約描述遠端外掛，並從 YAML 或 TypeScript 載入它�
 
 在[契約](../contracts/)中定義共用協定，再在項目中獨立指定實作。
 
+使用[成品快照](../artifacts/)可讓建置好的實作不受後續原始碼修改影響。
+
 ## 從 YAML 載入
 
 把外掛的設定項目換成 `remote` 設定項目。`name: remote` 會載入

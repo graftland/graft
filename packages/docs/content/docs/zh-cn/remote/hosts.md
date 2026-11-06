@@ -7,6 +7,8 @@ description: 用契约描述远程插件，并从 YAML 或 TypeScript 加载它�
 
 在[契约](../contracts/)中定义共享协议，再在条目中独立指定实现。
 
+使用[制品快照](../artifacts/)可让构建好的实现不受后续源码修改影响。
+
 ## 从 YAML 加载
 
 把插件的条目换成 `remote` 条目。`name: remote` 会加载

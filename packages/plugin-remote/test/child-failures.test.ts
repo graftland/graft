@@ -74,7 +74,7 @@ it.effect(
 				telemetry,
 			)
 			yield* Effect.addFinalizer(() => lifecycle.release)
-			yield* lifecycle.load(null)
+			yield* lifecycle.serve(null).pipe(Effect.andThen(lifecycle.ready))
 			const event = yield* Queue.take(telemetry.events).pipe(
 				Effect.timeout("1 second"),
 			)
@@ -86,7 +86,7 @@ it.effect(
 					(reason) => reason._tag === "Die" && reason.defect === marker,
 				),
 			)
-			yield* lifecycle.dispose
+			yield* lifecycle.stop
 		}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
 )
 
