@@ -102,7 +102,10 @@ keeps the interrupted phase, attempt and accumulated evidence. Confirmed cleanup
 returns `Aborted(Closing)`; only missing required exit evidence produces
 `Stuck`. Coordinator defects retain their cause without being classified as
 termination failures. Confirmed execution exit does not hide host cleanup
-failures: `Fork.dispose` combines them into `CleanupError`.
+failures: `Fork.dispose` waits for host release separately and combines its
+failures into `CleanupError`, including when cancellation arrives just after
+execution exit. Repeated termination joins the same host release; confirmed exit
+never skips it.
 
 ## Policies and calls
 

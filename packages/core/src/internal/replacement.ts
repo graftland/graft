@@ -396,22 +396,27 @@ const restarted = (
 			const tracked = HashSet.fromIterable(
 				Array.map(restored.roots, ({ entry }) => entry.id),
 			)
-			const counted = (entry: ForkEntry) => {
-				if (HashSet.has(tracked, entry.id)) return HashSet.has(roots, entry.id)
-				if (HashSet.has(restored.existing, entry.id)) return false
+			const counted = Effect.fnUntraced(function* (entry: ForkEntry) {
 				for (
-					let parent = entry.parent;
-					parent !== undefined;
-					parent = Option.getOrUndefined(HashMap.get(forks, parent))?.parent
+					let node: ForkEntry | undefined = entry;
+					node !== undefined;
+					node =
+						node.parent === undefined
+							? undefined
+							: Option.getOrUndefined(HashMap.get(forks, node.parent))
 				) {
-					// A later owner takes its subtree with it.
-					if (HashSet.has(tracked, parent)) return HashSet.has(roots, parent)
+					if (HashSet.has(tracked, node.id)) return HashSet.has(roots, node.id)
+					if (HashSet.has(restored.existing, node.id)) return false
+					const spec = yield* TxRef.get(node.spec)
+					// Creation pins ownership even if takeover happens before recovery first observes the child.
+					if (spec.revision !== node.initialRevision) return false
 				}
 				return false
-			}
+			})
+
 			const recovery = yield* Effect.forEach(HashMap.values(forks), (entry) =>
 				Effect.gen(function* () {
-					if (!counted(entry)) return Option.none<ReplacementFailure>()
+					if (!(yield* counted(entry))) return Option.none<ReplacementFailure>()
 					const spec = yield* TxRef.get(entry.spec)
 					const snapshot = yield* TxSubscriptionRef.get(entry.status.snapshot)
 					if (snapshot.disposed) return Option.none<ReplacementFailure>()

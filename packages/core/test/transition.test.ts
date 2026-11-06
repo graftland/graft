@@ -10,8 +10,11 @@ import {
 	Exit,
 	Fiber,
 	HashMap,
+	MutableRef,
 	Option,
+	Order,
 	Ref,
+	Scheduler,
 	Scope,
 	Stream,
 	String,
@@ -1398,5 +1401,132 @@ it.effect(
 			if (outcome._tag === "RecoveryFailed")
 				assert.equal(outcome.reason, "CoordinatorDefect")
 			assert.equal(outcome.phase, "Describing")
+		}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
+)
+
+it.effect(
+	"disposal resumes host release interrupted exactly after execution exit was cached",
+	() =>
+		Effect.gen(function* () {
+			const boundary = yield* Deferred.make<void>()
+			const scopes = yield* Ref.make<ReadonlyArray<Scope.Scope>>([])
+			const finalized = yield* Ref.make<ReadonlyArray<number>>([])
+			const inspect = MutableRef.make<() => boolean>(() => false)
+			const hit = MutableRef.make(false)
+			const base = yield* Scheduler.Scheduler
+			const scheduler: Scheduler.Scheduler = {
+				executionMode: base.executionMode,
+				makeDispatcher: () => base.makeDispatcher(),
+				shouldYield(fiber) {
+					// This synchronous scheduler hook interrupts at the first instruction after exit is cached.
+					if (!hit.current && inspect.current()) {
+						MutableRef.set(hit, true)
+						Deferred.doneUnsafe(boundary, Exit.void)
+						fiber.interruptUnsafe()
+						return true
+					}
+					return base.shouldYield(fiber)
+				},
+			}
+			const disposed = yield* Effect.gen(function* () {
+				const h = yield* setup((id) => ({
+					start: Effect.gen(function* () {
+						const scope = yield* Effect.scope
+						yield* Ref.update(scopes, Array.append(scope))
+						yield* Effect.addFinalizer(() =>
+							Ref.update(finalized, Array.append(id)).pipe(
+								Effect.andThen(Effect.die(`Host finalizer ${id} failed`)),
+							),
+						)
+					}),
+				}))
+				const context = yield* Effect.serviceOption(RuntimeContext)
+				const { runtime } = Option.getOrThrow(context)
+				const forks = yield* TxSubscriptionRef.get(runtime.forks)
+				const entry = Option.getOrThrow(HashMap.get(forks, h.fork.id))
+				const registered = yield* TxRef.get(entry.status.managed)
+				const managed = Option.getOrThrow(registered)
+				const attempts = yield* Ref.get(managed.attempts)
+				const previous = Option.getOrThrow(Array.head(attempts))
+				MutableRef.set(inspect, () =>
+					Option.isSome(Ref.getUnsafe(previous.terminated)),
+				)
+				const transitioning = yield* Effect.forkScoped(h.request())
+				yield* Deferred.await(boundary)
+				const disposed = yield* Effect.exit(h.fork.dispose)
+				const outcome = yield* Fiber.join(transitioning)
+				assert.notEqual(outcome._tag, "Stuck")
+				return disposed
+			}).pipe(
+				Effect.scoped,
+				Effect.provide(Graft.layer),
+				Effect.provideService(Scheduler.Scheduler, scheduler),
+			)
+			assert.isTrue(hit.current)
+			const owned = yield* Ref.get(scopes)
+			assert.equal(owned.length, 2)
+			assert.deepEqual(
+				Array.map(owned, (scope) => scope.state._tag),
+				["Closed", "Closed"],
+			)
+			const released = yield* Ref.get(finalized)
+			assert.deepEqual(Array.sort(released, Order.Number), [1, 2])
+			assert.isTrue(Exit.isFailure(disposed))
+			if (Exit.isFailure(disposed)) {
+				assert.include(Cause.pretty(disposed.cause), "Host finalizer 1 failed")
+				assert.include(Cause.pretty(disposed.cause), "Host finalizer 2 failed")
+			}
+		}),
+)
+
+it.effect(
+	"a repeated termination awaits the running host release and retains its failure",
+	() =>
+		Effect.gen(function* () {
+			const entered = yield* Deferred.make<void>()
+			const release = yield* Deferred.make<void>()
+			const finalizers = yield* Ref.make<ReadonlyArray<number>>([])
+			const h = yield* setup((id) => ({
+				start: Effect.addFinalizer(() =>
+					Effect.gen(function* () {
+						yield* Ref.update(finalizers, Array.append(id))
+						if (id === 1) {
+							yield* Deferred.succeed(entered, undefined)
+							yield* Deferred.await(release)
+						}
+						return yield* Effect.die(`Finalizer ${id} failed`)
+					}),
+				),
+			}))
+			const transitioning = yield* Effect.forkScoped(h.request())
+			yield* Deferred.await(entered)
+			const disposing = yield* Effect.forkScoped(Effect.exit(h.fork.dispose))
+			// Cancellation reaches the coordinator while host cleanup remains blocked.
+			const context = yield* Effect.serviceOption(RuntimeContext)
+			const { runtime } = Option.getOrThrow(context)
+			const forks = yield* TxSubscriptionRef.get(runtime.forks)
+			const entry = Option.getOrThrow(HashMap.get(forks, h.fork.id))
+			const registered = yield* TxRef.get(entry.status.managed)
+			const managed = Option.getOrThrow(registered)
+			yield* Effect.tx(
+				Effect.gen(function* () {
+					const state = yield* TxRef.get(managed.lifecycle)
+					if (state._tag !== "Closing") return yield* Effect.txRetry
+				}),
+			)
+			yield* TestClock.adjust(1)
+			assert.isUndefined(transitioning.pollUnsafe())
+			assert.isUndefined(disposing.pollUnsafe())
+			yield* Deferred.succeed(release, undefined)
+			const outcome = yield* Fiber.join(transitioning)
+			assert.equal(outcome._tag, "Aborted")
+			const disposed = yield* Fiber.join(disposing)
+			assert.isTrue(Exit.isFailure(disposed))
+			if (Exit.isFailure(disposed)) {
+				assert.include(Cause.pretty(disposed.cause), "Finalizer 1 failed")
+				assert.include(Cause.pretty(disposed.cause), "Finalizer 2 failed")
+			}
+			const calls = yield* Ref.get(finalizers)
+			assert.deepEqual(Array.sort(calls, Order.Number), [1, 2])
 		}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
 )

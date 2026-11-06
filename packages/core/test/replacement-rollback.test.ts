@@ -11,6 +11,7 @@ import {
 	Scope,
 	Stream,
 } from "effect"
+import { TestClock } from "effect/testing"
 import { assert, describe, it } from "@effect/vitest"
 
 import { Graft, Plugin } from "../src/index.ts"
@@ -565,3 +566,98 @@ it.effect("counts failing descendants created by the restored parent", () =>
 		}
 	}).pipe(run),
 )
+
+for (const action of ["restart", "replace"] as const) {
+	for (const descendant of [false, true]) {
+		for (const loading of [false, true]) {
+			it.effect(
+				`excludes a recreated child's ${action} takeover and its ${loading ? "loading" : "failed"} ${descendant ? "subtree" : "attempt"}`,
+				() =>
+					Effect.gen(function* () {
+						const childRuns = yield* Ref.make(0)
+						const parentRuns = yield* Ref.make(0)
+						const recreated =
+							yield* Deferred.make<
+								Pick<import("../src/Fork").Fork, "restart">
+							>()
+						const recovering = yield* Deferred.make<void>()
+						const takeoverStarted = yield* Deferred.make<void>()
+						const parentRelease = yield* Deferred.make<void>()
+						const later: Effect.Effect<void, string> = Deferred.succeed(
+							takeoverStarted,
+							undefined,
+						).pipe(
+							Effect.andThen(
+								loading ? Effect.never : Effect.fail("Later owner's failure"),
+							),
+						)
+						const grandchild = Plugin.make({
+							name: "later-grandchild",
+							apply: () => later,
+						})
+						const takenOver = descendant
+							? Graft.plugin(grandchild).pipe(Effect.asVoid)
+							: later
+						const child = Plugin.make({
+							name: "recreated-child",
+							apply: () =>
+								Effect.gen(function* () {
+									const run = yield* Ref.updateAndGet(childRuns, (n) => n + 1)
+									if (run === 2) {
+										yield* Deferred.succeed(recovering, undefined)
+										return yield* Effect.never
+									}
+									if (run > 2) yield* takenOver
+								}),
+						})
+						const parent = Plugin.make({
+							name: "restored-parent",
+							apply: (): Effect.Effect<
+								void,
+								string,
+								Graft.Graft | Scope.Scope
+							> =>
+								Effect.gen(function* () {
+									const run = yield* Ref.updateAndGet(parentRuns, (n) => n + 1)
+									const fork = yield* Graft.plugin(child)
+									if (run > 1) {
+										yield* Deferred.succeed(recreated, fork)
+										yield* Deferred.await(parentRelease)
+									}
+								}),
+						})
+						const broken = Plugin.make({
+							name: "broken-parent",
+							apply: () => Effect.fail("Parent replacement failed"),
+						})
+						const root = yield* Graft.plugin(parent)
+						yield* root.stable
+						const original = yield* Effect.forkScoped(
+							Graft.replace([[parent, broken]]),
+						)
+						const restoredChild = yield* Deferred.await(recreated)
+						yield* Deferred.await(recovering)
+						const laterPlugin = Plugin.make({
+							name: "later-child",
+							apply: () => takenOver,
+						})
+						yield* Effect.forkScoped(
+							action === "restart"
+								? restoredChild.restart
+								: Graft.replace([[child, laterPlugin]]).pipe(Effect.asVoid),
+						)
+						yield* Deferred.await(takeoverStarted)
+						yield* Deferred.succeed(parentRelease, undefined)
+						const waiting = yield* Effect.forkScoped(
+							Effect.timeoutOption(Fiber.join(original), 1),
+						)
+						yield* TestClock.adjust(1)
+						const outcome = yield* Fiber.join(waiting)
+						assert.isTrue(Option.isSome(outcome))
+						if (Option.isSome(outcome))
+							assert.equal(outcome.value._tag, "RolledBack")
+					}).pipe(run),
+			)
+		}
+	}
+}

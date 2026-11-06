@@ -88,7 +88,8 @@ export const request = Graft.transition({
 釋放會先關閉入場，再取消已入場的轉換。結局保留被中斷的階段、嘗試和已有證據。確認清理後回傳
 `Aborted(Closing)`；只有缺少必要退出證據才回傳
 `Stuck`。協調器缺陷保留 cause，不會被歸類為終止失敗。確認執行單元退出不會掩蓋宿主清理失敗：`Fork.dispose`
-將它們合併到 `CleanupError`。
+獨立等待宿主釋放，並將失敗合併到
+`CleanupError`，即使取消恰好發生在執行單元退出之後。重複終止會等待同一次宿主釋放；確認退出不會跳過它。
 
 ## 策略和呼叫
 

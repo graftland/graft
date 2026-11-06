@@ -28,6 +28,14 @@ import type { Activation, ForkEntry, Provision, Runtime } from "./runtime"
 import { RuntimeContext } from "./runtimeContext"
 import { derive, type Deadlines } from "./transitionBudgets"
 
+type HostRelease =
+	| { readonly _tag: "Pending" }
+	| {
+			readonly _tag: "Running"
+			readonly completed: Deferred.Deferred<Exit.Exit<void>>
+	  }
+	| { readonly _tag: "Completed"; readonly exit: Exit.Exit<void> }
+
 interface Attempt {
 	readonly id: number
 	readonly candidate: T.Candidate
@@ -37,7 +45,7 @@ interface Attempt {
 	readonly scope: Scope.Closeable
 	readonly services: Ref.Ref<Context.Context<never>>
 	readonly terminated: Ref.Ref<Option.Option<T.Termination>>
-	readonly hostRelease: Ref.Ref<Exit.Exit<void, unknown>>
+	readonly hostRelease: Ref.Ref<HostRelease>
 }
 export interface Managed {
 	readonly instance: string
@@ -73,7 +81,7 @@ type Lifecycle =
 	| { readonly _tag: "Closed" }
 interface Terminated {
 	readonly termination: Option.Option<T.Termination>
-	readonly host: Exit.Exit<void, unknown>
+	readonly host: HostRelease
 }
 const confirmed = (result: Terminated) => Option.isSome(result.termination)
 const foldCauses = (exits: ReadonlyArray<Exit.Exit<unknown, unknown>>) =>
@@ -318,7 +326,7 @@ const engine = (
 			scope: yield* Scope.make(),
 			services: yield* Ref.make(Context.empty()),
 			terminated: yield* Ref.make<Option.Option<T.Termination>>(Option.none()),
-			hostRelease: yield* Ref.make<Exit.Exit<void, unknown>>(Exit.void),
+			hostRelease: yield* Ref.make<HostRelease>({ _tag: "Pending" }),
 		}
 		yield* Ref.update(managed.attempts, Array.append(attempt))
 		yield* generation(managed, attempt, "Starting")
@@ -401,10 +409,92 @@ const engine = (
 				policy.probe,
 			)
 	})
+	const beginHostRelease = Effect.fnUntraced(function* (attempt: Attempt) {
+		return yield* Effect.uninterruptible(
+			Effect.gen(function* () {
+				const completed = yield* Deferred.make<Exit.Exit<void>>()
+				const claim = yield* Ref.modify(
+					attempt.hostRelease,
+					(
+						state,
+					): readonly [
+						{
+							readonly owner: boolean
+							readonly state: Exclude<HostRelease, { readonly _tag: "Pending" }>
+						},
+						HostRelease,
+					] => {
+						if (state._tag !== "Pending")
+							return [{ owner: false, state }, state]
+						const running: HostRelease & { readonly _tag: "Running" } = {
+							_tag: "Running",
+							completed,
+						}
+						return [{ owner: true, state: running }, running]
+					},
+				)
+				if (claim.owner)
+					yield* Effect.forkIn(
+						Effect.gen(function* () {
+							const exit = yield* Effect.exit(
+								Release.close(attempt.scope, Exit.void),
+							)
+							if (Exit.isFailure(exit)) {
+								yield* Ref.update(managed.hostFailures, (all) =>
+									Cause.combine(all, exit.cause),
+								)
+								yield* record({
+									attempt: attempt.id,
+									phase: "Terminating",
+									cause: exit.cause,
+								})
+								yield* Effect.logError(
+									"Execution host release failed",
+									exit.cause,
+								)
+							}
+							yield* Ref.set(attempt.hostRelease, { _tag: "Completed", exit })
+							yield* Ref.update(
+								managed.attempts,
+								Array.filter((item) => item !== attempt),
+							)
+							yield* Deferred.succeed(completed, exit)
+						}),
+						managed.scope,
+						{ uninterruptible: true },
+					)
+				return claim.state
+			}),
+		)
+	})
+	const releaseHost = Effect.fnUntraced(function* (attempt: Attempt) {
+		const state = yield* beginHostRelease(attempt)
+		return state._tag === "Completed"
+			? state.exit
+			: yield* Deferred.await(state.completed)
+	})
+	const awaitHostRelease = Effect.fnUntraced(function* (attempt: Attempt) {
+		const state = yield* beginHostRelease(attempt)
+		if (state._tag === "Completed") return state
+		const waited = yield* Effect.exit(
+			step(
+				attempt.id,
+				"Terminating",
+				Deferred.await(state.completed),
+				limits.termination.hostRelease,
+			),
+		)
+		// A deadline ends this observation, not the owned release or its eventual result.
+		if (Exit.isFailure(waited))
+			yield* Ref.update(managed.hostFailures, (all) =>
+				Cause.combine(all, waited.cause),
+			)
+		return yield* Ref.get(attempt.hostRelease)
+	})
 	const terminate = Effect.fnUntraced(function* (attempt: Attempt) {
 		const known = yield* Ref.get(attempt.terminated)
 		if (Option.isSome(known))
-			return { termination: known, host: yield* Ref.get(attempt.hostRelease) }
+			return { termination: known, host: yield* awaitHostRelease(attempt) }
 		// A command's acknowledgement is not exit evidence. Observe exit independently.
 		const command = yield* Effect.forkIn(
 			Effect.suspend(() => attempt.unit.terminate).pipe(
@@ -435,59 +525,30 @@ const engine = (
 		yield* Effect.forkIn(Fiber.interrupt(command), managed.scope)
 		if (observed._tag === "Failure") {
 			yield* generation(managed, attempt, "Stuck")
-			return { termination: Option.none<T.Termination>(), host: Exit.void }
+			return {
+				termination: Option.none<T.Termination>(),
+				host: yield* Ref.get(attempt.hostRelease),
+			}
 		}
-		yield* record({
-			attempt: attempt.id,
-			phase: "Terminating",
-			termination: observed.success,
-		})
-		yield* Ref.set(attempt.terminated, Option.some(observed.success))
-		yield* generation(managed, attempt, "Terminated")
-		// Host release remains owned even when the total budget leaves no time to observe it.
-		const release = yield* Effect.forkIn(
-			Release.close(attempt.scope, Exit.void).pipe(
-				Effect.tapCause((cause) =>
-					Ref.update(managed.hostFailures, (all) =>
-						Cause.combine(all, cause),
-					).pipe(
-						Effect.andThen(
-							record({ attempt: attempt.id, phase: "Terminating", cause }),
-						),
-						Effect.andThen(
-							Effect.logError("Execution host release failed", cause),
-						),
-					),
-				),
-			),
-			managed.scope,
+		// Cache exit and register the independent release owner before interruption can resume.
+		yield* Effect.uninterruptible(
+			Effect.gen(function* () {
+				yield* record({
+					attempt: attempt.id,
+					phase: "Terminating",
+					termination: observed.success,
+				})
+				yield* Ref.set(attempt.terminated, Option.some(observed.success))
+				yield* beginHostRelease(attempt)
+				yield* generation(managed, attempt, "Terminated")
+			}),
 		)
-		const released = yield* Effect.exit(
-			step(
-				attempt.id,
-				"Terminating",
-				Fiber.await(release),
-				limits.termination.hostRelease,
-			),
-		)
-		const host = Exit.isSuccess(released)
-			? released.value
-			: Exit.failCause(released.cause)
-		if (Exit.isFailure(released))
-			yield* Ref.update(managed.hostFailures, (all) =>
-				Cause.combine(all, released.cause),
-			)
-		yield* Ref.set(attempt.hostRelease, host)
-		yield* Ref.update(
-			managed.attempts,
-			Array.filter((item) => item !== attempt),
-		)
+		const host = yield* awaitHostRelease(attempt)
 		return { termination: Option.some(observed.success), host }
 	})
 	const retire = Effect.fnUntraced(function* (attempt: Attempt) {
 		const known = yield* Ref.get(attempt.terminated)
-		if (Option.isSome(known))
-			return { termination: known, host: yield* Ref.get(attempt.hostRelease) }
+		if (Option.isSome(known)) return yield* terminate(attempt)
 		yield* generation(managed, attempt, "Draining")
 		yield* Effect.result(
 			step(
@@ -517,7 +578,7 @@ const engine = (
 				yield* generation(managed, attempt, "Serving")
 			}),
 		).pipe(Effect.andThen(record({ attempt: attempt.id, phase: "Cutover" })))
-	return { allocate, start, terminate, retire, cutover, step }
+	return { allocate, start, terminate, retire, cutover, step, releaseHost }
 }
 
 const invoke =
@@ -703,23 +764,18 @@ export const register = Effect.fnUntraced(function* (
 					const remaining = yield* Ref.get(managed.attempts)
 					const cleanup = yield* Effect.forEach(remaining, (attempt) =>
 						Effect.gen(function* () {
-							const result = yield* engine(managed, policy, evidence).terminate(
-								attempt,
-							)
+							const coordinator = engine(managed, policy, evidence)
+							const result = yield* coordinator.terminate(attempt)
 							if (confirmed(result)) return Exit.void
 							yield* TxRef.set(runtime.transitionStuck, true)
 							const observed = yield* Ref.get(evidence)
-							const closed = yield* Effect.exit(
-								Release.close(attempt.scope, Exit.void),
-							)
+							// The release owner records its complete cause before this wait completes.
+							yield* coordinator.releaseHost(attempt)
 							return Exit.failCause(
-								Cause.combine(
-									Cause.die(
-										T.DriverError.make({
-											cause: Cause.fail({ evidence: observed }),
-										}),
-									),
-									Exit.isFailure(closed) ? closed.cause : Cause.empty,
+								Cause.die(
+									T.DriverError.make({
+										cause: Cause.fail({ evidence: observed }),
+									}),
 								),
 							)
 						}),

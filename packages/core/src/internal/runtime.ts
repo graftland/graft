@@ -104,6 +104,8 @@ export interface ForkStatus {
 }
 
 export interface ForkEntry<out E = unknown> {
+	/** The revision owned by the creating activation, before any restart or replacement. */
+	readonly initialRevision: number
 	readonly scope: Scope.Closeable
 	readonly status: ForkStatus
 	readonly id: number

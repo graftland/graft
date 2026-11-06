@@ -398,6 +398,7 @@ export const plugin: <P extends Plugin>(
 								initialSpec,
 							)
 							const entry: ForkEntry = {
+								initialRevision: initialSpec.revision,
 								scope: forkScope,
 								id,
 								node,
