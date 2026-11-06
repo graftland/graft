@@ -14,7 +14,7 @@ import * as Graft from "./Graft"
 import * as Coordinator from "./internal/transition"
 import type { OperationIdentity } from "./Plugin"
 
-/** An immutable implementation identity and driver-specific deployment data. */
+/** An immutable implementation identity and driver-owned immutable deployment snapshot. Custom drivers must detach and validate caller-owned input before registration or admission. */
 export interface Candidate {
 	readonly driver: string
 	readonly identity: string
@@ -74,7 +74,7 @@ export interface Request {
 
 export interface Termination {
 	readonly unit: string
-	/** NotStarted proves startup settled without creating an execution. */
+	/** NotStarted proves startup was prevented or settled without creating an execution. */
 	readonly state: "Exited" | "NotStarted"
 	/** The observed exit status, including an abnormal exit. */
 	readonly cause?: Cause.Cause<unknown>
@@ -89,6 +89,8 @@ export interface Evidence {
 
 export type Reason =
 	| "Busy"
+	| "Closing"
+	| "CoordinatorDefect"
 	| "UnsupportedTarget"
 	| "InvalidPolicy"
 	| "IncompatibleContract"
@@ -111,11 +113,22 @@ export type Outcome = Data.TaggedEnum<{
 }>
 export const Outcome = Data.taggedEnum<Outcome>()
 
+/** Retain at most this many retired summaries per fork. */
+export const generationHistoryLimit = 32
+export interface CandidateIdentity {
+	readonly driver: string
+	readonly identity: string
+}
 export interface Generation {
 	readonly generation: number
 	readonly attempt: number
-	readonly candidate: Candidate
+	readonly candidate: CandidateIdentity
 	readonly state: "Starting" | "Serving" | "Draining" | "Terminated" | "Stuck"
+}
+
+/** Live event with the complete candidate; consumers own any historical archive. */
+export interface GenerationEvent extends Generation {
+	readonly candidate: Candidate
 }
 
 export class DriverError extends Schema.TaggedError<

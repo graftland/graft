@@ -8,6 +8,7 @@ import {
 	Option,
 	Ref,
 	Schedule,
+	Scope,
 	Stream,
 } from "effect"
 import { assert, describe, it } from "@effect/vitest"
@@ -507,3 +508,60 @@ describe("replacement rollback", () => {
 		}).pipe(run),
 	)
 })
+
+it.effect("counts failing descendants created by the restored parent", () =>
+	Effect.gen(function* () {
+		const starts = yield* Ref.make(0)
+		const restored = yield* Deferred.make<void>()
+		const release = yield* Deferred.make<void>()
+		const cause = Cause.combine(
+			Cause.fail("restored child failed"),
+			Cause.die("restored child defect"),
+		)
+		const child = Plugin.make({
+			name: "restored-child",
+			apply: () =>
+				Ref.updateAndGet(starts, (n) => n + 1).pipe(
+					Effect.flatMap((n) =>
+						n > 1
+							? Deferred.succeed(restored, undefined).pipe(
+									Effect.andThen(Deferred.await(release)),
+									Effect.andThen(Effect.failCause(cause)),
+								)
+							: Effect.void,
+					),
+				),
+		})
+		const parent = Plugin.make({
+			name: "restored-parent",
+			apply: (): Effect.Effect<void, string, Graft.Graft | Scope.Scope> =>
+				Graft.plugin(child).pipe(Effect.asVoid),
+		})
+		const broken = Plugin.make({
+			name: "broken-parent",
+			apply: () => Effect.fail("replacement failed"),
+		})
+		const fork = yield* Graft.plugin(parent)
+		yield* fork.stable
+		const pending = yield* Effect.forkScoped(Graft.replace([[parent, broken]]))
+		yield* Deferred.await(restored)
+		yield* Effect.yieldNow
+		assert.isUndefined(pending.pollUnsafe())
+		yield* Deferred.succeed(release, undefined)
+		const result = yield* Fiber.join(pending)
+		assert.equal(result._tag, "RecoveryFailed")
+		if (result._tag === "RecoveryFailed") {
+			assert.equal(result.recovery.length, 1)
+			const failure = result.recovery[0]
+			assert.equal(failure?.plugin, "restored-child")
+			if (failure?._tag === "Failed") {
+				assert.deepEqual(
+					Array.map(failure.cause.reasons, (reason) => reason._tag),
+					["Fail", "Die"],
+				)
+				assert.include(Cause.pretty(failure.cause), "restored child failed")
+				assert.include(Cause.pretty(failure.cause), "restored child defect")
+			}
+		}
+	}).pipe(run),
+)

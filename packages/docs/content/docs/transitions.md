@@ -63,13 +63,16 @@ export const request = Graft.transition({
 ```
 
 `Remote.candidate` constructs an inert description of a captured artifact,
-contract module, direct target and input. It neither verifies nor starts the
-artifact. [Capture](../remote/artifacts/) remains explicit; the driver verifies
-the captured bytes before launching each unit, including recovery.
+contract module, direct target and input. It copies and freezes deployment data,
+including nested JSON input and target options, so later caller mutations cannot
+change the retained recovery input. It neither verifies nor starts the artifact.
+[Capture](../remote/artifacts/) remains explicit; the driver verifies the
+captured bytes before launching each unit, including recovery.
 
 | Admission rule                                                                         | Result                                                                                        |
 | -------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
 | Another transition is running, including its trial window                              | `Aborted(Busy)`; nothing is queued.                                                           |
+| The target fork is closing                                                             | `Aborted(Closing)` before allocating a unit.                                                  |
 | Target has no matching registered driver                                               | `Aborted(UnsupportedTarget)` before allocating a unit.                                        |
 | A normalized deadline is non-finite or not positive, or total cannot cover the reserve | `Aborted(InvalidPolicy)`. Zero trial is allowed.                                              |
 | A previous transition has unconfirmed termination                                      | `Aborted(Stuck)` until the runtime is disposed. Late exit evidence does not reopen admission. |
@@ -77,22 +80,29 @@ the captured bytes before launching each unit, including recovery.
 
 ## Outcomes and evidence
 
-| Outcome          | Meaning                                                                                                                                                                       |
-| ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `Accepted`       | The candidate serves; the previous unit has observed exit evidence.                                                                                                           |
-| `Aborted`        | Admission failed, or the candidate failed before cutover and its termination was confirmed. The old route is retained after candidate rejection.                              |
-| `Recovered`      | Candidate and old-unit termination were confirmed, then a fresh attempt of the old artifact became ready. This also covers an old attempt failing during candidate rejection. |
-| `RecoveryFailed` | Recovery failed; failed units have confirmed termination, and calls receive `Unavailable`.                                                                                    |
-| `Stuck`          | A required termination could not be confirmed. Calls receive `Unavailable`; later transitions are blocked.                                                                    |
+| Outcome          | Meaning                                                                                                                                                                                                                 |
+| ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Accepted`       | The candidate serves; the previous unit has observed exit evidence.                                                                                                                                                     |
+| `Aborted`        | Admission failed, or the candidate failed before cutover and its termination was confirmed. The old route is retained after candidate rejection; disposal cancellation returns `Aborted(Closing)` and closes the route. |
+| `Recovered`      | Candidate and old-unit termination were confirmed, then a fresh attempt of the old artifact became ready. This also covers an old attempt failing during candidate rejection.                                           |
+| `RecoveryFailed` | Recovery failed, or an internal coordinator defect ended the transition with reason `CoordinatorDefect`; all units requiring cleanup have confirmed termination. Calls receive `Unavailable`.                           |
+| `Stuck`          | A required termination could not be confirmed. Calls receive `Unavailable`; later transitions are blocked.                                                                                                              |
 
 `Transition.Outcome` provides tagged constructors and `$match`. Outcomes carry
 the phase and evidence, including complete failure causes, deadlines and
 observed exits. A termination command, lost transport or closed scope is not
 exit evidence. Stopping or draining can time out without preventing `Accepted`
 if termination is confirmed; those failures remain in the evidence. Direct-unit
-evidence distinguishes `Exited` from `NotStarted`: the latter proves startup
-settled before an execution was spawned. It never substitutes a lost connection
-or an acknowledged termination command for an exit.
+evidence distinguishes `Exited` from `NotStarted`: the latter proves startup was
+prevented or settled before an execution was spawned. It never substitutes a
+lost connection or an acknowledged termination command for an exit.
+
+Disposal closes admission before cancelling an admitted transition. Its outcome
+keeps the interrupted phase, attempt and accumulated evidence. Confirmed cleanup
+returns `Aborted(Closing)`; only missing required exit evidence produces
+`Stuck`. Coordinator defects retain their cause without being classified as
+termination failures. Confirmed execution exit does not hide host cleanup
+failures: `Fork.dispose` combines them into `CleanupError`.
 
 ## Policies and calls
 
@@ -132,9 +142,14 @@ Unit termination provides cleanup evidence; RPC response delivery alone does not
 prove server request-scope cleanup.
 
 `Fork.generations` observes starting, serving, draining, terminated and stuck
-generations. Unmanaged forks report an empty list. Recovery allocates a fresh
-unit and attempt from the pinned previous artifact and input; it does not reuse
-a failed attempt. Direct units attempt graceful exit after stopping; a stop
+generations. It retains active and stuck generations plus the latest 32 retired
+summaries, containing candidate identity but no deployment payload. Unmanaged
+forks report an empty list. `Fork.generationEvents` publishes full generation
+changes with deployment data to current subscribers, without replay. Its buffer
+holds 64 events; a slow subscriber can miss older events. Persist events outside
+the fork when a durable audit history is needed. Recovery allocates a fresh unit
+and attempt from the pinned previous artifact and input; it does not reuse a
+failed attempt. Direct units attempt graceful exit after stopping; a stop
 timeout leads to forced termination. External runtime dependencies are not
 captured or pinned.
 
@@ -159,7 +174,14 @@ function to its methods. The coordinator owns readiness, probes, cutover, drain
 and recovery. Drivers supply lifecycle operations, private service contexts and
 an independently observable exit; they cannot change routes.
 
-Allocation must be inert: external execution starts in `Unit.start`. Driver
+Custom drivers must construct immutable candidate snapshots before registration
+or transition admission, including every nested deployment value needed for
+recovery. Core retains that snapshot; it cannot clone arbitrary driver
+resources.
+
+Allocation must be inert: external execution starts in `Unit.start`. Terminating
+an allocated unit must prevent later startup and report `NotStarted`.
+Termination racing startup must await definitive spawn or exit evidence. Driver
 operations must be safe to cancel; unresponsive operations remain owned until
 fork disposal. Supply independent, repeatable `failure` and `exited`
 observations. Describe the implementation's own operation identities, and use

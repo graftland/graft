@@ -40,7 +40,11 @@ export class ProbeError extends Schema.TaggedError<
 }) {}
 
 export interface Fork<in Input = any, out E = any> {
-	/** Execution generations, including retired attempts; empty for unmanaged forks. */
+	/** Live complete generation events. No replay; slow subscribers retain at most 64 events. */
+	readonly generationEvents: Stream.Stream<
+		import("./Transition").GenerationEvent
+	>
+	/** Active/stuck generations and the latest 32 retired summaries, without deployment payloads. */
 	readonly generations: Stream.Stream<
 		ReadonlyArray<import("./Transition").Generation>
 	>

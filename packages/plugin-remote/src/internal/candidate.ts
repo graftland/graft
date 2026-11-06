@@ -1,4 +1,4 @@
-import { Schema } from "effect"
+import { Array, Record, Schema } from "effect"
 
 import type { Transition } from "@graftland/graft"
 
@@ -20,8 +20,47 @@ export const CandidateOptions = Schema.Struct({
 /** Deployment data for a captured direct execution unit. */
 export type CandidateOptions = typeof CandidateOptions.Type
 export const driverName = "@graftland/plugin-remote/direct"
-export const candidate = (options: CandidateOptions): Transition.Candidate => ({
-	driver: driverName,
-	identity: `sha256-v${options.artifact.identity.version}:${options.artifact.identity.digest}:${options.artifact.identity.entry}`,
-	deployment: options,
-})
+/** Copy JSON recursively so a caller cannot alter a retained recovery deployment. */
+const isJsonArray = (value: Schema.Json): value is Schema.JsonArray =>
+	Array.isArray(value)
+const snapshot = (value: Schema.Json): Schema.Json =>
+	isJsonArray(value)
+		? Object.freeze(Array.map(value, snapshot))
+		: value !== null && typeof value === "object"
+			? Object.freeze(Record.map(value, snapshot))
+			: value
+
+export const candidate = (options: CandidateOptions): Transition.Candidate => {
+	const deployment: CandidateOptions = Object.freeze({
+		artifact: Object.freeze({
+			...options.artifact,
+			identity: Object.freeze({ ...options.artifact.identity }),
+		}),
+		contractModule: options.contractModule,
+		target:
+			options.target._tag === "Worker"
+				? Object.freeze({
+						_tag: "Worker",
+						...(options.target.execArgv === undefined
+							? {}
+							: { execArgv: Object.freeze([...options.target.execArgv]) }),
+					})
+				: Object.freeze({
+						_tag: "Local",
+						...(options.target.command === undefined
+							? {}
+							: {
+									command: Object.freeze([...options.target.command] as [
+										string,
+										...Array<string>,
+									]),
+								}),
+					}),
+		input: snapshot(options.input),
+	})
+	return Object.freeze({
+		driver: driverName,
+		identity: `sha256-v${deployment.artifact.identity.version}:${deployment.artifact.identity.digest}:${deployment.artifact.identity.entry}`,
+		deployment,
+	})
+}

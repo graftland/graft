@@ -1,4 +1,11 @@
-import { Effect, HashMap, Option, TxRef, TxSubscriptionRef } from "effect"
+import {
+	Effect,
+	HashMap,
+	Option,
+	TxPubSub,
+	TxRef,
+	TxSubscriptionRef,
+} from "effect"
 
 import { ForkState } from "../Fork"
 import * as Probes from "./probes"
@@ -25,6 +32,8 @@ export const make = Effect.fnUntraced(function* (
 	const status: ForkStatus = {
 		parent,
 		managed: yield* TxRef.make<ForkStatus["managed"]["value"]>(Option.none()),
+		generationEvents:
+			yield* TxPubSub.sliding<import("../Transition").GenerationEvent>(64),
 		generations: yield* TxSubscriptionRef.make<
 			ReadonlyArray<import("../Transition").Generation>
 		>([]),
@@ -86,6 +95,7 @@ export const dispose = Effect.fnUntraced(function* (
 		disposed: true,
 	})
 	yield* TxSubscriptionRef.update(runtime.forks, HashMap.remove(id))
+	yield* TxPubSub.shutdown(status.generationEvents)
 })
 
 /** Only the subtree's own counter belongs to this waiting transaction's read set. */

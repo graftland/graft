@@ -136,7 +136,7 @@ outcome // => [["app/greeterV2"], Option.some(["app/greeterV1"])]
 | 之后的 `replace` 或 `restart` 接管了某个 fork      | 该 fork 及其子 fork 不再计入，它也不会回滚。                      |
 | 调用方在 `replace` 等待时被中断                    | 保留替换。                                                        |
 
-恢复后的 fork 只有仍处于回滚恢复的插件、且未被卸载时才计入。后续替换或重启会接管它。
+恢复后的 fork 只有仍处于回滚恢复的插件、且未被卸载时才计入。恢复也会等待恢复后的父插件新建的后代，并计入它们的完整失败 cause。后续替换或重启会接管该 fork 及其子树，它们不再计入。
 `Pending` 表示等待依赖，与替换前一样算作已恢复。`timeout` 不限制恢复等待时间。
 
 - `timeout`

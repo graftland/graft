@@ -6,9 +6,10 @@ description: The members of a fork, and how update, restart and dispose behave.
 `Graft.plugin` returns a fork handle. This page is the reference for its
 members. For states, see [Lifecycle](../lifecycle/).
 
-`generations` streams execution generations for managed forks; unmanaged forks
-report an empty list. `update` and `restart` fail with `ManagedFork` before
-changing a managed fork or its ancestor. See
+`generations` streams bounded generation summaries for managed forks; unmanaged
+forks report an empty list. `generationEvents` streams live changes with
+deployment data, without replay. `update` and `restart` fail with `ManagedFork`
+before changing a managed fork or its ancestor. See
 [Execution transitions](../transitions/).
 
 ## Members

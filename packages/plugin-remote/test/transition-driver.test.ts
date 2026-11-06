@@ -67,8 +67,8 @@ it.effect(
 				stderr: "",
 				statusCause: Cause.empty,
 			})
-			const transport: WorkerTransport["Service"] = {
-				start: (_, onSpawn) =>
+			const transport = {
+				start: (_: unknown, onSpawn?: Effect.Effect<void>) =>
 					Effect.gen(function* () {
 						yield* onSpawn ?? Effect.void
 						yield* Ref.update(count, (n) => n + 1)
@@ -188,3 +188,133 @@ it.effect(
 			),
 		),
 )
+
+it.effect(
+	"terminating an allocated unit confirms NotStarted and prevents later startup",
+	() =>
+		Effect.gen(function* () {
+			const fs = yield* FileSystem.FileSystem
+			const root = yield* fs.makeTempDirectoryScoped()
+			yield* fs.writeFileString(root + "/package.json", '{"type":"module"}')
+			yield* fs.writeFileString(root + "/plugin.js", "export default undefined")
+			const store = yield* fs.makeTempDirectoryScoped()
+			const artifact = yield* Remote.Artifact.capture({
+				directory: root,
+				entry: "plugin.js",
+				store,
+			})
+			const launches = yield* Ref.make(0)
+			const start = () =>
+				Ref.update(launches, (n) => n + 1).pipe(Effect.andThen(Effect.never))
+			const remote = yield* driver(contract).pipe(
+				Effect.provideService(WorkerTransport, { start }),
+				Effect.provideService(LocalTransport, { start }),
+			)
+			const unit = yield* remote.allocate(
+				Remote.candidate({
+					artifact,
+					contractModule: "unused",
+					target: { _tag: "Worker" },
+					input: { value: "old" },
+				}),
+				1,
+			)
+			const pending = yield* Effect.forkScoped(
+				unit.terminate.pipe(
+					Effect.andThen(unit.exited),
+					Effect.timeoutOption(10),
+				),
+			)
+			yield* TestClock.adjust(10)
+			const observed = yield* Fiber.join(pending)
+			assert.isTrue(Option.isSome(observed))
+			if (Option.isSome(observed))
+				assert.equal(observed.value.state, "NotStarted")
+			const started = yield* Effect.result(unit.start)
+			assert.equal(started._tag, "Failure")
+			const count = yield* Ref.get(launches)
+			assert.equal(count, 0)
+		}).pipe(
+			Effect.scoped,
+			Effect.provide(
+				Layer.merge(NodeServices.layer, SecureRandom.layerWebCrypto),
+			),
+		),
+)
+
+for (const placement of ["Worker", "Local"] as const) {
+	it.effect(
+		`termination racing ${placement} startup waits for execution evidence`,
+		() =>
+			Effect.gen(function* () {
+				const fs = yield* FileSystem.FileSystem
+				const root = yield* fs.makeTempDirectoryScoped()
+				yield* fs.writeFileString(root + "/package.json", '{"type":"module"}')
+				yield* fs.writeFileString(
+					root + "/plugin.js",
+					"export default undefined",
+				)
+				const store = yield* fs.makeTempDirectoryScoped()
+				const artifact = yield* Remote.Artifact.capture({
+					directory: root,
+					entry: "plugin.js",
+					store,
+				})
+				const spawned = yield* Deferred.make<void>()
+				const publish = yield* Deferred.make<void>()
+				const exited = yield* Deferred.make<ProcessExited>()
+				const status = ProcessExited.make({
+					pid: Option.none(),
+					exitCode: 0,
+					stderr: "",
+					statusCause: Cause.empty,
+				})
+				const transport = {
+					start: (_: unknown, onSpawn?: Effect.Effect<void>) =>
+						Effect.gen(function* () {
+							yield* onSpawn ?? Effect.void
+							yield* Deferred.succeed(spawned, undefined)
+							yield* Deferred.await(publish)
+							return {
+								pid: Option.none(),
+								channel: { input: Stream.never, output: Sink.drain },
+								failure: Effect.never,
+								exited: Deferred.await(exited),
+								terminate: Deferred.succeed(exited, status).pipe(
+									Effect.as(status),
+								),
+							}
+						}),
+				}
+				const remote = yield* driver(contract).pipe(
+					Effect.provideService(WorkerTransport, transport),
+					Effect.provideService(LocalTransport, transport),
+				)
+				const unit = yield* remote.allocate(
+					Remote.candidate({
+						artifact,
+						contractModule: "unused",
+						target: { _tag: placement },
+						input: { value: "old" },
+					}),
+					1,
+				)
+				const starting = yield* Effect.forkScoped(Effect.exit(unit.start))
+				yield* Deferred.await(spawned)
+				const terminating = yield* Effect.forkScoped(
+					unit.terminate.pipe(Effect.andThen(unit.exited)),
+				)
+				yield* TestClock.adjust(10)
+				assert.isUndefined(terminating.pollUnsafe())
+				yield* Deferred.succeed(publish, undefined)
+				const evidence = yield* Fiber.join(terminating)
+				assert.equal(evidence.state, "Exited")
+				yield* Fiber.interrupt(starting)
+			}).pipe(
+				Effect.scoped,
+				Effect.provide(
+					Layer.merge(NodeServices.layer, SecureRandom.layerWebCrypto),
+				),
+			),
+	)
+}

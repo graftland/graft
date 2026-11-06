@@ -150,10 +150,11 @@ outcome // => [["app/greeterV2"], Option.some(["app/greeterV1"])]
 | The caller is interrupted while `replace` waits              | The swap stays.                                                                               |
 
 A restored fork counts only while it remains on the plugin restored by rollback
-and has not been disposed. A later replacement or restart takes it over.
-`Pending` means it is waiting for a dependency and counts as restored, just as
-it counts as started before replacement. Recovery waits are not bounded by
-`timeout`.
+and has not been disposed. Recovery also waits for descendants created by the
+restored parent and includes their complete failure causes. A later replacement
+or restart takes over the fork and its subtree, which no longer count. `Pending`
+means it is waiting for a dependency and counts as restored, just as it counts
+as started before replacement. Recovery waits are not bounded by `timeout`.
 
 - `timeout` is an option: `Graft.replace(pairs, { timeout: "30 seconds" })`.
   Without it, `replace` waits as long as the forks take.

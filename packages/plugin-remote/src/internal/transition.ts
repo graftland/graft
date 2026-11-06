@@ -9,9 +9,9 @@ import {
 	Layer,
 	Option,
 	Path,
-	Ref,
 	Schema,
 	Scope,
+	TxRef,
 } from "effect"
 import { SecureRandom } from "effect/crypto"
 import { ChildProcessSpawner } from "effect/process"
@@ -60,85 +60,123 @@ export const driver = Effect.fnUntraced(function* <
 					)
 					type Handle = Effect.Success<ReturnType<typeof Unit.open<S, E>>>
 					const handle = yield* Deferred.make<Handle, Transition.DriverError>()
-					const execution = yield* Ref.make<Option.Option<Execution>>(
-						Option.none(),
-					)
-					const started = yield* Deferred.make<void>()
-					const spawned = yield* Ref.make(false)
-					const startCause = yield* Ref.make<Cause.Cause<unknown>>(Cause.empty)
-					const changed = yield* Deferred.make<Execution>()
+					type Lifecycle =
+						| { readonly _tag: "Allocated" }
+						| {
+								readonly _tag: "NotStarted"
+								readonly cause: Cause.Cause<unknown>
+						  }
+						| {
+								readonly _tag: "Starting" | "Settled"
+								readonly spawned: boolean
+								readonly execution: Option.Option<Execution>
+								readonly cause: Cause.Cause<unknown>
+						  }
+					const lifecycle = yield* TxRef.make<Lifecycle>({ _tag: "Allocated" })
 					const attemptScope = yield* Deferred.make<Scope.Scope>()
 					const unit = `direct-${attempt}`
-					const observed = Effect.raceFirst(
-						Deferred.await(changed),
-						Deferred.await(started).pipe(Effect.andThen(Ref.get(execution))),
-					).pipe(
-						Effect.flatMap((result) => {
-							if (Option.isOption(result)) {
-								if (Option.isNone(result))
-									return Ref.get(spawned).pipe(
-										Effect.flatMap((spawned) =>
-											spawned
-												? Effect.never
-												: Ref.get(startCause).pipe(
-														Effect.map((cause): Transition.Termination => ({
-															unit,
-															state: "NotStarted",
-															cause,
-														})),
-													),
-										),
-									)
-								return result.value.exited.pipe(
+					const settled = Effect.tx(
+						Effect.gen(function* () {
+							const state = yield* TxRef.get(lifecycle)
+							if (state._tag === "Allocated") return yield* Effect.txRetry
+							if (state._tag === "Starting" && Option.isNone(state.execution))
+								return yield* Effect.txRetry
+							return state
+						}),
+					)
+					const observed = settled.pipe(
+						Effect.flatMap((state) => {
+							if (state._tag === "NotStarted")
+								return Effect.succeed<Transition.Termination>({
+									unit,
+									state: "NotStarted",
+									cause: state.cause,
+								})
+							if (Option.isSome(state.execution))
+								return state.execution.value.exited.pipe(
 									Effect.map((status): Transition.Termination => ({
 										unit,
 										state: "Exited",
 										cause: Cause.fail(status),
 									})),
 								)
-							}
-							return result.exited.pipe(
-								Effect.map((status): Transition.Termination => ({
-									unit,
-									state: "Exited",
-									cause: Cause.fail(status),
-								})),
-							)
+							// Losing the transport after spawn is not proof that the execution exited.
+							return state.spawned
+								? Effect.never
+								: Effect.succeed<Transition.Termination>({
+										unit,
+										state: "NotStarted",
+										cause: state.cause,
+									})
 						}),
 					)
+
 					const use = <A, E2, R>(
 						f: (handle: Handle) => Effect.Effect<A, E2, R>,
 					) => failure(Deferred.await(handle).pipe(Effect.flatMap(f)))
 					return {
-						start: Effect.gen(function* () {
-							const scope = yield* Effect.scope
-							yield* Deferred.succeed(attemptScope, scope)
-							const result = yield* Effect.exit(
-								failure(
-									Unit.open(contract, {
-										...options,
-										onSpawn: Ref.set(spawned, true),
-										onExecution: (current) =>
-											Ref.set(execution, Option.some(current)).pipe(
-												Effect.andThen(Deferred.succeed(changed, current)),
-												Effect.asVoid,
+						start: Effect.uninterruptibleMask((restore) =>
+							Effect.gen(function* () {
+								yield* Effect.tx(
+									Effect.gen(function* () {
+										const state = yield* TxRef.get(lifecycle)
+										if (state._tag !== "Allocated")
+											return yield* Transition.DriverError.make({
+												cause: Cause.die(
+													new Error(
+														"The execution unit cannot start after startup or termination",
+													),
+												),
+											})
+										yield* TxRef.set(lifecycle, {
+											_tag: "Starting",
+											spawned: false,
+											execution: Option.none(),
+											cause: Cause.empty,
+										})
+									}),
+								)
+								const scope = yield* Effect.scope
+								yield* Deferred.succeed(attemptScope, scope)
+								const result = yield* Effect.exit(
+									restore(
+										failure(
+											Unit.open(contract, {
+												...options,
+												onSpawn: TxRef.update(lifecycle, (state) =>
+													state._tag === "Starting"
+														? { ...state, spawned: true }
+														: state,
+												),
+												onExecution: (current) =>
+													TxRef.update(lifecycle, (state) =>
+														state._tag === "Starting"
+															? { ...state, execution: Option.some(current) }
+															: state,
+													),
+											}).pipe(
+												Scope.provide(scope),
+												Effect.provideContext(environment),
 											),
-									}).pipe(
-										Scope.provide(scope),
-										Effect.provideContext(environment),
+										),
 									),
-								),
-							)
-							yield* Deferred.done(handle, result)
-							return yield* result
-						}).pipe(
-							Effect.onExit((exit) =>
-								Ref.set(
-									startCause,
-									Exit.isFailure(exit) ? exit.cause : Cause.empty,
-								).pipe(Effect.andThen(Deferred.succeed(started, undefined))),
-							),
+								)
+								yield* TxRef.update(lifecycle, (state) =>
+									state._tag === "Starting"
+										? {
+												...state,
+												_tag: "Settled" as const,
+												cause: Exit.isFailure(result)
+													? result.cause
+													: Cause.empty,
+											}
+										: state,
+								)
+								yield* Deferred.done(handle, result)
+								return yield* result
+							}),
 						),
+
 						describe: use((handle) =>
 							handle.describe.pipe(
 								Effect.map((description) => ({
@@ -181,22 +219,40 @@ export const driver = Effect.fnUntraced(function* <
 							),
 						),
 						terminate: failure(
-							Effect.raceFirst(
-								Deferred.await(changed),
-								Deferred.await(started).pipe(
-									Effect.andThen(Ref.get(execution)),
-								),
-							).pipe(
-								Effect.flatMap((result) =>
-									Option.isOption(result)
-										? Option.match(result, {
-												onNone: () => Effect.void,
-												onSome: (current) => Effect.asVoid(current.terminate),
+							Effect.uninterruptibleMask((restore) =>
+								Effect.gen(function* () {
+									const cancelled = yield* Effect.tx(
+										Effect.gen(function* () {
+											const state = yield* TxRef.get(lifecycle)
+											if (state._tag !== "Allocated") return false
+											yield* TxRef.set(lifecycle, {
+												_tag: "NotStarted",
+												cause: Cause.empty,
 											})
-										: Effect.asVoid(result.terminate),
-								),
+											return true
+										}),
+									)
+									if (cancelled)
+										yield* Deferred.fail(
+											handle,
+											Transition.DriverError.make({
+												cause: Cause.die(
+													new Error(
+														"The execution unit was terminated before startup",
+													),
+												),
+											}),
+										)
+									const state = yield* restore(settled)
+									if (
+										state._tag !== "NotStarted" &&
+										Option.isSome(state.execution)
+									)
+										yield* restore(state.execution.value.terminate)
+								}),
 							),
 						),
+
 						exited: failure(observed),
 						failure: use((handle) => handle.failure),
 					} satisfies Transition.Unit

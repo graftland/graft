@@ -53,5 +53,7 @@ ordinary `apply`; readiness waits for the plugin and its exported services. A
 successful probe is separate from readiness and from confirmed process exit.
 
 `fork.probe` addresses that fork's own registrations. A host Remote fork does
-not forward this API to its child. Automatic upgrade checks and overlap
-transitions are not available yet.
+not forward this API to its child. For managed direct Worker and child-process
+deployments, the coordinator requests `policy.probes` before cutover and during
+recovery. A failed candidate probe aborts cutover and preserves its cause in the
+outcome. See [execution transitions](../transitions/).

@@ -22,6 +22,8 @@ import {
 	Schema,
 	Scope,
 	Stream,
+	TxPubSub,
+	TxQueue,
 	TxRef,
 	TxSubscriptionRef,
 } from "effect"
@@ -314,6 +316,11 @@ const makeFork = <I, E>(
 	return {
 		id,
 		generations: TxSubscriptionRef.changesStream(status.generations),
+		generationEvents: Stream.unwrap(
+			Effect.map(TxPubSub.subscribe(status.generationEvents), (queue) =>
+				Stream.fromEffectRepeat(TxQueue.take(queue)),
+			),
+		),
 		probes: Probes.names(status.probes),
 		probe: (name) => Probes.run(status.probes, name),
 		state,

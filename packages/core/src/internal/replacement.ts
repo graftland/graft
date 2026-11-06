@@ -358,7 +358,10 @@ const rollBack = (
 					return Option.some({ entry, spec: next })
 				}),
 			)
-			return Array.getSomes(reverted)
+			return {
+				roots: Array.getSomes(reverted),
+				existing: HashSet.fromIterable(HashMap.keys(forks)),
+			}
 		}),
 	)
 
@@ -368,16 +371,50 @@ const rollBack = (
  * forks and forks taken over by another replacement or restart no longer count.
  */
 const restarted = (
-	reverted: ReadonlyArray<{ readonly entry: ForkEntry; readonly spec: Spec }>,
+	runtime: Runtime,
+	restored: {
+		readonly roots: ReadonlyArray<{
+			readonly entry: ForkEntry
+			readonly spec: Spec
+		}>
+		readonly existing: HashSet.HashSet<number>
+	},
 ) =>
 	Effect.tx(
 		Effect.gen(function* () {
-			const recovery = yield* Effect.forEach(reverted, ({ entry, spec }) =>
+			const forks = yield* TxSubscriptionRef.get(runtime.forks)
+			const owned = yield* Effect.forEach(restored.roots, ({ entry, spec }) =>
 				Effect.gen(function* () {
 					const current = yield* TxRef.get(entry.spec)
 					const snapshot = yield* TxSubscriptionRef.get(entry.status.snapshot)
-					if (!sameSpec(current, spec) || snapshot.disposed)
-						return Option.none<ReplacementFailure>()
+					return sameSpec(current, spec) && !snapshot.disposed
+						? Option.some(entry.id)
+						: Option.none<number>()
+				}),
+			)
+			const roots = HashSet.fromIterable(Array.getSomes(owned))
+			const tracked = HashSet.fromIterable(
+				Array.map(restored.roots, ({ entry }) => entry.id),
+			)
+			const counted = (entry: ForkEntry) => {
+				if (HashSet.has(tracked, entry.id)) return HashSet.has(roots, entry.id)
+				if (HashSet.has(restored.existing, entry.id)) return false
+				for (
+					let parent = entry.parent;
+					parent !== undefined;
+					parent = Option.getOrUndefined(HashMap.get(forks, parent))?.parent
+				) {
+					// A later owner takes its subtree with it.
+					if (HashSet.has(tracked, parent)) return HashSet.has(roots, parent)
+				}
+				return false
+			}
+			const recovery = yield* Effect.forEach(HashMap.values(forks), (entry) =>
+				Effect.gen(function* () {
+					if (!counted(entry)) return Option.none<ReplacementFailure>()
+					const spec = yield* TxRef.get(entry.spec)
+					const snapshot = yield* TxSubscriptionRef.get(entry.status.snapshot)
+					if (snapshot.disposed) return Option.none<ReplacementFailure>()
 					if (
 						snapshot.accepted === undefined ||
 						!sameSpec(snapshot.accepted, spec) ||
@@ -425,7 +462,7 @@ export const replace = Effect.fnUntraced(function* (
 	if (failures.length === 0) return ReplaceResult.Replaced()
 	const reverted = yield* rollBack(runtime, pairs, swapped)
 	// Recovery is not bounded by the replacement startup timeout.
-	const recovery = yield* restarted(reverted)
+	const recovery = yield* restarted(runtime, reverted)
 	return recovery.length > 0
 		? ReplaceResult.RecoveryFailed({ failures, recovery })
 		: ReplaceResult.RolledBack({ failures })

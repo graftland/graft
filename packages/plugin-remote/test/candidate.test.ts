@@ -25,7 +25,7 @@ it.effect(
 			}
 			const candidate = Remote.candidate(options)
 			assert.equal(candidate.driver, "@graftland/plugin-remote/direct")
-			assert.equal(candidate.deployment, options)
+			assert.deepEqual(candidate.deployment, options)
 			const fork = yield* Graft.plugin(
 				Plugin.make({ name: "ordinary", apply: () => Effect.void }),
 			)
@@ -39,3 +39,40 @@ it.effect(
 			})
 		}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
 )
+
+it("snapshots and freezes nested candidate input, artifact and target options", () => {
+	const input = { nested: { value: "original" }, items: ["original"] }
+	const execArgv = ["--no-warnings"]
+	const options = {
+		artifact: {
+			directory: "/captured",
+			identity: {
+				version: 1 as const,
+				algorithm: "sha256" as const,
+				digest: String.repeat(64)("a"),
+				entry: "index.js",
+			},
+		},
+		contractModule: "contract",
+		target: { _tag: "Worker" as const, execArgv },
+		input,
+	}
+	const value = Remote.candidate(options)
+	input.nested.value = "mutated"
+	input.items.push("mutated")
+	execArgv.push("--inspect")
+	options.artifact.directory = "/mutated"
+	const pinned = value.deployment as Remote.CandidateOptions
+	assert.deepEqual(pinned.input, {
+		nested: { value: "original" },
+		items: ["original"],
+	})
+	assert.deepEqual(pinned.target, {
+		_tag: "Worker",
+		execArgv: ["--no-warnings"],
+	})
+	assert.equal(pinned.artifact.directory, "/captured")
+	assert.isTrue(Object.isFrozen(pinned))
+	assert.isTrue(Object.isFrozen(pinned.input))
+	assert.isTrue(Object.isFrozen(pinned.target))
+})

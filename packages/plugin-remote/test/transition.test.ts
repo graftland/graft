@@ -295,6 +295,27 @@ for (const target of [
 			}).pipe(Effect.scoped, Effect.provide(runtime)),
 	)
 	it.live(
+		`${target._tag} recovers the immutable input captured before caller mutation`,
+		() =>
+			Effect.gen(function* () {
+				const h = yield* setup(target)
+				const input = { value: "pinned" }
+				const accepted = yield* h.request(input)
+				assert.equal(accepted._tag, "Accepted")
+				input.value = "mutated"
+				const running = yield* Effect.forkScoped(
+					h.request({ value: "trial" }, { trial: "5 seconds" }),
+				)
+				yield* h.serving(3)
+				yield* Effect.exit(h.service.crash)
+				const outcome = yield* Fiber.join(running)
+				assert.equal(outcome._tag, "Recovered")
+				assert.equal((yield* h.service.read).value, "pinned")
+				yield* h.serving(4)
+			}).pipe(Effect.scoped, Effect.provide(runtime)),
+	)
+
+	it.live(
 		`${target._tag} reports recovery failure when the pinned previous artifact fails verification`,
 		() =>
 			Effect.gen(function* () {

@@ -9,14 +9,20 @@ import {
 	Equal,
 	Exit,
 	Fiber,
+	HashMap,
 	Option,
 	Ref,
+	Scope,
 	Stream,
+	String,
+	TxRef,
+	TxSubscriptionRef,
 } from "effect"
 import { TestClock } from "effect/testing"
 import { assert, it } from "@effect/vitest"
 
 import { Graft, Plugin, Transition } from "../src/index"
+import { RuntimeContext } from "../src/internal/runtimeContext"
 
 class Value extends Context.Service<
 	Value,
@@ -61,7 +67,11 @@ interface Script {
 	readonly serve?: Effect.Effect<void, Transition.DriverError>
 	readonly missingServices?: boolean
 	readonly exitAtReadiness?: boolean
-	readonly start?: Effect.Effect<void, Transition.DriverError>
+	readonly start?: Effect.Effect<
+		void,
+		Transition.DriverError,
+		import("effect").Scope.Scope
+	>
 	readonly describe?: Effect.Effect<
 		Transition.Description,
 		Transition.DriverError
@@ -1048,3 +1058,345 @@ for (const instance of [undefined, "", "different"]) {
 			}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
 	)
 }
+
+it.effect(
+	"rejects admission while disposal is waiting for an exit without leaving Busy",
+	() =>
+		Effect.gen(function* () {
+			const h = yield* setup(() => ({ noExit: true }))
+			const old = yield* h.control(1)
+			const disposing = yield* Effect.forkScoped(h.fork.dispose)
+			yield* Deferred.await(old.terminating)
+			const request = yield* Effect.forkScoped(h.request())
+			yield* Effect.yieldNow
+			yield* Deferred.succeed(old.exited, { unit: "old", state: "Exited" })
+			yield* Fiber.join(disposing)
+			const answer = yield* Effect.timeoutOption(Fiber.join(request), 1).pipe(
+				Effect.forkScoped,
+			)
+			yield* TestClock.adjust(1)
+			const outcome = yield* Fiber.join(answer)
+			assert.isTrue(Option.isSome(outcome))
+			if (Option.isSome(outcome)) {
+				assert.equal(outcome.value._tag, "Aborted")
+				if (outcome.value._tag === "Aborted")
+					assert.equal(outcome.value.reason, "Closing")
+			}
+			const next = yield* Graft.transition({
+				target: "missing",
+				candidate: candidate("new"),
+			})
+			assert.equal(next._tag, "Aborted")
+			if (next._tag === "Aborted")
+				assert.equal(next.reason, "UnsupportedTarget")
+		}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
+)
+
+it.effect(
+	"disposal during startup preserves evidence and does not poison another instance",
+	() =>
+		Effect.gen(function* () {
+			const entered = yield* Deferred.make<void>()
+			const h = yield* setup((id) =>
+				id === 2
+					? {
+							start: Deferred.succeed(entered, undefined).pipe(
+								Effect.andThen(Effect.never),
+							),
+						}
+					: {},
+			)
+			const running = yield* Effect.forkScoped(h.request())
+			yield* Deferred.await(entered)
+			yield* h.fork.dispose
+			const outcome = yield* Fiber.join(running)
+			assert.equal(outcome._tag, "Aborted")
+			if (outcome._tag === "Aborted") assert.equal(outcome.reason, "Closing")
+			assert.equal(outcome.phase, "Starting")
+			assert.isTrue(
+				Array.some(
+					outcome.evidence,
+					(item) => item.attempt === 2 && item.phase === "Starting",
+				),
+			)
+			assert.isFalse(Array.some(outcome.evidence, (item) => item.attempt === 0))
+			assert.equal(
+				Array.filter(outcome.evidence, (item) => item.termination !== undefined)
+					.length,
+				2,
+			)
+			const other = yield* setup()
+			assert.equal((yield* other.request())._tag, "Accepted")
+		}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
+)
+
+it.effect(
+	"disposal combines host finalizer causes after confirmed execution exit",
+	() =>
+		Effect.gen(function* () {
+			const h = yield* setup(() => ({
+				start: Effect.addFinalizer(() =>
+					Effect.failCause(
+						Cause.combine(
+							Cause.die("host release defect"),
+							Cause.die("host release failure"),
+						),
+					),
+				),
+			}))
+			const exit = yield* Effect.exit(h.fork.dispose)
+			assert.isTrue(Exit.isFailure(exit))
+			if (Exit.isFailure(exit)) {
+				const message = Cause.pretty(exit.cause)
+				assert.include(message, "host release defect")
+				assert.include(message, "host release failure")
+			}
+			const head = yield* Stream.runHead(h.fork.generations)
+			const observed = Option.getOrThrow(head)
+			assert.equal(observed[0]?.state, "Terminated")
+		}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
+)
+
+it.effect(
+	"generation snapshots bound retired summaries and release deployment payloads",
+	() =>
+		Effect.gen(function* () {
+			const h = yield* setup()
+			for (let index = 0; index < 40; index++) {
+				const outcome = yield* Graft.transition({
+					target: h.fork.id,
+					candidate: {
+						...candidate("next-" + index),
+						deployment: { payload: "retired input " + index },
+					},
+				})
+				assert.equal(outcome._tag, "Accepted")
+			}
+			const head = yield* Stream.runHead(h.fork.generations)
+			const observed = Option.getOrThrow(head)
+			assert.isAtMost(observed.length, 33)
+			assert.isFalse(
+				Array.some(observed, (item) => "deployment" in item.candidate),
+			)
+			assert.equal(
+				Array.filter(observed, (item) => item.state === "Serving").length,
+				1,
+			)
+		}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
+)
+
+it.effect(
+	"coordinator defects preserve their phase and cause without poisoning admission",
+	() =>
+		Effect.gen(function* () {
+			const h = yield* setup((id) =>
+				id === 2
+					? {
+							describe: Effect.succeed({
+								overlap: true,
+								get provides(): ReadonlyArray<Plugin.OperationIdentity> {
+									throw new Error("Description inspection defect")
+								},
+							}),
+						}
+					: {},
+			)
+			const outcome = yield* h.request()
+			assert.equal(outcome._tag, "RecoveryFailed")
+			if (outcome._tag === "RecoveryFailed")
+				assert.equal(outcome.reason, "CoordinatorDefect")
+			assert.equal(outcome.phase, "Describing")
+			assert.isTrue(
+				Array.some(
+					outcome.evidence,
+					(item) =>
+						item.attempt === 2 &&
+						item.cause !== undefined &&
+						String.includes("Description inspection defect")(
+							Cause.pretty(item.cause),
+						),
+				),
+			)
+			assert.equal(
+				Array.filter(outcome.evidence, (item) => item.termination !== undefined)
+					.length,
+				2,
+			)
+			yield* h.fork.dispose
+			const other = yield* setup()
+			const next = yield* other.request()
+			assert.equal(next._tag, "Accepted")
+		}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
+)
+
+it.effect(
+	"folds cleanup causes from every attempt when disposal cancels preparation",
+	() =>
+		Effect.gen(function* () {
+			const entered = yield* Deferred.make<void>()
+			const h = yield* setup((id) => ({
+				start: Effect.addFinalizer(() => Effect.die(`Host cleanup ${id}`)).pipe(
+					Effect.andThen(
+						id === 2
+							? Deferred.succeed(entered, undefined).pipe(
+									Effect.andThen(Effect.never),
+								)
+							: Effect.void,
+					),
+				),
+			}))
+			const pending = yield* Effect.forkScoped(h.request())
+			yield* Deferred.await(entered)
+			const disposed = yield* Effect.exit(h.fork.dispose)
+			assert.isTrue(Exit.isFailure(disposed))
+			if (Exit.isFailure(disposed)) {
+				assert.include(Cause.pretty(disposed.cause), "Host cleanup 1")
+				assert.include(Cause.pretty(disposed.cause), "Host cleanup 2")
+			}
+			const outcome = yield* Fiber.join(pending)
+			assert.equal(outcome._tag, "Aborted")
+			for (const attempt of [1, 2]) {
+				assert.isTrue(
+					Array.some(
+						outcome.evidence,
+						(item) =>
+							item.attempt === attempt && item.termination !== undefined,
+					),
+				)
+				assert.isTrue(
+					Array.some(
+						outcome.evidence,
+						(item) =>
+							item.cause !== undefined &&
+							String.includes(`Host cleanup ${attempt}`)(
+								Cause.pretty(item.cause),
+							),
+					),
+				)
+			}
+		}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
+)
+
+it.effect(
+	"publishes full deployment events independently of bounded generation summaries",
+	() =>
+		Effect.gen(function* () {
+			const h = yield* setup()
+			const listening = yield* Deferred.make<void>()
+			const events = yield* Effect.forkScoped(
+				h.fork.generationEvents.pipe(
+					Stream.tap(() => Deferred.succeed(listening, undefined)),
+					Stream.take(3),
+					Stream.runCollect,
+				),
+			)
+			yield* Effect.yieldNow
+			const payload = { contract: "external", input: { value: "new" } }
+			const next = { ...candidate("new"), deployment: payload }
+			const outcome = yield* Graft.transition({
+				target: h.fork.id,
+				candidate: next,
+			})
+			assert.equal(outcome._tag, "Accepted")
+			yield* Deferred.await(listening)
+			const observed = yield* Fiber.join(events)
+			assert.equal(observed[0]?.candidate, next)
+			assert.deepEqual(
+				Array.map(observed, (item) => item.state),
+				["Starting", "Serving", "Draining"],
+			)
+			const summary = yield* Stream.runHead(h.fork.generations)
+			assert.isFalse(
+				Array.some(
+					Option.getOrThrow(summary),
+					(item) => "deployment" in item.candidate,
+				),
+			)
+		}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
+)
+
+it.effect(
+	"completes an admitted reply when its owner closes before the coordinator starts",
+	() =>
+		Effect.gen(function* () {
+			const h = yield* setup()
+			const context = yield* Effect.serviceOption(RuntimeContext)
+			const { runtime } = Option.getOrThrow(context)
+			const forks = yield* TxSubscriptionRef.get(runtime.forks)
+			const entry = Option.getOrThrow(HashMap.get(forks, h.fork.id))
+			const closing = yield* Effect.forkScoped(
+				Effect.tx(
+					Effect.gen(function* () {
+						if (!(yield* TxRef.get(runtime.transitionBusy)))
+							return yield* Effect.txRetry
+					}),
+				).pipe(Effect.andThen(Scope.close(entry.scope, Exit.void))),
+				{ startImmediately: true },
+			)
+			const outcome = yield* h.request()
+			yield* Fiber.join(closing)
+			assert.equal(outcome._tag, "Aborted")
+			if (outcome._tag === "Aborted") assert.equal(outcome.reason, "Closing")
+			assert.equal(outcome.phase, "Admission")
+			const allocated = yield* Ref.get(h.allocations)
+			assert.equal(allocated, 1)
+			assert.isTrue(
+				Array.some(
+					outcome.evidence,
+					(item) => item.attempt === 1 && item.termination?.state === "Exited",
+				),
+			)
+			yield* h.fork.dispose
+			const other = yield* setup()
+			const next = yield* other.request()
+			assert.equal(next._tag, "Accepted")
+		}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
+)
+
+it.effect(
+	"keeps a coordinator defect distinct when disposal joins its cleanup",
+	() =>
+		Effect.gen(function* () {
+			const h = yield* setup((id) => ({
+				noExit: true,
+				...(id === 2
+					? {
+							describe: Effect.succeed({
+								overlap: true,
+								get provides(): ReadonlyArray<Plugin.OperationIdentity> {
+									throw new Error("Coordinator inspection failed")
+								},
+							}),
+						}
+					: {}),
+			}))
+			const context = yield* Effect.serviceOption(RuntimeContext)
+			const { runtime } = Option.getOrThrow(context)
+			const forks = yield* TxSubscriptionRef.get(runtime.forks)
+			const entry = Option.getOrThrow(HashMap.get(forks, h.fork.id))
+			const registered = yield* TxRef.get(entry.status.managed)
+			const managed = Option.getOrThrow(registered)
+			const running = yield* Effect.forkScoped(h.request())
+			const previous = yield* h.control(1)
+			yield* Deferred.await(previous.terminating)
+			const disposing = yield* Effect.forkScoped(h.fork.dispose)
+			yield* Effect.tx(
+				Effect.gen(function* () {
+					const state = yield* TxRef.get(managed.lifecycle)
+					if (state._tag !== "Closing") return yield* Effect.txRetry
+				}),
+			)
+			yield* Deferred.succeed(previous.exited, { unit: "old", state: "Exited" })
+			const next = yield* h.control(2)
+			yield* Deferred.succeed(next.exited, {
+				unit: "candidate",
+				state: "Exited",
+			})
+			yield* Fiber.join(disposing)
+			const outcome = yield* Fiber.join(running)
+			assert.equal(outcome._tag, "RecoveryFailed")
+			if (outcome._tag === "RecoveryFailed")
+				assert.equal(outcome.reason, "CoordinatorDefect")
+			assert.equal(outcome.phase, "Describing")
+		}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
+)

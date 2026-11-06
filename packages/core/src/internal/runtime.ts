@@ -10,6 +10,7 @@ import {
 	type LogLevel,
 	type PubSub,
 	type Scope,
+	type TxPubSub,
 	type TxRef,
 	type TxSubscriptionRef,
 } from "effect"
@@ -92,6 +93,9 @@ export interface ForkStatus {
 	readonly snapshot: TxSubscriptionRef.TxSubscriptionRef<LocalSnapshot>
 	readonly probes: import("./probes").Registry
 	readonly managed: TxRef.TxRef<Option.Option<import("./transition").Managed>>
+	readonly generationEvents: TxPubSub.TxPubSub<
+		import("../Transition").GenerationEvent
+	>
 	readonly generations: TxSubscriptionRef.TxSubscriptionRef<
 		ReadonlyArray<import("../Transition").Generation>
 	>
@@ -100,7 +104,7 @@ export interface ForkStatus {
 }
 
 export interface ForkEntry<out E = unknown> {
-	readonly scope: Scope.Scope
+	readonly scope: Scope.Closeable
 	readonly status: ForkStatus
 	readonly id: number
 	readonly node: GraphNode
