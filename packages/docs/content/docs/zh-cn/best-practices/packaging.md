@@ -257,3 +257,14 @@ export const entries = () => [
 dependency。probe 只在服务尝试中收到请求时运行。部署前捕获构建后的包目录；外部运行时依赖不会被捕获或固定版本。
 [integration-gateway 示例](https://github.com/graftland/graft/tree/main/samples/integration-gateway)
 分别打包并安装契约包和实现包。
+
+## 发布清单
+
+从已构建包生成[插件清单](../../ecosystem/manifest/)，打包前验证。服务身份来自
+`inject`、`provides`
+和契约描述符，运行时版本范围来自包元数据。显式声明放置能力，信任留给运维策略。
+
+对已安装的 tarball 运行[一致性测试](../../ecosystem/conformance/)，并对每种声明支持的宿主运行
+[兼容性检查](../../ecosystem/compatibility/)。一方包遵循同样的检查。
+[插件作者夹具](https://github.com/graftland/graft/tree/main/samples/plugin-authors)
+不使用工作区别名或私有导入，完整演示此流程。

@@ -1,0 +1,44 @@
+{
+	"name": "@graftland/conformance-echo",
+	"version": "1.0.0",
+	"type": "module",
+	"author": "Graft maintainers",
+	"exports": {
+		".": "./dist/index.js",
+		"./package.json": "./package.json"
+	},
+	"files": [
+		"dist"
+	],
+	"engines": {
+		"node": ">=22.19.0"
+	},
+	"peerDependencies": {
+		"effect": "4.1.*",
+		"@graftland/graft": "0.0.0",
+		"@graftland/plugin-remote": "0.0.0",
+		"@graftland/conformance-echo-contract": "1.0.0"
+	},
+	"graft": {
+		"version": 1,
+		"entries": {
+			".": {
+				"implementation": "dist/index.js",
+				"contracts": [
+					"@graftland/conformance-echo-contract"
+				],
+				"requirements": {
+					"placements": [
+						"Worker",
+						"Local"
+					],
+					"filesystem": false,
+					"nativeModules": false
+				},
+				"probes": [
+					"health"
+				]
+			}
+		}
+	}
+}

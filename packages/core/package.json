@@ -36,6 +36,10 @@
 			"source": "./src/Graft.ts",
 			"default": "./dist/Graft.js"
 		},
+		"./Manifest": {
+			"source": "./src/Manifest.ts",
+			"default": "./dist/Manifest.js"
+		},
 		"./Plugin": {
 			"source": "./src/Plugin.ts",
 			"default": "./dist/Plugin.js"
@@ -68,6 +72,7 @@
 			"./Event": "./dist/Event.js",
 			"./Fork": "./dist/Fork.js",
 			"./Graft": "./dist/Graft.js",
+			"./Manifest": "./dist/Manifest.js",
 			"./Plugin": "./dist/Plugin.js",
 			"./Release": "./dist/Release.js",
 			"./Transition": "./dist/Transition.js",

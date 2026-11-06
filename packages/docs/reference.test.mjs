@@ -70,6 +70,7 @@ test("preserves core exports, re-exports, overloads, and local Schema fields", a
 		"Event",
 		"Fork",
 		"Graft",
+		"Manifest",
 		"Plugin",
 		"Release",
 		"Transition",

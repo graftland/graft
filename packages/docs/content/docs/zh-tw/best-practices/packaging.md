@@ -259,3 +259,14 @@ export const entries = () => [
 dependency。probe 只在服務嘗試中收到請求時執行。部署前擷取建置後的套件目錄；外部執行階段依賴不會被擷取或固定版本。
 [integration-gateway 範例](https://github.com/graftland/graft/tree/main/samples/integration-gateway)
 分別打包並安裝契約套件和實作套件。
+
+## 發布清單
+
+從已建置套件產生[外掛清單](../../ecosystem/manifest/)，封裝前驗證。服務身分來自
+`inject`、`provides`
+與契約描述符，執行環境版本範圍來自套件中繼資料。明確宣告放置能力，信任留給維運策略。
+
+對已安裝的 tarball 執行[一致性測試](../../ecosystem/conformance/)，並對每種宣告支援的宿主執行
+[相容性檢查](../../ecosystem/compatibility/)。第一方套件遵循相同檢查。
+[外掛作者夾具](https://github.com/graftland/graft/tree/main/samples/plugin-authors)
+不使用工作區別名或私有匯入，完整示範此流程。

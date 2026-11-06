@@ -6,6 +6,7 @@ export default defineProject({
 		include: [
 			"public-api.test.mjs",
 			"packed-gateway.test.mjs",
+			"packed-ecosystem.test.mjs",
 			"isolated-home.test.mjs",
 		],
 		globalSetup: ["./isolated-home.mjs", "./public-api-setup.mjs"],

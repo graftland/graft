@@ -13,6 +13,7 @@ The `@graftland/cli` package provides the `graft` command. It needs Node.js
 | `graft add <package...>`    | Adds dependencies and installs them.          | [graft add](#graft-add)       |
 | `graft remove <package...>` | Removes dependencies.                         | [graft remove](#graft-remove) |
 | `graft schema`              | Writes the editor schema of `graft.yml`.      | [graft schema](#graft-schema) |
+| `graft check [file]`        | Checks manifests against a host.              | [graft check](#graft-check)   |
 
 `graft start` runs both [remote hosts](../remote/hosts/) and
 [runners](../remote/runners/). Command plugins add subcommands such as
@@ -347,3 +348,26 @@ operator endpoint that calls `Graft.transition` with the entry id. There is no
 built-in transition subcommand. `--watch` does not upgrade managed units: HMR
 skips managed runtimes and Loader rejects managed-tree refreshes before changing
 its target.
+
+## graft check
+
+```sh
+graft --no-plugins check graft.check.json
+```
+
+Checks published manifests against an explicit host before loading. Paths are
+relative to the preflight file, which defaults to `graft.check.json`.
+[Compatibility checks](../ecosystem/compatibility/) define the file and
+diagnostics. The check does not install packages or alter the application's
+configuration.
+
+## graft remote manifest
+
+```sh
+graft remote manifest ./release
+graft remote manifest ./release --check --provenance ./provenance.json
+```
+
+Provided by the enabled `remote/cli` command plugin. Generates or verifies the
+`graft` field from built declarations and optionally records package provenance.
+See [Plugin manifests](../ecosystem/manifest/) for the publication workflow.

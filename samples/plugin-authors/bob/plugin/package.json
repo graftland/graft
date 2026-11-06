@@ -1,0 +1,44 @@
+{
+	"name": "@bob/conformance-counter",
+	"version": "1.0.0",
+	"type": "module",
+	"author": "Bob (independent author fixture)",
+	"exports": {
+		".": "./dist/index.js",
+		"./package.json": "./package.json"
+	},
+	"files": [
+		"dist"
+	],
+	"engines": {
+		"node": ">=22.19.0"
+	},
+	"peerDependencies": {
+		"effect": "4.1.*",
+		"@graftland/graft": "0.0.0",
+		"@graftland/plugin-remote": "0.0.0",
+		"@bob/conformance-counter-contract": "1.0.0"
+	},
+	"graft": {
+		"version": 1,
+		"entries": {
+			".": {
+				"implementation": "dist/index.js",
+				"contracts": [
+					"@bob/conformance-counter-contract"
+				],
+				"requirements": {
+					"placements": [
+						"Worker",
+						"Local"
+					],
+					"filesystem": false,
+					"nativeModules": false
+				},
+				"probes": [
+					"health"
+				]
+			}
+		}
+	}
+}

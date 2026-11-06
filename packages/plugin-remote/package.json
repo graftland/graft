@@ -37,6 +37,10 @@
 			"source": "./src/Config.ts",
 			"default": "./dist/Config.js"
 		},
+		"./Conformance": {
+			"source": "./src/Conformance.ts",
+			"default": "./dist/Conformance.js"
+		},
 		"./Contract": {
 			"source": "./src/Contract.ts",
 			"default": "./dist/Contract.js"
@@ -80,6 +84,10 @@
 		"./host/worker": {
 			"source": "./src/host/worker.ts",
 			"default": "./dist/host/worker.js"
+		},
+		"./Publication": {
+			"source": "./src/Publication.ts",
+			"default": "./dist/Publication.js"
 		},
 		"./runner": {
 			"source": "./src/runner/index.ts",
@@ -163,6 +171,7 @@
 			"./Auth": "./dist/Auth.js",
 			"./cli": "./dist/cli.js",
 			"./Config": "./dist/Config.js",
+			"./Conformance": "./dist/Conformance.js",
 			"./Contract": "./dist/Contract.js",
 			"./Errors": "./dist/Errors.js",
 			"./host/auth/bearer": "./dist/host/auth/bearer.js",
@@ -174,6 +183,7 @@
 			"./host/unix": "./dist/host/unix.js",
 			"./host/websocket": "./dist/host/websocket.js",
 			"./host/worker": "./dist/host/worker.js",
+			"./Publication": "./dist/Publication.js",
 			"./runner": "./dist/runner/index.js",
 			"./runner/auth/bearer": "./dist/runner/auth/bearer.js",
 			"./runner/auth/jwt": "./dist/runner/auth/jwt.js",

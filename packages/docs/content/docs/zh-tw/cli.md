@@ -13,6 +13,7 @@ description: graft 命令及其子命令。
 | `graft add <package...>`    | 新增相依套件並安裝。               | [graft add](#graft-add)       |
 | `graft remove <package...>` | 移除相依套件。                     | [graft remove](#graft-remove) |
 | `graft schema`              | 寫入 `graft.yml` 的編輯器 Schema。 | [graft schema](#graft-schema) |
+| `graft check [file]`        | 檢查清單是否符合宿主要求。         | [graft check](#graft-check)   |
 
 `graft start` 同時支援 [remote 宿主](../remote/hosts/)與
 [runner](../remote/runners/)。命令外掛可以加入 `graft remote certificates`
@@ -306,3 +307,23 @@ Windows 以現狀提供：行程樹清理和還原未經驗證，Graft 不作保
 [受管理的 Remote 項目](../config-file/#受管理的整合)。由應用程式提供操作端點，使用項目 id 呼叫
 `Graft.transition`。CLI 沒有內建 transition 子命令。 `--watch`
 不升級受管理的單元：HMR 跳過含受管理實例的執行環境，Loader 在改變目標前拒絕受管理樹的更新。
+
+## graft check
+
+```sh
+graft --no-plugins check graft.check.json
+```
+
+載入前將已發布清單與明確宿主描述進行比較。路徑相對於預檢檔，預設檔名為
+`graft.check.json`。
+[相容性檢查](../ecosystem/compatibility/)說明檔案格式與診斷。檢查不安裝套件，也不改變應用程式設定。
+
+## graft remote manifest
+
+```sh
+graft remote manifest ./release
+graft remote manifest ./release --check --provenance ./provenance.json
+```
+
+由已啟用的 `remote/cli` 命令外掛提供。從已建置宣告產生或驗證 `graft`
+欄位，並可記錄套件來源。發布流程見[外掛清單](../ecosystem/manifest/)。

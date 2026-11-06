@@ -13,6 +13,7 @@ Node 适配器的要求一致。
 | `graft add <package...>`    | 添加依赖并安装。                   | [graft add](#graft-add)       |
 | `graft remove <package...>` | 移除依赖。                         | [graft remove](#graft-remove) |
 | `graft schema`              | 写入 `graft.yml` 的编辑器 Schema。 | [graft schema](#graft-schema) |
+| `graft check [file]`        | 检查清单是否符合宿主要求。         | [graft check](#graft-check)   |
 
 `graft start` 同时支持 [remote 宿主](../remote/hosts/)和
 [runner](../remote/runners/)。命令插件可以添加 `graft remote certificates`
@@ -306,3 +307,23 @@ Windows 按现状提供（as is）：进程树清理与回滚保证未经验证�
 [托管 Remote 条目](../config-file/#托管集成)。由应用提供操作端点，使用条目 id 调用
 `Graft.transition`。CLI 没有内置 transition 子命令。 `--watch`
 不升级托管单元：HMR 跳过含托管实例的运行时，Loader 在改变目标前拒绝托管树的刷新。
+
+## graft check
+
+```sh
+graft --no-plugins check graft.check.json
+```
+
+加载前将已发布清单与显式宿主描述进行比较。路径相对于预检文件，默认文件名为
+`graft.check.json`。
+[兼容性检查](../ecosystem/compatibility/)说明文件格式和诊断。检查不安装包，也不改变应用配置。
+
+## graft remote manifest
+
+```sh
+graft remote manifest ./release
+graft remote manifest ./release --check --provenance ./provenance.json
+```
+
+由已启用的 `remote/cli` 命令插件提供。从已构建声明生成或验证 `graft`
+字段，并可记录包来源。发布流程见[插件清单](../ecosystem/manifest/)。

@@ -1,0 +1,18 @@
+{
+	"name": "@alice/conformance-echo-contract",
+	"version": "1.0.0",
+	"type": "module",
+	"author": "Alice (independent author fixture)",
+	"exports": {
+		".": "./dist/index.js",
+		"./package.json": "./package.json"
+	},
+	"files": [
+		"dist"
+	],
+	"peerDependencies": {
+		"effect": "4.1.*",
+		"@graftland/graft": "0.0.0",
+		"@graftland/plugin-remote": "0.0.0"
+	}
+}

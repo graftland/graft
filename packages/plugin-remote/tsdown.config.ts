@@ -23,6 +23,8 @@ export default defineConfig({
 		"src/runner/index.ts",
 		"src/Contract.ts",
 		"src/Artifact.ts",
+		"src/Conformance.ts",
+		"src/Publication.ts",
 		"src/Config.ts",
 		"src/schema.ts",
 

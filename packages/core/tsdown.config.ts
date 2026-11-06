@@ -12,5 +12,6 @@ export default defineConfig({
 		"src/Fork.ts",
 		"src/Release.ts",
 		"src/Transition.ts",
+		"src/Manifest.ts",
 	],
 })

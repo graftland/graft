@@ -272,3 +272,16 @@ requested in a serving attempt. Capture the built package directory before
 deployment; external runtime dependencies are not captured or pinned. The
 [integration-gateway sample](https://github.com/graftland/graft/tree/main/samples/integration-gateway)
 packs and installs separate contract and implementation packages.
+
+## Publish a manifest
+
+Generate the [plugin manifest](../../ecosystem/manifest/) from the built
+package, then verify it before packing. Service identities come from `inject`,
+`provides` and contract descriptors; runtime ranges come from package metadata.
+Keep placement capabilities explicit and trust in operator policy.
+
+Run the [conformance kit](../../ecosystem/conformance/) on the installed tarball
+and the [compatibility check](../../ecosystem/compatibility/) against each host
+you claim to support. First-party packages follow the same checks. The
+[plugin author fixtures](https://github.com/graftland/graft/tree/main/samples/plugin-authors)
+exercise this workflow without workspace aliases or private imports.

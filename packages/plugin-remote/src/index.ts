@@ -171,3 +171,7 @@ export function plugin<
 		? managedPlugin(contract, options)
 		: unmanagedPlugin(contract, options)
 }
+
+export * as Publication from "./Publication"
+
+export * as Conformance from "./Conformance"

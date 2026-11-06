@@ -118,6 +118,24 @@ const schema = Command.make(
 	),
 )
 
+const check = Command.make(
+	"check",
+	{
+		file: Argument.String("file").pipe(
+			Argument.withDefault("graft.check.json"),
+		),
+	},
+	({ file }) =>
+		Effect.promise(() => import("./Check")).pipe(
+			Effect.uninterruptible,
+			Effect.flatMap((Check) => Check.run(file)),
+		),
+).pipe(
+	Command.withDescription(
+		"Check selected plugin manifests against a host without loading plugins",
+	),
+)
+
 const graft = Command.make("graft").pipe(
 	Command.withDescription("Run and manage Graft applications"),
 	Command.withSharedFlags({
@@ -134,7 +152,7 @@ const program = Effect.gen(function* () {
 			Effect.gen(function* () {
 				const context = yield* Layer.build(Graft.layer)
 				return yield* Host.run(
-					[start, create, add, remove, schema],
+					[start, create, add, remove, schema, check],
 					graft,
 					version,
 					args,

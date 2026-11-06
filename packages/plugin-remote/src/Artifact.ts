@@ -14,6 +14,8 @@ import {
 	String,
 } from "effect"
 
+import { Manifest } from "@graftland/graft"
+
 export const Identity = Schema.Struct({
 	version: Schema.Literal(1),
 	algorithm: Schema.Literal("sha256"),
@@ -40,35 +42,14 @@ export class ArtifactError extends Schema.TaggedError<
 }) {}
 const invalid = (detail: string) => ArtifactError.make({ detail })
 
-const inspect = Effect.fnUntraced(function* (
+const hashDirectory = Effect.fnUntraced(function* (
 	directory: string,
-	entry: string,
+	prefix: string,
 	copy?: string,
 ) {
 	const fs = yield* FileSystem.FileSystem
 	const path = yield* Path.Path
-	if (
-		path.isAbsolute(entry) ||
-		entry !== path.normalize(entry) ||
-		entry === ".." ||
-		String.startsWith("../")(entry)
-	)
-		return yield* invalid(
-			"The implementation entry must be a normalized path inside the artifact",
-		)
-	if (
-		!Array.some([".js", ".mjs", ".cjs"], (extension) =>
-			String.endsWith(extension)(entry),
-		)
-	)
-		return yield* invalid(
-			"Artifacts require a built JavaScript implementation entry",
-		)
-	const hash = yield* Effect.sync(() =>
-		createHash("sha256").update(
-			`graft-artifact-sha256-v1\0${entry.length}:${entry}\0`,
-		),
-	)
+	const hash = yield* Effect.sync(() => createHash("sha256").update(prefix))
 	const visit = Effect.fnUntraced(function* (
 		relative: string,
 	): Effect.fn.Return<
@@ -107,17 +88,44 @@ const inspect = Effect.fnUntraced(function* (
 		}
 	})
 	yield* visit("")
-	if ((yield* fs.lstat(path.join(directory, entry))).type !== "File")
-		return yield* invalid("The implementation entry must be a regular file")
 	if ((yield* fs.lstat(path.join(directory, "package.json"))).type !== "File")
 		return yield* invalid("The artifact directory must contain package.json")
-	return Identity.make({
-		version: 1,
-		algorithm: "sha256",
-		entry,
-		digest: yield* Effect.sync(() => hash.digest("hex")),
-	})
+	return yield* Effect.sync(() => hash.digest("hex"))
 })
+const inspect = Effect.fnUntraced(function* (
+	directory: string,
+	entry: string,
+	copy?: string,
+) {
+	const fs = yield* FileSystem.FileSystem
+	const path = yield* Path.Path
+	if (
+		path.isAbsolute(entry) ||
+		entry !== path.normalize(entry) ||
+		entry === ".." ||
+		String.startsWith("../")(entry)
+	)
+		return yield* invalid(
+			"The implementation entry must be a normalized path inside the artifact",
+		)
+	if (
+		!Array.some([".js", ".mjs", ".cjs"], (extension) =>
+			String.endsWith(extension)(entry),
+		)
+	)
+		return yield* invalid(
+			"Artifacts require a built JavaScript implementation entry",
+		)
+	const digest = yield* hashDirectory(
+		directory,
+		`graft-artifact-sha256-v1\0${entry.length}:${entry}\0`,
+		copy,
+	)
+	if ((yield* fs.lstat(path.join(directory, entry))).type !== "File")
+		return yield* invalid("The implementation entry must be a regular file")
+	return Identity.make({ version: 1, algorithm: "sha256", entry, digest })
+})
+
 const filesystemError = (cause: import("effect").PlatformError.PlatformError) =>
 	ArtifactError.make({
 		detail: "Reading or writing the artifact failed",
@@ -214,3 +222,27 @@ export const implementation = Effect.fnUntraced(function* (artifact: Artifact) {
 	return pathToFileURL(path.join(artifact.directory, artifact.identity.entry))
 		.href
 })
+
+/** Hashes a resolved built package without importing it or creating a captured copy. */
+export const identify = Effect.fnUntraced(
+	function* (options: { readonly directory: string; readonly entry: string }) {
+		return yield* inspect(options.directory, options.entry)
+	},
+	Effect.catchTag("PlatformError", filesystemError),
+)
+
+/** Hashes package bytes independently of any selected module, without importing code. */
+export const directoryIdentity = Effect.fnUntraced(
+	function* (directory: string) {
+		const digest = yield* hashDirectory(
+			directory,
+			"graft-directory-sha256-v1\0",
+		)
+		return Manifest.DirectoryIdentity.make({
+			version: 1,
+			algorithm: "sha256",
+			digest,
+		})
+	},
+	Effect.catchTag("PlatformError", filesystemError),
+)

@@ -110,6 +110,15 @@ export default defineConfig({
 					],
 				},
 				{
+					label: "Ecosystem",
+					translations: { "zh-CN": "生态", "zh-TW": "生態" },
+					items: [
+						"ecosystem/manifest",
+						"ecosystem/compatibility",
+						"ecosystem/conformance",
+					],
+				},
+				{
 					label: "Remote",
 					translations: { "zh-CN": "Remote", "zh-TW": "Remote" },
 					items: [
