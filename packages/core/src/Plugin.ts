@@ -89,6 +89,8 @@ export interface Definition<in out Config, in out Input, in out E> {
 		readonly error: 0 extends 1 & E ? unknown : (value: E) => E
 	}
 	readonly name: string
+	/** The public configuration schema, when the plugin declares one. */
+	readonly config: Schema.Top | undefined
 	readonly inject: ReadonlyArray<Dependency>
 	readonly retry: Schedule.Schedule<unknown, unknown> | undefined
 	/** Runs only inside an activation, which provides whatever decoding needs. */
@@ -131,6 +133,11 @@ export const isOptional = (
 
 /** Options shared by `make`, `layer` and `service`. */
 export interface Options<Inject extends ReadonlyArray<Dependency>> {
+	/**
+	 * Labels the plugin in logs, spans and the fork tree. Build it like an
+	 * Effect service key: the package, the module path, then the binding unless
+	 * it is the module's default export, such as `@acme/graft-plugin-db/migrations`.
+	 */
 	readonly name: string
 	readonly inject?: Inject | undefined
 	/** Restarts a failed plugin on this schedule; without it, a failed plugin waits for a change. */
@@ -189,6 +196,7 @@ export const make: {
 		[TypeId]: TypeId,
 		[Contract]: { input: identity, error: identity },
 		name: options.name,
+		config: schema,
 		inject: options.inject ?? [],
 		retry: options.retry,
 		// Overloads connect the schema's decoded type to the callback; this implementation erases that type.

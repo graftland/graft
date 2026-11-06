@@ -62,7 +62,7 @@ export class PackageManagerError extends Schema.TaggedError<
 	PackageManagerError,
 	{ readonly brand: unique symbol }
 >()("PackageManagerError", {
-	operation: Schema.Literals(["detect", "install", "recover", "state"]),
+	operation: Schema.Literals(["detect", "install", "recover", "state", "view"]),
 	message: Schema.String,
 	exitCode: Schema.optionalKey(Schema.Int),
 }) {}
@@ -382,6 +382,144 @@ export interface PackageManager {
 	/** Serialized per manager. Empty changes installs the current manifest, including first installs. */
 	readonly install: (changes: Changes) => Effect.Effect<InstallResult, Error>
 }
+
+const viewCommand = (agent: Agent, name: string) =>
+	Match.value(agent).pipe(
+		Match.when("npm", () => ({
+			executable: "npm",
+			args: ["view", name, "name", "--json"],
+		})),
+		Match.when("pnpm", () => ({
+			executable: "pnpm",
+			args: ["view", name, "name", "--json"],
+		})),
+		Match.when("yarn-classic", () => ({
+			executable: "yarn",
+			args: ["info", name, "name", "--json"],
+		})),
+		Match.when("yarn-berry", () => ({
+			executable: "yarn",
+			args: ["npm", "info", name, "--fields", "name", "--json"],
+		})),
+		Match.exhaustive,
+	)
+
+/**
+ * How npm, pnpm and Yarn Berry report a package the registry does not have.
+ * A package counts as published only when the output names it.
+ */
+const notFound = /\bcode E404\b|ERR_PNPM_FETCH_404|Response Code: 404/
+
+/** Whether a directory or one of its parents holds a package.json. */
+const insideProject = (
+	fs: FileSystem.FileSystem,
+	path: Path.Path,
+	directory: string,
+): Effect.Effect<boolean, PlatformError.PlatformError> =>
+	Effect.filterOrElse(
+		fs.exists(path.join(directory, "package.json")),
+		(found) => found || path.dirname(directory) === directory,
+		() => insideProject(fs, path, path.dirname(directory)),
+	)
+
+/**
+ * Whether the registry has a package, asked through the package manager so
+ * that the project's registry and credentials apply. `directory` is where the
+ * command runs; it need not contain a package.json when `agent` is given.
+ */
+export const published = Effect.fnUntraced(function* (
+	options: Options,
+	name: string,
+) {
+	const fs = yield* FileSystem.FileSystem
+	const path = yield* Path.Path
+	const detected = yield* detectAgent(options)
+	// Yarn classic prints the same line for a missing package and a failed
+	// request, and reads the npm config anyway, so npm asks for it. Yarn Berry
+	// only runs inside a project; outside one, npm asks the registry.
+	const agent =
+		detected === "yarn-classic" ||
+		(detected === "yarn-berry" &&
+			!(yield* insideProject(fs, path, path.resolve(options.directory))))
+			? "npm"
+			: detected
+	const answer = yield* view(agent, options.directory, name)
+	if (answer._tag !== "Unreadable" || agent === "npm")
+		return yield* answerOf(answer)
+	// A parent project can pin another package manager, which then refuses the
+	// command; npm reads the same registry configuration.
+	const fallback = yield* view("npm", options.directory, name)
+	return yield* answerOf(fallback._tag === "Unreadable" ? answer : fallback)
+})
+
+type Answer =
+	| { readonly _tag: "Published" }
+	| { readonly _tag: "Missing" }
+	| {
+			readonly _tag: "Unreadable"
+			readonly command: string
+			readonly output: string
+			readonly code: number
+	  }
+
+const answerOf = (
+	answer: Answer,
+): Effect.Effect<boolean, PackageManagerError> =>
+	answer._tag === "Unreadable"
+		? Effect.fail(
+				PackageManagerError.make({
+					operation: "view",
+					message: `${answer.command} failed:\n${answer.output}`,
+					exitCode: answer.code,
+				}),
+			)
+		: Effect.succeed(answer._tag === "Published")
+
+/** Asks one package manager whether the registry has a package. */
+const view = Effect.fnUntraced(function* (
+	agent: Agent,
+	directory: string,
+	name: string,
+) {
+	const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+	const command = viewCommand(agent, name)
+	const line = `${command.executable} ${Array.join(command.args, " ")}`
+	const [code, output] = yield* Effect.scoped(
+		Effect.gen(function* () {
+			const process = yield* spawner.spawn(
+				ChildProcess.make(command.executable, command.args, {
+					cwd: directory,
+					extendEnv: true,
+					stdin: "ignore",
+					stdout: "pipe",
+					stderr: "pipe",
+					env: { CI: "true" },
+				}),
+			)
+			return yield* Effect.all(
+				[process.exitCode, Stream.mkString(Stream.decodeText(process.all))],
+				{ concurrency: 2 },
+			)
+		}),
+	).pipe(
+		Effect.timeoutOrElse({
+			duration: "1 minute",
+			orElse: () =>
+				PackageManagerError.make({
+					operation: "view",
+					message: `${line} timed out`,
+				}),
+		}),
+	)
+	// Package names hold no quotes, so the quoted name is how the JSON output names it.
+	const answer: Answer =
+		code === 0 && String.includes(`"${name}"`)(output)
+			? { _tag: "Published" }
+			: notFound.test(output)
+				? { _tag: "Missing" }
+				: { _tag: "Unreadable", command: line, output, code }
+	return answer
+})
 
 /**
  * Own one manager per project. The caller must give this manager and its child

@@ -4,7 +4,7 @@ import { Plugin } from "@graftland/graft"
 
 // Module evaluation only defines the plugin; its activation owns all resources.
 export default Plugin.make({
-	name: "hello",
+	name: "{{package}}/hello",
 	config: Schema.Struct({ message: Schema.String }),
 	apply: ({ message }) =>
 		Effect.acquireRelease(Effect.logInfo(message), () =>

@@ -19,13 +19,13 @@ import { inject } from "vitest"
 
 import { Authenticator } from "../src/Auth"
 import local from "../src/host/local"
-import { listenerConsumer } from "../src/internal/assembly"
 import { LocalTransport } from "../src/internal/directTransport"
 import { executionPlugin } from "../src/internal/execution"
 import * as Lock from "../src/internal/runner/Lock"
 import { Supervisor } from "../src/internal/Supervisor"
-import supervisor from "../src/internal/supervisorPlugin"
 import { default as mtls } from "../src/runner/auth/mtls"
+import { consumer } from "../src/runner/consumer"
+import supervisor from "../src/runner/supervisor"
 import unix from "../src/runner/unix"
 import {
 	default as websocket,
@@ -158,7 +158,7 @@ describe("remote capability plugins", () => {
 					url: "ws://localhost:0",
 				})
 				yield* networkProvider.await
-				const network = yield* Graft.plugin(listenerConsumer)
+				const network = yield* Graft.plugin(consumer())
 				const networkError = yield* Effect.flip(network.await)
 				yield* network.dispose
 				yield* networkProvider.dispose
@@ -167,7 +167,7 @@ describe("remote capability plugins", () => {
 					path: "unused.sock",
 				})
 				yield* localProvider.await
-				const local = yield* Graft.plugin(listenerConsumer)
+				const local = yield* Graft.plugin(consumer())
 				const localError = yield* Effect.flip(local.await)
 				assert.equal(localError._tag, "ListenerConfigError")
 			}).pipe(Effect.scoped, Effect.provide(runtime)),
@@ -230,7 +230,7 @@ describe("remote capability plugins", () => {
 					key: inject("remoteTls") + "/server.key",
 				})
 				yield* provider.await
-				const listener = yield* Graft.plugin(listenerConsumer)
+				const listener = yield* Graft.plugin(consumer())
 				yield* listener.await
 				yield* connection(port).pipe(Effect.scoped)
 				yield* auth.dispose

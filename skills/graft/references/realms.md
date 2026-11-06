@@ -15,7 +15,7 @@ the listed keys:
 
 ```ts
 const tenants = Plugin.make({
-	name: "tenants",
+	name: "app/tenants",
 	apply: () =>
 		Effect.gen(function* () {
 			yield* Graft.plugin(tenant, { name: "a" }, { isolate: [Database] })
@@ -54,7 +54,7 @@ const greet = (name: string) =>
 
 ```ts
 const formal = Plugin.make({
-	name: "formal",
+	name: "app/formal",
 	apply: () =>
 		Graft.plugin(welcome, undefined, {
 			intercept: [Graft.intercept(Formal, () => true)],

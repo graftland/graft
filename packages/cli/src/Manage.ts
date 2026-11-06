@@ -170,11 +170,23 @@ export const addPlugin = Effect.fn("Manage.addPlugin")(function* (
 	const path = yield* Path.Path
 	const fs = yield* FileSystem.FileSystem
 	const directory = global ? yield* home : path.resolve(".")
-	const packageName = Create.pluginPackage(name)
+	if (global) yield* prepareHome(directory)
+	const userAgent = yield* Config.String("npm_config_user_agent").pipe(
+		Config.withDefault(""),
+	)
+	const packageName = yield* Create.pluginPackage(name, {
+		directory,
+		userAgent,
+	}).pipe(
+		Effect.mapError((error) =>
+			error._tag === "PluginNotFound" || error._tag === "AmbiguousPluginName"
+				? CliError.UserError.make({ cause: error, userMessage: error.message })
+				: error,
+		),
+	)
 	const module = `${packageName}/cli`
 	const file = path.join(directory, "graft.yml")
 	const text = yield* enabledConfig(file, module)
-	if (global) yield* prepareHome(directory)
 	yield* install(directory, Record.singleton(packageName, "latest"))
 	// Once accepted, the native write must finish before command cleanup can proceed.
 	yield* fs.writeFileString(file, text).pipe(Effect.uninterruptible)

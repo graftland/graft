@@ -1,36 +1,44 @@
 ---
 title: 替换插件
-description: 在一个事务中把插件替换为新版本。
+description: 在一个事务中把插件替换为新版本，启动失败时回滚。
 ---
 
 `Graft.replace`
-将插件替换为新版本。旧插件的每个 fork 都会使用替换后的插件重启；之后再加载旧插件，也会加载新插件：
+将插件替换为新版本。旧插件的每个 fork 都会使用替换后的插件重启；之后再加载旧插件，也会加载新插件。重启的 fork 启动后它才返回：
 
 ```ts import.meta.vitest name="replace: swap a plugin for a new version"
 import { Array, Effect, Option, Stream } from "effect"
 
 import { Graft, Plugin } from "@graftland/graft"
 
-const greeterV1 = Plugin.make({ name: "greeter v1", apply: () => Effect.void })
-const greeterV2 = Plugin.make({ name: "greeter v2", apply: () => Effect.void })
+const greeterV1 = Plugin.make({
+	name: "app/greeterV1",
+	apply: () => Effect.void,
+})
+const greeterV2 = Plugin.make({
+	name: "app/greeterV2",
+	apply: () => Effect.void,
+})
 
-const names = await Effect.runPromise(
+const outcome = await Effect.runPromise(
 	Effect.gen(function* () {
 		const running = yield* Graft.plugin(greeterV1)
 		yield* running.await
-		yield* Graft.replace([[greeterV1, greeterV2]])
+		const result = yield* Graft.replace([[greeterV1, greeterV2]])
 		const later = yield* Graft.plugin(greeterV1)
 		yield* later.await
-		// Wait until the running fork has restarted as well.
-		return yield* Graft.forks.pipe(
-			Stream.map(Array.map((fork) => fork.name)),
-			Stream.filter(Array.every((name) => name === "greeter v2")),
-			Stream.runHead,
-		)
+		const tree = yield* Stream.runHead(Graft.forks)
+		return [
+			result._tag,
+			Option.map(
+				tree,
+				Array.map((fork) => fork.name),
+			),
+		]
 	}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
 )
 
-names // => Option.some(["greeter v2", "greeter v2"])
+outcome // => ["Replaced", Option.some(["app/greeterV2", "app/greeterV2"])]
 ```
 
 ## 类型规则
@@ -65,6 +73,68 @@ TypeScript 会逐对独立检查：
 
 Graft 在一个事务中应用所有配对，任何 fork 都不会看到只完成一部分的替换。随后，每个受影响的 fork 按照正常的[服务撤回顺序](../services/#服务撤回流程)停止并重新启动。[热重载](../hot-reload/)使用的就是
 `replace`。
+
+## 回滚
+
+如果运行替换插件的某个 fork 启动失败，Graft 会回滚整批替换：每个 fork 回到旧插件，之后加载旧插件也会再次加载旧插件；旧插件重启后，`replace`
+返回带有失败信息的 `RolledBack`：
+
+```ts import.meta.vitest name="replace: roll back a replacement that fails"
+import { Array, Effect, Option, Stream } from "effect"
+
+import { Graft, Plugin } from "@graftland/graft"
+
+// The error bound admits the failures of later versions; see Type rules.
+const greeterV1 = Plugin.make({
+	name: "app/greeterV1",
+	apply: (): Effect.Effect<void, string> => Effect.void,
+})
+const broken = Plugin.make({
+	name: "app/greeterV2",
+	apply: () => Effect.fail("no greeting"),
+})
+
+const outcome = await Effect.runPromise(
+	Effect.gen(function* () {
+		const running = yield* Graft.plugin(greeterV1)
+		yield* running.await
+		const result = yield* Graft.replace([[greeterV1, broken]])
+		const failed =
+			result._tag === "RolledBack"
+				? Array.map(result.failures, (failure) => failure.plugin)
+				: []
+		const tree = yield* Stream.runHead(Graft.forks)
+		return [
+			failed,
+			Option.map(
+				tree,
+				Array.map((fork) => fork.name),
+			),
+		]
+	}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
+)
+
+outcome // => [["app/greeterV2"], Option.some(["app/greeterV1"])]
+```
+
+| 情形                                               | 结果                                               |
+| -------------------------------------------------- | -------------------------------------------------- |
+| 运行替换插件的每个 fork 都是 `Active` 或 `Pending` | `Replaced`。                                       |
+| 其中一个失败，包括被替换的父插件加载的子插件       | `RolledBack`，带有 `Failed` 失败及其完整 `Cause`。 |
+| 到 `timeout` 时仍有 fork 在启动                    | `RolledBack`，带有 `TimedOut` 失败。               |
+| 插件设置了 `retry` 调度                            | 第一次失败即作决定；Graft 不等待重试。             |
+| 某个 fork 在 `replace` 之前就已失败                | 它的结果不计入，但会一起回滚。                     |
+| 某个 fork 在 `replace` 之前或期间直接请求目标插件  | 不计入，回滚后仍留在目标插件上。                   |
+| 之后的 `replace` 或 `restart` 接管了某个 fork      | 该 fork 及其子 fork 不再计入，它也不会回滚。       |
+| 调用方在 `replace` 等待时被中断                    | 保留替换。                                         |
+
+- `timeout`
+  是一个选项：`Graft.replace(pairs, { timeout: "30 seconds" })`。不设置时，`replace`
+  会一直等到 fork 启动完成。[热重载](../hot-reload/)默认等待 30 秒。
+- 每个失败都带有 `fork` id 和 `plugin` 名称。
+- `Graft.resolve(plugin)` 返回现在加载 `plugin` 时实际加载的插件，因此在
+  `replace` 等待期间被中断的代码可以据此判断替换是否保留。
+- 使用被回滚插件服务的插件会重启两次：一次换成新版本，一次换回旧版本。它们自身的失败不会引起回滚。
 
 ## 冲突
 

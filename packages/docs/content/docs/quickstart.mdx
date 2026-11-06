@@ -20,11 +20,13 @@ adapter needs. It also has `module.registerHooks`, which hot reload uses.
 
    The files to start with:
 
-   | File            | What it is                                       |
-   | --------------- | ------------------------------------------------ |
-   | `graft.yml`     | The config file: which plugins to load, and how. |
-   | `src/hello.ts`  | An example plugin.                               |
-   | `tsconfig.json` | Type checking for `npm run typecheck`.           |
+   | File             | What it is                                             |
+   | ---------------- | ------------------------------------------------------ |
+   | `graft.yml`      | The config file: which plugins to load, and how.       |
+   | `src/hello.ts`   | A plugin that logs a message from its config.          |
+   | `src/greeter.ts` | A plugin that publishes the `Greeter` service.         |
+   | `src/ticker.ts`  | A plugin that injects `Greeter` and greets on a timer. |
+   | `tsconfig.json`  | Type checking for `npm run typecheck`.                 |
 
    [`graft create`](../cli/#graft-create) lists the questions, the other
    templates and the options that skip the questions.
@@ -35,52 +37,95 @@ adapter needs. It also has `module.registerHooks`, which hot reload uses.
    npm run dev
    ```
 
-   The `hello` plugin logs `Hello from Graft!`. The process keeps running until
-   you press <kbd>Ctrl</kbd>+<kbd>C</kbd>. Then Graft unloads every plugin.
+   `hello` logs `Hello from Graft!`, and `ticker` logs `Hello, Graft!` every 3
+   seconds through the `Greeter` that `greeter` publishes. The process keeps
+   running until you press <kbd>Ctrl</kbd>+<kbd>C</kbd>. Then Graft unloads
+   every plugin.
 
 3. Change the config while the app runs. Open `graft.yml` and change the
-   message:
+   greeting:
 
    ```yaml
-   - id: hello
-     name: ./src/hello.ts
+   - id: greeter
+     name: ./src/greeter.ts
      config:
-       message: Hello again!
+       greeting: Hi
    ```
 
-   When you save, Graft unloads `hello` and loads it again with the new message.
-   You see `Hello plugin stopped`, then `Hello again!`.
+   When you save, Graft stops `ticker` first, because it uses the `Greeter`,
+   then restarts `greeter` with the new greeting and starts `ticker` again. You
+   see `Ticker stopped`, `Greeter stopped`, then `Hi, Graft!`. `hello` is not
+   touched.
 
-4. Change the code while the app runs. Edit `src/hello.ts` (for example, log the
-   message twice) and save. Graft imports the new version of the module and
-   replaces the running plugin with it. If the new code fails to import, the old
-   version keeps running, and Graft logs the error.
+4. Change the code while the app runs. In `src/ticker.ts`, change `"3 seconds"`
+   to `"1 second"` and save. Graft imports the new module and restarts only
+   `ticker`. If the new code fails to import or to start, the old version keeps
+   running, and Graft logs the error.
+
+5. Take a dependency away. Add `disabled: true` to the `greeter` entry and save.
+   `ticker` stops and waits as `Pending` until a `Greeter` exists again. Remove
+   the line, and it greets again.
 
 </Steps>
 
-## The example plugin
+## The example plugins
 
-```ts title="src/hello.ts"
-import { Effect, Schema } from "effect"
+```ts title="src/greeter.ts"
+import { Context, Effect, Schema } from "effect"
 
-import { Plugin } from "@graftland/graft"
+import { Graft, Plugin } from "@graftland/graft"
 
-// Module evaluation only defines the plugin; its activation owns all resources.
+/** Greets by name. Other plugins list it in `inject` to use it. */
+export class Greeter extends Context.Service<
+	Greeter,
+	{ readonly greet: (name: string) => Effect.Effect<void> }
+>()("app/Greeter") {}
+
+// Publishes a Greeter while it is loaded. Plugins that use it stop first.
 export default Plugin.make({
-	name: "hello",
-	config: Schema.Struct({ message: Schema.String }),
-	apply: ({ message }) =>
-		Effect.acquireRelease(Effect.logInfo(message), () =>
-			Effect.logInfo("Hello plugin stopped"),
-		),
+	name: "app/greeter",
+	config: Schema.Struct({ greeting: Schema.String }),
+	apply: ({ greeting }) =>
+		Effect.gen(function* () {
+			yield* Effect.addFinalizer(() => Effect.logInfo("Greeter stopped"))
+			yield* Graft.provide(Greeter, {
+				greet: (name) => Effect.logInfo(`${greeting}, ${name}!`),
+			})
+		}),
 })
 ```
 
-Node runs the TypeScript file as it is, removing the types, so there is no build
+```ts title="src/ticker.ts"
+import { Effect, Schedule, Schema } from "effect"
+
+import { Plugin } from "@graftland/graft"
+
+import { Greeter } from "./greeter.ts"
+
+// Starts once a Greeter exists and greets on a schedule. The task belongs to
+// the plugin, so it stops when the plugin stops or reloads.
+export default Plugin.make({
+	name: "app/ticker",
+	config: Schema.Struct({ name: Schema.String }),
+	inject: [Greeter],
+	apply: ({ name }) =>
+		Effect.gen(function* () {
+			const greeter = yield* Greeter
+			yield* Plugin.fork(
+				greeter.greet(name).pipe(Effect.repeat(Schedule.spaced("3 seconds"))),
+			)
+			yield* Effect.addFinalizer(() => Effect.logInfo("Ticker stopped"))
+		}),
+})
+```
+
+`inject: [Greeter]` is checked by the compiler: remove it, and
+`npm run typecheck` reports that `apply` uses a service it did not declare. Node
+runs the TypeScript files as they are, removing the types, so there is no build
 step. A plugin module exports its plugin as the default export, or as an export
 named `plugin`. Importing the module must not start anything. Open connections,
 timers and servers inside `apply`, so that Graft can release them. See
-[Plugins](../plugins/).
+[Plugins](../plugins/) and [Services](../services/).
 
 ## Add a plugin from npm
 
@@ -93,9 +138,10 @@ fails, it puts `package.json` and the lockfile back as they were. While it
 installs or recovers, do not edit project files or run another installer. A
 rollback overwrites changes. It does not merge them. See
 [installation ownership and recovery](../cli/#package-managers). Then add an
-entry for the plugin to `graft.yml`. Its `name` can be the short name `review`.
-Graft looks for `review`, `@graftland/plugin-review` and `graft-plugin-review`,
-in that order. See [Config file](../config-file/).
+entry for the plugin to `graft.yml`. Its `name` can be the short name `review`:
+Graft looks for `review` itself, then for `@graftland/plugin-review` and
+`graft-plugin-review`, and fails if both of those are installed. See
+[Config file](../config-file/).
 
 ## Next steps
 

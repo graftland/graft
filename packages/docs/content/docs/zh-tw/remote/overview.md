@@ -43,7 +43,7 @@ declare const greeter: Contract.Service
 export const config = Schema.Struct({ greeting: Schema.String })
 
 export const contract = Contract.make({
-	name: "greeter",
+	name: "app/greeter",
 	config,
 	module: new URL("./greeter.js", import.meta.url).href,
 	provides: [greeter],
@@ -58,7 +58,7 @@ import { Graft, Plugin } from "@graftland/graft"
 import { config, Greeter } from "./contract.ts"
 
 export default Plugin.make({
-	name: "greeter",
+	name: "app/greeter",
 	config,
 	apply: ({ greeting }) =>
 		Graft.provide(Greeter, {

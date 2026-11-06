@@ -70,13 +70,18 @@ describe("create", () => {
 			const result = yield* create({ directory, packageManager: "pnpm@9.15.9" })
 			assert.strictEqual(result.name, "example")
 			assert.strictEqual(result.template, "app")
+			const greeter = yield* readText(path.join(directory, "src/greeter.ts"))
+			assert.include(greeter, `()("example/greeter")`)
+			assert.include(greeter, `name: "example/greeter"`)
 			assert.deepStrictEqual(result.files, [
 				".gitignore",
 				".vscode/extensions.json",
 				"README.md",
 				"graft.yml",
 				"package.json",
+				"src/greeter.ts",
 				"src/hello.ts",
+				"src/ticker.ts",
 				"tsconfig.json",
 			])
 			const { yaml, entries } = yield* readConfig(
@@ -88,6 +93,16 @@ describe("create", () => {
 					id: "hello",
 					name: "./src/hello.ts",
 					config: { message: "Hello from Graft!" },
+				},
+				{
+					id: "greeter",
+					name: "./src/greeter.ts",
+					config: { greeting: "Hello" },
+				},
+				{
+					id: "ticker",
+					name: "./src/ticker.ts",
+					config: { name: "Graft" },
 				},
 			])
 			const manifest = yield* readJson(path.join(directory, "package.json"))
@@ -105,6 +120,7 @@ describe("create", () => {
 				},
 				dependencies: {
 					"@graftland/graft": "0.0.0",
+					"@graftland/loader": "0.0.0",
 					"@graftland/cli": "0.0.0",
 					effect: "4.1.2",
 				},
@@ -125,6 +141,8 @@ describe("create", () => {
 			)
 			assert.strictEqual(result.name, "graft-plugin-example")
 			assert.deepStrictEqual(logged, [])
+			const plugin = yield* readText(path.join(directory, "src/index.ts"))
+			assert.include(plugin, `name: "graft-plugin-example"`)
 			assert.deepStrictEqual(result.files, [
 				".gitignore",
 				".vscode/extensions.json",
@@ -209,13 +227,17 @@ describe("create", () => {
 		}).pipe(run),
 	)
 
-	it.effect("depends on and loads each plugin, mapping short names", () =>
+	it.effect("depends on and loads each plugin", () =>
 		Effect.gen(function* () {
 			const { path, directory } = yield* setup
 			yield* create({
 				directory,
 				template: "minimal",
-				plugins: ["review", "graft-plugin-echo@^1.2.0", "@acme/audit"],
+				plugins: [
+					"@graftland/plugin-review",
+					"graft-plugin-echo@^1.2.0",
+					"@acme/audit",
+				],
 			})
 			// The loader gives entries without an id one when it first reads the file.
 			const text = yield* readText(path.join(directory, "graft.yml"))
@@ -228,6 +250,7 @@ describe("create", () => {
 			assert.deepInclude(manifest, {
 				dependencies: {
 					"@graftland/graft": "0.0.0",
+					"@graftland/loader": "0.0.0",
 					"@graftland/cli": "0.0.0",
 					effect: "4.1.2",
 					"@graftland/plugin-review": "0.0.0",
@@ -236,13 +259,23 @@ describe("create", () => {
 				},
 			})
 			const app = path.join(path.dirname(directory), "app")
-			yield* create({ directory: app, plugins: ["review"] })
+			yield* create({ directory: app, plugins: ["@graftland/plugin-review"] })
 			const appText = yield* readText(path.join(app, "graft.yml"))
 			assert.deepStrictEqual(parse(appText), [
 				{
 					id: "hello",
 					name: "./src/hello.ts",
 					config: { message: "Hello from Graft!" },
+				},
+				{
+					id: "greeter",
+					name: "./src/greeter.ts",
+					config: { greeting: "Hello" },
+				},
+				{
+					id: "ticker",
+					name: "./src/ticker.ts",
+					config: { name: "Graft" },
 				},
 				{ name: "@graftland/plugin-review" },
 			])

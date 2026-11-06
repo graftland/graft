@@ -23,9 +23,9 @@ import { follow } from "../internal/follow"
 import * as Startup from "../internal/listenerStartup"
 import * as Lifecycle from "../internal/RunnerLifecycle"
 import { Supervisor } from "../internal/Supervisor"
-import supervisor, {
-	Config as SupervisorConfig,
-} from "../internal/supervisorPlugin"
+import * as RunnerAssembly from "./assembly"
+import { consumer } from "./consumer"
+import supervisor, { Config as SupervisorConfig } from "./supervisor"
 
 const startListener = Effect.fnUntraced(function* (
 	input: Configuration.Listen,
@@ -42,7 +42,7 @@ const startListener = Effect.fnUntraced(function* (
 		field + ".auth",
 	)
 	const signals = yield* Startup.signals
-	const consumer = Assembly.makeListenerConsumer(
+	const serve = consumer(
 		(properties, auth) =>
 			Assembly.directAuth(properties, input.auth !== undefined).pipe(
 				Effect.andThen(
@@ -52,12 +52,12 @@ const startListener = Effect.fnUntraced(function* (
 			),
 		Deferred.succeed(signals.ready, undefined).pipe(Effect.asVoid),
 	)
-	const fork = yield* Assembly.runner({ transport, auth }, consumer)
+	const fork = yield* RunnerAssembly.run({ transport, auth }, serve)
 	return { fork, signals, field }
 })
 
 const owner = Plugin.make({
-	name: "remote-supervised-runtime",
+	name: "@graftland/plugin-remote/runner/owner",
 	config: Configuration.Runner,
 	inject: [
 		ModuleResolver.ModuleResolver,
@@ -137,7 +137,7 @@ const shutdown = Effect.fnUntraced(function* (
 })
 
 export default Plugin.make({
-	name: "remote-server",
+	name: "@graftland/plugin-remote/runner",
 	config: Schema.Unknown,
 	inject: [Plugin.optional(Application)],
 	apply: Effect.fnUntraced(function* (input) {
@@ -153,8 +153,8 @@ export default Plugin.make({
 		)
 		const lifecycle = yield* Lifecycle.make
 		const encoded = yield* Schema.encodeEffect(Configuration.Runner)(config)
-		const assembly = Plugin.make({
-			name: "remote-runner-runtime",
+		const runtime = Plugin.make({
+			name: "@graftland/plugin-remote/runner/runtime",
 			apply: Effect.fnUntraced(function* () {
 				yield* Graft.provide(Lifecycle.RunnerLifecycle, lifecycle)
 				const fork = yield* Graft.plugin(owner, encoded)
@@ -162,7 +162,7 @@ export default Plugin.make({
 				yield* follow(fork, fail)
 			}),
 		})
-		const fork = yield* Graft.plugin(assembly, undefined, {
+		const fork = yield* Graft.plugin(runtime, undefined, {
 			isolate: [Supervisor, Lifecycle.RunnerLifecycle],
 		})
 		if (Option.isSome(application)) {

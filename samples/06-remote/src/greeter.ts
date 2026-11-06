@@ -5,7 +5,7 @@ import { Graft, Plugin } from "@graftland/graft"
 import { config, Greeter } from "./contract.ts"
 
 export default Plugin.make({
-	name: "greeter",
+	name: "@graftland/sample-remote/greeter",
 	config,
 	apply: ({ greeting }) =>
 		Graft.provide(Greeter, {

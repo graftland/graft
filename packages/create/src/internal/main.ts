@@ -14,10 +14,13 @@ import { CliError } from "effect/cli"
 import * as PackageManager from "@graftland/package-manager"
 
 import {
+	AmbiguousPluginName,
 	create,
 	CreateError,
 	InvalidName,
 	InvalidPackageManager,
+	PluginNotFound,
+	pluginSpec,
 } from "../index"
 import * as Git from "./git"
 import { install } from "./install"
@@ -37,9 +40,14 @@ const scripts = {
 } as const
 
 /** A mistake in the answers, shown as a message rather than a failure trace. */
-const userError = (
-	error: CreateError | InvalidName | InvalidPackageManager,
-): CliError.UserError =>
+type Mistake =
+	| CreateError
+	| InvalidName
+	| InvalidPackageManager
+	| PluginNotFound
+	| AmbiguousPluginName
+
+const userError = (error: Mistake): CliError.UserError =>
 	CliError.UserError.make({
 		cause: error,
 		userMessage:
@@ -47,11 +55,19 @@ const userError = (
 				? `${error.directory}: ${error.message}`
 				: error._tag === "InvalidName"
 					? `Invalid package name ${error.packageName}: ${error.message}`
-					: `Unsupported package manager ${error.value}: ${error.message}`,
+					: error._tag === "InvalidPackageManager"
+						? `Unsupported package manager ${error.value}: ${error.message}`
+						: error.message,
 	})
 
 const isMistake = Schema.is(
-	Schema.Union([CreateError, InvalidName, InvalidPackageManager]),
+	Schema.Union([
+		CreateError,
+		InvalidName,
+		InvalidPackageManager,
+		PluginNotFound,
+		AmbiguousPluginName,
+	]),
 )
 const reportMistakes = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
 	Effect.mapError(effect, (error) =>
@@ -67,10 +83,13 @@ export const main = Effect.fn("Create.main")(function* (input: Input) {
 		reportMistakes,
 	)
 	const { agent, declaration } = answers.packageManager
+	const plugins = yield* Effect.forEach(answers.plugins, (spec) =>
+		pluginSpec(spec, { directory: path.resolve("."), agent }),
+	).pipe(reportMistakes)
 	const project = yield* create({
 		directory: answers.directory,
 		template: answers.template,
-		plugins: answers.plugins,
+		plugins,
 		...(answers.name === undefined ? {} : { name: answers.name }),
 		...(declaration === undefined ? {} : { packageManager: declaration }),
 	}).pipe(reportMistakes)

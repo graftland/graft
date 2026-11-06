@@ -52,7 +52,7 @@ export const make = (options: UnixOptions): ConnectorApi => ({
 })
 export const Config = Schema.Struct({ path: Schema.String })
 export default Plugin.make({
-	name: "remote-unix-connector",
+	name: "@graftland/plugin-remote/host/unix",
 	config: Config,
 	inject: [Path.Path],
 	apply: Effect.fnUntraced(function* (config) {

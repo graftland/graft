@@ -15,7 +15,7 @@ const Listening = Schema.fromJsonString(
 	Schema.Struct({ event: Schema.Literal("Listening"), path: Schema.String }),
 )
 export default Plugin.make({
-	name: "remote-unix-listener",
+	name: "@graftland/plugin-remote/runner/unix",
 	config: Config,
 	inject: [Path.Path],
 	apply: Effect.fnUntraced(function* (config) {

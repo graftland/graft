@@ -5,7 +5,7 @@ import { Graft, Plugin } from "@graftland/graft"
 import { Notifier } from "./services.ts"
 
 export const notifier = Plugin.make({
-	name: "notifier",
+	name: "@graftland/sample-market-feed/notifier",
 	apply: Effect.fn("notifier.apply")(function* () {
 		yield* Effect.addFinalizer(() => Effect.log("notifier: stopped"))
 		yield* Graft.provide(Notifier, {

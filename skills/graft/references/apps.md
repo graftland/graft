@@ -84,7 +84,7 @@ plugin process.
 
 ```ts
 const admin = Plugin.make({
-	name: "admin",
+	name: "app/admin",
 	inject: [Loader.Loader],
 	apply: () =>
 		Effect.gen(function* () {

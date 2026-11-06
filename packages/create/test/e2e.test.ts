@@ -110,8 +110,9 @@ describe("generated projects", () => {
 				assert.strictEqual(schema.code, 0, schema.output)
 				const written = yield* fs.exists(`${directory}/graft.schema.json`)
 				assert.isTrue(written)
-				const log = yield* start(directory, "Hello from Graft!")
-				assert.include(log, "Hello from Graft!")
+				// The ticker greets once the greeter publishes its service.
+				const log = yield* start(directory, "Hello, Graft!")
+				assert.include(log, "Hello, Graft!")
 			}).pipe(run),
 		120_000,
 	)

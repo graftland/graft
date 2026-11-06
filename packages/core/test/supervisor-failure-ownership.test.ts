@@ -43,6 +43,7 @@ it.effect(
 				})
 				const spec = yield* TxRef.make<Spec>({
 					plugin,
+					requested: plugin,
 					input: undefined,
 					revision: 0,
 				})

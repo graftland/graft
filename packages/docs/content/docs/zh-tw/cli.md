@@ -26,8 +26,9 @@ graft remote certificates --out ./certs --server localhost
 graft add --plugin remote --global
 ```
 
-`add --plugin` 安裝 `@graftland/plugin-<name>`，並啟用它的 `/cli`
-項目。第三方套件可以寫完整名稱。`--global`
+`add --plugin` 安裝外掛套件，並啟用它的 `/cli`
+項目。短名稱會改寫成 registry 中存在的那一個：`@graftland/plugin-<name>` 或
+`graft-plugin-<name>`；兩者都存在時，請寫完整名稱。`--global`
 將套件與項目放進[使用者設定](../config-file/#命令外掛)。
 
 已啟用的命令會出現在 `--help` 與 `--completions bash`
@@ -50,7 +51,8 @@ graft start [config] [--watch] [--env-file <path>] [--env-dir <path>] [--stdio]
 ### 協定輸出
 
 只有一個 stdio listener 的 runner 使用
-`graft start runner.yml --stdio`。載入外掛、處理說明與版本參數之前，stdout 就已保留給協定位元組。日誌、Console 輸出（包括 worker 輸出）、說明、版本與錯誤都寫入 stderr；此模式不提供互動精靈與補全輸出。runner 會拒絕不相符的 listener 設定。stdin
+`graft start runner.yml --stdio`，[MCP 伺服器](../mcp-server/overview/)使用
+`graft start --stdio`。載入外掛、處理說明與版本參數之前，stdout 就已保留給協定位元組。日誌、Console 輸出（包括 worker 輸出）、說明、版本與錯誤都寫入 stderr；此模式不提供互動精靈與補全輸出。runner 會拒絕不相符的 listener 設定。stdin
 EOF 後，runner 停止執行單元，確認結束後退出行程；啟動或清理失敗時回傳非零結束碼。
 
 ### 選項
@@ -119,8 +121,10 @@ secrets 或 Kubernetes Secret 卷冊。
 CLI 驅動重載的方式：
 
 1. 它以模組檔案過濾器呼叫 `hmr.watch`。
-2. 每次嘗試以 `Reloaded` 或 `Skipped` 結束後，它會呼叫
-   `loader.retry`，以重試失敗的項目並重新整理 `!env` 值。
+2. 每次嘗試以 `Reloaded`、`RolledBack` 或 `Skipped` 結束後，它會呼叫
+   `loader.retry`，以重試失敗的項目並重新整理 `!env` 值。`RolledBack`
+   會為每個啟動失敗或逾時的外掛記錄一則警告，帶有 `graft.fork` 和
+   `graft.plugin`；啟動失敗時還帶有其 `Cause`。
 3. 重載和重試的失敗會連同完整的 `Cause` 一併記錄，監看繼續進行。
 
 YAML 和模組監看器使用原生檔案系統通知，不做輪詢。YAML 監看器安裝後會重新讀取檔案，以捕捉安裝期間的變更。任一監看器的後端失敗時，只記錄錯誤，不會重新安裝該監看器。
@@ -157,6 +161,9 @@ CLI 為項目的 `intercept` 設定登記了兩個 Reference，對該項目及�
 可接受的值和範例列在[設定檔頁面](../config-file/#設定檔中的-intercept)。無效的值會讓該項目以
 `InvalidIntercept` 失敗。CLI 不會登記其他 Reference。
 
+共用 HTTP 監聽器使用一般的 `graft start` 載入 [HTTP 伺服器](../http/)，不需要
+`--stdio`。
+
 ## graft create
 
 ```sh
@@ -191,11 +198,11 @@ graft create [directory] [options]
 
 ### 範本
 
-| 範本      | 用途                                                     | `package.json` 與 `graft.yml` 以外的檔案                                                                                           |
-| --------- | -------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| `app`     | 應用程式。`graft.yml` 載入範例外掛。                     | `src/hello.ts`、`tsconfig.json`、`README.md`、`.vscode/extensions.json`、`.gitignore`                                              |
-| `plugin`  | 要[發布](../plugins/#發布外掛)的外掛套件。               | `src/index.ts`、`test/index.test.ts`、`tsconfig.json`、`tsconfig.build.json`、`README.md`、`.vscode/extensions.json`、`.gitignore` |
-| `minimal` | 只有設定檔，除了 `--plugin` 加入的項目之外沒有其他項目。 | `.gitignore`                                                                                                                       |
+| 範本      | 用途                                                                              | `package.json` 與 `graft.yml` 以外的檔案                                                                                           |
+| --------- | --------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `app`     | 應用程式。`graft.yml` 載入範例外掛：`hello`，以及使用 `greeter` 服務的 `ticker`。 | `src/hello.ts`、`src/greeter.ts`、`src/ticker.ts`、`tsconfig.json`、`README.md`、`.vscode/extensions.json`、`.gitignore`           |
+| `plugin`  | 要[發布](../plugins/#發布外掛)的外掛套件。                                        | `src/index.ts`、`test/index.test.ts`、`tsconfig.json`、`tsconfig.build.json`、`README.md`、`.vscode/extensions.json`、`.gitignore` |
+| `minimal` | 只有設定檔，除了 `--plugin` 加入的項目之外沒有其他項目。                          | `.gitignore`                                                                                                                       |
 
 | 指令碼      | `app`                 | `plugin`                                   | `minimal`             |
 | ----------- | --------------------- | ------------------------------------------ | --------------------- |

@@ -41,7 +41,7 @@ export default async function setup(project) {
 			"host/local",
 			"host/websocket",
 			"host/auth/mtls",
-			"internal/supervisorPlugin",
+			"runner/supervisor",
 			"runner/websocket",
 			"runner/auth/mtls",
 			"host/unix",

@@ -60,13 +60,14 @@ See [Loader API](../loader-api/).
 
 ## Hot reload
 
-| Name / result                   | Meaning                                                                             |
-| ------------------------------- | ----------------------------------------------------------------------------------- |
-| `HmrError`                      | A module did not import, or did not export a plugin. `cause` is the original error. |
-| `Skipped` / `restart-required`  | A native-loading capability or a symlink target change needs a restart.             |
-| `Skipped` / `ambiguous-exports` | Entries that shared a Plugin object now export different ones.                      |
-| `Skipped` / `identity-conflict` | The replacement identities do not fit the runtime's aliases.                        |
-| `Failed`                        | A reload failed. The value holds the full `Cause`; old plugins keep running.        |
+| Name / result                   | Meaning                                                                                                          |
+| ------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `HmrError`                      | A module did not import, or did not export a plugin. `cause` is the original error.                              |
+| `Skipped` / `restart-required`  | A native-loading capability or a symlink target change needs a restart.                                          |
+| `Skipped` / `ambiguous-exports` | Entries that shared a Plugin object now export different ones.                                                   |
+| `Skipped` / `identity-conflict` | The replacement identities do not fit the runtime's aliases.                                                     |
+| `RolledBack`                    | A reloaded plugin failed to start or timed out. The old plugins run again; a `Failed` failure keeps its `Cause`. |
+| `Failed`                        | A reload failed. The value holds the full `Cause`; old plugins keep running.                                     |
 
 See [Hot reload](../hot-reload/#when-a-reload-does-not-apply).
 

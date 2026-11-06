@@ -29,7 +29,7 @@ const Tokens = Schema.fromJsonString(
 	),
 )
 export default Plugin.make({
-	name: "remote-bearer-authenticator",
+	name: "@graftland/plugin-remote/runner/auth/bearer",
 	config: Config,
 	inject: [FileSystem.FileSystem, Path.Path, Digest.Digest],
 	apply: Effect.fnUntraced(function* (config) {

@@ -58,7 +58,7 @@ function fixture(files, run) {
 }
 
 it("keeps every published entry's signature publicly nameable", () => {
-	assert.lengthOf(publicPackages(root), 7)
+	assert.lengthOf(publicPackages(root), 11)
 	assert.deepEqual(checkWorkspace(root), [])
 })
 
@@ -190,5 +190,26 @@ it("skips artifact directories without hiding invalid package manifests", () => 
 		assert.throws(() => publicPackages(directory), SyntaxError)
 	} finally {
 		rmSync(directory, { recursive: true, force: true })
+	}
+})
+
+it("keeps shared Graft runtime packages as peers with development copies", () => {
+	for (const { manifest } of publicPackages(root)) {
+		assert.isString(manifest.engines?.node, `${manifest.name}: Node engine`)
+		for (const name of [
+			"@graftland/graft",
+			"@graftland/loader",
+			"@graftland/cli",
+		]) {
+			assert.isUndefined(
+				manifest.dependencies?.[name],
+				`${manifest.name}: ${name} must be a peer`,
+			)
+			if (manifest.peerDependencies?.[name] !== undefined)
+				assert.isString(
+					manifest.devDependencies?.[name],
+					`${manifest.name}: ${name} development copy`,
+				)
+		}
 	}
 })

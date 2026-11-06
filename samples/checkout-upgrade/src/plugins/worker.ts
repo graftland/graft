@@ -11,7 +11,7 @@ import { OrderQueue } from "../Orders.ts"
  * withdraw `Checkout` and everything behind it.
  */
 export default Plugin.make({
-	name: "order-worker",
+	name: "@graftland/sample-checkout-upgrade/plugins/worker",
 	inject: [Checkout, OrderQueue],
 	apply: Effect.fn("order-worker.apply")(function* () {
 		const checkout = yield* Checkout

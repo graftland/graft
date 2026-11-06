@@ -26,7 +26,7 @@ export class Time extends Context.Service<
 
 ```ts
 const time = Plugin.make({
-	name: "time",
+	name: "@acme/graft-plugin-time",
 	apply: () => Graft.provide(Time, { now: Clock.currentTimeMillis }),
 })
 ```
@@ -42,7 +42,7 @@ const time = Plugin.make({
 
 ```ts
 const uptime = Plugin.make({
-	name: "uptime",
+	name: "app/uptime",
 	inject: [Time],
 	apply: () =>
 		Effect.gen(function* () {

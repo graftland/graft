@@ -44,7 +44,7 @@ declare const openPool: (
 }>
 
 export default Plugin.make({
-	name: "postgres",
+	name: "graft-plugin-postgres",
 	config: Config,
 	apply: ({ url, poolSize }) =>
 		Effect.gen(function* () {
@@ -156,13 +156,35 @@ export default Plugin.make({
 
 - 應用程式從自己的目錄解析[外掛名稱](../../config-file/#外掛名稱)，因此它必須相依於你的套件，例如透過
   `graft add` 加入。
-- 短名稱會先照原樣嘗試，只有在某個候選不存在時，Graft 才會改試下一個。如果應用程式能解析到名為
-  `postgres` 的套件（例如你的驅動程式），`name: postgres` 和
-  `name: postgres/migrations` 都會以 `ModuleInvalid` 失敗。
+- 短名稱會先照原樣嘗試。該模組不存在，或能匯入但沒有匯出外掛（例如 Node 的
+  `http` 或你的 `postgres`
+  驅動程式）時，Graft 才會改試命名慣例。其他匯入失敗都會以 `ModuleInvalid`
+  終止解析。
 - README 中的 `graft.yml` 範例請寫完整的套件名稱，它不會解析到別的套件。
 - `graft add --plugin` 會保留以 `@` 或 `graft-plugin-`
-  開頭的名稱，其他名稱則改寫成 `@graftland/plugin-<name>`。帶有 `./cli`
-  匯出的套件，名稱必須是這兩種形式之一。
+  開頭的名稱；其他名稱會改寫成 registry 中存在的那一個：`@graftland/plugin-<name>`
+  或 `graft-plugin-<name>`，兩者都存在時失敗。帶有 `./cli`
+  匯出的套件，名稱必須是這些形式之一。
+
+## 為外掛命名
+
+外掛的 `name` 用於在日誌、span 和 fork 樹中標示它。按 Effect 的
+`deterministicKeys` 診斷產生服務鍵的方式建構它，名稱就能說明外掛由哪個模組定義：
+
+| 部分 | 取值                                                                           |
+| ---- | ------------------------------------------------------------------------------ |
+| 1    | 套件名稱。                                                                     |
+| 2    | 模組在 `src/` 下的路徑，不含副檔名，省略 `index`。                             |
+| 3    | 持有外掛的繫結名稱。預設匯出、名為 `plugin` 的匯出或與模組同名的匯出省略此段。 |
+
+| 外掛                                    | `name`                                    |
+| --------------------------------------- | ----------------------------------------- |
+| `src/index.ts` 的預設匯出               | `graft-plugin-postgres`                   |
+| `src/migrations.ts` 的預設匯出          | `graft-plugin-postgres/migrations`        |
+| `src/migrations.ts` 中的 `const warmup` | `graft-plugin-postgres/migrations/warmup` |
+
+Graft 不檢查名稱。應用程式用自己 `package.json`
+中的套件名稱，以同樣方式為自己的外掛命名。
 
 ## 編輯器自動補全
 

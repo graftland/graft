@@ -49,6 +49,7 @@ import { Supervisor } from "../src/internal/Supervisor"
 import bearer from "../src/runner/auth/bearer"
 import jwt from "../src/runner/auth/jwt"
 import { default as none } from "../src/runner/auth/none"
+import { consumer as listenerConsumer } from "../src/runner/consumer"
 import { Config as StdioConfig } from "../src/runner/stdio"
 import unix from "../src/runner/unix"
 import { default as websocket } from "../src/runner/websocket"
@@ -96,7 +97,7 @@ const listen = Effect.fnUntraced(function* () {
 		url: `ws://127.0.0.1:${port}`,
 	})
 	yield* fork.await
-	const consumer = yield* Graft.plugin(Assembly.listenerConsumer)
+	const consumer = yield* Graft.plugin(listenerConsumer())
 	yield* consumer.await
 	return port
 })
@@ -279,7 +280,7 @@ describe("runner authentication", () => {
 						path,
 					})
 					yield* listener.await
-					const consumer = yield* Graft.plugin(Assembly.listenerConsumer)
+					const consumer = yield* Graft.plugin(listenerConsumer())
 					yield* consumer.await
 					const host = yield* Graft.plugin(hostUnix, { path })
 					yield* host.await
@@ -470,7 +471,7 @@ describe("runner authentication", () => {
 						path: directory + "/runner.sock",
 					})
 					yield* listener.await
-					const consumer = yield* Graft.plugin(Assembly.listenerConsumer)
+					const consumer = yield* Graft.plugin(listenerConsumer())
 					yield* consumer.await
 					const transportPlugin = yield* Graft.plugin(hostUnix, {
 						path: directory + "/runner.sock",

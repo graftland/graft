@@ -1,5 +1,5 @@
 /**
- * The project templates. Each one copies a directory of static files and
+ * The project templates. Each one copies a directory of files and
  * generates package.json and graft.yml, the files that name the project, its
  * versions and its plugins. A template from elsewhere, such as a registry,
  * only needs another way to provide the static directory.
@@ -22,6 +22,7 @@ export interface Context {
 	readonly packageManager: string | undefined
 	readonly versions: {
 		readonly graft: string
+		readonly loader: string
 		readonly cli: string
 		readonly effect: string
 	}
@@ -33,7 +34,10 @@ export interface Template {
 	readonly description: string
 	/** The package name used when none is given. */
 	readonly defaultName: (directory: string) => string
-	/** The directory of files copied as they are; `_gitignore` becomes `.gitignore`. */
+	/**
+	 * The directory of files to copy. `_gitignore` becomes `.gitignore`, and
+	 * `{{package}}` in a text file becomes the package name.
+	 */
 	readonly files: Effect.Effect<string, never, Path.Path>
 	readonly manifest: (context: Context) => Readonly<Record<string, unknown>>
 	readonly config: (context: Context) => string
@@ -80,6 +84,7 @@ const compatible = (prefix: "^" | "~", version: string) =>
 
 const dependencies = (context: Context) => ({
 	"@graftland/graft": context.versions.graft,
+	"@graftland/loader": context.versions.loader,
 	"@graftland/cli": context.versions.cli,
 	effect: context.versions.effect,
 	...pluginDependencies(context),
@@ -95,7 +100,8 @@ const identity = (context: Context) => ({
 
 const app: Template = {
 	name: "app",
-	description: "An application with an example plugin in TypeScript",
+	description:
+		"An application with example plugins and a service in TypeScript",
 	defaultName: (directory) => directory,
 	files: bundled("app"),
 	manifest: (context) => ({
@@ -117,6 +123,14 @@ const app: Template = {
   name: ./src/hello.ts
   config:
     message: Hello from Graft!
+- id: greeter
+  name: ./src/greeter.ts
+  config:
+    greeting: Hello
+- id: ticker
+  name: ./src/ticker.ts
+  config:
+    name: Graft
 ` +
 		pluginEntries(context),
 }

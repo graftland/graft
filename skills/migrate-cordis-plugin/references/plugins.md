@@ -28,7 +28,7 @@ import { Event, Plugin } from "@graftland/graft"
 import { Database, Message } from "./tokens.ts"
 
 export default Plugin.make({
-	name: "greeter",
+	name: "app/greeter",
 	config: Schema.Struct({ greeting: Schema.String }),
 	inject: [Database],
 	apply: ({ greeting }) =>
@@ -85,7 +85,7 @@ apply: () =>
 		// runs whenever Cache exists, stops when it goes away
 		yield* Graft.plugin(
 			Plugin.make({
-				name: "greeter/cache-warmup",
+				name: "app/greeter/cacheWarmup",
 				inject: [Cache],
 				apply: () => Effect.flatMap(Cache, (cache) => cache.warm),
 			}),
@@ -150,7 +150,7 @@ when its `retry` schedule fires:
 
 ```ts
 Plugin.make({
-	name: "client",
+	name: "app/client",
 	retry: Schedule.exponential("1 second"),
 	apply: () => connect,
 })

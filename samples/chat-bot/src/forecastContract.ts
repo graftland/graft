@@ -29,7 +29,7 @@ export const config = Schema.Struct({
 	units: Schema.Literals(["celsius", "fahrenheit"]),
 })
 export const contract = Contract.make({
-	name: "forecasts",
+	name: "@graftland/sample-chat-bot/forecastContract/contract",
 	config,
 	module: new URL("./plugins/forecasts.js", import.meta.url).href,
 	provides: [forecasts],

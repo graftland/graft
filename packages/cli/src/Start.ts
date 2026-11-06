@@ -153,7 +153,7 @@ export const run = (
 			const { reload: reloadDir } = yield* EnvDir
 			const { envFile, envDir } = options
 			const reloader = Plugin.make({
-				name: "reloader",
+				name: "@graftland/cli/Start/reloader",
 				inject: [Loader.Loader, FileSystem.FileSystem, Path.Path],
 				apply: () =>
 					Effect.gen(function* () {

@@ -5,7 +5,7 @@ import { Graft, Plugin } from "@graftland/graft"
 import { Note, NotesFile, NoteStore } from "./services.ts"
 
 export const storage = Plugin.make({
-	name: "storage",
+	name: "@graftland/sample-saas-tenants/storage",
 	config: Schema.Struct({ file: Schema.String }),
 	inject: [FileSystem.FileSystem],
 	apply: Effect.fn("storage.apply")(function* ({ file }) {

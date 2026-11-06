@@ -53,7 +53,7 @@ const greeter = Contract.service(Greeter, api, {
 })
 
 export const contract = Contract.make({
-	name: "greeter",
+	name: "app/greeter",
 	config: Schema.Struct({ greeting: Schema.String }),
 	module: new URL("./greeter.js", import.meta.url).href,
 	provides: [greeter],

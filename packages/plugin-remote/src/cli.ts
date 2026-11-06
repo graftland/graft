@@ -53,7 +53,7 @@ const command = Command.make("remote").pipe(
 	Command.provide(platform),
 )
 export default Plugin.make({
-	name: "remote-commands",
+	name: "@graftland/plugin-remote/cli",
 	inject: [Commands],
 	apply: () =>
 		Effect.flatMap(Commands, (commands) => commands.register(command)),

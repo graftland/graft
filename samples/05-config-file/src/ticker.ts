@@ -4,7 +4,7 @@ import { Plugin } from "@graftland/graft"
 
 // Logs a tick every few seconds, until its entry is removed or disabled.
 export default Plugin.make({
-	name: "ticker",
+	name: "@graftland/sample-config-file/ticker",
 	config: Schema.Struct({
 		seconds: Schema.Int.check(Schema.isGreaterThan(0)),
 	}),

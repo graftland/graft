@@ -37,7 +37,7 @@ const greeter = Contract.service(Greeter, api, {
 })
 export const config = Schema.Struct({ greeting: Schema.String })
 export const contract = Contract.make({
-	name: "greeter",
+	name: "@graftland/sample-remote/contract",
 	config,
 	module: new URL("./greeter.js", import.meta.url).href,
 	provides: [greeter],

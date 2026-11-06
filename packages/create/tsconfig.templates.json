@@ -1,10 +1,11 @@
 {
 	// Checks the template sources; each template's own tsconfig.json is for the generated project.
+	// The app's service key holds the package placeholder, so test/e2e.test.ts checks it once generated.
 	"extends": "../../tsconfig.base.json",
 	"compilerOptions": {
 		"outDir": ".cache/templates-types",
 		"tsBuildInfoFile": ".cache/templates.tsbuildinfo",
 		"allowImportingTsExtensions": true
 	},
-	"include": ["templates/*/src", "templates/*/test"]
+	"include": ["templates/plugin/src", "templates/plugin/test"]
 }

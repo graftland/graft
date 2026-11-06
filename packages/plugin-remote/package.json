@@ -131,23 +131,26 @@
 		"test": "vitest run"
 	},
 	"peerDependencies": {
-		"effect": "4.1.*"
+		"effect": "4.1.*",
+		"@graftland/graft": "workspace:^",
+		"@graftland/loader": "workspace:^",
+		"@graftland/cli": "workspace:^"
 	},
 	"dependencies": {
-		"@graftland/graft": "workspace:*",
 		"@effect/platform-node": "4.1.2",
-		"@graftland/loader": "workspace:*",
 		"pkijs": "4.0.1",
 		"asn1js": "4.0.0",
-		"ws": "8.22.1",
-		"@graftland/cli": "workspace:*"
+		"ws": "8.22.1"
 	},
 	"devDependencies": {
 		"@effect/vitest": "4.1.2",
 		"@graftland/hmr": "workspace:*",
 		"@types/ws": "8.18.2",
 		"effect": "4.1.2",
-		"vitest": "5.1.0"
+		"vitest": "5.1.0",
+		"@graftland/graft": "workspace:*",
+		"@graftland/loader": "workspace:*",
+		"@graftland/cli": "workspace:*"
 	},
 	"publishConfig": {
 		"exports": {
@@ -182,5 +185,8 @@
 			"./internal/watchdog": "./dist/internal/watchdogMain.js",
 			"./internal/worker": "./dist/internal/workerMain.js"
 		}
+	},
+	"engines": {
+		"node": ">=22.19.0"
 	}
 }

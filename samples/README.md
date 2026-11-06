@@ -27,13 +27,14 @@ These samples join the basics into larger programs. Each README starts with a
 problem that you would otherwise solve by hand. Then it shows what Graft does
 about it.
 
-| Sample                               | Scenario                                                               | What it shows                                                                                                  |
-| ------------------------------------ | ---------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
-| [chat-bot](chat-bot)                 | A chat bot whose commands and filters are plugins.                     | Event handlers owned by plugins, dependency gating, update in place, a weather integration in a child process. |
-| [checkout-upgrade](checkout-upgrade) | An order worker while pricing is upgraded and the database fails over. | `Graft.replace` and reconfiguration under load, ordered teardown, draining work in flight.                     |
-| [http-gateway](http-gateway)         | A real HTTP server whose routes come from `graft.yml`.                 | `graft start --watch`, config edits and hot reload while serving, `Pending` routes, the live fork tree.        |
-| [saas-tenants](saas-tenants)         | One set of plugins serving several tenants.                            | `isolate` and `intercept` per tenant, a shared service with per-tenant settings, onboarding and offboarding.   |
-| [market-feed](market-feed)           | A market data pipeline behind an unreliable exchange.                  | Supervised background tasks, retry schedules, `Pending` and `Failed` states, optional dependencies.            |
+| Sample                               | Scenario                                                               | What it shows                                                                                                     |
+| ------------------------------------ | ---------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| [chat-bot](chat-bot)                 | A chat bot whose commands and filters are plugins.                     | Event handlers owned by plugins, dependency gating, update in place, a weather integration in a child process.    |
+| [checkout-upgrade](checkout-upgrade) | An order worker while pricing is upgraded and the database fails over. | `Graft.replace` and reconfiguration under load, ordered teardown, draining work in flight.                        |
+| [http-gateway](http-gateway)         | An HTTP gateway with a shared todo store.                              | HttpApi contracts, typed clients, live OpenAPI and Scalar UI; watch edits, Pending routes and the live fork tree. |
+| [mcp-tools](mcp-tools)               | An MCP server whose tools are plugins.                                 | `plugin-mcp-server`, tools that reload while a client is connected, rollback of a broken tool.                    |
+| [saas-tenants](saas-tenants)         | One set of plugins serving several tenants.                            | `isolate` and `intercept` per tenant, a shared service with per-tenant settings, onboarding and offboarding.      |
+| [market-feed](market-feed)           | A market data pipeline behind an unreliable exchange.                  | Supervised background tasks, retry schedules, `Pending` and `Failed` states, optional dependencies.               |
 
 ## Run a sample
 

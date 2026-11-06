@@ -20,7 +20,7 @@ Graft 記錄外掛失敗時會附上完整的 `Cause`，並帶有 `graft.plugin`
 要記錄一直停在 `Pending`
 的 fork，請加入[用 fork 樹診斷](../observability/#用-fork-樹診斷)中的外掛。
 [`http-gateway`](https://github.com/graftland/graft/tree/main/samples/http-gateway)
-範例在 `GET /_graft` 透過 HTTP 提供這棵樹。
+範例透過 [HTTP 伺服器](../../http/)掛載 `GET /_graft`，顯示即時外掛樹。
 
 ## 讀取狀態
 
@@ -61,12 +61,13 @@ Graft 記錄外掛失敗時會附上完整的 `Cause`，並帶有 `graft.plugin`
 [Graft 記錄的內容](../observability/#graft-記錄的內容)中。下列來自 `graft start`
 和 loader 的訊息，指出程式碼或設定有問題：
 
-| 訊息                                                 | 含義                                                                                                     |
-| ---------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
-| `Restart required…`                                  | 某個模組變更無法熱重載，舊的外掛繼續執行。請參閱[重載不適用的情況](../../hot-reload/#重載不適用的情況)。 |
-| `Reloading plugin modules failed`                    | 新程式碼無法匯入或未通過檢查，舊的外掛繼續執行；修正程式碼後再儲存一次。                                 |
-| `Waiting for valid configuration in <file>`          | 在 `--watch` 下，第一份 `graft.yml` 無效。請參閱[第一份設定無效](../../cli/#第一份設定無效)。            |
-| `Dropped an edit to "<id>": the file changed it too` | 一次 API 編輯輸給了檔案中的編輯。請參閱[與外部編輯的衝突](../../loader-api/#與外部編輯的衝突)。          |
+| 訊息                                                 | 含義                                                                                                                     |
+| ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `Restart required…`                                  | 某個模組變更無法熱重載，舊的外掛繼續執行。請參閱[重載不適用的情況](../../hot-reload/#重載不適用的情況)。                 |
+| `Reloading plugin modules failed`                    | 新程式碼無法匯入或未通過檢查，舊的外掛繼續執行；修正程式碼後再儲存一次。                                                 |
+| `Kept the previous code: plugin "<name>" …`          | 新程式碼已匯入，但外掛啟動失敗或逾時。舊外掛重新執行。啟動失敗的日誌帶有 cause，逾時沒有 cause；修正程式碼後再儲存一次。 |
+| `Waiting for valid configuration in <file>`          | 在 `--watch` 下，第一份 `graft.yml` 無效。請參閱[第一份設定無效](../../cli/#第一份設定無效)。                            |
+| `Dropped an edit to "<id>": the file changed it too` | 一次 API 編輯輸給了檔案中的編輯。請參閱[與外部編輯的衝突](../../loader-api/#與外部編輯的衝突)。                          |
 
 ## 症狀
 

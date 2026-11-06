@@ -32,13 +32,13 @@ const engine = Effect.fn("pricing.engine")(function* (
 
 /** List prices. */
 export const pricingV1 = Plugin.make({
-	name: "pricing-v1",
+	name: "@graftland/sample-checkout-upgrade/plugins/pricing/pricingV1",
 	apply: () => engine("v1", subtotal),
 })
 
 /** List prices, with 10% off orders of three items or more. */
 export const pricingV2 = Plugin.make({
-	name: "pricing-v2",
+	name: "@graftland/sample-checkout-upgrade/plugins/pricing/pricingV2",
 	apply: () =>
 		engine("v2", (order) => {
 			const total = subtotal(order)

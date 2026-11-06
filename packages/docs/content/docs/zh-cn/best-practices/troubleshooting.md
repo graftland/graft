@@ -19,7 +19,7 @@ Graft 记录插件的失败时会附上完整的 `Cause`，并带有 `graft.plug
 
 要把一直停在 `Pending`
 的 fork 记入日志，请添加[用 fork 树诊断](../observability/#用-fork-树诊断)中的插件。[`http-gateway`](https://github.com/graftland/graft/tree/main/samples/http-gateway)
-示例通过 HTTP 在 `GET /_graft` 提供这棵树。
+示例通过 [HTTP 服务器](../../http/)挂载 `GET /_graft`，显示实时插件树。
 
 ## 读懂状态
 
@@ -59,12 +59,13 @@ Graft 记录插件的失败时会附上完整的 `Cause`，并带有 `graft.plug
 [Graft 记录的日志](../observability/#graft-记录的日志)中。下面这些来自
 `graft start` 和 loader 的消息，指向代码或配置中的问题：
 
-| 消息                                                 | 含义                                                                                                  |
-| ---------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| `Restart required…`                                  | 某个模块变化无法热重载，旧插件继续运行。见[重载未生效的情形](../../hot-reload/#重载未生效的情形)。    |
-| `Reloading plugin modules failed`                    | 新代码导入失败或没有通过检查。旧插件继续运行；修复代码后再保存一次。                                  |
-| `Waiting for valid configuration in <file>`          | 使用 `--watch` 时，首个 `graft.yml` 无效。见[初始配置无效](../../cli/#初始配置无效)。                 |
-| `Dropped an edit to "<id>": the file changed it too` | 一次 API 编辑与文件中的编辑冲突，被放弃了。见[与外部编辑的冲突](../../loader-api/#与外部编辑的冲突)。 |
+| 消息                                                 | 含义                                                                                                                 |
+| ---------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `Restart required…`                                  | 某个模块变化无法热重载，旧插件继续运行。见[重载未生效的情形](../../hot-reload/#重载未生效的情形)。                   |
+| `Reloading plugin modules failed`                    | 新代码导入失败或没有通过检查。旧插件继续运行；修复代码后再保存一次。                                                 |
+| `Kept the previous code: plugin "<name>" …`          | 新代码已导入，但插件启动失败或超时。旧插件重新运行。启动失败的日志带有 cause，超时没有 cause；修复代码后再保存一次。 |
+| `Waiting for valid configuration in <file>`          | 使用 `--watch` 时，首个 `graft.yml` 无效。见[初始配置无效](../../cli/#初始配置无效)。                                |
+| `Dropped an edit to "<id>": the file changed it too` | 一次 API 编辑与文件中的编辑冲突，被放弃了。见[与外部编辑的冲突](../../loader-api/#与外部编辑的冲突)。                |
 
 ## 症状
 

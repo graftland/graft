@@ -15,7 +15,7 @@ import { Graft, Plugin } from "@graftland/graft"
 import { Entry, Loader, ModuleResolver } from "@graftland/loader"
 
 const admin = Plugin.make({
-	name: "admin",
+	name: "app/admin",
 	inject: [Loader.Loader],
 	apply: () =>
 		Effect.gen(function* () {
@@ -26,8 +26,8 @@ const admin = Plugin.make({
 		}),
 })
 
-const cron = Plugin.make({ name: "cron", apply: () => Effect.void })
-const api = Plugin.make({ name: "api", apply: () => Effect.void })
+const cron = Plugin.make({ name: "app/cron", apply: () => Effect.void })
+const api = Plugin.make({ name: "app/api", apply: () => Effect.void })
 const resolver = ModuleResolver.fromRecord({ "./plugins/cron.mjs": cron, api })
 
 const entries = await Effect.runPromise(
@@ -40,7 +40,7 @@ const entries = await Effect.runPromise(
 		yield* fork.await
 		const read = yield* Deferred.make<ReadonlyArray<Entry.Entry>>()
 		const probe = Plugin.make({
-			name: "probe",
+			name: "app/probe",
 			inject: [Loader.Loader],
 			apply: () =>
 				Loader.Loader.pipe(

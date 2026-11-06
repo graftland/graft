@@ -43,7 +43,7 @@ declare const openPool: (
 }>
 
 export default Plugin.make({
-	name: "postgres",
+	name: "graft-plugin-postgres",
 	config: Config,
 	apply: ({ url, poolSize }) =>
 		Effect.gen(function* () {
@@ -155,13 +155,34 @@ export default Plugin.make({
 
 - 应用从自己的目录解析[插件名称](../../config-file/#插件名称)，因此应用必须依赖你的包，例如通过
   `graft add` 添加。
-- 短名称先按原样尝试，只有某个候选不存在时，Graft 才会尝试下一个。如果应用能解析到名为
-  `postgres` 的包（比如你的驱动），`name: postgres` 和
-  `name: postgres/migrations` 都会以 `ModuleInvalid` 失败。
+- 短名称先按原样尝试。该模块不存在，或能导入但没有导出插件（例如 Node 的 `http`
+  或你的 `postgres` 驱动）时，Graft 才会改试命名约定。其他导入失败都会以
+  `ModuleInvalid` 终止解析。
 - README 中的 `graft.yml` 示例请写完整包名，它不会解析到别的包。
 - `graft add --plugin` 会保留以 `@` 或 `graft-plugin-`
-  开头的名称，其他名称则变成 `@graftland/plugin-<name>`。带 `./cli`
-  导出的包需要使用这两种形式之一。
+  开头的名称；其他名称会变成 registry 中存在的那一个：`@graftland/plugin-<name>`
+  或 `graft-plugin-<name>`，两者都存在时失败。带 `./cli`
+  导出的包需要使用这些形式之一。
+
+## 为插件命名
+
+插件的 `name` 用于在日志、span 和 fork 树中标识它。按 Effect 的
+`deterministicKeys` 诊断生成服务键的方式构造它，名称就能说明插件由哪个模块定义：
+
+| 部分 | 取值                                                                         |
+| ---- | ---------------------------------------------------------------------------- |
+| 1    | 包名。                                                                       |
+| 2    | 模块在 `src/` 下的路径，不含扩展名，省略 `index`。                           |
+| 3    | 持有插件的绑定名。默认导出、名为 `plugin` 的导出或与模块同名的导出省略此段。 |
+
+| 插件                                    | `name`                                    |
+| --------------------------------------- | ----------------------------------------- |
+| `src/index.ts` 的默认导出               | `graft-plugin-postgres`                   |
+| `src/migrations.ts` 的默认导出          | `graft-plugin-postgres/migrations`        |
+| `src/migrations.ts` 中的 `const warmup` | `graft-plugin-postgres/migrations/warmup` |
+
+Graft 不检查名称。应用用自己 `package.json`
+中的包名，以同样方式为自己的插件命名。
 
 ## 编辑器补全
 

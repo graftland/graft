@@ -87,7 +87,18 @@ export default defineConfig({
 				{
 					label: "Applications",
 					translations: { "zh-CN": "应用", "zh-TW": "應用" },
-					items: ["config-file", "cli", "hot-reload", "embedding"],
+					items: [
+						"config-file",
+						"cli",
+						"hot-reload",
+						"embedding",
+						"http",
+						"http-api",
+						"http-authorization",
+						"mcp-server/overview",
+						"mcp-server/contributing",
+						"mcp-server/extending",
+					],
 				},
 				{
 					label: "Remote",

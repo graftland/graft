@@ -34,20 +34,25 @@ services in its environment.
    publishes the replacements. Affected forks restart in the usual
    [withdrawal order](../services/#how-withdrawal-works), and shared
    dependencies stay consistent across the batch.
-4. **Or keep the old code.** If a candidate fails, the old plugins keep running
-   and the full cause is logged.
+4. **Or keep the old code.** If a candidate fails to import or pass the checks,
+   nothing is replaced. If a replaced plugin fails to start, or has not started
+   after `activationTimeout` (30 seconds by default), `replace`
+   [rolls back](../replace/#rollback) and the old plugins run again. Failures
+   are logged with their full cause; a timeout warning names the plugin that did
+   not start.
 
 ### If a candidate fails
 
 | Situation                     | Behavior                                                                                                                            |
 | ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
 | Import or check fails         | Old plugins keep running. HMR retains the changed modules and failed observations for the next change.                              |
+| A new plugin fails to start   | The result is `RolledBack`; the old plugins run again. HMR retains the changed modules for the next change.                         |
 | A plugin entry was deleted    | It is dropped from the reload. Its existing forks keep running until unloaded.                                                      |
 | Events arrive during a reload | They remain available for the next pass.                                                                                            |
 | Incomplete write              | The reload may fail. Graft logs the full cause and keeps watching; a later content change can recover, even without a native event. |
 
-After a reload attempt returns `Reloaded` or `Skipped`, the CLI calls
-`loader.retry`. This retries failed entries and refreshes `!env` values
+After a reload attempt returns `Reloaded`, `RolledBack` or `Skipped`, the CLI
+calls `loader.retry`. This retries failed entries and refreshes `!env` values
 throughout the tree, so fixing a broken plugin can start it without a process
 restart.
 

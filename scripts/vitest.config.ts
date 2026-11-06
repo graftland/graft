@@ -3,7 +3,7 @@ import { defineProject } from "vitest/config"
 export default defineProject({
 	test: {
 		name: "@graftland/workspace",
-		include: ["public-api.test.mjs"],
-		globalSetup: ["./public-api-setup.mjs"],
+		include: ["public-api.test.mjs", "isolated-home.test.mjs"],
+		globalSetup: ["./isolated-home.mjs", "./public-api-setup.mjs"],
 	},
 })

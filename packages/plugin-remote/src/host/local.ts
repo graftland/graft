@@ -32,7 +32,7 @@ const make = Effect.map(ChildProcessSpawner.ChildProcessSpawner, (spawner) =>
 	}),
 )
 const plugin = Plugin.service(LocalTransport, make, {
-	name: "remote-local-transport",
+	name: "@graftland/plugin-remote/host/local",
 	inject: [ChildProcessSpawner.ChildProcessSpawner],
 })
 

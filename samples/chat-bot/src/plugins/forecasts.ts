@@ -17,7 +17,7 @@ const table: Record<
 
 /** Publishes `Forecasts`. Every plugin that injects it waits for this one. */
 export default Plugin.make({
-	name: "forecasts",
+	name: "@graftland/sample-chat-bot/plugins/forecasts",
 	config,
 	apply: Effect.fn("forecasts.apply")(function* ({ units }) {
 		yield* Effect.acquireRelease(

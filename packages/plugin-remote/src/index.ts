@@ -15,9 +15,9 @@ import { ModuleResolver } from "@graftland/loader"
 
 import * as Contract from "./Contract"
 import { MissingInstance, RemoteError, RemoteWithdrawn } from "./Errors"
+import * as Credential from "./host/credentials"
+import { launch } from "./host/index"
 import { CapabilityFailed } from "./internal/assembly"
-import * as Credential from "./internal/credentials"
-import { launch } from "./internal/entry"
 import * as Configuration from "./internal/entryConfig"
 import { publicError } from "./internal/execution"
 import { follow } from "./internal/follow"
@@ -32,7 +32,7 @@ export type {
 	Authentication,
 	Token as CredentialToken,
 	Source as CredentialSource,
-} from "./internal/credentials"
+} from "./host/credentials"
 
 export interface Options<
 	D extends ReadonlyArray<Plugin.Dependency> = readonly [],
@@ -129,4 +129,4 @@ export const plugin = <
 				)
 			}).pipe(Effect.mapError((error) => publicError(contract.error, error))),
 	})
-export { host as default } from "./internal/entry"
+export { default } from "./host/index"

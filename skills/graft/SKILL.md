@@ -94,7 +94,10 @@ importing it performs no I/O.
 Inside `apply`, give each kind of work to its owner: `Effect.acquireRelease` for
 resources, `Plugin.fork` for background work, `Graft.provide` for services,
 `Event.on` for handlers, `Graft.plugin` for children. Export the plugin as the
-module's default export. Done when it typechecks with no `any` or assertion.
+module's default export. Name it like an Effect service key: package, module
+path under `src/` without `index`, then the binding unless it is the default
+export (`@acme/graft-plugin-db`, `@acme/graft-plugin-db/migrations/warmup`).
+Done when it typechecks with no `any` or assertion.
 
 ### 4. Test
 

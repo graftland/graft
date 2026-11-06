@@ -7,7 +7,7 @@ import { notes } from "./notes.ts"
 import { storage } from "./storage.ts"
 
 export const tenant = Plugin.make({
-	name: "tenant",
+	name: "@graftland/sample-saas-tenants/tenant",
 	config: Schema.Struct({ file: Schema.String }),
 	apply: Effect.fn("tenant.apply")(function* (config) {
 		const consumer = yield* Graft.plugin(notes)

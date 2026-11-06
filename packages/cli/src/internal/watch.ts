@@ -1,5 +1,6 @@
 import { Array, Cause, Effect, Exit, Stream, String } from "effect"
 
+import type { Graft } from "@graftland/graft"
 import type * as Hmr from "@graftland/hmr"
 
 import { observeShutdown } from "./observeShutdown"
@@ -11,16 +12,40 @@ export const isModule = (path: string) =>
 	!Array.contains(String.split(/[/\\]/)(path), "node_modules") &&
 	Array.some(moduleExtensions, (extension) => String.endsWith(extension)(path))
 
+/** One warning per failed or timed-out plugin; failures retain their full cause. */
+const rolledBack = (failures: ReadonlyArray<Graft.ReplacementFailure>) =>
+	Effect.forEach(
+		failures,
+		(failure) =>
+			(failure._tag === "Failed"
+				? Effect.logWarning(
+						`Kept the previous code: plugin "${failure.plugin}" failed to start`,
+						failure.cause,
+					)
+				: Effect.logWarning(
+						`Kept the previous code: plugin "${failure.plugin}" did not start in time`,
+					)
+			).pipe(
+				Effect.annotateLogs({
+					"graft.fork": failure.fork,
+					"graft.plugin": failure.plugin,
+				}),
+			),
+		{ discard: true },
+	)
+
 const describe = (result: Hmr.ReloadResult) =>
 	result._tag === "Reloaded"
 		? Effect.logInfo(`Reloaded ${result.entries.length} plugin module(s)`)
-		: Effect.logWarning(
-				result.reason === "ambiguous-exports"
-					? `Restart required: shared plugin exports diverged in ${Array.join(result.modules, ", ")}`
-					: result.reason === "identity-conflict"
-						? `Restart required: plugin replacement identities conflict in ${Array.join(result.modules, ", ")}`
-						: `Restart required to pick up ${Array.join(result.modules, ", ")}`,
-			)
+		: result._tag === "RolledBack"
+			? rolledBack(result.failures)
+			: Effect.logWarning(
+					result.reason === "ambiguous-exports"
+						? `Restart required: shared plugin exports diverged in ${Array.join(result.modules, ", ")}`
+						: result.reason === "identity-conflict"
+							? `Restart required: plugin replacement identities conflict in ${Array.join(result.modules, ", ")}`
+							: `Restart required to pick up ${Array.join(result.modules, ", ")}`,
+				)
 
 /** Owns the HMR stream and retries failed loader entries after each reload. */
 export const watchModules = <E, R>(

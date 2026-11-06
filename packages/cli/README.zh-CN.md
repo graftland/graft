@@ -7,7 +7,7 @@
 `graft` 命令：`start`、`create`、`add` 和 `remove`。
 
 ```sh
-npm install @graftland/cli effect
+npm install @graftland/cli @graftland/graft @graftland/loader effect
 ```
 
 用 `npm create @graftland@latest my-app` 创建项目，它运行的就是同一个 `create`

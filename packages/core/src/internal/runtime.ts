@@ -72,6 +72,8 @@ export interface ActiveResolution {
 
 export interface Spec {
 	readonly plugin: Plugin
+	/** The plugin the fork was loaded with, before aliases; a rollback resolves it again. */
+	readonly requested: Plugin
 	readonly input: unknown
 	readonly revision: number
 }
@@ -120,6 +122,7 @@ export interface Handler<
 	out E = any,
 > {
 	readonly realm: string
+	readonly order: number
 	readonly global: boolean
 	readonly once: boolean
 	readonly context: Context.Context<never>

@@ -39,7 +39,7 @@ const heard = await Effect.runPromise(
 	Effect.gen(function* () {
 		const texts = yield* Ref.make<ReadonlyArray<string>>([])
 		const listener = Plugin.make({
-			name: "listener",
+			name: "app/listener",
 			apply: () =>
 				Event.on(Message, (text) => Ref.update(texts, (all) => [...all, text])),
 		})
@@ -56,10 +56,11 @@ heard // => ["Hello"]
 
 ### 選項
 
-| 選項      | 作用                                       |
-| --------- | ------------------------------------------ |
-| `prepend` | 排在先前註冊的處理函式前面執行。           |
-| `global`  | 接收來自所有領域的事件，並忽略派發過濾器。 |
+| 選項      | 作用                                                                                                                   |
+| --------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `order`   | 數字越小越先執行、越在外層；預設為 `0`。相同順序依註冊先後執行，`prepend` 優先。依賴相對順序的處理函式應使用不同的值。 |
+| `prepend` | 排在先前註冊的處理函式前面執行。                                                                                       |
+| `global`  | 接收來自所有領域的事件，並忽略派發過濾器。                                                                             |
 
 ### 處理函式的 context
 
@@ -82,12 +83,13 @@ heard // => ["Hello"]
 
 ## 派發事件
 
-| 函式              | 呼叫處理函式的方式 | 結果                                            |
-| ----------------- | ------------------ | ----------------------------------------------- |
-| `Event.emit`      | 依序呼叫           | 遇到第一個失敗就停止。                          |
-| `Event.parallel`  | 同時呼叫           | 收集所有結果，將所有失敗合併到一個 `Cause` 中。 |
-| `Event.bail`      | 依序呼叫           | 回傳處理函式給出的第一個 `Some`。               |
-| `Event.waterfall` | 依中介軟體鏈呼叫   | 回傳整條鏈的輸出。                              |
+| 函式              | 呼叫處理函式的方式 | 結果                                                          |
+| ----------------- | ------------------ | ------------------------------------------------------------- |
+| `Event.emit`      | 依序呼叫           | 遇到第一個失敗就停止。                                        |
+| `Event.parallel`  | 同時呼叫           | 收集所有結果，將所有失敗合併到一個 `Cause` 中。               |
+| `Event.settle`    | 同時呼叫           | 每個已執行處理函式的 `Exit`；某個處理函式失敗不會讓派發失敗。 |
+| `Event.bail`      | 依序呼叫           | 回傳處理函式給出的第一個 `Some`。                             |
+| `Event.waterfall` | 依中介軟體鏈呼叫   | 回傳整條鏈的輸出。                                            |
 
 ```ts import.meta.vitest name="events: dispatch an event"
 import { Effect, Option } from "effect"
@@ -111,7 +113,7 @@ await Effect.runPromise(status.pipe(Effect.scoped, Effect.provide(Graft.layer)))
 | 情況                     | 結果                                                                      |
 | ------------------------ | ------------------------------------------------------------------------- |
 | 派發過程中處理函式被移除 | 之後不會再被呼叫。                                                        |
-| 處理函式所屬的外掛停止   | 中斷會使該處理函式被略過。                                                |
+| 處理函式所屬的外掛停止   | 一般處理函式被略過；中介軟體遵循下文的規則。                              |
 | 處理函式主動中斷或被取消 | 它完整的 `Cause` 會透過派發傳遞，清理產生的 defect 也一樣。               |
 | 取消 `Event.parallel`    | 先等待所有呼叫清理完成，再將中斷與已經發生的失敗、defect 及清理失敗合併。 |
 
@@ -173,6 +175,40 @@ await Effect.runPromise(render.pipe(Effect.scoped, Effect.provide(Graft.layer)))
 - 如果處理函式被略過，鏈條會使用同一個 `next` 繼續。
 - 處理函式所屬的外掛卸載後，已經執行過的下游不會重播。
 - 如果首次下游執行被中斷，之後的呼叫會得到該中斷結果，不會重新開始。
+
+卸載正在執行的中介軟體會中斷整條鏈，無論它是在等待呼叫
+`next`，還是在處理其結果。下游失敗會被保留；下游成功不會略過後處理。領取前就被移除的處理函式會被略過。
+
+當 `next`
+在獨立歸屬的 fiber 中執行時，派發者可以取消等待。呼叫仍然中斷，不會回傳略過中介軟體的結果。該 fiber 的清理和失敗仍由其外部擁有者負責。
+
+## 辨識派發來源
+
+**來源**是一個不透明標記，用來辨識派發鏈，不共用呼叫方的服務。
+
+```ts import.meta.vitest name="events: origins"
+import { Effect } from "effect"
+
+import { Event, Graft } from "@graftland/graft"
+
+const origin = Event.makeOrigin()
+const Changed = Event.make<[], boolean>("@acme/example/Changed")
+
+const check = Effect.gen(function* () {
+	yield* Event.on(Changed, () => Event.isWithin(origin))
+	return yield* Event.parallel(Changed).pipe(Event.within(origin))
+})
+
+await Effect.runPromise(check.pipe(Effect.scoped, Effect.provide(Graft.layer))) // => [true]
+```
+
+| 操作                     | 規則                                                                                                                      |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------- |
+| `Event.makeOrigin()`     | 建立全新的標記；另一個標記不會與它相符。                                                                                  |
+| `Event.within(origin)`   | 標記包裹的 effect 及其巢狀派發；既有來源仍然有效。                                                                        |
+| `Event.isWithin(origin)` | 只回傳目前 fiber 中這個標記是否有效。                                                                                     |
+| 作用域與隔離             | 來源跟隨 effect，不跟隨處理函式的註冊。處理函式的服務和領域不變，不暴露呼叫方的 Context。                                 |
+| 信任邊界                 | 標記不能偽造。成員關係保存在 context 引用中；提供該引用的程式碼能夠改變 `isWithin` 的結果。這用於偵測重入，不是授權邊界。 |
 
 ## 領域與過濾器
 

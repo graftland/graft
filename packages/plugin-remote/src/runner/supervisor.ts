@@ -14,14 +14,14 @@ import { ChildProcessSpawner } from "effect/process"
 import { Graft, Plugin } from "@graftland/graft"
 import { ConfigDirectory } from "@graftland/loader"
 
-import { PositiveDuration } from "./config"
-import { accept } from "./runner/accept"
-import * as Execution from "./runner/Execution"
-import * as Lock from "./runner/Lock"
-import * as Stores from "./runner/Store"
-import * as Engine from "./runner/Supervisor"
-import * as Lifecycle from "./RunnerLifecycle"
-import { Supervisor } from "./Supervisor"
+import { PositiveDuration } from "../internal/config"
+import { accept } from "../internal/runner/accept"
+import * as Execution from "../internal/runner/Execution"
+import * as Lock from "../internal/runner/Lock"
+import * as Stores from "../internal/runner/Store"
+import * as Engine from "../internal/runner/Supervisor"
+import * as Lifecycle from "../internal/RunnerLifecycle"
+import { Supervisor } from "../internal/Supervisor"
 
 export const Config = Schema.Struct({
 	root: Schema.String,
@@ -30,7 +30,7 @@ export const Config = Schema.Struct({
 	grace: Schema.optionalKey(PositiveDuration),
 })
 export default Plugin.make({
-	name: "remote-supervisor",
+	name: "@graftland/plugin-remote/runner/supervisor",
 	config: Config,
 	inject: [
 		Plugin.optional(Lifecycle.RunnerLifecycle),

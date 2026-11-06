@@ -40,7 +40,8 @@ Graft 参考了 [cordis](https://github.com/cordiverse/cordis)
 - **可使用服务的配置解码。** 解码可以异步执行，也可以使用插件的依赖。
 - **保留上下文的处理函数。**
   事件处理函数使用所属插件自身的服务、领域（realm）和 intercept 运行。
-- **原子替换。** `Graft.replace` 在一个事务中完成所有插件的替换。
+- **可回滚的原子替换。** `Graft.replace`
+  在一个事务中完成所有插件的替换；新插件启动失败时回到旧插件。
 - **在其他进程中运行插件。** [Remote](../remote/overview/)
   让某个插件在子进程、worker 或另一台机器上运行，使用它服务的插件不必改动。
 

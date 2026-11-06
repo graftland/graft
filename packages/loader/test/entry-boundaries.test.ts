@@ -214,7 +214,7 @@ it.effect(
 )
 
 it("validates known fields at every depth despite accepting metadata", () => {
-	expectTypeOf<Loader.NewEntry>().toExtend<{ readonly name: string }>()
+	expectTypeOf<Entry.NewEntry>().toExtend<{ readonly name: string }>()
 	expectTypeOf<Tree.Patch["disabled"]>().toEqualTypeOf<boolean | undefined>()
 	expectTypeOf<Tree.Patch["id"]>().toEqualTypeOf<undefined>()
 	for (const bad of [

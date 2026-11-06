@@ -26,9 +26,10 @@ graft remote certificates --out ./certs --server localhost
 graft add --plugin remote --global
 ```
 
-`add --plugin` installs `@graftland/plugin-<name>` and enables its `/cli` entry.
-Use a full package name for third-party packages. `--global` installs and
-enables it in the [user configuration](../config-file/#command-plugins).
+`add --plugin` installs the plugin package and enables its `/cli` entry. A short
+name becomes whichever of `@graftland/plugin-<name>` and `graft-plugin-<name>`
+the registry has; if it has both, name the package in full. `--global` installs
+and enables it in the [user configuration](../config-file/#command-plugins).
 
 Enabled commands appear in `--help` and `--completions bash`. Built-in command
 names and aliases are reserved; duplicates stop startup. Commands are loaded
@@ -52,13 +53,14 @@ order.
 
 ### Protocol output
 
-Use `graft start runner.yml --stdio` for a runner with one stdio listener. The
-flag reserves stdout for protocol bytes before loading plugins or parsing help
-and version flags. Logs, Console output (including worker output), help, version
-and errors go to stderr; interactive wizard and completion output are
-unavailable in this mode. The runner rejects a mismatched listener
-configuration. At stdin EOF it stops its execution units, confirms termination
-and exits; startup or cleanup failure gives a nonzero exit.
+Use `graft start runner.yml --stdio` for a runner with one stdio listener, and
+`graft start --stdio` for an [MCP server](../mcp-server/overview/). The flag
+reserves stdout for protocol bytes before loading plugins or parsing help and
+version flags. Logs, Console output (including worker output), help, version and
+errors go to stderr; interactive wizard and completion output are unavailable in
+this mode. The runner rejects a mismatched listener configuration. At stdin EOF
+it stops its execution units, confirms termination and exits; startup or cleanup
+failure gives a nonzero exit.
 
 ### Options
 
@@ -132,8 +134,10 @@ How the two interact:
 How the CLI drives reload:
 
 1. It calls `hmr.watch` with a module-file filter.
-2. After each attempt that ends with `Reloaded` or `Skipped`, it calls
-   `loader.retry`, to retry failed entries and refresh `!env` values.
+2. After each attempt that ends with `Reloaded`, `RolledBack` or `Skipped`, it
+   calls `loader.retry`, to retry failed entries and refresh `!env` values.
+   `RolledBack` logs one warning per plugin that failed to start or timed out,
+   with `graft.fork` and `graft.plugin`, and the `Cause` of a failure.
 3. Reload and retry failures are logged with their complete `Cause`, and
    watching goes on.
 
@@ -182,6 +186,9 @@ The [config file page](../config-file/#intercepts-in-a-config-file) lists
 accepted values and an example. Invalid values fail the entry with
 `InvalidIntercept`. The CLI does not register other references.
 
+For a shared HTTP listener, load [HTTP server](../http/) with ordinary
+`graft start`; it does not need `--stdio`.
+
 ## graft create
 
 ```sh
@@ -217,11 +224,11 @@ With `--yes`, or when stdin or stdout is not a terminal, it asks nothing and
 
 ### Templates
 
-| Template  | For                                                                  | Files besides `package.json` and `graft.yml`                                                                                       |
-| --------- | -------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| `app`     | An application. `graft.yml` loads the example plugin.                | `src/hello.ts`, `tsconfig.json`, `README.md`, `.vscode/extensions.json`, `.gitignore`                                              |
-| `plugin`  | A plugin package to [publish](../plugins/#publish-a-plugin).         | `src/index.ts`, `test/index.test.ts`, `tsconfig.json`, `tsconfig.build.json`, `README.md`, `.vscode/extensions.json`, `.gitignore` |
-| `minimal` | Only the config file, with no entries besides those from `--plugin`. | `.gitignore`                                                                                                                       |
+| Template  | For                                                                                                          | Files besides `package.json` and `graft.yml`                                                                                       |
+| --------- | ------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `app`     | An application. `graft.yml` loads the example plugins: `hello`, and `ticker` using the service of `greeter`. | `src/hello.ts`, `src/greeter.ts`, `src/ticker.ts`, `tsconfig.json`, `README.md`, `.vscode/extensions.json`, `.gitignore`           |
+| `plugin`  | A plugin package to [publish](../plugins/#publish-a-plugin).                                                 | `src/index.ts`, `test/index.test.ts`, `tsconfig.json`, `tsconfig.build.json`, `README.md`, `.vscode/extensions.json`, `.gitignore` |
+| `minimal` | Only the config file, with no entries besides those from `--plugin`.                                         | `.gitignore`                                                                                                                       |
 
 | Script      | `app`                 | `plugin`                                      | `minimal`             |
 | ----------- | --------------------- | --------------------------------------------- | --------------------- |

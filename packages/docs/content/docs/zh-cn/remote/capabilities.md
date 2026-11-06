@@ -82,7 +82,7 @@ import {
 } from "@graftland/plugin-remote/Auth"
 
 const fixedLocalIdentity = Plugin.make({
-	name: "fixed-local-identity",
+	name: "app/fixed-local-identity",
 	config: Schema.Struct({ identity: Schema.NonEmptyString }),
 	apply: ({ identity }) =>
 		Graft.provide(Authenticator, { _tag: "None", identity }),
@@ -95,7 +95,7 @@ const published = await Effect.runPromise(
 		yield* Graft.plugin(fixedLocalIdentity, { identity: "local" })
 		yield* Graft.plugin(
 			Plugin.make({
-				name: "reader",
+				name: "app/reader",
 				inject: [Authenticator],
 				apply: () =>
 					Effect.gen(function* () {

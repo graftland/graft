@@ -32,6 +32,7 @@ import { inject } from "vitest"
 
 import { Credentials } from "../src/Auth"
 import { CredentialsError, TransportError } from "../src/Errors"
+import * as HostAssembly from "../src/host/assembly"
 import hostBearer from "../src/host/auth/bearer"
 import hostJwt from "../src/host/auth/jwt"
 import credentials from "../src/host/auth/mtls"
@@ -44,6 +45,7 @@ import * as Certificates from "../src/internal/Certificates"
 import { Peer } from "../src/internal/Peer"
 import * as Framing from "../src/internal/runner/Framing"
 import { Supervisor } from "../src/internal/Supervisor"
+import * as RunnerAssembly from "../src/runner/assembly"
 import runnerBearer from "../src/runner/auth/bearer"
 import runnerJwt from "../src/runner/auth/jwt"
 import authenticator from "../src/runner/auth/mtls"
@@ -191,7 +193,7 @@ const host = Effect.fnUntraced(function* (
 ) {
 	const found = yield* Deferred.make<Channel>()
 	const business = yield* Deferred.make<string>()
-	const fork = yield* Assembly.host({
+	const fork = yield* HostAssembly.run({
 		...input,
 		consumer: Plugin.make({
 			name: "test-connection",
@@ -216,7 +218,7 @@ const connection = Effect.fnUntraced(function* (
 	const provider = yield* Graft.plugin(supervisor)
 	yield* provider.await
 	const config = yield* pair("echo", plugins)
-	const server = yield* Assembly.runner(config.server)
+	const server = yield* RunnerAssembly.run(config.server)
 	yield* ready(server)
 	return yield* host(config.host)
 })
@@ -264,7 +266,7 @@ describe("capability conformance: websocket and mTLS", () => {
 				const left = yield* pair("left")
 				const right = yield* pair("right")
 				const servers = yield* Effect.forEach([left, right], (config) =>
-					Assembly.runner(config.server),
+					RunnerAssembly.run(config.server),
 				)
 				yield* Effect.forEach(servers, ready)
 				const clients = yield* Effect.forEach([left, right], (config) =>
@@ -291,7 +293,7 @@ describe("capability conformance: websocket and mTLS", () => {
 					["inherited", "inherited"],
 				)
 				// Swapping only the server CA cannot connect to the other assembly.
-				const wrong = yield* Assembly.host({
+				const wrong = yield* HostAssembly.run({
 					...left.host,
 					transport: {
 						...left.host.transport,
@@ -330,7 +332,7 @@ describe("capability conformance: websocket and mTLS", () => {
 				),
 				{ name: "delayed-connector" },
 			)
-			const assembly = yield* Assembly.host({
+			const assembly = yield* HostAssembly.run({
 				transport: {
 					plugin: Plugin.make({
 						name: "active-parent",
@@ -416,7 +418,7 @@ describe("capability conformance: websocket and mTLS", () => {
 					name: "nested-provider",
 					apply: () => Graft.plugin(empty).pipe(Effect.asVoid),
 				})
-				const fork = yield* Assembly.host({
+				const fork = yield* HostAssembly.run({
 					transport: { plugin: nested, config: undefined },
 					auth: {
 						plugin: Plugin.service(
@@ -460,7 +462,7 @@ describe("capability conformance: websocket and mTLS", () => {
 						),
 				})
 				const config = yield* pair("cancel")
-				const server = yield* Assembly.runner(config.server)
+				const server = yield* RunnerAssembly.run(config.server)
 				yield* ready(server)
 				yield* host(config.host).pipe(Effect.scoped)
 				yield* Deferred.await(ended)
@@ -474,7 +476,7 @@ describe("capability conformance: websocket and mTLS", () => {
 				yield* Graft.provide(Supervisor, { accept: () => Effect.never })
 				const directory = inject("remoteTls")
 				const address = yield* port
-				const server = yield* Assembly.runner({
+				const server = yield* RunnerAssembly.run({
 					transport: {
 						plugin: listener,
 						config: {
@@ -528,7 +530,7 @@ describe("capability conformance: websocket and mTLS", () => {
 			Effect.gen(function* () {
 				const config = yield* pair("rotate")
 				const found = yield* Deferred.make<typeof Credentials.Service>()
-				const assembly = yield* Assembly.host({
+				const assembly = yield* HostAssembly.run({
 					...config.host,
 					consumer: Plugin.make({
 						name: "credentials-consumer",
@@ -590,7 +592,7 @@ describe("capability conformance: websocket and mTLS", () => {
 					}),
 					{ name: "failing-listener" },
 				)
-				const assembly = yield* Assembly.runner({
+				const assembly = yield* RunnerAssembly.run({
 					transport: { plugin: broken, config: undefined },
 					auth: config.server.auth,
 				})
@@ -608,7 +610,7 @@ describe("capability conformance: websocket and mTLS", () => {
 	it.live("keeps a genuinely missing business dependency Pending", () =>
 		Effect.gen(function* () {
 			const config = yield* pair("pending")
-			const assembly = yield* Assembly.host({
+			const assembly = yield* HostAssembly.run({
 				...config.host,
 				consumer: Plugin.make({
 					name: "waiting-business",
@@ -740,7 +742,7 @@ const remainingConnection = (name: string) =>
 				? { path: directory + "/echo.sock" }
 				: { url: `ws://127.0.0.1:${address}` }
 		if (name !== "command/stdio") {
-			const server = yield* Assembly.runner({
+			const server = yield* RunnerAssembly.run({
 				transport: { plugin: plugins.listener, config },
 				auth: { plugin: plugins.authenticator, config: auth.server },
 			})

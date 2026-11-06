@@ -74,10 +74,37 @@
 			"path": "./samples/market-feed"
 		},
 		{
+			"path": "./samples/mcp-tools"
+		},
+		{
 			"path": "./packages/plugin-remote"
 		},
 		{
 			"path": "./packages/plugin-remote/tsconfig.test.json"
+		},
+		{
+			"path": "./packages/plugin-otlp"
+		},
+		{
+			"path": "./packages/plugin-otlp/tsconfig.test.json"
+		},
+		{
+			"path": "./packages/plugin-mcp-server"
+		},
+		{
+			"path": "./packages/plugin-mcp-server/tsconfig.test.json"
+		},
+		{
+			"path": "./packages/plugin-http"
+		},
+		{
+			"path": "./packages/plugin-http/tsconfig.test.json"
+		},
+		{
+			"path": "packages/plugin-http-api"
+		},
+		{
+			"path": "packages/plugin-http-api/tsconfig.test.json"
 		}
 	]
 }

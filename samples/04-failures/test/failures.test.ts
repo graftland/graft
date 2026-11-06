@@ -41,9 +41,9 @@ describe("failures", () => {
 				Array.filter(log, (line) => !String.startsWith("heartbeat")(line)),
 				[
 					"Connecting, attempt 1",
-					'Plugin "client" failed',
+					'Plugin "@graftland/sample-failures/main/makeClient" failed',
 					"Connecting, attempt 2",
-					'Plugin "client" failed',
+					'Plugin "@graftland/sample-failures/main/makeClient" failed',
 					"Connecting, attempt 3",
 					"Connected",
 				],

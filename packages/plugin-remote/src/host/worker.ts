@@ -86,6 +86,6 @@ const start: typeof WorkerTransport.Service.start = Effect.fnUntraced(
 	},
 )
 const plugin = Plugin.service(WorkerTransport, Effect.succeed({ start }), {
-	name: "remote-thread-transport",
+	name: "@graftland/plugin-remote/host/worker",
 })
 export default plugin

@@ -1,0 +1,25 @@
+{
+	"name": "@graftland/sample-mcp-tools",
+	"private": true,
+	"type": "module",
+	"description": "An MCP server whose tools are Graft plugins that reload without reconnecting",
+	"scripts": {
+		"start": "graft start --stdio --watch",
+		"test": "vitest run",
+		"start:http": "graft start graft.http.yml --watch"
+	},
+	"dependencies": {
+		"@graftland/cli": "workspace:*",
+		"@graftland/graft": "workspace:*",
+		"@graftland/plugin-mcp-server": "workspace:*",
+		"effect": "4.1.2",
+		"@graftland/plugin-http": "workspace:*"
+	},
+	"devDependencies": {
+		"@effect/vitest": "4.1.2",
+		"vitest": "5.1.0",
+		"@graftland/loader": "workspace:*",
+		"@effect/platform-node": "4.1.2",
+		"yaml": "2.9.1"
+	}
+}

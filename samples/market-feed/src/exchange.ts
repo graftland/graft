@@ -5,7 +5,7 @@ import { Graft, Plugin } from "@graftland/graft"
 import { ExchangeTransport, Quotes, type Quote } from "./services.ts"
 
 export const exchange = Plugin.make({
-	name: "exchange",
+	name: "@graftland/sample-market-feed/exchange",
 	inject: [ExchangeTransport],
 	retry: Schedule.exponential("400 millis"),
 	apply: Effect.fn("exchange.apply")(function* () {

@@ -15,12 +15,12 @@ export const Message = Event.make<[text: string]>(
 )
 
 export const printer = Plugin.make({
-	name: "printer",
+	name: "@graftland/sample-events/main/printer",
 	apply: () => Event.on(Message, (text) => Effect.log(`printer: ${text}`)),
 })
 
 export const shouter = Plugin.make({
-	name: "shouter",
+	name: "@graftland/sample-events/main/shouter",
 	apply: () =>
 		Event.on(Message, (text) =>
 			Effect.log(`shouter: ${String.toUpperCase(text)}!`),

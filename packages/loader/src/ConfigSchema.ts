@@ -2,6 +2,7 @@
 import { Array, JsonSchema, Schema } from "effect"
 
 import * as Entry from "./Entry"
+import { EntryDefinition } from "./internal/entryIds"
 
 /** A plugin name and its aliases share one encoded JSON Schema for config. */
 export interface Registration {
@@ -16,7 +17,7 @@ export interface Options {
 }
 /** Draft-07, which YAML language servers support most widely. */
 export const make = (options: Options = {}) => {
-	const fields = Entry.Entry.schema.fields
+	const fields = Entry.NewEntry.schema.fields
 	const Intercept =
 		options.intercept ?? Schema.Record(Schema.String, Schema.Unknown)
 	const Metadata = [Schema.Record(Schema.String, Schema.Unknown)] as const
@@ -24,7 +25,7 @@ export const make = (options: Options = {}) => {
 	const shared = {
 		...fields,
 		id: Schema.optionalKey(
-			fields.id.annotate({
+			Entry.Entry.schema.fields.id.annotate({
 				description:
 					"Identifies the entry. Graft adds one, and writes it to the file, if an entry has none.",
 			}),
@@ -60,7 +61,7 @@ export const make = (options: Options = {}) => {
 			}),
 			Metadata,
 		),
-	]).annotate({ identifier: "Entry" })
+	]).annotate({ identifier: EntryDefinition })
 
 	const File = Schema.NullOr(Schema.Array(FileEntry)).annotate({
 		title: "Graft config file",
@@ -77,8 +78,8 @@ export const make = (options: Options = {}) => {
 		...document.schema,
 		definitions: {
 			...document.definitions,
-			Entry: {
-				...document.definitions["Entry"],
+			[EntryDefinition]: {
+				...document.definitions[EntryDefinition],
 				...(options.entries === undefined || options.entries.length === 0
 					? {}
 					: {

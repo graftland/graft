@@ -38,6 +38,7 @@ import {
 	RestartRequired,
 	type Attempt,
 	type FileVersion,
+	type Generation,
 } from "./internal/modules"
 import * as SourceObservation from "./internal/sourceObservation"
 
@@ -61,6 +62,11 @@ export type WatchResult = Data.TaggedEnum<{
 		readonly reason:
 			"restart-required" | "ambiguous-exports" | "identity-conflict"
 	}
+	/** The new code was imported but failed to start; the old plugins run again. */
+	RolledBack: {
+		readonly entries: ReadonlyArray<string>
+		readonly failures: ReadonlyArray<Graft.ReplacementFailure>
+	}
 	Failed: { readonly cause: Cause.Cause<HmrError> }
 }>
 
@@ -68,11 +74,37 @@ export const WatchResult = Data.taggedEnum<WatchResult>()
 
 export type ReloadResult = Exclude<WatchResult, { readonly _tag: "Failed" }>
 
+/** Candidates imported and checked, ready for `Graft.replace`. */
+interface Prepared {
+	readonly _tag: "Prepared"
+	readonly pairs: ReadonlyArray<readonly [Plugin.Plugin, Plugin.Plugin]>
+	readonly candidates: ReadonlyArray<{
+		readonly url: string
+		readonly leases: HashSet.HashSet<symbol>
+		/** The plugin the entry ran, and the one it is replaced with. */
+		readonly previous: Plugin.Plugin
+		readonly plugin: Plugin.Plugin
+	}>
+	readonly replacements: HashMap.HashMap<
+		string,
+		{
+			readonly plugin: Plugin.Plugin
+			readonly leases: HashSet.HashSet<symbol>
+		}
+	>
+	readonly candidate: Generation
+}
+
 export interface Options {
 	/** Application module URL, usually import.meta.url; used for bare and relative resolution. */
 	readonly base: string
 	/** Files to version. Defaults to file URLs outside node_modules. Entries are always included. */
 	readonly include?: (url: string) => boolean
+	/**
+	 * How long reloaded plugins may take to start before the reload is rolled
+	 * back. Defaults to 30 seconds.
+	 */
+	readonly activationTimeout?: Duration.Input
 }
 
 export interface WatchOptions extends FileSystem.WatchOptions {
@@ -149,6 +181,9 @@ export const make: (
 	function* (options: Options) {
 		const graft = yield* Graft.Graft
 		const semaphore = yield* Semaphore.make(1)
+		// Orders whole reloads. Their activation wait runs outside `serial`, so
+		// that new plugins can import through this session while they start.
+		const reloading = yield* Semaphore.make(1)
 		// A lease owns both the running graph and its latest uncommitted attempt.
 		const owners = yield* Ref.make(
 			HashMap.empty<
@@ -245,6 +280,8 @@ export const make: (
 			if (attempts.length === 0) yield* Ref.set(retryAll, false)
 		})
 
+		/** The generation of a reload whose plugins are starting, if one is. */
+		const starting = yield* Ref.make(Option.none<Generation>())
 		const state = yield* Ref.make({
 			generation: hooks.prepare(),
 			entries: HashMap.empty<
@@ -393,7 +430,10 @@ export const make: (
 			function* (specifier: string) {
 				yield* checkOpen
 				const current = yield* Ref.get(state)
-				hooks.start(current.generation)
+				// While a reload's plugins start, their imports see its new modules.
+				const pending = yield* Ref.get(starting)
+				const generation = Option.getOrElse(pending, () => current.generation)
+				hooks.start(generation)
 				// Acquire an owner for either Exit. Rethrow only after its finalizer
 				// is registered, so failed imports remain available for scoped retry.
 				const exit = yield* Effect.exit(load(specifier))
@@ -405,7 +445,7 @@ export const make: (
 				)
 				const attempt = Option.map(root, (url) => ({
 					url,
-					generation: current.generation,
+					generation,
 					...Option.match(hooks.fileRequest(specifier), {
 						onNone: () => ({}),
 						onSome: (request) => ({ request }),
@@ -636,7 +676,7 @@ export const make: (
 			),
 		)
 
-		const reloadChanged = Effect.fnUntraced(function* (
+		const prepareReload = Effect.fnUntraced(function* (
 			dirty: HashSet.HashSet<string> | undefined,
 		) {
 			yield* checkOpen
@@ -774,9 +814,6 @@ export const make: (
 						({ url, plugin, leases }) => [url, { plugin, leases }] as const,
 					),
 				)
-				// A missing entry still owns its running plugin until the last lease closes.
-				const next = HashMap.union(entries, replacements)
-
 				const pairs = Array.map(
 					candidates,
 					({ previous, plugin }) => [previous, plugin] as const,
@@ -802,19 +839,32 @@ export const make: (
 						modules: Array.fromIterable(unsafe),
 					})
 
-				const replacement = yield* Graft.replace(pairs).pipe(
-					Effect.provideService(Graft.Graft, graft),
-					Effect.result,
-				)
-				if (Result.isFailure(replacement))
-					return WatchResult.Skipped({
-						reason: "identity-conflict",
-						modules: Array.filterMap(candidates, ({ url }, index) =>
-							Array.contains(replacement.failure.indices, index)
-								? Result.succeed(url)
-								: Result.fail(undefined),
-						),
-					})
+				const prepared: Prepared = {
+					_tag: "Prepared",
+					pairs,
+					candidates,
+					replacements,
+					candidate,
+				}
+				return prepared
+			}).pipe(
+				Effect.catchTag("RestartRequired", (error) =>
+					Effect.succeed(
+						WatchResult.Skipped({
+							modules: Array.fromIterable(
+								HashSet.add(hooks.unsupported(candidate), error.url),
+							),
+							reason: "restart-required",
+						}),
+					),
+				),
+				Effect.ensuring(Effect.sync(hooks.discard)),
+				Effect.ensuring(collect),
+			)
+		}, serial)
+		/** Records a kept replacement; leases taken while it started are kept too. */
+		const commitReload = Effect.fnUntraced(
+			function* ({ candidates, replacements, candidate }: Prepared) {
 				yield* Ref.update(owners, (owners) =>
 					Array.reduce(candidates, owners, (owners, { url, leases }) =>
 						HashMap.map(owners, (owner, token) =>
@@ -831,6 +881,33 @@ export const make: (
 						),
 					),
 				)
+				const current = yield* Ref.get(state)
+				// Leases released while the replacements started are gone for good.
+				const held = yield* Ref.get(owners)
+				const kept = HashMap.filterMap(replacements, (replacement, url) => {
+					const leases = HashSet.filter(
+						HashSet.union(
+							replacement.leases,
+							Option.match(HashMap.get(current.entries, url), {
+								onNone: () => HashSet.empty<symbol>(),
+								onSome: (entry) => entry.leases,
+							}),
+						),
+						(token) => HashMap.has(held, token),
+					)
+					return HashSet.size(leases) === 0
+						? Result.fail(undefined)
+						: Result.succeed({ plugin: replacement.plugin, leases })
+				})
+				// A missing entry still owns its running plugin until the last lease closes.
+				const next = HashMap.union(
+					HashMap.filter(
+						current.entries,
+						(_, url) =>
+							!HashMap.has(replacements, url) || HashMap.has(kept, url),
+					),
+					kept,
+				)
 				yield* Ref.set(state, { entries: next, generation: candidate })
 				yield* Ref.update(cached, (cached) =>
 					HashMap.union(
@@ -846,21 +923,90 @@ export const make: (
 				return WatchResult.Reloaded({
 					entries: Array.map(candidates, (candidate) => candidate.url),
 				})
-			}).pipe(
-				Effect.catchTag("RestartRequired", (error) =>
-					Effect.succeed(
-						WatchResult.Skipped({
-							modules: Array.fromIterable(
-								HashSet.add(hooks.unsupported(candidate), error.url),
+			},
+			Effect.ensuring(collect),
+			serial,
+		)
+		/**
+		 * Undoes what imports made while a reload's plugins started: an entry
+		 * imported then points at the new plugin, which runs nowhere once the
+		 * reload is not kept.
+		 */
+		const restoreEntries = ({ candidates }: Prepared) =>
+			serial(
+				Ref.update(state, (current) => ({
+					...current,
+					entries: Array.reduce(
+						candidates,
+						current.entries,
+						(entries, candidate) =>
+							HashMap.modify(entries, candidate.url, (entry) =>
+								entry.plugin === candidate.plugin
+									? { ...entry, plugin: candidate.previous }
+									: entry,
 							),
-							reason: "restart-required",
-						}),
 					),
-				),
-				Effect.ensuring(Effect.sync(hooks.discard)),
-				Effect.ensuring(collect),
+				})),
 			)
-		}, serial)
+		const reloadChanged = (dirty: HashSet.HashSet<string> | undefined) =>
+			Effect.gen(function* () {
+				const prepared = yield* prepareReload(dirty)
+				if (prepared._tag !== "Prepared") return prepared
+				const { pairs, candidates } = prepared
+				// Once the replacement settles, the HMR state must match the forks, so
+				// recording it is uninterruptible. The wait itself is not; if it is
+				// interrupted, the state follows whatever the swap became.
+				return yield* Effect.uninterruptibleMask((restore) =>
+					Effect.gen(function* () {
+						yield* serial(Ref.set(starting, Option.some(prepared.candidate)))
+						const replacement = yield* restore(
+							Graft.replace(pairs, {
+								timeout: options.activationTimeout ?? "30 seconds",
+							}),
+						).pipe(
+							Effect.provideService(Graft.Graft, graft),
+							Effect.result,
+							Effect.onInterrupt(() =>
+								Effect.gen(function* () {
+									const resolved = yield* Effect.forEach(pairs, ([from]) =>
+										Graft.resolve(from),
+									).pipe(Effect.provideService(Graft.Graft, graft))
+									// The swap was kept unless it was rolled back first.
+									if (
+										Array.every(
+											pairs,
+											([, to], index) => resolved[index] === to,
+										)
+									)
+										yield* commitReload(prepared)
+									else yield* restoreEntries(prepared)
+								}),
+							),
+							Effect.ensuring(serial(Ref.set(starting, Option.none()))),
+						)
+						if (Result.isFailure(replacement)) {
+							yield* restoreEntries(prepared)
+							return WatchResult.Skipped({
+								reason: "identity-conflict",
+								modules: Array.filterMap(candidates, ({ url }, index) =>
+									Array.contains(replacement.failure.indices, index)
+										? Result.succeed(url)
+										: Result.fail(undefined),
+								),
+							})
+						}
+						// Keep the old generation and the dirty modules, so the next change retries.
+						if (replacement.success._tag === "RolledBack") {
+							yield* restoreEntries(prepared)
+							return WatchResult.RolledBack({
+								entries: Array.map(candidates, (candidate) => candidate.url),
+								failures: replacement.success.failures,
+							})
+						}
+						return yield* commitReload(prepared)
+					}),
+				)
+			}).pipe(reloading.withPermits(1))
 		return {
 			importer,
 			importerScoped,

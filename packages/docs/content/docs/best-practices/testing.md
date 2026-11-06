@@ -29,7 +29,7 @@ export class Mailer extends Context.Service<
 >()("app/Mailer") {}
 
 export const welcome = Plugin.make({
-	name: "welcome",
+	name: "app/welcome",
 	config: Schema.Struct({ to: Schema.String }),
 	inject: [Mailer],
 	retry: Schedule.spaced("1 second"),
@@ -153,7 +153,7 @@ it.effect("restarts on a new config", () =>
 		const journal = yield* Ref.make<ReadonlyArray<string>>([])
 		const record = (event: string) => Ref.update(journal, Array.append(event))
 		const echo = Plugin.make({
-			name: "echo",
+			name: "app/echo",
 			config: Schema.Struct({ text: Schema.String }),
 			apply: ({ text }) =>
 				Effect.acquireRelease(record(`start ${text}`), () =>
@@ -284,7 +284,7 @@ const messages = Effect.gen(function* () {
 })
 
 const greeter = Plugin.make({
-	name: "greeter",
+	name: "app/greeter",
 	apply: () => Effect.log("hello"),
 })
 

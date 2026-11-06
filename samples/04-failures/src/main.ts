@@ -22,7 +22,7 @@ export class ConnectionRefused extends Schema.TaggedError<
 // counts connections across restarts, so it is created outside the plugin.
 export const makeClient = (attempts: Ref.Ref<number>) =>
 	Plugin.make({
-		name: "client",
+		name: "@graftland/sample-failures/main/makeClient",
 		// Try again 300 ms after each failure.
 		retry: Schedule.spaced("300 millis"),
 		apply: Effect.fn("client.apply")(function* () {
@@ -36,7 +36,7 @@ export const makeClient = (attempts: Ref.Ref<number>) =>
 // Ticks in the background. `Plugin.fork` ties the task to the plugin: it
 // stops when the plugin stops.
 export const heartbeat = Plugin.make({
-	name: "heartbeat",
+	name: "@graftland/sample-failures/main/heartbeat",
 	apply: () =>
 		Effect.log("heartbeat: still running").pipe(
 			Effect.repeat(Schedule.spaced("250 millis")),

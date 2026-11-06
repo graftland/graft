@@ -80,7 +80,7 @@ const connect = Effect.flatMap(
 )
 
 const client = Plugin.make({
-	name: "client",
+	name: "app/client",
 	retry: Schedule.min([
 		Schedule.exponential("1 second"),
 		Schedule.spaced("1 minute"),
@@ -151,12 +151,12 @@ export default Remote.plugin(contract, {
 
 配置项失败或停在等待中都不会让进程退出，因此只盯着进程的服务管理器会认为应用一切正常。请把 fork 状态发布出来，供健康检查端点使用：
 
-```ts import.meta.vitest name="production: report health"
-import { Array, Context, Effect, Ref, Schema, Stream } from "effect"
+```ts title="health.ts"
+import { Array, Context, Effect, Ref, Stream } from "effect"
 
 import { Fork, Graft, Plugin } from "@graftland/graft"
 
-class Health extends Context.Service<
+export class Health extends Context.Service<
 	Health,
 	{ readonly unhealthy: Effect.Effect<ReadonlyArray<string>> }
 >()("app/Health") {}
@@ -171,8 +171,8 @@ const unhealthy = (
 		...unhealthy(tree.children),
 	])
 
-const health = Plugin.make({
-	name: "health",
+export const health = Plugin.make({
+	name: "app/health",
 	apply: () =>
 		Effect.gen(function* () {
 			const latest = yield* Ref.make<ReadonlyArray<string>>([])
@@ -183,44 +183,41 @@ const health = Plugin.make({
 			yield* Graft.provide(Health, { unhealthy: Ref.get(latest) })
 		}),
 })
-
-class DatabaseDown extends Schema.TaggedError<
-	DatabaseDown,
-	{ readonly brand: unique symbol }
->()("DatabaseDown", {}) {}
-
-const database = Plugin.make({
-	name: "database",
-	apply: () => DatabaseDown.make({}),
-})
-
-// Stands in for the HTTP plugin: it keeps the first report that is not empty.
-const report = Ref.makeUnsafe<ReadonlyArray<string>>([])
-const http = Plugin.make({
-	name: "http",
-	inject: [Health],
-	apply: () =>
-		Health.pipe(
-			Effect.flatMap(({ unhealthy }) => unhealthy),
-			Effect.repeat({ until: Array.isReadonlyArrayNonEmpty }),
-			Effect.flatMap((list) => Ref.set(report, list)),
-		),
-})
-
-await Effect.runPromise(
-	Effect.gen(function* () {
-		const monitor = yield* Graft.plugin(health)
-		yield* monitor.await
-		yield* Graft.plugin(database)
-		const probe = yield* Graft.plugin(http)
-		yield* probe.await
-		yield* Ref.get(report) // => ["database: Failed"]
-	}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
-)
 ```
 
-HTTP 插件注入 `Health`，列表不为空时返回
-`503`。要诊断树中显示的问题，见[故障排查](../troubleshooting/)。
+将健康监控和这个路由插件与 [HTTP 服务器](../../http/)一起加载。挂载注入
+`Health`，列表非空时返回 503：
+
+```ts
+import { Effect } from "effect"
+import { HttpRouter, HttpServerResponse } from "effect/http"
+
+import { Plugin } from "@graftland/graft"
+import * as Http from "@graftland/plugin-http/Http"
+
+import { Health } from "./health.ts"
+
+export default Plugin.make({
+	name: "app/health-route",
+	inject: [Health],
+	apply: () =>
+		Http.mount(
+			HttpRouter.add(
+				"GET",
+				"/health",
+				Effect.gen(function* () {
+					const health = yield* Health
+					const unhealthy = yield* health.unhealthy
+					return HttpServerResponse.empty({
+						status: unhealthy.length === 0 ? 200 : 503,
+					})
+				}),
+			),
+		).pipe(Effect.asVoid),
+})
+```
+
+诊断插件树请参见[故障排查](../troubleshooting/)。
 
 ## 按配置项设置日志级别
 

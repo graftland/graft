@@ -48,16 +48,18 @@
 		"test": "vitest run"
 	},
 	"peerDependencies": {
-		"effect": "4.1.*"
+		"effect": "4.1.*",
+		"@graftland/graft": "workspace:^",
+		"@graftland/loader": "workspace:^"
 	},
 	"devDependencies": {
 		"@effect/vitest": "4.1.2",
 		"effect": "4.1.2",
-		"vitest": "5.1.0"
+		"vitest": "5.1.0",
+		"@graftland/graft": "workspace:*",
+		"@graftland/loader": "workspace:*"
 	},
 	"dependencies": {
-		"@graftland/graft": "workspace:*",
-		"@graftland/loader": "workspace:*",
 		"@graftland/hmr": "workspace:*",
 		"@graftland/create": "workspace:*",
 		"@graftland/package-manager": "workspace:*",

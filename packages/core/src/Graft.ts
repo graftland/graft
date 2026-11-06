@@ -32,6 +32,7 @@ import * as Aliases from "./internal/aliases"
 import { inheritContext } from "./internal/context"
 import { publicationCycle, resolutionChanged } from "./internal/dependencies"
 import * as ForkStatus from "./internal/forkState"
+import * as Replacement from "./internal/replacement"
 import {
 	GraftKey,
 	realmKey,
@@ -350,6 +351,7 @@ export const plugin: <P extends Plugin>(
 							const resolved = yield* Aliases.resolve(runtime.aliases, plugin)
 							const spec = TxRef.makeUnsafe<Spec>({
 								plugin: resolved,
+								requested: plugin,
 								input,
 								revision: 0,
 							})
@@ -509,13 +511,12 @@ export const plugin: <P extends Plugin>(
 		)
 	})
 
-/** The requested identities cannot be represented by the runtime's flat aliases. */
-export class ReplacementConflict extends Schema.TaggedError<
+export {
 	ReplacementConflict,
-	{ readonly brand: unique symbol }
->()("ReplacementConflict", {
-	indices: Schema.Array(Schema.Int),
-}) {}
+	ReplacementFailure,
+	ReplaceResult,
+	type ReplaceOptions,
+} from "./internal/replacement"
 
 /** A plugin and the replacement `replace` swaps in for it. */
 export type ReplacementPair = readonly [from: Plugin, to: Plugin]
@@ -555,33 +556,35 @@ export type CompatibleReplacements<
  * Swaps plugins for new versions. Every fork of an old plugin restarts with
  * its replacement, and loading the old plugin later loads the new one.
  * Each pair keeps the same input type and can only narrow the source's error bound.
+ *
+ * Then it waits for the forks running a replacement. If one fails, or
+ * `timeout` passes first, every fork goes back to the old plugin and the
+ * result is `RolledBack` with the failures. A `Pending` fork counts as
+ * started. Interrupting the wait keeps the swap.
  */
 export const replace: <const Pairs extends ReadonlyArray<ReplacementPair>>(
 	pairs: Pairs & CompatibleReplacements<NoInfer<Pairs>>,
-) => Effect.Effect<void, ReplacementConflict, Graft> = Effect.fnUntraced(
-	function* (pairs: ReadonlyArray<ReplacementPair>) {
-		const { runtime } = yield* RuntimeContext
-		yield* Effect.tx(
-			Effect.gen(function* () {
-				const conflicts = yield* Aliases.replace(runtime.aliases, pairs)
-				if (conflicts.length > 0)
-					return yield* ReplacementConflict.make({ indices: conflicts })
-				const forks = yield* TxSubscriptionRef.get(runtime.forks)
-				for (const entry of HashMap.values(forks)) {
-					const spec = yield* TxRef.get(entry.spec)
-					const next = yield* Aliases.resolve(runtime.aliases, spec.plugin)
-					if (next !== spec.plugin) {
-						yield* TxRef.set(entry.spec, {
-							...spec,
-							plugin: next,
-							revision: spec.revision + 1,
-						})
-					}
-				}
-			}),
-		)
-	},
-)
+	options?: Replacement.ReplaceOptions,
+) => Effect.Effect<
+	Replacement.ReplaceResult,
+	Replacement.ReplacementConflict,
+	Graft
+> = Effect.fnUntraced(function* (
+	pairs: ReadonlyArray<ReplacementPair>,
+	options?: Replacement.ReplaceOptions,
+) {
+	const { runtime } = yield* RuntimeContext
+	return yield* Replacement.replace(runtime, pairs, options)
+})
+
+/**
+ * The plugin that loading `plugin` loads now: the plugin itself, or the one
+ * that replacements have put in its place.
+ */
+export const resolve = (plugin: Plugin): Effect.Effect<Plugin, never, Graft> =>
+	Effect.flatMap(RuntimeContext, ({ runtime }) =>
+		Effect.tx(Aliases.resolve(runtime.aliases, plugin)),
+	)
 
 const byId = Order.mapInput(Order.Number, (entry: ForkEntry) => entry.id)
 

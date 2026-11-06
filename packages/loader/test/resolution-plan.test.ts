@@ -92,11 +92,13 @@ it.effect(
 				importer: (name) =>
 					Effect.gen(function* () {
 						yield* Ref.update(calls, Array.append(name))
-						if (name === "example" && !(yield* Ref.get(installed)))
+						if (
+							(name === "example" && !(yield* Ref.get(installed))) ||
+							name === "graft-plugin-example"
+						)
 							return yield* Effect.fail({
 								code: "ERR_MODULE_NOT_FOUND",
-								message:
-									"Cannot find package 'example' imported from /app/index.js",
+								message: `Cannot find package '${name}' imported from /app/index.js`,
 							})
 						return { default: plugin }
 					}),
@@ -109,6 +111,7 @@ it.effect(
 			assert.deepStrictEqual(checked5, [
 				"example",
 				"@graftland/plugin-example",
+				"graft-plugin-example",
 				"example",
 			])
 		}).pipe(Effect.provide(Path.layer)),
@@ -134,7 +137,10 @@ it.effect("does not let an old in-flight plan replace a newer revision", () =>
 							yield* Deferred.succeed(started, undefined)
 							yield* Deferred.await(release)
 						}
-						return name === "@graftland/plugin-example" || version > 0
+						return (
+							name === "@graftland/plugin-example" ||
+							(version > 0 && name === "example")
+						)
 					}),
 			},
 			importer: (name) =>
@@ -272,7 +278,7 @@ it.effect("does not cache a plan whose fallback probe failed", () =>
 				revision: Effect.succeed(0),
 				observe: () => Effect.void,
 				exists: (name) =>
-					name === "example"
+					name !== "@graftland/plugin-example"
 						? Effect.succeed(false)
 						: Effect.flatMap(Ref.get(denied), (denied) =>
 								denied

@@ -41,20 +41,20 @@ import { Card, CardGrid } from "@astrojs/starlight/components"
 ## Three promises
 
 <CardGrid>
-	<Card title="Rootstock">
-		Services are Effect <code>Context</code> keys, provided by layers or by
-		other plugins. A plugin lists what it needs in <code>inject</code>, and the
-		compiler checks the list. See <a href="services/">services</a>.
+	<Card title="Hot swap">
+		Change the variety without felling the tree. Hot reload swaps only the
+		plugins your change affects, in one transaction, and keeps the old code if
+		the new code fails. See <a href="hot-reload/">hot reload</a>.
 	</Card>
-	<Card title="Pruning">
+	<Card title="Clean teardown">
 		Each plugin runs in its own <code>Scope</code>. When it goes away, its
 		dependents stop first, then its finalizers run. A failure keeps its full{" "}
 		<code>Cause</code>. See <a href="lifecycle/">lifecycle</a>.
 	</Card>
-	<Card title="Top-working">
-		Change the variety without felling the tree. Hot reload swaps only the
-		plugins your change affects, in one transaction, and keeps the old code if
-		the new code fails. See <a href="hot-reload/">hot reload</a>.
+	<Card title="Checked dependencies">
+		Services are Effect <code>Context</code> keys, provided by layers or by
+		other plugins. A plugin lists what it needs in <code>inject</code>, and the
+		compiler checks the list. See <a href="services/">services</a>.
 	</Card>
 </CardGrid>
 
@@ -72,7 +72,7 @@ class Greeter extends Context.Service<
 
 // Publishes a Greeter while it is loaded.
 const greeter = Plugin.make({
-	name: "greeter",
+	name: "app/greeter",
 	config: Schema.Struct({ greeting: Schema.String }),
 	apply: ({ greeting }) =>
 		Graft.provide(Greeter, {
@@ -82,7 +82,7 @@ const greeter = Plugin.make({
 
 // Starts once a Greeter exists, and stops before it goes away.
 const hello = Plugin.make({
-	name: "hello",
+	name: "app/hello",
 	inject: [Greeter],
 	apply: () => Effect.flatMap(Greeter, (greeter) => greeter.greet("world")),
 })
@@ -144,15 +144,19 @@ states // => [Option.some(Fork.ForkState.Pending({ missing: ["app/Greeter"] })),
 
 ## Packages
 
-| Package                      | What it does                                                                                                            |
-| ---------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| `@graftland/graft`           | A plugin framework built on Effect: plugins, forks, services, isolation, events and logs.                               |
-| `@graftland/loader`          | Loads plugins from a list of entries or a YAML config file.                                                             |
-| `@graftland/hmr`             | Reloads plugin modules on Node.js without restarting the process.                                                       |
-| `@graftland/cli`             | The `graft` command: `start`, `create`, `add` and `remove`.                                                             |
-| `@graftland/create`          | Makes a new Graft project: `npm create @graftland` and `graft create`.                                                  |
-| `@graftland/package-manager` | Installs dependencies with npm, pnpm or Yarn. A failed install is undone by [snapshot rollback](cli/#package-managers). |
-| `@graftland/plugin-remote`   | Runs a plugin in a child process, a worker or on another machine. See [Remote](remote/overview/).                       |
+| Package                        | What it does                                                                                                                |
+| ------------------------------ | --------------------------------------------------------------------------------------------------------------------------- |
+| `@graftland/graft`             | A plugin framework built on Effect: plugins, forks, services, isolation, events and logs.                                   |
+| `@graftland/loader`            | Loads plugins from a list of entries or a YAML config file.                                                                 |
+| `@graftland/hmr`               | Reloads plugin modules on Node.js without restarting the process.                                                           |
+| `@graftland/cli`               | The `graft` command: `start`, `create`, `add` and `remove`.                                                                 |
+| `@graftland/create`            | Makes a new Graft project: `npm create @graftland` and `graft create`.                                                      |
+| `@graftland/package-manager`   | Installs dependencies with npm, pnpm or Yarn. A failed install is undone by [snapshot rollback](cli/#package-managers).     |
+| `@graftland/plugin-remote`     | Runs a plugin in a child process, a worker or on another machine. See [Remote](remote/overview/).                           |
+| `@graftland/plugin-otlp`       | Exports the spans of a subtree of plugins to OpenTelemetry. See [Export spans](best-practices/observability/#export-spans). |
+| `@graftland/plugin-http`       | [Shared HTTP server; routes and streams follow plugin lifetimes.](http/)                                                    |
+| `@graftland/plugin-http-api`   | [Live HttpApi groups, typed clients and OpenAPI documentation.](http-api/)                                                  |
+| `@graftland/plugin-mcp-server` | Serves the tools of plugins to MCP clients. See [MCP server](mcp-server/overview/).                                         |
 
 All packages share one version number and are released together. They need
 `effect` 4.1.x.

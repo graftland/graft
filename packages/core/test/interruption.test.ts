@@ -43,6 +43,7 @@ it.effect(
 			for (const ticks of Array.range(0, 100)) {
 				const spec = yield* TxRef.make<Spec>({
 					plugin,
+					requested: plugin,
 					input: undefined,
 					revision: 0,
 				})

@@ -1,8 +1,11 @@
 # yaml-language-server: $schema=../../packages/cli/schema.json
 # The gateway's plugins. With `pnpm start`, edits to this file and to the
 # plugin modules apply while the server keeps running.
+- id: router
+  name: "@graftland/plugin-http/router"
+
 - id: server
-  name: ./src/plugins/server.ts
+  name: "@graftland/plugin-http"
   config:
     port: 3000
 
@@ -21,3 +24,15 @@
 
 - id: todos
   name: ./src/plugins/todos.ts
+
+- id: events
+  name: ./src/plugins/events.ts
+
+- id: http-api
+  name: "@graftland/plugin-http-api"
+  config:
+    title: Todos
+    version: 1.0.0
+
+- id: docs
+  name: "@graftland/plugin-http-api/scalar"

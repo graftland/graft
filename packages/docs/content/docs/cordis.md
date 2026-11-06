@@ -47,8 +47,8 @@ only what Effect does not have.
   use the plugin's dependencies.
 - **Handlers that keep their context.** An event handler runs with the services,
   realm and intercepts of its own plugin.
-- **Atomic replacement.** `Graft.replace` changes every plugin in one
-  transaction.
+- **Atomic replacement with rollback.** `Graft.replace` changes every plugin in
+  one transaction, and goes back to the old plugins if a new one fails to start.
 - **Plugins in other processes.** [Remote](../remote/overview/) runs one plugin
   in a child process, a worker or on another machine. The plugins that use its
   services do not change.

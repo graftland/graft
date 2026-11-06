@@ -18,7 +18,7 @@ export class Greeter extends Context.Service<
 
 // Two plugins that publish a Greeter, each while it is loaded.
 export const english = Plugin.make({
-	name: "english",
+	name: "@graftland/sample-services/main/english",
 	apply: () =>
 		Graft.provide(Greeter, {
 			greet: (name) => Effect.log(`Hello, ${name}!`),
@@ -26,7 +26,7 @@ export const english = Plugin.make({
 })
 
 export const french = Plugin.make({
-	name: "french",
+	name: "@graftland/sample-services/main/french",
 	apply: () =>
 		Graft.provide(Greeter, {
 			greet: (name) => Effect.log(`Bonjour, ${name} !`),
@@ -35,7 +35,7 @@ export const french = Plugin.make({
 
 // Uses whichever Greeter exists.
 export const welcome = Plugin.make({
-	name: "welcome",
+	name: "@graftland/sample-services/main/welcome",
 	inject: [Greeter],
 	apply: Effect.fn("welcome.apply")(function* () {
 		const greeter = yield* Greeter

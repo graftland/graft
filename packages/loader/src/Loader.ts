@@ -10,7 +10,9 @@ import {
 	Context,
 	Deferred,
 	Effect,
+	Equal,
 	Exit,
+	HashMap,
 	Option,
 	Queue,
 	Random,
@@ -25,8 +27,9 @@ import {
 
 import { Graft, Plugin, type Fork } from "@graftland/graft"
 
-import { Entry } from "./Entry"
+import { Entry, type NewEntry } from "./Entry"
 import { Group } from "./Group"
+import { EntryLists, type Lists } from "./internal/entryLists"
 import { PendingRefreshes } from "./internal/pending"
 import { nextEpoch, withEpoch } from "./internal/refresh"
 import { snapshot } from "./internal/snapshot"
@@ -58,9 +61,6 @@ export class LoaderClosed extends Schema.TaggedError<
 	{ readonly brand: unique symbol }
 >()("LoaderClosed", {}) {}
 
-export type NewEntry = Omit<typeof Entry.schema.Type, "id"> &
-	Readonly<Record<string, unknown>> & { readonly id?: string | undefined }
-
 export class Loader extends Context.Service<
 	Loader,
 	{
@@ -79,7 +79,8 @@ export class Loader extends Context.Service<
 		readonly retry: Effect.Effect<void>
 		/**
 		 * Waits for the current target and every descendant, including module resolution,
-		 * to leave Loading, and for entries that were loading during a retry to read
+		 * to leave Loading, for discovered entry-list ids to finish persistence,
+		 * and for entries that were loading during a retry to read
 		 * their environment again. Failed and Pending count as settled; cleanup success
 		 * is not guaranteed. Do not await inside a lifecycle callback.
 		 */
@@ -108,6 +109,12 @@ export class Loader extends Context.Service<
  * synchronous defects complete the edit's reply and leave later edits runnable.
  */
 export interface Store {
+	/** Persist missing ids in discovered plugin entry lists under the store lock.
+	 * Each path starts at config; "*" selects every array element or record value.
+	 */
+	readonly identify?: (
+		lists: HashMap.HashMap<string, ReadonlyArray<ReadonlyArray<string>>>,
+	) => Effect.Effect<Option.Option<ReadonlyArray<Entry>>, EditError>
 	readonly initial: ReadonlyArray<Entry>
 	/** Receives captured edit data, persists it, and returns a target that Loader snapshots before publication. */
 	readonly apply: (op: Op) => Effect.Effect<ReadonlyArray<Entry>, EditError>
@@ -139,12 +146,26 @@ export const start = Effect.fnUntraced(function* (store: Store) {
 		epoch: nextEpoch(),
 	})
 	const pending = yield* SubscriptionRef.make(0)
+	const lists = yield* SubscriptionRef.make<Lists>(HashMap.empty())
+	const identified = yield* SubscriptionRef.make<Lists>(HashMap.empty())
 	// Groups load their children here, so every nested group reports to it too.
 	const initialState = yield* SubscriptionRef.get(state)
 	const root = yield* Graft.plugin(
 		Group,
 		withEpoch(copyGroup(initial), initialState.epoch),
-	).pipe(Effect.provideService(PendingRefreshes, Option.some(pending)))
+	).pipe(
+		Effect.provideService(PendingRefreshes, Option.some(pending)),
+		Effect.provideService(
+			EntryLists,
+			Option.some((name, locators) =>
+				SubscriptionRef.update(lists, (current) =>
+					locators.length === 0 && !HashMap.has(current, name)
+						? current
+						: HashMap.set(current, name, locators),
+				),
+			),
+		),
+	)
 	const lock = yield* Semaphore.make(1)
 	const publish = (entries: ReadonlyArray<Entry>) =>
 		Effect.flatMap(Effect.fromResult(validate(entries)), (target) =>
@@ -228,41 +249,63 @@ export const start = Effect.fnUntraced(function* (store: Store) {
 		if (!accepted) return yield* LoaderClosed.make()
 		return yield* Deferred.await(reply)
 	})
-	yield* Stream.suspend(() => store.external).pipe(
-		Stream.runForEach(() =>
-			Semaphore.withPermits(
-				lock,
-				1,
-			)(
+	const refresh = (
+		operation: Effect.Effect<Option.Option<ReadonlyArray<Entry>>, EditError>,
+		after: Effect.Effect<void> = Effect.void,
+	) =>
+		Semaphore.withPermits(
+			lock,
+			1,
+		)(
+			operation.pipe(
 				Effect.flatMap(
-					Effect.suspend(() => store.refresh),
-					Option.match({
-						onNone: () => Effect.void,
-						onSome: publish,
-					}),
+					Option.match({ onNone: () => Effect.void, onSome: publish }),
 				),
-			).pipe(
 				Effect.catchCause((cause) =>
 					Effect.logError("Refreshing loader entries failed", cause),
 				),
+				Effect.ensuring(after),
+			),
+		)
+	yield* Stream.merge(
+		Stream.suspend(() => store.external).pipe(
+			Stream.map(() => refresh(Effect.suspend(() => store.refresh))),
+		),
+		SubscriptionRef.changes(lists).pipe(
+			Stream.changes,
+			Stream.map((known) =>
+				refresh(
+					Effect.suspend(() =>
+						HashMap.size(known) === 0
+							? Effect.succeedNone
+							: (store.identify?.(known) ?? Effect.succeedNone),
+					),
+					SubscriptionRef.set(identified, known),
+				),
 			),
 		),
+	).pipe(
+		Stream.runForEach((operation) => operation),
 		Effect.catchCause((cause) =>
 			Effect.logError("Loader change notifications stopped", cause),
 		),
 		Effect.forkScoped,
 	)
-	// Wake on target and refresh changes only; the subtree counter replaces rendering the fork tree.
+	// Wake on target, refresh and identity persistence changes; avoid rendering the fork tree.
 	const ready = Stream.mergeAll(
 		[
 			Stream.as(SubscriptionRef.changes(state), undefined),
 			Stream.as(SubscriptionRef.changes(pending), undefined),
+			Stream.as(SubscriptionRef.changes(identified), undefined),
 		],
 		{ concurrency: "unbounded" },
 	).pipe(
 		Stream.filterEffect(
 			Effect.fnUntraced(function* () {
 				const before = yield* SubscriptionRef.get(state)
+				const known = yield* SubscriptionRef.get(lists)
+				const written = yield* SubscriptionRef.get(identified)
+				if (!Equal.equals(known, written)) return false
 				if (before.version !== before.reconciled) return false
 				if ((yield* SubscriptionRef.get(pending)) > 0) return false
 				yield* root.stable
@@ -270,7 +313,13 @@ export const start = Effect.fnUntraced(function* (store: Store) {
 				// count read after the subtree settled cannot hide a later Loading fork.
 				const refreshing = yield* SubscriptionRef.get(pending)
 				const after = yield* SubscriptionRef.get(state)
-				return after.version === before.version && refreshing === 0
+				const latest = yield* SubscriptionRef.get(lists)
+				const completed = yield* SubscriptionRef.get(identified)
+				return (
+					after.version === before.version &&
+					refreshing === 0 &&
+					Equal.equals(latest, completed)
+				)
 			}),
 		),
 		Stream.runHead,
@@ -330,7 +379,7 @@ export const start = Effect.fnUntraced(function* (store: Store) {
 
 /** Loads entries kept in memory; edits are not persisted. */
 export const plugin = Plugin.make({
-	name: "loader",
+	name: "@graftland/loader/Loader",
 	config: Schema.Array(Entry),
 	apply: Effect.fnUntraced(function* (entries) {
 		const initial = snapshot(entries)

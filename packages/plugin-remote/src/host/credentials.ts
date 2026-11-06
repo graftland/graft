@@ -4,8 +4,8 @@ import { Graft, Plugin } from "@graftland/graft"
 
 import { Credentials, type ClientCertificate, type Prepared } from "../Auth"
 import { CredentialsError } from "../Errors"
-import { prepare } from "./auth/token"
-import type * as Configuration from "./entryConfig"
+import { prepare } from "../internal/auth/token"
+import type * as Configuration from "../internal/entryConfig"
 
 export type Source<A, D extends ReadonlyArray<Plugin.Dependency>, E = unknown> =
 	| Effect.Effect<A, E, Scope.Scope>
@@ -49,7 +49,7 @@ const provider = <A, E, D extends ReadonlyArray<Plugin.Dependency>>(
 ) => {
 	const input = Effect.isEffect(source) ? { inject: [], read: source } : source
 	return Plugin.make({
-		name: "remote-effect-credentials",
+		name: "@graftland/plugin-remote/host/credentials/provider",
 		inject: input.inject,
 		apply: Effect.fnUntraced(function* () {
 			// Restore the provider's context without replacing each read's owning scope.

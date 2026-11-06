@@ -151,7 +151,8 @@ for (const global of [false, true]) {
 				yield* fs.makeDirectory(tools)
 				yield* fs.writeFileString(
 					tools + "/npm",
-					`#!${process.execPath}\nprocess.exitCode = 0;\n`,
+					// The registry has @graftland/plugin-remote and no graft-plugin-remote.
+					`#!${process.execPath}\nconst [command, name] = process.argv.slice(2);\nif (command === "view" && name !== "@graftland/plugin-remote") { console.error("npm error code E404"); process.exitCode = 1 } else { if (command === "view") console.log(JSON.stringify(name)); process.exitCode = 0 }\n`,
 				)
 				yield* fs.chmod(tools + "/npm", 0o755)
 				yield* fs.writeFileString(

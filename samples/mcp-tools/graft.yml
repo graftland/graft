@@ -1,0 +1,14 @@
+- id: mcp
+  name: "@graftland/plugin-mcp-server"
+  config:
+    name: graft-mcp-tools
+- id: stdio
+  name: "@graftland/plugin-mcp-server/stdio"
+- id: content
+  name: ./src/plugins/content.ts
+- id: clock
+  name: ./src/plugins/clock.ts
+- id: todo-store
+  name: ./src/plugins/todo-store.ts
+- id: todo
+  name: ./src/plugins/todo.ts

@@ -91,7 +91,7 @@ const factory = Effect.fnUntraced(function* (
 })
 /** Configured Listener; authentication is supplied to bind, never injected here. */
 export default Plugin.make({
-	name: "remote-websocket-capability",
+	name: "@graftland/plugin-remote/runner/websocket",
 	config: Config,
 	inject: [FileSystem.FileSystem, Path.Path],
 	apply: Effect.fnUntraced(function* (config) {

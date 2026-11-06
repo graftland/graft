@@ -47,7 +47,7 @@ declare const openPool: (
 }>
 
 export default Plugin.make({
-	name: "postgres",
+	name: "graft-plugin-postgres",
 	config: Config,
 	apply: ({ url, poolSize }) =>
 		Effect.gen(function* () {
@@ -164,15 +164,37 @@ Short names in `graft.yml` find unscoped packages named `graft-plugin-<name>`:
 - An application resolves [plugin names](../../config-file/#plugin-names) from
   its own directory, so it must depend on your package, for example through
   `graft add`.
-- A short name is tried as written first, and Graft moves on to the next
-  candidate only when one does not exist. If the application can resolve a
-  package named `postgres`, such as your driver, `name: postgres` and
-  `name: postgres/migrations` fail with `ModuleInvalid`.
+- A short name is tried as written first. Graft moves on to the conventions when
+  that module does not exist, or when it imports but exports no plugin, such as
+  Node's `http` or your `postgres` driver. Any other import failure stops
+  resolution with `ModuleInvalid`.
 - Show the full package name in your README's `graft.yml` example. It cannot
   resolve to another package.
-- `graft add --plugin` keeps a name that starts with `@` or `graft-plugin-`, and
-  turns any other name into `@graftland/plugin-<name>`. A package with a `./cli`
-  export needs one of those two forms.
+- `graft add --plugin` keeps a name that starts with `@` or `graft-plugin-`. It
+  turns any other name into whichever of `@graftland/plugin-<name>` and
+  `graft-plugin-<name>` the registry has, and fails if it has both. A package
+  with a `./cli` export needs one of those forms.
+
+## Name the plugin
+
+The plugin's `name` labels it in logs, spans and the fork tree. Build it the way
+Effect's `deterministicKeys` diagnostic builds service keys, so the name says
+which module defines the plugin:
+
+| Part | Value                                                                                                                       |
+| ---- | --------------------------------------------------------------------------------------------------------------------------- |
+| 1    | The package name.                                                                                                           |
+| 2    | The module's path under `src/`, without the extension. `index` is left out.                                                 |
+| 3    | The binding that holds the plugin. Left out for the default export, an export named `plugin`, or one named like the module. |
+
+| Plugin                                    | `name`                                    |
+| ----------------------------------------- | ----------------------------------------- |
+| The default export of `src/index.ts`      | `graft-plugin-postgres`                   |
+| The default export of `src/migrations.ts` | `graft-plugin-postgres/migrations`        |
+| `const warmup` in `src/migrations.ts`     | `graft-plugin-postgres/migrations/warmup` |
+
+Graft does not check the name. An application names its own plugins the same
+way, from its `package.json` name.
 
 ## Editor completion
 

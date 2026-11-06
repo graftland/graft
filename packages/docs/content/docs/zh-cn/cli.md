@@ -26,8 +26,9 @@ graft remote certificates --out ./certs --server localhost
 graft add --plugin remote --global
 ```
 
-`add --plugin` 安装 `@graftland/plugin-<name>`，并启用它的 `/cli`
-条目。第三方包可以写完整包名。`--global`
+`add --plugin` 安装插件包，并启用它的 `/cli`
+条目。短名称会变成 registry 中存在的那一个：`@graftland/plugin-<name>` 或
+`graft-plugin-<name>`；两者都存在时，请写完整包名。`--global`
 将包和条目放进[用户级配置](../config-file/#命令插件)。
 
 已启用的命令会出现在 `--help` 和 `--completions bash`
@@ -50,7 +51,8 @@ graft start [config] [--watch] [--env-file <path>] [--env-dir <path>] [--stdio]
 ### 协议输出
 
 只有一个 stdio listener 的 runner 使用
-`graft start runner.yml --stdio`。加载插件、处理帮助和版本参数之前，stdout 就已保留给协议字节。日志、Console 输出（包括 worker 输出）、帮助、版本和错误都写入 stderr；此模式不提供交互向导和补全输出。runner 会拒绝不匹配的 listener 配置。stdin
+`graft start runner.yml --stdio`，[MCP 服务器](../mcp-server/overview/)使用
+`graft start --stdio`。加载插件、处理帮助和版本参数之前，stdout 就已保留给协议字节。日志、Console 输出（包括 worker 输出）、帮助、版本和错误都写入 stderr；此模式不提供交互向导和补全输出。runner 会拒绝不匹配的 listener 配置。stdin
 EOF 后，runner 停止执行单元，确认退出后结束进程；启动或清理失败时返回非零退出码。
 
 ### 选项
@@ -119,8 +121,10 @@ secrets 或 Kubernetes Secret 卷。
 CLI 如何驱动重载：
 
 1. 它使用带模块文件过滤的 `hmr.watch`。
-2. 每次重载尝试返回 `Reloaded` 或 `Skipped` 后，它会调用
-   `loader.retry`，重试失败项并刷新 `!env` 值。
+2. 每次重载尝试返回 `Reloaded`、`RolledBack` 或 `Skipped` 后，它会调用
+   `loader.retry`，重试失败项并刷新 `!env` 值。`RolledBack`
+   会为每个启动失败或超时的插件记录一条警告，带有 `graft.fork` 和
+   `graft.plugin`；启动失败时还带有其 `Cause`。
 3. 重载和 retry 的失败会记录完整 `Cause`，监听继续。
 
 YAML 和模块 watcher 使用原生文件系统通知，不做轮询。YAML
@@ -158,6 +162,9 @@ CLI 为配置项的 `intercept` 设置登记了两个 Reference，对该项及�
 [配置文件页面](../config-file/#配置文件中的-intercept)列出了合法值和示例。非法值让该项以
 `InvalidIntercept` 失败。CLI 不登记其他 Reference。
 
+共享 HTTP 监听器使用普通的 `graft start` 加载 [HTTP 服务器](../http/)，不需要
+`--stdio`。
+
 ## graft create
 
 ```sh
@@ -192,11 +199,11 @@ graft create [directory] [options]
 
 ### 模板
 
-| 模板      | 用途                                                     | 除 `package.json` 和 `graft.yml` 外的文件                                                                                          |
-| --------- | -------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| `app`     | 应用。`graft.yml` 加载示例插件。                         | `src/hello.ts`、`tsconfig.json`、`README.md`、`.vscode/extensions.json`、`.gitignore`                                              |
-| `plugin`  | 要[发布](../plugins/#发布插件)的插件包。                 | `src/index.ts`、`test/index.test.ts`、`tsconfig.json`、`tsconfig.build.json`、`README.md`、`.vscode/extensions.json`、`.gitignore` |
-| `minimal` | 只有配置文件，除 `--plugin` 添加的配置项外没有其他条目。 | `.gitignore`                                                                                                                       |
+| 模板      | 用途                                                                          | 除 `package.json` 和 `graft.yml` 外的文件                                                                                          |
+| --------- | ----------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `app`     | 应用。`graft.yml` 加载示例插件：`hello`，以及使用 `greeter` 服务的 `ticker`。 | `src/hello.ts`、`src/greeter.ts`、`src/ticker.ts`、`tsconfig.json`、`README.md`、`.vscode/extensions.json`、`.gitignore`           |
+| `plugin`  | 要[发布](../plugins/#发布插件)的插件包。                                      | `src/index.ts`、`test/index.test.ts`、`tsconfig.json`、`tsconfig.build.json`、`README.md`、`.vscode/extensions.json`、`.gitignore` |
+| `minimal` | 只有配置文件，除 `--plugin` 添加的配置项外没有其他条目。                      | `.gitignore`                                                                                                                       |
 
 | 脚本        | `app`                 | `plugin`                                   | `minimal`             |
 | ----------- | --------------------- | ------------------------------------------ | --------------------- |

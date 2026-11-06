@@ -8,7 +8,7 @@ const notation = /^(\d{1,2})d(\d{1,3})$/
 
 /** `/roll 2d6` rolls two six-sided dice. */
 export default Plugin.make({
-	name: "dice",
+	name: "@graftland/sample-chat-bot/plugins/dice",
 	apply: () =>
 		command("roll", "roll dice, such as /roll 2d6", ({ user, args }) => {
 			const match = Option.fromNullishOr(notation.exec(args[0] ?? "1d6"))

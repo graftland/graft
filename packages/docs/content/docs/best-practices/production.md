@@ -86,7 +86,7 @@ const connect = Effect.flatMap(
 )
 
 const client = Plugin.make({
-	name: "client",
+	name: "app/client",
 	retry: Schedule.min([
 		Schedule.exponential("1 second"),
 		Schedule.spaced("1 minute"),
@@ -162,12 +162,12 @@ A failed or pending entry does not stop the process, so a service manager that
 only watches the process sees a healthy application. Publish the fork states for
 a health endpoint:
 
-```ts import.meta.vitest name="production: report health"
-import { Array, Context, Effect, Ref, Schema, Stream } from "effect"
+```ts title="health.ts"
+import { Array, Context, Effect, Ref, Stream } from "effect"
 
 import { Fork, Graft, Plugin } from "@graftland/graft"
 
-class Health extends Context.Service<
+export class Health extends Context.Service<
 	Health,
 	{ readonly unhealthy: Effect.Effect<ReadonlyArray<string>> }
 >()("app/Health") {}
@@ -182,8 +182,8 @@ const unhealthy = (
 		...unhealthy(tree.children),
 	])
 
-const health = Plugin.make({
-	name: "health",
+export const health = Plugin.make({
+	name: "app/health",
 	apply: () =>
 		Effect.gen(function* () {
 			const latest = yield* Ref.make<ReadonlyArray<string>>([])
@@ -194,44 +194,42 @@ const health = Plugin.make({
 			yield* Graft.provide(Health, { unhealthy: Ref.get(latest) })
 		}),
 })
-
-class DatabaseDown extends Schema.TaggedError<
-	DatabaseDown,
-	{ readonly brand: unique symbol }
->()("DatabaseDown", {}) {}
-
-const database = Plugin.make({
-	name: "database",
-	apply: () => DatabaseDown.make({}),
-})
-
-// Stands in for the HTTP plugin: it keeps the first report that is not empty.
-const report = Ref.makeUnsafe<ReadonlyArray<string>>([])
-const http = Plugin.make({
-	name: "http",
-	inject: [Health],
-	apply: () =>
-		Health.pipe(
-			Effect.flatMap(({ unhealthy }) => unhealthy),
-			Effect.repeat({ until: Array.isReadonlyArrayNonEmpty }),
-			Effect.flatMap((list) => Ref.set(report, list)),
-		),
-})
-
-await Effect.runPromise(
-	Effect.gen(function* () {
-		const monitor = yield* Graft.plugin(health)
-		yield* monitor.await
-		yield* Graft.plugin(database)
-		const probe = yield* Graft.plugin(http)
-		yield* probe.await
-		yield* Ref.get(report) // => ["database: Failed"]
-	}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
-)
 ```
 
-An HTTP plugin injects `Health` and answers `503` when the list is not empty. To
-diagnose what the tree shows, see [Troubleshooting](../troubleshooting/).
+Load the health monitor and this route plugin with the
+[HTTP server](../../http/). The mount injects `Health` and answers 503 when the
+list is not empty:
+
+```ts
+import { Effect } from "effect"
+import { HttpRouter, HttpServerResponse } from "effect/http"
+
+import { Plugin } from "@graftland/graft"
+import * as Http from "@graftland/plugin-http/Http"
+
+import { Health } from "./health.ts"
+
+export default Plugin.make({
+	name: "app/health-route",
+	inject: [Health],
+	apply: () =>
+		Http.mount(
+			HttpRouter.add(
+				"GET",
+				"/health",
+				Effect.gen(function* () {
+					const health = yield* Health
+					const unhealthy = yield* health.unhealthy
+					return HttpServerResponse.empty({
+						status: unhealthy.length === 0 ? 200 : 503,
+					})
+				}),
+			),
+		).pipe(Effect.asVoid),
+})
+```
+
+To diagnose the tree, see [Troubleshooting](../troubleshooting/).
 
 ## Set log levels per entry
 

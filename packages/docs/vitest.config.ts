@@ -19,6 +19,7 @@ export default defineProject({
 	resolve: { conditions: ["source"] },
 	ssr: { resolve: { conditions: ["source"] } },
 	test: {
+		globalSetup: ["../../scripts/isolated-home.mjs"],
 		include: [],
 		// A page whose blocks are all typecheck-only has no doctests.
 		passWithNoTests: true,

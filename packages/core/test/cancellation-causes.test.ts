@@ -5,10 +5,13 @@ import {
 	Effect,
 	Exit,
 	Fiber,
+	HashMap,
 	Option,
 	PubSub,
 	Schema,
 	String,
+	TxRef,
+	TxSubscriptionRef,
 } from "effect"
 import { assert, describe, it } from "@effect/vitest"
 
@@ -23,25 +26,37 @@ describe("cancellation causes", () => {
 			Effect.gen(function* () {
 				const { runtime } = yield* RuntimeContext
 				const replacementStarted = yield* Deferred.make<void>()
+				const release = yield* Deferred.make<void>()
 				const replacement = Plugin.make({
 					name: "replacement",
 					apply: () =>
 						Effect.asVoid(Deferred.succeed(replacementStarted, undefined)),
 				})
-				const original: Plugin.Plugin<
-					void,
-					void,
-					string | Graft.ReplacementConflict
-				> = Plugin.make({
-					name: "self replacing",
+				// The old activation fails after the swap, before it can be interrupted.
+				const original = Plugin.make({
+					name: "original",
 					apply: () =>
-						Graft.replace([[original, replacement]]).pipe(
+						Deferred.await(release).pipe(
 							Effect.andThen(Effect.fail("failure during replacement")),
+							Effect.uninterruptible,
 						),
 				})
 				const fork = yield* Graft.plugin(original)
+				const replacing = yield* Effect.forkChild(
+					Graft.replace([[original, replacement]]),
+				)
+				yield* Effect.tx(
+					Effect.gen(function* () {
+						const forks = yield* TxSubscriptionRef.get(runtime.forks)
+						const entry = Option.getOrThrow(HashMap.get(forks, fork.id))
+						const spec = yield* TxRef.get(entry.spec)
+						if (spec.plugin !== replacement) return yield* Effect.txRetry
+					}),
+				)
+				yield* Deferred.succeed(release, undefined)
 				yield* Deferred.await(replacementStarted)
-				yield* fork.await
+				const result = yield* Fiber.join(replacing)
+				assert.strictEqual(result._tag, "Replaced")
 				yield* Effect.log("Review replacement logs")
 				const subscription = yield* PubSub.subscribe(runtime.logs)
 				const entries = yield* PubSub.takeAll(subscription)

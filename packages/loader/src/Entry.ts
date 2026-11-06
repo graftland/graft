@@ -13,8 +13,15 @@ import {
 	Record,
 	Result,
 	Schema,
+	SchemaGetter,
 } from "effect"
 
+import {
+	assignIds,
+	EntriesId,
+	EntryDefinition,
+	validateIds,
+} from "./internal/entryIds"
 import { isContainer } from "./internal/snapshot"
 
 /** A value read from an environment variable when the entry is loaded (`!env NAME` in YAML). */
@@ -22,7 +29,8 @@ export class Env extends Data.TaggedClass("Env")<{ readonly name: string }> {}
 
 /**
  * The id of the entry a plugin was loaded from. Ids persist in the config
- * file, so a plugin can use this as a name that survives restarts.
+ * file, including plugin entry lists. Outside a file, missing ids derive from
+ * the parent id, plugin name and occurrence among anonymous same-name siblings.
  */
 export const CurrentId = Context.Reference<Option.Option<string>>(
 	"@graftland/loader/Entry/CurrentId",
@@ -78,6 +86,38 @@ export const Entry = Schema.StructWithRest(Fields, [
 ])
 
 export type Entry = typeof Entry.Type
+
+/** An entry whose identity Graft may assign. Additional metadata is preserved. */
+export const NewEntry = Schema.StructWithRest(
+	Schema.Struct({ ...Fields.fields, id: Schema.optionalKey(Fields.fields.id) }),
+	[Schema.Record(Schema.String, Schema.Unknown)],
+)
+export type NewEntry = typeof NewEntry.Type
+
+/** Hosted entries with automatic identities and the config file's registered plugin schemas. */
+export const Entries = Schema.Array(NewEntry)
+	.check(
+		Schema.makeFilter(
+			(entries) => {
+				const checked = validateIds(entries)
+				return Result.isFailure(checked) ? checked.failure : undefined
+			},
+			{
+				[EntriesId]: true,
+				toJsonSchema: () => ({
+					items: { $ref: `#/definitions/${EntryDefinition}` },
+				}),
+			},
+		),
+	)
+	.pipe(
+		Schema.decodeTo(Schema.Array(Entry), {
+			decode: SchemaGetter.transformEffect((entries) =>
+				Effect.map(CurrentId, (parent) => assignIds(entries, parent)),
+			),
+			encode: SchemaGetter.transform((entries) => entries),
+		}),
+	)
 
 /** Selects entries for this loader subtree; excluded entries remain in the store. */
 export const Select = Context.Reference<(entry: Entry) => boolean>(

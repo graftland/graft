@@ -9,7 +9,7 @@ import { Checkout, Database, Pricing } from "../Checkout.ts"
  * `Pricing` never change: Graft restarts it whenever either one does.
  */
 export default Plugin.make({
-	name: "checkout",
+	name: "@graftland/sample-checkout-upgrade/plugins/checkout",
 	inject: [Database, Pricing],
 	apply: Effect.fn("checkout.apply")(function* () {
 		const database = yield* Database

@@ -1,4 +1,5 @@
 import {
+	Cause,
 	Deferred,
 	Effect,
 	Exit,
@@ -121,7 +122,7 @@ for (const mode of ["emit", "parallel", "bail", "waterfall"]) {
 		}).pipe(run),
 	)
 
-	it.effect(`skips a withdrawn owner while its handler nests ${mode}`, () =>
+	it.effect(`handles a withdrawn owner while its handler nests ${mode}`, () =>
 		Effect.gen(function* () {
 			const entered = yield* Deferred.make<void>()
 			const { dispatch: inner } = yield* register(
@@ -138,7 +139,10 @@ for (const mode of ["emit", "parallel", "bail", "waterfall"]) {
 			const dispatch = yield* outer.pipe(Effect.forkScoped)
 			yield* Deferred.await(entered)
 			yield* Scope.close(owner, Exit.void)
-			yield* Fiber.join(dispatch)
+			const result = yield* Fiber.await(dispatch)
+			assert.equal(Exit.isFailure(result), mode === "waterfall")
+			if (Exit.isFailure(result))
+				assert.isTrue(Cause.hasInterruptsOnly(result.cause))
 		}).pipe(run),
 	)
 }

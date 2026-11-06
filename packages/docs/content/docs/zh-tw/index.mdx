@@ -39,20 +39,20 @@ import { Card, CardGrid } from "@astrojs/starlight/components"
 ## 三項承諾
 
 <CardGrid>
-	<Card title="砧木">
-		服務是 Effect 的 <code>Context</code> 鍵，由 layer 或其他外掛提供。外掛在{" "}
-		<code>inject</code> 中列出所需服務，由編譯器檢查。見
-		<a href="services/">服務</a>。
+	<Card title="熱替換">
+		不砍樹，只換品種。熱重載只取代受變更影響的外掛，在一次交易中完成；新程式碼失敗時保留舊程式碼。見
+		<a href="hot-reload/">熱重載</a>。
 	</Card>
-	<Card title="修剪">
+	<Card title="乾淨卸載">
 		每個外掛都在自己的 <code>Scope</code>{" "}
 		中執行。外掛消失時，相依於它的部分先停止，再執行它的
 		finalizer。失敗保留完整的 <code>Cause</code>。見
 		<a href="lifecycle/">生命週期</a>。
 	</Card>
-	<Card title="高接換種">
-		不砍樹，只換品種。熱重載只取代受變更影響的外掛，在一次交易中完成；新程式碼失敗時保留舊程式碼。見
-		<a href="hot-reload/">熱重載</a>。
+	<Card title="相依受檢查">
+		服務是 Effect 的 <code>Context</code> 鍵，由 layer 或其他外掛提供。外掛在{" "}
+		<code>inject</code> 中列出所需服務，由編譯器檢查。見
+		<a href="services/">服務</a>。
 	</Card>
 </CardGrid>
 
@@ -70,7 +70,7 @@ class Greeter extends Context.Service<
 
 // Publishes a Greeter while it is loaded.
 const greeter = Plugin.make({
-	name: "greeter",
+	name: "app/greeter",
 	config: Schema.Struct({ greeting: Schema.String }),
 	apply: ({ greeting }) =>
 		Graft.provide(Greeter, {
@@ -80,7 +80,7 @@ const greeter = Plugin.make({
 
 // Starts once a Greeter exists, and stops before it goes away.
 const hello = Plugin.make({
-	name: "hello",
+	name: "app/hello",
 	inject: [Greeter],
 	apply: () => Effect.flatMap(Greeter, (greeter) => greeter.greet("world")),
 })
@@ -139,15 +139,19 @@ states // => [Option.some(Fork.ForkState.Pending({ missing: ["app/Greeter"] })),
 
 ## 套件
 
-| 套件                         | 功能                                                                                   |
-| ---------------------------- | -------------------------------------------------------------------------------------- |
-| `@graftland/graft`           | 基於 Effect 的外掛框架：外掛、fork、服務、隔離、事件和日誌。                           |
-| `@graftland/loader`          | 從設定項目清單或 YAML 設定檔載入外掛。                                                 |
-| `@graftland/hmr`             | 在 Node.js 中重載外掛模組，無需重新啟動行程。                                          |
-| `@graftland/cli`             | 提供 `graft` 命令：`start`、`create`、`add` 和 `remove`。                              |
-| `@graftland/create`          | 建立新的 Graft 專案：`npm create @graftland` 與 `graft create`。                       |
-| `@graftland/package-manager` | 使用 npm、pnpm 或 Yarn 安裝相依套件。安裝失敗時，透過[快照還原](cli/#套件管理器)復原。 |
-| `@graftland/plugin-remote`   | 讓外掛在子行程、worker 或另一台機器上執行。見 [Remote](remote/overview/)。             |
+| 套件                           | 功能                                                                                                 |
+| ------------------------------ | ---------------------------------------------------------------------------------------------------- |
+| `@graftland/graft`             | 基於 Effect 的外掛框架：外掛、fork、服務、隔離、事件和日誌。                                         |
+| `@graftland/loader`            | 從設定項目清單或 YAML 設定檔載入外掛。                                                               |
+| `@graftland/hmr`               | 在 Node.js 中重載外掛模組，無需重新啟動行程。                                                        |
+| `@graftland/cli`               | 提供 `graft` 命令：`start`、`create`、`add` 和 `remove`。                                            |
+| `@graftland/create`            | 建立新的 Graft 專案：`npm create @graftland` 與 `graft create`。                                     |
+| `@graftland/package-manager`   | 使用 npm、pnpm 或 Yarn 安裝相依套件。安裝失敗時，透過[快照還原](cli/#套件管理器)復原。               |
+| `@graftland/plugin-remote`     | 讓外掛在子行程、worker 或另一台機器上執行。見 [Remote](remote/overview/)。                           |
+| `@graftland/plugin-otlp`       | 把一棵外掛子樹的 span 匯出到 OpenTelemetry。見[匯出 span](best-practices/observability/#匯出-span)。 |
+| `@graftland/plugin-http`       | [共用 HTTP 伺服器；路由與串流隨外掛的生命週期載入與卸載。](http/)                                    |
+| `@graftland/plugin-http-api`   | [即時 HttpApi 路由群組、型別化用戶端與 OpenAPI 文件。](http-api/)                                    |
+| `@graftland/plugin-mcp-server` | 把外掛的工具提供給 MCP 用戶端。見 [MCP 伺服器](mcp-server/overview/)。                               |
 
 所有套件共用同一個版本號，一同發布，並需要 `effect` 4.1.x。
 

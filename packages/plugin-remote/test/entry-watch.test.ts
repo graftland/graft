@@ -28,7 +28,7 @@ import * as Hmr from "@graftland/hmr"
 import { Loader, ModuleResolver } from "@graftland/loader"
 
 import * as Contract from "../src/Contract"
-import { host } from "../src/internal/entry"
+import host from "../src/host/index"
 
 it.effect(
 	"keeps entry observations through failed execution and restarts on a change",

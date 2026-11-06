@@ -21,7 +21,7 @@ import { Duration, Effect, Option, Schedule, Schema, Stream } from "effect"
 import { Fork, Graft, Plugin } from "@graftland/graft"
 
 const ticker = Plugin.make({
-	name: "ticker",
+	name: "app/ticker",
 	config: Schema.Struct({ every: Schema.Duration }),
 	apply: ({ every }) =>
 		Effect.log("tick").pipe(
@@ -42,13 +42,13 @@ await Effect.runPromise(
 
 ### Options
 
-| Option   | What it does                                                                                      |
-| -------- | ------------------------------------------------------------------------------------------------- |
-| `name`   | A name for logs and the fork tree.                                                                |
-| `config` | An Effect `Schema`. The input is decoded with it before `apply` runs. Leave it out for no config. |
-| `inject` | The services the plugin needs. See [Dependencies](#dependencies).                                 |
-| `apply`  | Starts the plugin. It runs inside the fork's `Scope`.                                             |
-| `retry`  | A `Schedule` for restarting after `apply` or a supervised task fails.                             |
+| Option   | What it does                                                                                                         |
+| -------- | -------------------------------------------------------------------------------------------------------------------- |
+| `name`   | A name for logs and the fork tree, [built like an Effect service key](../best-practices/packaging/#name-the-plugin). |
+| `config` | An Effect `Schema`. The input is decoded with it before `apply` runs. Leave it out for no config.                    |
+| `inject` | The services the plugin needs. See [Dependencies](#dependencies).                                                    |
+| `apply`  | Starts the plugin. It runs inside the fork's `Scope`.                                                                |
+| `retry`  | A `Schedule` for restarting after `apply` or a supervised task fails.                                                |
 
 ### What to use inside `apply`
 
@@ -149,7 +149,7 @@ class Cache extends Context.Service<
 >()("app/Cache") {}
 
 const report = Plugin.make({
-	name: "report",
+	name: "app/report",
 	inject: [Database, Plugin.optional(Cache)],
 	apply: () =>
 		Effect.gen(function* () {
@@ -216,7 +216,7 @@ const startServer = (port: number, banner: Ref.Ref<string>) =>
 	Ref.update(starts, Array.append(port))
 
 const server = Plugin.make({
-	name: "server",
+	name: "app/server",
 	config: Schema.Struct({ port: Schema.Int, banner: Schema.String }),
 	apply: (config) =>
 		Effect.gen(function* () {
@@ -292,7 +292,7 @@ const connect = Effect.flatMap(
 )
 
 const client = Plugin.make({
-	name: "client",
+	name: "app/client",
 	retry: Schedule.exponential("1 second"),
 	apply: () => connect,
 })
@@ -335,7 +335,7 @@ const openDatabase = Effect.acquireRelease(
 )
 
 export const database = Plugin.service(Database, openDatabase, {
-	name: "database",
+	name: "app/database",
 })
 ```
 
@@ -370,14 +370,14 @@ const StorageLive = Layer.mergeAll(
 )
 
 const storage = Plugin.layer(StorageLive, {
-	name: "storage",
+	name: "app/storage",
 	inject: [Database],
 	provides: [Storage, StorageAdmin],
 })
 
 // Starts only once both services are published.
 const files = Plugin.make({
-	name: "files",
+	name: "app/files",
 	inject: [Storage, StorageAdmin],
 	apply: () => Effect.void,
 })
@@ -424,3 +424,31 @@ plugin from `src/index.ts`, with a test and a `graft.yml` that runs it through
 
 The rest of what a published package needs is in
 [Plugin packages](../best-practices/packaging/).
+
+## Host entries
+
+Declare an entry-list field with `Entry.Entries` and pass it to `Group.Group`.
+
+```ts
+import { Effect, Schema } from "effect"
+
+import { Graft, Plugin } from "@graftland/graft"
+import { Entry, Group } from "@graftland/loader"
+
+export const host = Plugin.make({
+	name: "host",
+	config: Schema.Struct({ plugins: Entry.Entries }),
+	apply: Effect.fnUntraced(function* ({ plugins }) {
+		const subtree = yield* Graft.plugin(Group.Group, plugins)
+		return (next) => subtree.update(next.plugins).pipe(Effect.as(true))
+	}),
+})
+```
+
+Graft assigns missing ids, persists them in a config file, and checks each child
+with its own plugin's config schema. The composed editor schema applies
+registered child schemas to these lists too.
+
+Return an update function as above to keep children running when Graft first
+writes their ids. A host without an update function restarts on that write. See
+[Entry fields](../config-file/#entry-fields) for identity rules.

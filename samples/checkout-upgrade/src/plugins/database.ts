@@ -10,7 +10,7 @@ import { Ledger } from "../Orders.ts"
  * pool is a defect: if Graft ever let one through, the sample would crash.
  */
 export default Plugin.make({
-	name: "database",
+	name: "@graftland/sample-checkout-upgrade/plugins/database",
 	config: Schema.Struct({ url: Schema.String }),
 	inject: [Ledger],
 	apply: Effect.fn("database.apply")(function* ({ url }) {

@@ -39,7 +39,7 @@ const heard = await Effect.runPromise(
 	Effect.gen(function* () {
 		const texts = yield* Ref.make<ReadonlyArray<string>>([])
 		const listener = Plugin.make({
-			name: "listener",
+			name: "app/listener",
 			apply: () =>
 				Event.on(Message, (text) => Ref.update(texts, (all) => [...all, text])),
 		})
@@ -56,10 +56,11 @@ heard // => ["Hello"]
 
 ### 选项
 
-| 选项      | 作用                                       |
-| --------- | ------------------------------------------ |
-| `prepend` | 排在之前注册的处理函数前面执行。           |
-| `global`  | 接收来自所有领域的事件，并忽略派发过滤器。 |
+| 选项      | 作用                                                                                                                   |
+| --------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `order`   | 数字越小越先执行、越在外层；默认为 `0`。相同顺序按注册先后执行，`prepend` 优先。依赖相对顺序的处理函数应使用不同的值。 |
+| `prepend` | 排在之前注册的处理函数前面执行。                                                                                       |
+| `global`  | 接收来自所有领域的事件，并忽略派发过滤器。                                                                             |
 
 ### 处理函数的上下文
 
@@ -82,12 +83,13 @@ heard // => ["Hello"]
 
 ## 派发事件
 
-| 函数              | 调用处理函数   | 结果                                            |
-| ----------------- | -------------- | ----------------------------------------------- |
-| `Event.emit`      | 依次调用       | 遇到第一个失败就停止。                          |
-| `Event.parallel`  | 同时调用       | 收集所有结果，将所有失败合并到一个 `Cause` 中。 |
-| `Event.bail`      | 依次调用       | 返回处理函数给出的第一个 `Some`。               |
-| `Event.waterfall` | 按中间件链调用 | 返回整条链的输出。                              |
+| 函数              | 调用处理函数   | 结果                                                          |
+| ----------------- | -------------- | ------------------------------------------------------------- |
+| `Event.emit`      | 依次调用       | 遇到第一个失败就停止。                                        |
+| `Event.parallel`  | 同时调用       | 收集所有结果，将所有失败合并到一个 `Cause` 中。               |
+| `Event.settle`    | 同时调用       | 每个已运行处理函数的 `Exit`；某个处理函数失败不会让派发失败。 |
+| `Event.bail`      | 依次调用       | 返回处理函数给出的第一个 `Some`。                             |
+| `Event.waterfall` | 按中间件链调用 | 返回整条链的输出。                                            |
 
 ```ts import.meta.vitest name="events: dispatch an event"
 import { Effect, Option } from "effect"
@@ -111,7 +113,7 @@ await Effect.runPromise(status.pipe(Effect.scoped, Effect.provide(Graft.layer)))
 | 情形                               | 结果                                                                      |
 | ---------------------------------- | ------------------------------------------------------------------------- |
 | 处理函数在派发过程中被移除         | 之后不会再被调用。                                                        |
-| 处理函数所属插件停止               | 该中断使处理函数被跳过。                                                  |
+| 处理函数所属插件停止               | 普通处理函数被跳过；中间件遵循下文的规则。                                |
 | 处理函数主动中断，或因其他原因取消 | 它完整的 `Cause` 会通过派发传播，清理产生的 defect 也会传播。             |
 | 取消 `Event.parallel`              | 先等待所有调用清理完成，再将中断与已经发生的失败、defect 及清理失败合并。 |
 
@@ -173,6 +175,40 @@ await Effect.runPromise(render.pipe(Effect.scoped, Effect.provide(Graft.layer)))
 - 如果处理函数被跳过，链条使用同一个 `next` 继续。
 - 处理函数所属插件卸载后，已经执行过的下游不会重放。
 - 如果首次下游执行被中断，之后的调用得到该中断结果，不会重新开始。
+
+卸载正在运行的中间件会中断整条链，无论它是在等待调用
+`next`，还是在处理其结果。下游失败会被保留；下游成功不会绕过后处理。领取前就被移除的处理函数会被跳过。
+
+当 `next`
+在独立归属的 fiber 中运行时，派发者可以取消等待。调用仍然中断，不会返回绕过中间件的结果。该 fiber 的清理和失败仍由其外部所有者负责。
+
+## 识别派发来源
+
+**来源**是一个不透明标记，用来识别派发链，不共享调用方的服务。
+
+```ts import.meta.vitest name="events: origins"
+import { Effect } from "effect"
+
+import { Event, Graft } from "@graftland/graft"
+
+const origin = Event.makeOrigin()
+const Changed = Event.make<[], boolean>("@acme/example/Changed")
+
+const check = Effect.gen(function* () {
+	yield* Event.on(Changed, () => Event.isWithin(origin))
+	return yield* Event.parallel(Changed).pipe(Event.within(origin))
+})
+
+await Effect.runPromise(check.pipe(Effect.scoped, Effect.provide(Graft.layer))) // => [true]
+```
+
+| 操作                     | 规则                                                                                                                    |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------------------- |
+| `Event.makeOrigin()`     | 创建全新的标记；另一个标记不会匹配它。                                                                                  |
+| `Event.within(origin)`   | 标记包裹的 effect 及其嵌套派发；已有来源仍然有效。                                                                      |
+| `Event.isWithin(origin)` | 只返回当前 fiber 中这个标记是否有效。                                                                                   |
+| 作用域与隔离             | 来源跟随 effect，不跟随处理函数的注册。处理函数的服务和领域不变，不暴露调用方的 Context。                               |
+| 信任边界                 | 标记不能伪造。成员关系保存在 context 引用中；提供该引用的代码能够改变 `isWithin` 的结果。这用于检测重入，不是授权边界。 |
 
 ## 领域与过滤器
 

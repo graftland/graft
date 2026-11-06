@@ -32,7 +32,7 @@ const keys = Effect.fnUntraced(function* (config: typeof Config.Type) {
 	return Jwks.layerLocal({ keys })
 })
 export default Plugin.make({
-	name: "remote-jwt-authenticator",
+	name: "@graftland/plugin-remote/runner/auth/jwt",
 	config: Config,
 	inject: [
 		FileSystem.FileSystem,
