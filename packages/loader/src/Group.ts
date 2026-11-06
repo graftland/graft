@@ -411,6 +411,9 @@ const definition = Plugin.make({
 						intercept: [
 							...intercept,
 							Graft.intercept(CurrentId, () => Option.some(entry.id)),
+							Graft.intercept(Transition.CurrentInstance, () =>
+								Option.some(entry.id),
+							),
 							Graft.intercept(CurrentObservation, () =>
 								Option.map(source, (observation) => ({
 									observation,

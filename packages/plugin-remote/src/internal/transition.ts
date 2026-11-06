@@ -27,6 +27,8 @@ import * as Unit from "./unit"
 import { layer as workerLayer } from "./workerTransport"
 
 export interface ManagedOptions extends Omit<CandidateOptions, "input"> {
+	/** Required outside Loader; must match the entry id when Loader supplies one. */
+	readonly instance?: string | undefined
 	readonly policy?: Partial<Transition.Policy> | undefined
 	/** Must be between 1 and the direct transport capacity (16). Defaults to 16. */
 	readonly maxInFlight?: number | undefined
@@ -243,6 +245,7 @@ export const managedPlugin = <
 					Effect.provideContext(transports),
 				)
 				yield* Transition.registerDriver(execution, {
+					instance: options.instance,
 					initial: candidate({
 						artifact: options.artifact,
 						contractModule: options.contractModule,

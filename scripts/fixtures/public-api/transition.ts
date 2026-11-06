@@ -15,12 +15,13 @@ export const transition = (
 	fork: number,
 	deployment: Remote.CandidateOptions,
 ): Effect.Effect<Transition.Outcome, never, Graft.Graft> =>
-	Graft.transition({ fork, candidate: Remote.candidate(deployment) })
+	Graft.transition({ target: fork, candidate: Remote.candidate(deployment) })
 
 export const directPlugin = (artifact: Remote.Artifact.Artifact) =>
 	Remote.plugin(
 		Remote.Contract.make({ name: "independent/direct", config: Schema.String }),
 		{
+			instance: "independent",
 			artifact,
 			contractModule: "independent/contract",
 			target: { _tag: "Worker" },

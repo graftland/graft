@@ -3,6 +3,7 @@ import {
 	Context,
 	Data,
 	Effect,
+	Option,
 	Schema,
 	type Cause,
 	type Duration,
@@ -58,8 +59,15 @@ export const defaultPolicy: Policy = {
 	probes: [],
 }
 
+/** Loader binds this reference to its entry id. Embedded registrations name themselves. */
+export const CurrentInstance = Context.Reference<Option.Option<string>>(
+	"@graftland/graft/Transition/CurrentInstance",
+	{ defaultValue: Option.none },
+)
+
 export interface Request {
-	readonly fork: number
+	/** Managed instance name (Loader entry id), or the owning fork id. */
+	readonly target: string | number
 	readonly candidate: Candidate
 	readonly policy?: Partial<Policy> | undefined
 }
@@ -202,6 +210,8 @@ export const facade = <I, S>(
 })
 
 export interface Registration {
+	/** Required for embedded use; Loader supplies and binds its entry id. */
+	readonly instance?: string | undefined
 	/** Positive per-attempt admission limit. Defaults to 256. */
 	readonly maxInFlight?: number | undefined
 	readonly initial: Candidate

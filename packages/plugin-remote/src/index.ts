@@ -114,7 +114,9 @@ const unmanagedPlugin = <
 		apply: (config) =>
 			Effect.gen(function* () {
 				const auth = Credential.invocation(options.connect)
-				const input = yield* Schema.decodeUnknownEffect(Configuration.Host)({
+				const input = yield* Schema.decodeUnknownEffect(
+					Configuration.OrdinaryHost,
+				)({
 					contract: options.contractModule,
 					implementation: options.implementation,
 					connect:

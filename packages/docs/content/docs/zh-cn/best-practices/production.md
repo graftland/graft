@@ -309,3 +309,12 @@ const environment = Layer.mergeAll(
 | 把服务器自己的服务放进 `environment`。                         | 插件像注入其他服务一样注入它们，它们的生命周期与程序相同。               |
 | 用 `NodeRuntime.runMain` 运行。                                | 它把 `SIGINT` 和 `SIGTERM` 转换为中断，于是 Scope 关闭，插件按顺序停止。 |
 | 如果加载 `remote` 配置项，添加 `SecureRandom.layerWebCrypto`。 | Remote 需要它；`graft start` 会替你提供。                                |
+
+## 升级时保留网关会话
+
+把上游连接放在宿主拥有的插件中，由独立消费者注入集成契约。集成使用捕获的制品，在直连 Worker 或子进程中运行。
+[执行转换](../../transitions/) 在切换代时保留消费者的服务对象。
+
+报告成功前记录结果和退出证据。`Recovered` 表示旧制品的新单元正在服务；
+`RecoveryFailed` 使集成不可用，但宿主仍可保留会话。`Stuck`
+需要操作人员介入。另行保存下次启动宿主时需要的制品：transition 不持久化 Loader 配置。

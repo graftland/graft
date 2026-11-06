@@ -64,6 +64,24 @@ it.effect(
 				)
 				const loader = yield* loaderService
 				yield* loader.ready
+				const outcome = yield* Graft.transition({
+					target: "integration",
+					candidate: {
+						driver: "test",
+						identity: "next",
+						deployment: undefined,
+					},
+				})
+				assert.equal(outcome._tag, "Accepted")
+				const missing = yield* Graft.transition({
+					target: "missing",
+					candidate: {
+						driver: "test",
+						identity: "next",
+						deployment: undefined,
+					},
+				})
+				assert.equal(missing._tag, "Aborted")
 				const update = yield* Effect.flip(
 					loader.update("integration", { config: { changed: true } }),
 				)

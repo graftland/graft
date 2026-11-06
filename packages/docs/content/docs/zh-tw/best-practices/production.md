@@ -311,3 +311,12 @@ const environment = Layer.mergeAll(
 | 把伺服器自己的服務放進 `environment`。                       | 外掛像注入其他服務一樣注入它們，它們的生命週期與整個程式相同。         |
 | 用 `NodeRuntime.runMain` 執行。                              | 它把 `SIGINT` 和 `SIGTERM` 轉為中斷，因此 scope 會關閉，外掛依序停止。 |
 | 載入 `remote` 設定項目時加入 `SecureRandom.layerWebCrypto`。 | Remote 需要它；`graft start` 會替你提供。                              |
+
+## 升級時保留閘道工作階段
+
+把上游連線放在宿主擁有的外掛中，由獨立消費者注入整合契約。整合使用擷取的產物，在直連 Worker 或子行程中執行。
+[執行轉換](../../transitions/) 在切換世代時保留消費者的服務物件。
+
+回報成功前記錄結果和結束證據。`Recovered` 表示舊產物的新單元正在服務；
+`RecoveryFailed` 使整合無法使用，但宿主仍可保留工作階段。`Stuck`
+需要操作人員介入。另行儲存下次啟動宿主時需要的產物：transition 不持久化 Loader 設定。

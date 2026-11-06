@@ -63,7 +63,14 @@ const setup = Effect.fnUntraced(function* (
 		"../.cache/integration/transition-contract.js",
 		import.meta.url,
 	).href
-	const options = { artifact, contractModule, target, policy, maxInFlight }
+	const options = {
+		instance: "integration",
+		artifact,
+		contractModule,
+		target,
+		policy,
+		maxInFlight,
+	}
 	const fork = yield* Graft.plugin(Remote.plugin(contract, options), input)
 	yield* fork.await
 	const found = yield* Deferred.make<Integration["Service"]>()
@@ -87,7 +94,7 @@ const setup = Effect.fnUntraced(function* (
 		override?: Partial<Transition.Policy>,
 	) =>
 		Graft.transition({
-			fork: fork.id,
+			target: fork.id,
 			candidate: Remote.candidate({ ...options, input }),
 			policy: override,
 		})
@@ -336,7 +343,7 @@ for (const target of [
 					store: h.source + "-broken",
 				})
 				const result = yield* Graft.transition({
-					fork: h.fork.id,
+					target: h.fork.id,
 					candidate: Remote.candidate({
 						...h.options,
 						artifact: broken,
@@ -370,7 +377,7 @@ for (const target of [
 						store: h.source + "-candidate",
 					})
 					const result = yield* Graft.transition({
-						fork: h.fork.id,
+						target: h.fork.id,
 						candidate: Remote.candidate({
 							...h.options,
 							artifact,
@@ -413,7 +420,7 @@ for (const target of [
 					"tampered",
 				)
 				const result = yield* Graft.transition({
-					fork: h.fork.id,
+					target: h.fork.id,
 					candidate: Remote.candidate({
 						...h.options,
 						artifact,
@@ -432,7 +439,7 @@ for (const target of [
 			Effect.gen(function* () {
 				const h = yield* setup(target)
 				const result = yield* Graft.transition({
-					fork: h.fork.id,
+					target: h.fork.id,
 					candidate: Remote.candidate({
 						...h.options,
 						target: {

@@ -337,3 +337,17 @@ in [Load a config file](../../embedding/#load-a-config-file).
 | Put the server's own services in `environment`.                 | Plugins inject them like any service, and they live as long as the program.                       |
 | Run with `NodeRuntime.runMain`.                                 | It turns `SIGINT` and `SIGTERM` into interruption, so the scope closes and plugins stop in order. |
 | Add `SecureRandom.layerWebCrypto` if you load `remote` entries. | Remote needs it; `graft start` provides it for you.                                               |
+
+## Keep a gateway session during upgrades
+
+Keep the upstream connection in a host-owned plugin and inject the integration's
+contract into a separate consumer. Use a captured artifact and a direct Worker
+or child process for the integration.
+[Execution transitions](../../transitions/) keep the consumer's service object
+across generations.
+
+Record the outcome and exit evidence before reporting success. `Recovered` means
+a fresh previous artifact is serving; `RecoveryFailed` leaves the integration
+unavailable while the host can keep its session. `Stuck` requires operator
+intervention. Store the intended artifact for the next host start separately:
+transitions do not persist Loader configuration.

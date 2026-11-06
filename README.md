@@ -102,6 +102,8 @@ into another process.
 
 After those, larger applications show what Graft is for:
 
+- a [WebSocket integration gateway](samples/integration-gateway) that upgrades a
+  plugin while keeping its session
 - a chat bot built from plugins, with its weather integration in a child process
 - a checkout that swaps its pricing engine and database under load
 - an HTTP gateway driven by `graft.yml`

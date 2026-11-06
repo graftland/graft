@@ -129,6 +129,7 @@ it.effect(
 											: remote.allocate(candidate, attempt),
 								},
 								{
+									instance: "integration",
 									initial: candidate,
 									required: [],
 									facades: [],
@@ -146,7 +147,7 @@ it.effect(
 				}),
 			)
 			yield* managed.await
-			const request = Graft.transition({ fork: managed.id, candidate })
+			const request = Graft.transition({ target: managed.id, candidate })
 			const running = yield* Effect.forkScoped(request)
 			// Wait for allocation (including artifact verification) before advancing virtual time.
 			yield* managed.generations.pipe(

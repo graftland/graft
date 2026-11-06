@@ -340,3 +340,20 @@ it.effect("loads welcome from an entry", () =>
 [远程插件](../../remote/overview/)的实现就是普通插件：像上文那样在进程内测试即可。[06 · 远程插件](https://github.com/graftland/graft/tree/main/samples/06-remote/test)示例的测试跨越了边界：`globalSetup`
 先把它构建为供 Node 导入的 JavaScript，再由 `it.live` 测试在 `local` 和 `worker`
 上运行它。
+
+## 测试安装后的集成
+
+分别打包契约和实现，把 tarball 安装到隔离的消费者项目，再针对公开导出编译和运行。不使用工作区源码别名或私有导入。
+
+| 检查              | 证据                                                                          |
+| ----------------- | ----------------------------------------------------------------------------- |
+| 正常升级          | 上游只登录一次，会话和激活次数不变，响应更新，旧单元退出，结果为 `Accepted`。 |
+| probe 失败        | `Aborted` 携带 probe 的 cause；旧实现继续服务。                               |
+| 试运行和恢复失败  | `Recovered` 或 `RecoveryFailed`，上游会话保留。                               |
+| 切换期间的调用    | 已接纳的慢调用返回旧实现的响应。                                              |
+| 重复升级          | 每个已退役执行单元都有退出证据。                                              |
+| Loader 编辑被拒绝 | 文件和已接受目标均不改变。                                                    |
+
+两种直连部署方式都要运行。
+[integration-gateway 示例](https://github.com/graftland/graft/tree/main/samples/integration-gateway)
+使用本地 WebSocket 机器人服务器，并从安装后的消费者项目测试 `graft start`。

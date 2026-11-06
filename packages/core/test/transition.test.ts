@@ -148,6 +148,7 @@ const setup = Effect.fnUntraced(function* (
 		name: "managed",
 		apply: () =>
 			Transition.registerDriver(driver, {
+				instance: "integration",
 				initial: candidate("old"),
 				required: [{ name: "read", version: 1 }],
 				policy,
@@ -193,7 +194,7 @@ const setup = Effect.fnUntraced(function* (
 		allocations,
 		request: (overrides?: Partial<Transition.Policy>) =>
 			Graft.transition({
-				fork: fork.id,
+				target: fork.id,
 				candidate: candidate("new"),
 				policy: overrides,
 			}),
@@ -443,7 +444,7 @@ it.effect(
 	() =>
 		Effect.gen(function* () {
 			const unsupported = yield* Graft.transition({
-				fork: 100,
+				target: 100,
 				candidate: candidate("new"),
 			})
 			assert.equal(unsupported._tag, "Aborted")
@@ -975,3 +976,75 @@ it.effect("rejects a NaN trial rather than normalizing it to zero", () =>
 		)
 	}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
 )
+
+it.effect(
+	"addresses a managed instance by name and rejects duplicate registrations before allocation",
+	() =>
+		Effect.gen(function* () {
+			const h = yield* setup()
+			const result = yield* Graft.transition({
+				target: "integration",
+				candidate: candidate("named"),
+			})
+			assert.equal(result._tag, "Accepted")
+			const before = yield* Ref.get(h.allocations)
+			const duplicate = yield* Graft.plugin(h.definition)
+			const failed = yield* Effect.exit(duplicate.await)
+			assert.isTrue(Exit.isFailure(failed))
+			if (Exit.isFailure(failed))
+				assert.include(
+					Cause.pretty(failed.cause),
+					"Managed instance already registered",
+				)
+			const after = yield* Ref.get(h.allocations)
+			assert.equal(after, before)
+		}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
+)
+
+for (const instance of [undefined, "", "different"]) {
+	it.effect(
+		`rejects ${instance === undefined ? "unnamed" : instance === "" ? "empty" : "conflicting"} instance identity before allocation`,
+		() =>
+			Effect.gen(function* () {
+				const allocations = yield* Ref.make(0)
+				const definition = Plugin.make({
+					name: "invalid-instance",
+					apply: () =>
+						Transition.registerDriver(
+							{
+								name: "test",
+								allocate: () =>
+									Ref.update(allocations, (n) => n + 1).pipe(
+										Effect.andThen(Effect.never),
+									),
+							},
+							{
+								instance,
+								initial: candidate("old"),
+								required: [],
+								facades: [],
+							},
+						),
+				})
+				const fork = yield* Graft.plugin(definition, undefined, {
+					intercept:
+						instance === "different"
+							? [
+									Graft.intercept(Transition.CurrentInstance, () =>
+										Option.some("entry"),
+									),
+								]
+							: [],
+				})
+				const exit = yield* Effect.exit(fork.await)
+				assert.isTrue(Exit.isFailure(exit))
+				if (Exit.isFailure(exit))
+					assert.include(
+						Cause.pretty(exit.cause),
+						"explicit, matching instance name",
+					)
+				const count = yield* Ref.get(allocations)
+				assert.equal(count, 0)
+			}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
+	)
+}

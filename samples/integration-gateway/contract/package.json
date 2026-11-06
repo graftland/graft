@@ -1,0 +1,13 @@
+{
+	"name": "@example/forecast-contract",
+	"version": "1.0.0",
+	"type": "module",
+	"exports": "./dist/index.js",
+	"files": [
+		"dist"
+	],
+	"peerDependencies": {
+		"effect": "4.1.*",
+		"@graftland/plugin-remote": "0.0.0"
+	}
+}

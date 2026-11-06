@@ -378,6 +378,7 @@ it.effect("rejects HMR for managed forks before reloading modules", () =>
 									}),
 							},
 							{
+								instance: "integration",
 								initial: {
 									driver: "test",
 									identity: "initial",

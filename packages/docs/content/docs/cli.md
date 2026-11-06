@@ -337,3 +337,13 @@ Windows is provided as is: process-tree cleanup and rollback are not verified,
 and Graft does not promise them.
 
 :::
+
+## Managed upgrades
+
+`graft start` loads
+[managed Remote entries](../config-file/#managed-integrations) through the same
+public Loader and driver APIs as an embedded host. Use an application-owned
+operator endpoint that calls `Graft.transition` with the entry id. There is no
+built-in transition subcommand. `--watch` does not upgrade managed units: HMR
+skips managed runtimes and Loader rejects managed-tree refreshes before changing
+its target.

@@ -16,6 +16,7 @@ import { executionPlugin, type ExecutionOptions } from "../internal/execution"
 import { follow } from "../internal/follow"
 import type { LocalTarget, WorkerTarget } from "../internal/runner/Connection"
 import { resolveEntry } from "../internal/runner/Packages"
+import { managedPlugin } from "../internal/transition"
 import * as HostAssembly from "./assembly"
 
 /** Direct execution installs only its execution capability in a private realm. */
@@ -61,7 +62,7 @@ const directTarget = Effect.fnUntraced(function* <
 	},
 >(
 	contract: Contract.Contract<S, E>,
-	input: typeof Configuration.Host.Type,
+	input: typeof Configuration.OrdinaryHost.Type,
 	selected: LocalTarget | WorkerTarget,
 	annotations: Annotations,
 	options: ExecutionOptions,
@@ -136,7 +137,7 @@ const runnerTarget = Effect.fnUntraced(function* <
 	},
 >(
 	contract: Contract.Contract<S, E>,
-	input: typeof Configuration.Host.Type,
+	input: typeof Configuration.OrdinaryHost.Type,
 	target: Exclude<
 		Configuration.Connect,
 		{ readonly local: object } | { readonly worker: object }
@@ -193,7 +194,7 @@ export const launch = Effect.fnUntraced(function* <
 	},
 >(
 	contract: Contract.Contract<S, E>,
-	input: typeof Configuration.Host.Type,
+	input: typeof Configuration.OrdinaryHost.Type,
 	options: ExecutionOptions,
 	authOverride?: typeof Assembly.Invocation.Type,
 ) {
@@ -235,6 +236,33 @@ const load = Effect.fnUntraced(function* (
 	yield* Schema.decodeEffect(contract.config)(input.config).pipe(
 		Effect.catchCause(failConfig),
 	)
+	if (input.artifact !== undefined) {
+		const deployment = input
+		const failArtifact = yield* boundary("artifact")
+		return yield* Effect.gen(function* () {
+			const path = yield* Path.Path
+			const source = yield* ConfigDirectory
+			const directory = Option.getOrElse(source, () => ".")
+			const contractModule = String.startsWith("file:")(deployment.contract)
+				? deployment.contract
+				: yield* resolveEntry(directory, deployment.contract)
+			const fork = yield* Graft.plugin(
+				managedPlugin(contract, {
+					artifact: {
+						...deployment.artifact,
+						directory: path.resolve(directory, deployment.artifact.directory),
+					},
+					contractModule,
+					target: deployment.target,
+					maxInFlight: deployment.maxInFlight,
+					policy: { probes: deployment.probes ?? [] },
+				}),
+				deployment.config,
+			)
+			yield* follow(fork, failArtifact)
+		}).pipe(Effect.catchCause(failArtifact))
+	}
+
 	const failConnect = yield* boundary("connect")
 	const fork = yield* launch(contract, input, {
 		contractModule: input.contract,

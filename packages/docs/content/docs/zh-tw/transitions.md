@@ -18,6 +18,7 @@ declare const contract: Remote.Contract.Contract<typeof Schema.String>
 declare const artifact: Remote.Artifact.Artifact
 
 export const integration = Remote.plugin(contract, {
+	instance: "forecasts",
 	artifact,
 	contractModule: "@acme/integration-contract",
 	target: { _tag: "Worker" },
@@ -30,17 +31,20 @@ export const integration = Remote.plugin(contract, {
 `{ _tag: "Local" }`。宿主執行環境提供檔案系統、路徑、安全亂數和子行程服務。受管理 Remote 契約支援一元操作，不支援注入宿主服務。透過服務圖解析的宿主相依服務與外掛自動重試尚不支援。使用模組位置的
 `Remote.plugin` 選項仍採用一般重新啟動行為。
 
+Loader 將項目 id 綁定為實例名稱。嵌入式註冊必須提供
+`instance`；空名稱、衝突或重複名稱會在啟動單元前失敗。`target`
+接受該名稱或數字 fork id。名稱在整個執行環境中唯一。
+
 ## 請求轉換
 
 ```ts
 import { Graft } from "@graftland/graft"
 import * as Remote from "@graftland/plugin-remote"
 
-declare const forkId: number
 declare const deployment: Remote.CandidateOptions
 
 export const request = Graft.transition({
-	fork: forkId,
+	target: "forecasts",
 	candidate: Remote.candidate(deployment),
 	policy: {
 		total: "5 minutes",

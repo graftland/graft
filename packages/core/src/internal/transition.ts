@@ -13,6 +13,7 @@ import {
 	Option,
 	Ref,
 	Scope,
+	String,
 	TxRef,
 	TxSubscriptionRef,
 } from "effect"
@@ -35,6 +36,7 @@ interface Attempt {
 	readonly terminated: Ref.Ref<boolean>
 }
 export interface Managed {
+	readonly instance: string
 	readonly driver: T.Driver
 	readonly facades: ReadonlyArray<T.Facade>
 	readonly required: ReadonlyArray<Plugin.OperationIdentity>
@@ -505,6 +507,23 @@ export const register = Effect.fnUntraced(function* (
 						),
 					),
 				})
+			const boundInstance = yield* T.CurrentInstance
+			const instance =
+				Option.getOrUndefined(boundInstance) ?? registration.instance
+			if (
+				instance === undefined ||
+				String.trim(instance) === "" ||
+				(Option.isSome(boundInstance) &&
+					registration.instance !== undefined &&
+					registration.instance !== boundInstance.value)
+			)
+				return yield* T.DriverError.make({
+					cause: Cause.die(
+						new Error(
+							"Managed instances require an explicit, matching instance name",
+						),
+					),
+				})
 			const policy = policyOf(registration.policy)
 			const maxInFlight = registration.maxInFlight ?? 256
 			if (
@@ -517,6 +536,7 @@ export const register = Effect.fnUntraced(function* (
 					cause: Cause.die(new Error("Invalid execution driver registration")),
 				})
 			const managed: Managed = {
+				instance,
 				driver,
 				required: registration.required,
 				facades: registration.facades,
@@ -551,6 +571,19 @@ export const register = Effect.fnUntraced(function* (
 								new Error("The fork already has an execution driver"),
 							),
 						})
+					const currentForks = yield* TxSubscriptionRef.get(runtime.forks)
+					for (const other of HashMap.values(currentForks)) {
+						const registered = yield* TxRef.get(other.status.managed)
+						if (
+							Option.isSome(registered) &&
+							registered.value.instance === instance
+						)
+							return yield* T.DriverError.make({
+								cause: Cause.die(
+									new Error(`Managed instance already registered: ${instance}`),
+								),
+							})
+					}
 					yield* TxRef.set(entry.status.managed, Option.some(managed))
 				}),
 			)
@@ -808,12 +841,19 @@ export const transition = Effect.fnUntraced(function* (
 					if (yield* TxRef.get(runtime.transitionBusy)) return abort("Busy")
 					if (yield* TxRef.get(runtime.transitionStuck)) return abort("Stuck")
 					const forks = yield* TxSubscriptionRef.get(runtime.forks)
-					const entry = Option.getOrUndefined(HashMap.get(forks, request.fork))
-					const selected =
-						entry === undefined
-							? Option.none<Managed>()
-							: yield* TxRef.get(entry.status.managed)
-					const managed = Option.getOrUndefined(selected)
+					let managed: Managed | undefined
+					for (const entry of HashMap.values(forks)) {
+						const selected = yield* TxRef.get(entry.status.managed)
+						if (
+							Option.isSome(selected) &&
+							(typeof request.target === "number"
+								? entry.id === request.target
+								: selected.value.instance === request.target)
+						) {
+							managed = selected.value
+							break
+						}
+					}
 					if (
 						managed === undefined ||
 						request.candidate.driver !== managed.driver.name

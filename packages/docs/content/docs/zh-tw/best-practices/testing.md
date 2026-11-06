@@ -341,3 +341,20 @@ it.effect("loads welcome from an entry", () =>
 [遠端外掛](../../remote/overview/)的實作就是一般的外掛：像上面一樣在行程內測試即可。[06 · Remote](https://github.com/graftland/graft/tree/main/samples/06-remote/test)
 範例的測試跨越了邊界：`globalSetup` 先把它建置成供 Node 匯入的 JavaScript，再由
 `it.live` 測試在 `local` 和 `worker` 上執行它。
+
+## 測試安裝後的整合
+
+分別打包契約和實作，把 tarball 安裝到隔離的消費者專案，再針對公開匯出編譯和執行。不使用工作區原始碼別名或私有匯入。
+
+| 檢查              | 證據                                                                              |
+| ----------------- | --------------------------------------------------------------------------------- |
+| 正常升級          | 上游只登入一次，工作階段和啟用次數不變，回應更新，舊單元結束，結果為 `Accepted`。 |
+| probe 失敗        | `Aborted` 攜帶 probe 的 cause；舊實作繼續服務。                                   |
+| 試行和復原失敗    | `Recovered` 或 `RecoveryFailed`，上游工作階段保留。                               |
+| 切換期間的呼叫    | 已接納的慢呼叫回傳舊實作的回應。                                                  |
+| 重複升級          | 每個已退役執行單元都有結束證據。                                                  |
+| Loader 編輯被拒絕 | 檔案和已接受目標均不改變。                                                        |
+
+兩種直連部署方式都要執行。
+[integration-gateway 範例](https://github.com/graftland/graft/tree/main/samples/integration-gateway)
+使用本機 WebSocket 機器人伺服器，並從安裝後的消費者專案測試 `graft start`。

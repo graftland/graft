@@ -71,11 +71,11 @@ Expose each part as its own entry point:
 | `./schema`   | The [editor registration](#editor-completion) of the config.           | [`graft schema`](../../cli/#graft-schema), for the application's editor schema.                |
 | `./cli`      | A command plugin that adds `graft` subcommands.                        | [`graft add --plugin <package>`](../../cli/#command-plugins), which enables `<package>/cli`.   |
 
-| Rule                                                 | Pitfall it avoids                                                                                                                       |
-| ---------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| `./tokens` imports no implementation.                | A plugin that only injects `Database`, or a test that fakes it, would load your driver and its dependencies.                            |
-| One plugin per module.                               | The loader takes one plugin from a module: the default export, or else `plugin`. Other exported plugins cannot be named in `graft.yml`. |
-| A contract names the implementation by `module` URL. | Importing the implementation from the contract would load it on the host too, not only in the plugin process.                           |
+| Rule                                                    | Pitfall it avoids                                                                                                                       |
+| ------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `./tokens` imports no implementation.                   | A plugin that only injects `Database`, or a test that fakes it, would load your driver and its dependencies.                            |
+| One plugin per module.                                  | The loader takes one plugin from a module: the default export, or else `plugin`. Other exported plugins cannot be named in `graft.yml`. |
+| Deployment configuration identifies the implementation. | Contracts contain protocol declarations only.                                                                                           |
 
 ## Declare dependencies
 
@@ -258,3 +258,17 @@ and `@graftland/graft` from its own `node_modules`, where your `devDependencies`
 live, so the application gets a second copy of each.
 
 :::
+
+## Author an independent integration
+
+| Package        | Public declarations                                                                                 |
+| -------------- | --------------------------------------------------------------------------------------------------- |
+| Contract       | Service key, RPC schemas and `Contract.operation(name, version, rpc)`; no implementation locations. |
+| Implementation | `Plugin.make({ provides, overlap })`, ordinary `apply`, and `Plugin.probe("health", effect)`.       |
+| Host           | Installs the contract, captures the built implementation, and supplies deployment configuration.    |
+
+Declare Effect and shared Graft packages as peers. Probes run only when
+requested in a serving attempt. Capture the built package directory before
+deployment; external runtime dependencies are not captured or pinned. The
+[integration-gateway sample](https://github.com/graftland/graft/tree/main/samples/integration-gateway)
+packs and installs separate contract and implementation packages.

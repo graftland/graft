@@ -299,3 +299,10 @@ graft schema [--output <file>]
 Windows 按现状提供（as is）：进程树清理与回滚保证未经验证，不作承诺。
 
 :::
+
+## 托管升级
+
+`graft start` 与嵌入式宿主使用相同的公开 Loader 和驱动 API，加载
+[托管 Remote 条目](../config-file/#托管集成)。由应用提供操作端点，使用条目 id 调用
+`Graft.transition`。CLI 没有内置 transition 子命令。 `--watch`
+不升级托管单元：HMR 跳过含托管实例的运行时，Loader 在改变目标前拒绝托管树的刷新。

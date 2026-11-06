@@ -84,6 +84,7 @@ Graft 的插件模型借鉴自
 
 之后是更大的应用，展示 Graft 的用途：
 
+- [WebSocket 集成网关](samples/integration-gateway)，升级插件时保留会话
 - 由插件构成的聊天机器人，天气集成在子进程中运行
 - 在负载下替换定价引擎和数据库的结账服务
 - 由 `graft.yml` 驱动的 HTTP 网关

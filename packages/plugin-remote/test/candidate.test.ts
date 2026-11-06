@@ -30,7 +30,7 @@ it.effect(
 				Plugin.make({ name: "ordinary", apply: () => Effect.void }),
 			)
 			yield* fork.await
-			const result = yield* Graft.transition({ fork: fork.id, candidate })
+			const result = yield* Graft.transition({ target: fork.id, candidate })
 			assert.deepEqual(result, {
 				_tag: "Aborted",
 				reason: "UnsupportedTarget",

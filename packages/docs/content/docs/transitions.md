@@ -21,6 +21,7 @@ declare const contract: Remote.Contract.Contract<typeof Schema.String>
 declare const artifact: Remote.Artifact.Artifact
 
 export const integration = Remote.plugin(contract, {
+	instance: "forecasts",
 	artifact,
 	contractModule: "@acme/integration-contract",
 	target: { _tag: "Worker" },
@@ -36,17 +37,21 @@ unary operations and no injected host services. Graph-resolved host dependencies
 and automatic plugin retry are unsupported. Module-based `Remote.plugin` options
 continue to use ordinary restart behavior.
 
+Loader binds the entry id to the instance name. Embedded registrations must
+supply `instance`; blank, conflicting or duplicate names fail before a unit
+starts. `target` accepts that name or a numeric fork id. Names are unique across
+the runtime.
+
 ## Request a transition
 
 ```ts
 import { Graft } from "@graftland/graft"
 import * as Remote from "@graftland/plugin-remote"
 
-declare const forkId: number
 declare const deployment: Remote.CandidateOptions
 
 export const request = Graft.transition({
-	fork: forkId,
+	target: "forecasts",
 	candidate: Remote.candidate(deployment),
 	policy: {
 		total: "5 minutes",

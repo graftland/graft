@@ -84,6 +84,7 @@ Graft 的外掛模型借鑑自
 
 之後是更大的應用程式，展示 Graft 的用途：
 
+- [WebSocket 整合閘道](samples/integration-gateway)，升級外掛時保留工作階段
 - 由外掛組成的聊天機器人，天氣整合在子行程中執行
 - 在負載下替換定價引擎和資料庫的結帳服務
 - 由 `graft.yml` 驅動的 HTTP 閘道

@@ -368,3 +368,39 @@ Include 會保留符號連結。每次磁碟操作都會解析設定的路徑，
 中的並行儲存是同一個視窗。它不是多檔案交易。
 
 :::
+
+## 受管理的整合
+
+受管理的 Remote 項目使用 `artifact` 和 `target`，取代 `implementation` 和
+`connect`：
+
+```yaml
+- id: forecasts
+  name: "@graftland/plugin-remote"
+  config:
+    contract: "@example/forecast-contract"
+    artifact:
+      directory: ./artifacts/sha256-v1-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      identity:
+        version: 1
+        algorithm: sha256
+        digest: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+        entry: dist/index.js
+    target:
+      _tag: Worker
+    probes: [health]
+    maxInFlight: 16
+    config: {}
+```
+
+將範例中的產物換成 [Artifact.capture](../remote/artifacts/)
+回傳的目錄和識別。產物目錄和相對契約路徑以設定檔所在目錄為準。子行程使用
+`target: { _tag: Local }`。
+
+項目 id 就是受管理的實例名稱：透過
+`Graft.transition({ target: "forecasts", candidate })`
+發起升級。實例名稱在整個執行環境中必須唯一，包括巢狀 Loader。子註冊繼承所屬項目的識別。
+
+Loader 在寫入檔案或變更已接受目標前，以 `ManagedFork`
+拒絕受管理樹的編輯。無法阻止外部手動改寫檔案；監看更新會拒絕這些修改並保留原目標。transition 只改變正在執行的世代，不會重寫
+`graft.yml`。持久化部署意圖與[升級結果](../transitions/) 分開記錄。

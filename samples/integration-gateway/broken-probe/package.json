@@ -1,0 +1,14 @@
+{
+	"name": "@example/forecasts-broken-probe",
+	"version": "2.0.0",
+	"type": "module",
+	"exports": "./dist/index.js",
+	"files": [
+		"dist"
+	],
+	"peerDependencies": {
+		"effect": "4.1.*",
+		"@graftland/graft": "0.0.0",
+		"@example/forecast-contract": "1.0.0"
+	}
+}

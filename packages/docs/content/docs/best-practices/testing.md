@@ -352,3 +352,23 @@ plugin: test it in process, as above. The tests of the
 [06 · Remote](https://github.com/graftland/graft/tree/main/samples/06-remote/test)
 sample cross the boundary: a `globalSetup` builds it to JavaScript for Node, and
 an `it.live` test runs it over `local` and `worker`.
+
+## Test the installed integration
+
+Pack the contract and implementation, install their tarballs into an isolated
+consumer, then compile and run against published exports. Do not use workspace
+source aliases or private imports.
+
+| Check                     | Evidence                                                                                               |
+| ------------------------- | ------------------------------------------------------------------------------------------------------ |
+| Healthy upgrade           | One upstream login, unchanged session and activation counts, new responses, old-unit exit, `Accepted`. |
+| Failed probe              | `Aborted` with the probe cause; the previous implementation still serves.                              |
+| Failed trial and recovery | `Recovered` or `RecoveryFailed`, with the upstream session preserved.                                  |
+| Calls during cutover      | An admitted slow call returns the old implementation's response.                                       |
+| Repeated upgrades         | Every retired execution unit has exit evidence.                                                        |
+| Rejected Loader edit      | Neither the file nor the accepted target changes.                                                      |
+
+Run both direct placements. The
+[integration-gateway sample](https://github.com/graftland/graft/tree/main/samples/integration-gateway)
+uses a local WebSocket bot server and also exercises `graft start` from the
+installed consumer.
