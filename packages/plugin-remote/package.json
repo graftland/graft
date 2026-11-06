@@ -136,7 +136,8 @@
 		"./package.json": "./package.json",
 		"./internal/child": "./dist/internal/childMain.js",
 		"./internal/watchdog": "./dist/internal/watchdogMain.js",
-		"./internal/worker": "./dist/internal/workerMain.js"
+		"./internal/worker": "./dist/internal/workerMain.js",
+		"./internal/publication": "./dist/internal/publicationMain.js"
 	},
 	"scripts": {
 		"build": "tsc -b && tsdown",
@@ -198,7 +199,8 @@
 			"./package.json": "./package.json",
 			"./internal/child": "./dist/internal/childMain.js",
 			"./internal/watchdog": "./dist/internal/watchdogMain.js",
-			"./internal/worker": "./dist/internal/workerMain.js"
+			"./internal/worker": "./dist/internal/workerMain.js",
+			"./internal/publication": "./dist/internal/publicationMain.js"
 		}
 	},
 	"engines": {

@@ -16,6 +16,7 @@ export default defineConfig({
 			"./internal/child": "./dist/internal/childMain.js",
 			"./internal/watchdog": "./dist/internal/watchdogMain.js",
 			"./internal/worker": "./dist/internal/workerMain.js",
+			"./internal/publication": "./dist/internal/publicationMain.js",
 		}),
 	},
 	entry: [
@@ -32,6 +33,7 @@ export default defineConfig({
 		"src/internal/childMain.ts",
 		"src/internal/watchdogMain.ts",
 		"src/internal/workerMain.ts",
+		"src/internal/publicationMain.ts",
 		"src/host/worker.ts",
 		"src/Transport.ts",
 		"src/Auth.ts",

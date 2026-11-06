@@ -1,6 +1,4 @@
 /** Explicit author tooling. Importing this module does not read or import packages. */
-import { createRequire } from "node:module"
-import { fileURLToPath, pathToFileURL } from "node:url"
 
 import {
 	Array,
@@ -14,18 +12,16 @@ import {
 	String,
 } from "effect"
 
-import { Manifest, Plugin } from "@graftland/graft"
+import { Manifest } from "@graftland/graft"
 
 import * as Artifact from "./Artifact"
-import * as Contract from "./Contract"
+import type * as Contract from "./Contract"
+import { EntryInput, PublicationError } from "./internal/publicationModel"
+import { readJson, resolve } from "./internal/publicationPackage"
+import { inspectFresh } from "./internal/publicationWorker"
 
-export const EntryInput = Schema.Struct({
-	implementation: Manifest.Entry.fields.implementation,
-	contracts: Manifest.Entry.fields.contracts,
-	requirements: Manifest.Requirements,
-	probes: Manifest.Entry.fields.probes,
-})
-export type EntryInput = typeof EntryInput.Type
+export { EntryInput, PublicationError } from "./internal/publicationModel"
+
 export const PackageInput = Schema.Struct({
 	...Manifest.PackageIdentity.fields,
 	engines: Manifest.Package.fields.engines,
@@ -43,13 +39,6 @@ export const Provenance = Schema.Struct({
 	operations: Schema.Array(Manifest.Operation),
 })
 export type Provenance = typeof Provenance.Type
-export class PublicationError extends Schema.TaggedError<
-	PublicationError,
-	{ readonly brand: unique symbol }
->()("PublicationError", {
-	message: Schema.String,
-	cause: Schema.optionalKey(Schema.Cause(Schema.Unknown, Schema.Unknown)),
-}) {}
 const failure = (message: string, cause?: Cause.Cause<unknown>) =>
 	PublicationError.make({ message, ...(cause === undefined ? {} : { cause }) })
 
@@ -82,116 +71,12 @@ export const declarations = (
 		})),
 	}))
 
-const readJson = Effect.fnUntraced(function* (file: string) {
-	const fs = yield* FileSystem.FileSystem
-	return yield* fs
-		.readFileString(file)
-		.pipe(
-			Effect.flatMap(
-				Schema.decodeUnknownEffect(
-					Schema.fromJsonString(Schema.Record(Schema.String, Schema.Json)),
-				),
-			),
-		)
-})
-const importModule = (url: string) =>
-	Effect.tryPromise({
-		try: () => import(url),
-		catch: (cause) => failure(`Cannot import ${url}`, Cause.die(cause)),
-	}).pipe(Effect.uninterruptible)
-const resolve = (directory: string, specifier: string) =>
-	Effect.try({
-		try: () =>
-			createRequire(pathToFileURL(`${directory}/package.json`)).resolve(
-				specifier,
-			),
-		catch: (cause) =>
-			failure(
-				`Cannot resolve ${specifier} from ${directory}; install the contract package with a Node default export`,
-				Cause.die(cause),
-			),
-	})
-const packageAt = Effect.fnUntraced(function* (filename: string) {
-	const fs = yield* FileSystem.FileSystem
-	const path = yield* Path.Path
-	const resolved = yield* fs.realPath(filename)
-	for (
-		let directory = path.dirname(resolved);
-		;
-		directory = path.dirname(directory)
-	) {
-		const file = path.join(directory, "package.json")
-		if (yield* fs.exists(file)) {
-			const identity = yield* readJson(file).pipe(
-				Effect.flatMap(Schema.decodeUnknownEffect(Manifest.PackageIdentity)),
-			)
-			const artifact = yield* Artifact.directoryIdentity(directory)
-			return { directory, package: identity, artifact }
-		}
-		if (directory === path.dirname(directory))
-			return yield* failure(`No package identity for ${filename}`)
-	}
-})
-
-/** Imports built declarations only. The returned plugin is not activated. */
+/** Inspects built declarations in a fresh, scoped module-loading environment. Never activates apply. */
 export const inspectEntry = Effect.fn("Publication.inspectEntry")(function* (
 	directory: string,
 	entry: EntryInput,
 ) {
-	const path = yield* Path.Path
-	const fs = yield* FileSystem.FileSystem
-	const root = yield* fs.realPath(directory)
-	const implementation = path.resolve(root, entry.implementation)
-	const relative = path.relative(root, implementation)
-	if (
-		relative === "" ||
-		String.startsWith("../")(relative) ||
-		path.isAbsolute(relative)
-	)
-		return yield* failure("The implementation must stay inside its package")
-	const module = yield* importModule(pathToFileURL(implementation).href)
-	const plugin = yield* Effect.fromOption(Plugin.fromModule(module), () =>
-		failure(`${implementation} exports no plugin`),
-	)
-	const contracts = yield* Effect.forEach(entry.contracts, (specifier) =>
-		Effect.gen(function* () {
-			const file = String.startsWith("file:")(specifier)
-				? fileURLToPath(specifier)
-				: yield* resolve(root, specifier)
-			const owner = yield* packageAt(file)
-			if (owner.directory === root)
-				return yield* failure(
-					"Publish contracts in a separate package; embedding a package's own directory digest in its manifest would change that digest",
-				)
-			const loaded = yield* importModule(pathToFileURL(file).href)
-			const contract = yield* Effect.fromOption(
-				Contract.fromModule(loaded),
-				() => failure(`${specifier} exports no contract`),
-			)
-			return {
-				contract,
-				owner,
-				declarations: declarations(contract, owner),
-			}
-		}),
-	)
-	const declared = Array.flatMap(contracts, (item) => item.declarations)
-	const metadata = yield* Manifest.derive(plugin, declared)
-	const conflicts = Manifest.conflicts([
-		{ id: plugin.name, operations: metadata.operations },
-	])
-	if (conflicts.length > 0)
-		return yield* failure(
-			Array.join(
-				Array.map(conflicts, (item) => item.message),
-				"\n",
-			),
-		)
-	return {
-		plugin,
-		declarations: declared,
-		entry: { ...entry, ...metadata } satisfies Manifest.Entry,
-	}
+	return yield* inspectFresh(directory, entry)
 })
 
 /** Generates the graft field, retaining author-owned deployment declarations. */
@@ -205,7 +90,7 @@ export const generate = Effect.fn("Publication.generate")(function* (
 	const entries = yield* Effect.forEach(
 		Record.toEntries(input.graft.entries),
 		Effect.fnUntraced(function* ([name, entry]) {
-			if (name !== "." && !String.startsWith("./")(name))
+			if (!Schema.is(Manifest.PublicEntry)(name))
 				return yield* failure(
 					`Invalid public entry ${name}; use . or ./subpath`,
 				)
@@ -221,7 +106,7 @@ export const generate = Effect.fn("Publication.generate")(function* (
 					`Public export ${name} does not select ${entry.implementation}`,
 				)
 			const result = yield* inspectEntry(directory, entry)
-			return [name, result.entry] as const
+			return [name, result] as const
 		}),
 	)
 	return {
@@ -275,7 +160,7 @@ export const provenance = Effect.fn("Publication.provenance")(function* (
 	const published = yield* readJson(path.join(directory, "package.json")).pipe(
 		Effect.flatMap(Schema.decodeUnknownEffect(Manifest.Package)),
 	)
-	const selected = published.graft.entries[entry]
+	const selected = Manifest.getEntry(published.graft, entry)
 	if (selected === undefined)
 		return yield* failure(`No manifest entry ${entry}`)
 	const artifact = yield* Artifact.identify({

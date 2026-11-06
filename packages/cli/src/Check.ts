@@ -7,7 +7,7 @@ import { Manifest } from "@graftland/graft"
 export const Selection = Schema.Struct({
 	id: Schema.NonEmptyString,
 	directory: Schema.NonEmptyString,
-	entry: Schema.String,
+	entry: Manifest.PublicEntry,
 })
 export const Configuration = Schema.Struct({
 	host: Manifest.Host,

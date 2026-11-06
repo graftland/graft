@@ -49,6 +49,7 @@ const setup = Effect.fnUntraced(function* () {
 			placement: "Worker",
 			filesystem: false,
 			nativeModules: false,
+			services: [],
 			operations: [],
 		},
 		entries: [{ id: "example", directory: "./plugin", entry: "." }],
@@ -83,3 +84,34 @@ it.effect(
 			assert.equal(result._tag, "Failure")
 		}).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 )
+
+it("validates concrete public entry syntax for selected entries and catalog entries", () => {
+	for (const entry of [
+		"constructor",
+		"toString",
+		"__proto__",
+		"",
+		"./",
+		"./../secret",
+		"./a/../b",
+		"./a//b",
+		"./*",
+	]) {
+		assert.isFalse(
+			Schema.is(Check.Selection)({
+				id: "plugin",
+				directory: "./plugin",
+				entry,
+			}),
+		)
+	}
+	for (const entry of [".", "./plugin", "./plugins/forecast.js"]) {
+		assert.isTrue(
+			Schema.is(Check.Selection)({
+				id: "plugin",
+				directory: "./plugin",
+				entry,
+			}),
+		)
+	}
+})

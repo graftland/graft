@@ -52,7 +52,8 @@ graft remote manifest ./release --check
 ```
 
 產生過程匯入已建置的宣告，不執行 `apply`
-或探針。只對你打算匯入的程式碼執行此命令。模組作者必須確保匯入不執行 I/O。清單與程式碼不一致時，驗證以失敗結束。
+或探針。只對你打算匯入的程式碼執行此命令。模組作者必須確保匯入不執行 I/O。每次入口檢查使用新的暫時 Worker，包括它匯入的所有相依套件。在同一呼叫行程中重複產生或驗證也會讀取模組變更。清單與程式碼不一致時，驗證以失敗結束。`Publication.inspectEntry`
+傳回中繼資料，不傳回執行中的外掛物件。
 
 | 產生欄位              | 來源                                                                        |
 | --------------------- | --------------------------------------------------------------------------- |
@@ -60,6 +61,9 @@ graft remote manifest ./release --check
 | `services.optional`   | `Plugin.optional` 鍵。                                                      |
 | `services.implements` | `Plugin.provides`。                                                         |
 | `operations`          | 精確的 `name@version`、契約套件名稱與版本，以及該套件的 Artifact 目錄摘要。 |
+
+每個服務集合包含 `{ "key": "service/key", "operations": ["read@1"] }`
+群組，由 Context 鍵與操作宣告衍生。操作字串相同不代表不同服務鍵可以互換。
 
 一般服務缺少契約描述符時，產生會失敗，不會將它從清單中省略。私有服務應封裝在套件內組合中。發布工具讀取操作身分，不檢查 schema。不透明 schema、串流與中介軟體不會阻止發布。[一致性測試工具](../conformance/)
 有自己的支援範圍。

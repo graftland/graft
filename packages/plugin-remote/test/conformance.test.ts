@@ -1,5 +1,6 @@
-import { Cause, Deferred, Effect, Exit, Ref, Schema } from "effect"
+import { Cause, Deferred, Effect, Exit, Fiber, Ref, Schema } from "effect"
 import { RpcClientError } from "effect/rpc"
+import { TestClock } from "effect/testing"
 import { assert, it } from "@effect/vitest"
 
 import type { Manifest } from "@graftland/graft"
@@ -15,7 +16,11 @@ const entry: Manifest.Entry = {
 		nativeModules: false,
 	},
 	probes: ["health"],
-	services: { required: [], optional: [], implements: ["example/read@1"] },
+	services: {
+		required: [],
+		optional: [],
+		implements: [{ key: "example/Reader", operations: ["example/read@1"] }],
+	},
 	operations: [],
 }
 const request = { operation: "example/read@1", payload: {} }
@@ -83,7 +88,10 @@ it.effect("rejects missing operation coverage", () =>
 				...suite,
 				entry: {
 					...entry,
-					services: { ...entry.services, implements: ["other@1"] },
+					services: {
+						...entry.services,
+						implements: [{ key: "example/Reader", operations: ["other@1"] }],
+					},
 				},
 			}),
 		)
@@ -183,3 +191,63 @@ it.effect(
 			assert.include(Cause.pretty(Cause.fail(result)), "Request cleanup broke")
 		}).pipe(Effect.scoped),
 )
+
+for (const kind of ["Success", "BusinessError"] as const) {
+	it.effect(
+		`bounds the ${kind} equality comparison and identifies the operation`,
+		() =>
+			Effect.gen(function* () {
+				const comparing = yield* Deferred.make<void>()
+				const interrupted = yield* Ref.make(false)
+				const fiber = yield* Effect.forkScoped(
+					Conformance.run(
+						{
+							...session,
+							call: () =>
+								Effect.succeed(
+									kind === "Success"
+										? Exit.succeed("ok")
+										: Exit.fail("rejected"),
+								),
+							equal: () =>
+								Deferred.succeed(comparing, undefined).pipe(
+									Effect.andThen(Effect.never),
+									Effect.onInterrupt(() => Ref.set(interrupted, true)),
+								),
+						},
+						{
+							...suite,
+							timeout: "5 millis",
+							examples: [
+								{
+									...request,
+									expected: {
+										_tag: kind,
+										value: kind === "Success" ? "ok" : "rejected",
+									},
+								},
+							],
+						},
+					).pipe(Effect.flip),
+				)
+				yield* Deferred.await(comparing)
+				yield* TestClock.adjust("5 millis")
+				assert.isDefined(
+					fiber.pollUnsafe(),
+					"The stage deadline must complete without an outer timeout",
+				)
+				const failure = yield* Fiber.join(fiber)
+				const detail = Cause.pretty(Cause.fail(failure))
+				assert.include(detail, request.operation)
+				assert.include(
+					detail,
+					kind === "Success"
+						? "Success comparison"
+						: "Business-error comparison",
+				)
+				assert.include(detail, "deadline")
+				const wasInterrupted = yield* Ref.get(interrupted)
+				assert.isTrue(wasInterrupted)
+			}).pipe(Effect.scoped),
+	)
+}

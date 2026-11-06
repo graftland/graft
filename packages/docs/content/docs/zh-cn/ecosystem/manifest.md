@@ -52,7 +52,8 @@ graft remote manifest ./release --check
 ```
 
 生成过程导入已构建的声明，不运行 `apply`
-或探针。只对你打算导入的代码运行此命令。模块作者必须保证导入不执行 I/O。清单与代码不一致时，验证以失败退出。
+或探针。只对你打算导入的代码运行此命令。模块作者必须保证导入不执行 I/O。每次入口检查使用新的临时 Worker，包括它导入的所有依赖。在同一调用进程中重复生成或验证也会读取模块变更。清单与代码不一致时，验证以失败退出。`Publication.inspectEntry`
+返回元数据，不返回运行中的插件对象。
 
 | 生成字段              | 来源                                                                  |
 | --------------------- | --------------------------------------------------------------------- |
@@ -60,6 +61,9 @@ graft remote manifest ./release --check
 | `services.optional`   | `Plugin.optional` 键。                                                |
 | `services.implements` | `Plugin.provides`。                                                   |
 | `operations`          | 精确的 `name@version`、契约包名与版本，以及该包的 Artifact 目录摘要。 |
+
+每个服务集合包含 `{ "key": "service/key", "operations": ["read@1"] }`
+分组，由 Context 键和操作声明派生。操作字符串相同不代表不同服务键可以互换。
 
 普通服务缺少契约描述符时，生成会失败，不会将它从清单中省略。私有服务应封装在包内组合中。发布工具读取操作身份，不检查 schema。不透明 schema、流和中间件不会阻止发布。[一致性测试工具](../conformance/)
 有自己的支持范围。

@@ -193,6 +193,10 @@ it.effect(
 				entry: "index.js",
 				store: root + "/store",
 			})
+			for (const name of ["constructor", "toString", "__proto__"]) {
+				const missing = yield* Effect.flip(Publication.provenance(source, name))
+				assert.include(missing.message, `No manifest entry ${name}`)
+			}
 			const record = yield* Publication.provenance(artifact.directory, ".")
 			assert.deepEqual(record.artifact, artifact.identity)
 			assert.deepEqual(record.package, { name: "published", version: "1.0.0" })

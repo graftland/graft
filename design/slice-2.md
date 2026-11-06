@@ -19,10 +19,10 @@ built packages, without workspace aliases or privileged first-party access.
    pinned.
 3. **Compatibility.** A public pure checker and `graft check` compare an
    explicit host description with selected package entries before loading. Check
-   exact operation inclusion, conflicting package provenance, runtime ranges and
-   placement capabilities. Report the needing entry, missing identity and
-   providers from an explicit candidate catalog. Optional dependencies do not
-   block startup.
+   exact operation inclusion within the same service binding, conflicting
+   package provenance, runtime ranges and placement capabilities. Report the
+   needing entry, missing identity and providers from an explicit candidate
+   catalog. Optional dependencies do not block startup.
 4. **Conformance.** A public Remote test kit checks manifest/code agreement,
    portable RPC value round trips, cancellation with observed cleanup, declared
    business/infrastructure failures, and declared probes. Authors supply domain
@@ -41,12 +41,15 @@ built packages, without workspace aliases or privileged first-party access.
 ## Settled decisions
 
 - Follow Koishi's required/optional/implements vocabulary, using `name@version`
-  operation identities rather than unversioned service names.
+  operation identities bound to their Context service keys. Each required group
+  needs one provider with the same key and every required operation; operation
+  unions across different services or partial providers do not satisfy it.
 - Keep portable manifest data and compatibility in core; Remote owns package
   inspection and conformance. No second lifecycle engine.
 - `graft check` is metadata-only. `graft remote manifest` is an author command
   registered by `remote/cli`; it explicitly imports built code but never runs
-  `apply`.
+  `apply`. Each inspection runs in a disposable worker with a fresh transitive
+  module cache; only metadata returns to the caller.
 - Runtime ranges come from standard package metadata. Filesystem/native-module
   needs and supported placements are author declarations, not inferred grants.
 - Operation provenance is contract package name/version plus the versioned
@@ -65,3 +68,10 @@ built packages, without workspace aliases or privileged first-party access.
   sandbox, automatic installation, adapter selection or migration system.
 - Conformance uses today's Remote failure types. It does not invent the target
   architecture's future `ContractFailure` union.
+
+- Compare normalized operation sets element by element, never through delimiter
+  encoding. Commas remain valid in operation identities.
+- Entry selection uses own properties only, including provenance and catalog
+  suggestions. Preflight configuration accepts concrete public export paths.
+- Every effectful conformance comparison shares the per-stage deadline; timeout
+  diagnostics identify the operation and comparison stage.

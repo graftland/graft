@@ -1,12 +1,17 @@
-import { Array, Context, Effect, String } from "effect"
+import { Array, Context, Effect, Schema, String } from "effect"
 import { assert, it } from "@effect/vitest"
 
-import { Manifest, Plugin } from "../src/index"
+import { Graft, Manifest, Plugin } from "../src/index"
+import { reach, run } from "./utils"
 
 const operation: Manifest.Operation = {
 	identity: "@example/read@1",
 	package: { name: "@example/contract", version: "1.0.0" },
 	artifact: { version: 1, algorithm: "sha256", digest: String.repeat(64)("a") },
+}
+const service: Manifest.Service = {
+	key: "example/Reader",
+	operations: [operation.identity],
 }
 const host: Manifest.Host = {
 	node: "22.22.0",
@@ -15,6 +20,7 @@ const host: Manifest.Host = {
 	placement: "Worker",
 	filesystem: false,
 	nativeModules: false,
+	services: [],
 	operations: [],
 }
 const entry: Manifest.Entry = {
@@ -26,7 +32,7 @@ const entry: Manifest.Entry = {
 		nativeModules: false,
 	},
 	probes: [],
-	services: { required: [], optional: [], implements: [operation.identity] },
+	services: { required: [], optional: [], implements: [service] },
 	operations: [operation],
 }
 const pkg: Manifest.Package = {
@@ -45,18 +51,20 @@ const selection = (id: string, manifest = entry): Manifest.Selection => ({
 it("accepts exact operation inclusion from host and other entries", () => {
 	const consumer = selection("consumer", {
 		...entry,
-		services: { required: [operation.identity], optional: [], implements: [] },
+		services: { required: [service], optional: [], implements: [] },
 	})
 	assert.deepEqual(Manifest.check(host, [consumer, selection("provider")]), [])
 	assert.deepEqual(
-		Manifest.check({ ...host, operations: [operation] }, [consumer]),
+		Manifest.check({ ...host, services: [service], operations: [operation] }, [
+			consumer,
+		]),
 		[],
 	)
 })
 it("reports the needing entry and candidate provider without enabling the catalog", () => {
 	const consumer = selection("consumer", {
 		...entry,
-		services: { required: [operation.identity], optional: [], implements: [] },
+		services: { required: [service], optional: [], implements: [] },
 	})
 	const result = Manifest.check(host, [consumer], [selection("provider")])
 	assert.equal(result[0]?.code, "MissingOperation")
@@ -68,7 +76,7 @@ it("does not satisfy an entry's injected requirement with its own provision", ()
 	const result = Manifest.check(host, [
 		selection("self", {
 			...entry,
-			services: { ...entry.services, required: [operation.identity] },
+			services: { ...entry.services, required: [service] },
 		}),
 	])
 	assert.equal(result[0]?.code, "MissingOperation")
@@ -80,7 +88,7 @@ it("does not require optional operations and does not substitute another operati
 				...entry,
 				services: {
 					required: [],
-					optional: [operation.identity],
+					optional: [service],
 					implements: [],
 				},
 			}),
@@ -92,7 +100,7 @@ it("does not require optional operations and does not substitute another operati
 		selection("required", {
 			...entry,
 			services: {
-				required: [operation.identity],
+				required: [service],
 				optional: [],
 				implements: [],
 			},
@@ -131,7 +139,7 @@ it("reports differing digests of the same package across entries and within one 
 })
 it("never conflicts for one contract package at one digest", () => {
 	assert.deepEqual(
-		Manifest.check({ ...host, operations: [operation] }, [
+		Manifest.check({ ...host, services: [service], operations: [operation] }, [
 			selection("first", { ...entry, operations: [operation, operation] }),
 			selection("second"),
 		]),
@@ -227,9 +235,9 @@ it.effect(
 				provided,
 			])
 			assert.deepEqual(result.services, {
-				required: ["required@1"],
-				optional: ["optional@1"],
-				implements: ["provided@1"],
+				required: [{ key: Required.key, operations: ["required@1"] }],
+				optional: [{ key: Optional.key, operations: ["optional@1"] }],
+				implements: [{ key: Provided.key, operations: ["provided@1"] }],
 			})
 		}),
 )
@@ -244,5 +252,173 @@ it.effect(
 			})
 			const failure = yield* Effect.flip(Manifest.derive(plugin, []))
 			assert.include(failure.message, Required.key)
+		}),
+)
+
+it.effect(
+	"does not confuse different service keys with identical operations and provenance",
+	() =>
+		Effect.gen(function* () {
+			const required = declaration(Required, "read")
+			const provided = declaration(Provided, "read")
+			const consumer = Plugin.make({
+				name: "consumer",
+				inject: [Required],
+				apply: () => Effect.void,
+			})
+			const provider = Plugin.make({
+				name: "provider",
+				provides: [provided.service],
+				apply: () => Graft.provide(Provided, {}),
+			})
+			const consumerMetadata = yield* Manifest.derive(consumer, [required])
+			const providerMetadata = yield* Manifest.derive(provider, [provided])
+			const consumerEntry = selection("consumer", {
+				...entry,
+				...consumerMetadata,
+			})
+			const providerEntry = selection("provider", {
+				...entry,
+				...providerMetadata,
+			})
+			const diagnostics = Manifest.check(
+				host,
+				[consumerEntry, providerEntry],
+				[providerEntry],
+			)
+			assert.equal(diagnostics[0]?.code, "MissingOperation")
+			assert.include(diagnostics[0]!.message, Required.key)
+			assert.include(diagnostics[0]!.message, "read@1")
+			assert.deepEqual(diagnostics[0]!.providers, [])
+			assert.equal(
+				Manifest.check(
+					{
+						...host,
+						services: providerMetadata.services.implements,
+						operations: providerMetadata.operations,
+					},
+					[consumerEntry],
+				)[0]?.code,
+				"MissingOperation",
+			)
+			const providerFork = yield* Graft.plugin(provider)
+			yield* providerFork.await
+			const consumerFork = yield* Graft.plugin(consumer)
+			yield* reach(consumerFork, "Pending")
+			const matching = Plugin.make({
+				name: "matching",
+				provides: [required.service],
+				apply: () => Graft.provide(Required, {}),
+			})
+			const metadata = yield* Manifest.derive(matching, [required])
+			assert.deepEqual(
+				Manifest.check(host, [
+					consumerEntry,
+					selection("matching", { ...entry, ...metadata }),
+				]),
+				[],
+			)
+			const matchingFork = yield* Graft.plugin(matching)
+			yield* matchingFork.await
+			yield* consumerFork.await
+		}).pipe(run),
+)
+
+it("does not assemble one required service from partial providers", () => {
+	const write = { ...operation, identity: "write@1" }
+	const required = {
+		...service,
+		operations: [operation.identity, write.identity],
+	}
+	const consumer = selection("consumer", {
+		...entry,
+		operations: [operation, write],
+		services: { required: [required], optional: [], implements: [] },
+	})
+	const partial = selection("partial", {
+		...entry,
+		operations: [write],
+		services: {
+			required: [],
+			optional: [],
+			implements: [{ ...service, operations: [write.identity] }],
+		},
+	})
+	assert.equal(
+		Manifest.check(host, [consumer, selection("provider"), partial])[0]?.code,
+		"MissingOperation",
+	)
+})
+
+it.effect(
+	"compares provenance operation sets without delimiter collisions",
+	() =>
+		Effect.gen(function* () {
+			const combined = declaration(Provided, "read@1,write")
+			const plugin = Plugin.make({
+				name: "collision",
+				provides: [combined.service],
+				apply: () => Effect.void,
+			})
+			const failure = yield* Effect.flip(
+				Manifest.derive(plugin, [
+					{
+						...combined,
+						operations: [
+							{ ...operation, identity: "read@1" },
+							{ ...operation, identity: "write@1" },
+						],
+					},
+				]),
+			)
+			assert.include(failure.message, "Operation provenance disagrees")
+		}),
+)
+
+it.effect(
+	"compares implementation operation sets without delimiter collisions",
+	() =>
+		Effect.gen(function* () {
+			const combined = declaration(Provided, "read@1,write")
+			const separate: Manifest.Declaration = {
+				service: {
+					key: Provided,
+					operations: [
+						{ name: "read", version: 1 },
+						{ name: "write", version: 1 },
+					],
+				},
+				operations: [
+					{ ...operation, identity: "read@1" },
+					{ ...operation, identity: "write@1" },
+				],
+			}
+			const plugin = Plugin.make({
+				name: "collision",
+				provides: [combined.service],
+				apply: () => Effect.void,
+			})
+			const failure = yield* Effect.flip(Manifest.derive(plugin, [separate]))
+			assert.include(failure.message, "Provided operations disagree")
+		}),
+)
+
+it.effect(
+	"treats inherited entry names as missing in selected entries and catalog suggestions",
+	() =>
+		Effect.gen(function* () {
+			const decoded = yield* Schema.decodeEffect(Manifest.Package)(pkg)
+			const consumer = selection("consumer", {
+				...entry,
+				services: { required: [service], optional: [], implements: [] },
+			})
+			for (const name of ["constructor", "toString", "__proto__"]) {
+				const absent = { id: "absent", package: decoded, entry: name }
+				const diagnostics = Manifest.check(host, [absent])
+				assert.equal(diagnostics[0]?.code, "MissingEntry")
+				const missing = Manifest.check(host, [consumer], [absent])
+				assert.equal(missing[0]?.code, "MissingOperation")
+				assert.deepEqual(missing[0]?.providers, [])
+			}
 		}),
 )

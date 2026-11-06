@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import { execFileSync } from "node:child_process"
-import { readFileSync, realpathSync, writeFileSync } from "node:fs"
+import { readFileSync, realpathSync, unlinkSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { test } from "node:test"
 import { fileURLToPath } from "node:url"
@@ -25,6 +25,7 @@ const host = {
 	placement: "Worker",
 	filesystem: true,
 	nativeModules: true,
+	services: [],
 	operations: [],
 }
 const installed = packages.map((name) => {
@@ -81,6 +82,50 @@ test("manifest verification rejects drift without rewriting the published packag
 		writeFileSync(file, original)
 	}
 })
+for (const changedModule of ["entry", "dependency"]) {
+	test(`repeated publication reloads changed ${changedModule} declarations`, async () => {
+		const entry = installed[0]
+		const file = join(entry.directory, "dist/index.js")
+		const dependency = join(entry.directory, "dist/publication-dependency.js")
+		const original = readFileSync(file, "utf8")
+		const changed = `import { Context, Effect } from "effect"
+import { Plugin } from "@graftland/graft"
+const Missing = Context.Service("missing")
+export default Plugin.make({ name: "changed", inject: [Missing], apply: () => Effect.void })
+`
+		try {
+			if (changedModule === "dependency") {
+				writeFileSync(dependency, original)
+				writeFileSync(
+					file,
+					'export { default } from "./publication-dependency.js"\n',
+				)
+			}
+			const baseline = await Effect.runPromise(
+				Publication.generate(entry.directory).pipe(Effect.provide(platform)),
+			)
+			assert.deepEqual(baseline.graft, entry.package.graft)
+			writeFileSync(changedModule === "entry" ? file : dependency, changed)
+			for (const inspect of [Publication.generate, Publication.verify]) {
+				const failure = await Effect.runPromise(
+					inspect(entry.directory).pipe(Effect.flip, Effect.provide(platform)),
+				)
+				assert.match(
+					Cause.pretty(Cause.fail(failure)),
+					/Service missing needs exactly one contract declaration/,
+				)
+			}
+			writeFileSync(changedModule === "entry" ? file : dependency, original)
+			const restored = await Effect.runPromise(
+				Publication.verify(entry.directory).pipe(Effect.provide(platform)),
+			)
+			assert.deepEqual(restored.graft, entry.package.graft)
+		} finally {
+			writeFileSync(file, original)
+			if (changedModule === "dependency") unlinkSync(dependency)
+		}
+	})
+}
 test("changed contract package bytes produce a provenance conflict and fail manifest agreement", async () => {
 	const entry = installed[0]
 	const file = fileURLToPath(import.meta.resolve(`${entry.id}-contract`))
@@ -143,7 +188,8 @@ test("manifest generation rejects a self-referential package digest without rewr
 })
 test("an incompatible plugin names the missing operation, entry and provider", () => {
 	const provider = installed[0]
-	const operation = provider.package.graft.entries["."].services.implements[0]
+	const operation =
+		provider.package.graft.entries["."].services.implements[0].operations[0]
 	const file = fileURLToPath(
 		import.meta.resolve("@incompatible/plugin/package.json"),
 	)
@@ -203,7 +249,8 @@ for (const entry of installed) {
 	for (const placement of ["Worker", "Local"]) {
 		test(`${entry.id}: public conformance on ${placement}`, async () => {
 			const { contract, Rejected } = await import(`${entry.id}-contract`)
-			const operation = entry.package.graft.entries["."].services.implements[0]
+			const operation =
+				entry.package.graft.entries["."].services.implements[0].operations[0]
 			const isCounter = entry.id.includes("counter")
 			const input = (mode) =>
 				isCounter ? { mode, value: 4 } : { mode, text: "hello" }

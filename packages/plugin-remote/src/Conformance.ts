@@ -238,10 +238,13 @@ export const run = Effect.fn("Conformance.run")(
 		const duration = parsed.value
 		if (!Number.isFinite(Duration.toMillis(duration)))
 			return yield* error("Conformance deadlines must be finite")
-		const bounded = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+		const bounded = <A, E, R>(
+			effect: Effect.Effect<A, E, R>,
+			stage = "Conformance stage",
+		) =>
 			checked(
 				Effect.timeout(effect, duration),
-				"Conformance stage failed or exceeded its deadline",
+				`${stage} failed or exceeded its deadline`,
 			)
 		const covered = [
 			...Array.map(suite.examples, (example) => example.operation),
@@ -249,7 +252,10 @@ export const run = Effect.fn("Conformance.run")(
 			suite.cancellation.started.operation,
 			suite.cancellation.released.operation,
 		]
-		for (const operation of suite.entry.services.implements)
+		for (const operation of Array.flatMap(
+			suite.entry.services.implements,
+			(service) => service.operations,
+		))
 			yield* assert(
 				covered.includes(operation) && session.operations.includes(operation),
 				`Missing conformance case for ${operation}`,
@@ -269,11 +275,14 @@ export const run = Effect.fn("Conformance.run")(
 					yield* bounded(
 						session.roundTrip(example, example.expected.value, "success"),
 					)
-					const equal = yield* session.equal(
-						example,
-						result.value,
-						example.expected.value,
-						"success",
+					const equal = yield* bounded(
+						session.equal(
+							example,
+							result.value,
+							example.expected.value,
+							"success",
+						),
+						`Success comparison for ${example.operation}`,
 					)
 					yield* assert(
 						equal,
@@ -320,11 +329,9 @@ export const run = Effect.fn("Conformance.run")(
 						yield* bounded(
 							session.roundTrip(example, example.expected.value, "error"),
 						)
-						const equal = yield* session.equal(
-							example,
-							value,
-							example.expected.value,
-							"error",
+						const equal = yield* bounded(
+							session.equal(example, value, example.expected.value, "error"),
+							`Business-error comparison for ${example.operation}`,
 						)
 						yield* assert(
 							equal,

@@ -2,7 +2,7 @@
 import {
 	Array,
 	Effect,
-	HashSet,
+	Option,
 	Order,
 	Record,
 	Result,
@@ -45,10 +45,16 @@ export const Requirements = Schema.Struct({
 	nativeModules: Schema.Boolean,
 })
 export type Requirements = typeof Requirements.Type
+/** The Context service key and the complete operation group bound to it. */
+export const Service = Schema.Struct({
+	key: Schema.NonEmptyString,
+	operations: Schema.Array(Identity),
+})
+export type Service = typeof Service.Type
 export const Services = Schema.Struct({
-	required: Schema.Array(Identity),
-	optional: Schema.Array(Identity),
-	implements: Schema.Array(Identity),
+	required: Schema.Array(Service),
+	optional: Schema.Array(Service),
+	implements: Schema.Array(Service),
 })
 export type Services = typeof Services.Type
 export const Entry = Schema.Struct({
@@ -60,6 +66,12 @@ export const Entry = Schema.Struct({
 	operations: Schema.Array(Operation),
 })
 export type Entry = typeof Entry.Type
+/** A package root or a concrete public subpath; patterns and traversal are not entries. */
+export const PublicEntry = Schema.String.check(
+	Schema.isPattern(
+		/^(?:\.|\.\/[A-Za-z0-9_@-][A-Za-z0-9_@.-]*(?:\/[A-Za-z0-9_@-][A-Za-z0-9_@.-]*)*)$/,
+	),
+)
 export const Manifest = Schema.Struct({
 	version: Schema.Literal(1),
 	entries: Schema.Record(Schema.String, Entry),
@@ -82,6 +94,7 @@ export const Host = Schema.Struct({
 	placement: Placement,
 	filesystem: Schema.Boolean,
 	nativeModules: Schema.Boolean,
+	services: Schema.Array(Service),
 	operations: Schema.Array(Operation),
 })
 export type Host = typeof Host.Type
@@ -117,8 +130,28 @@ export interface Declaration {
 }
 export const operationId = (operation: Plugin.OperationIdentity) =>
 	`${operation.name}@${operation.version}`
+/** Own-property lookup also handles arbitrary entry names supplied by embedded callers. */
+export const getEntry = (manifest: Manifest, name: string): Entry | undefined =>
+	Option.getOrUndefined(Record.get(manifest.entries, name))
 const sorted = (values: ReadonlyArray<string>) =>
 	Array.sort(Array.dedupe(values), Order.String)
+
+const sameIdentities = (
+	left: ReadonlyArray<string>,
+	right: ReadonlyArray<string>,
+) => {
+	const a = sorted(left)
+	const b = sorted(right)
+	return (
+		a.length === b.length &&
+		Array.every(a, (value, index) => value === b[index])
+	)
+}
+const satisfies = (provided: Service, required: Service) =>
+	provided.key === required.key &&
+	Array.every(required.operations, (identity) =>
+		provided.operations.includes(identity),
+	)
 
 /** Resolves service keys through contract declarations without running the plugin. */
 export const derive = Effect.fn("Manifest.derive")(function* (
@@ -126,13 +159,12 @@ export const derive = Effect.fn("Manifest.derive")(function* (
 	declarations: ReadonlyArray<Declaration>,
 ) {
 	for (const declaration of declarations) {
-		const declared = sorted(
-			Array.map(declaration.service.operations, operationId),
+		const declared = Array.map(declaration.service.operations, operationId)
+		const described = Array.map(
+			declaration.operations,
+			(operation) => operation.identity,
 		)
-		const described = sorted(
-			Array.map(declaration.operations, (operation) => operation.identity),
-		)
-		if (Array.join(declared, ",") !== Array.join(described, ","))
+		if (!sameIdentities(declared, described))
 			return yield* ManifestError.make({
 				message: `Operation provenance disagrees with ${declaration.service.key.key}`,
 			})
@@ -163,21 +195,25 @@ export const derive = Effect.fn("Manifest.derive")(function* (
 		if (!("operations" in item)) continue
 		const declared = yield* lookup(item.key.key)
 		if (
-			Array.join(sorted(Array.map(item.operations, operationId)), ",") !==
-			Array.join(
-				sorted(Array.map(declared.service.operations, operationId)),
-				",",
+			!sameIdentities(
+				Array.map(item.operations, operationId),
+				Array.map(declared.service.operations, operationId),
 			)
 		)
 			return yield* ManifestError.make({
 				message: `Provided operations disagree with the contract for ${item.key.key}`,
 			})
 	}
-	const ids = (items: ReadonlyArray<Declaration>) =>
-		sorted(
-			Array.flatMap(items, (item) =>
-				Array.map(item.operations, (op) => op.identity),
-			),
+	const bindings = (
+		items: ReadonlyArray<Declaration>,
+	): ReadonlyArray<Service> =>
+		Array.sortWith(
+			Array.map(items, (item) => ({
+				key: item.service.key.key,
+				operations: sorted(Array.map(item.operations, (op) => op.identity)),
+			})),
+			(item) => item.key,
+			Order.String,
 		)
 	const operations = Array.dedupeWith(
 		Array.flatMap(
@@ -192,9 +228,9 @@ export const derive = Effect.fn("Manifest.derive")(function* (
 	)
 	return {
 		services: {
-			required: ids(required),
-			optional: ids(optional),
-			implements: ids(provided),
+			required: bindings(required),
+			optional: bindings(optional),
+			implements: bindings(provided),
 		},
 		operations,
 	}
@@ -253,12 +289,12 @@ export const check = (
 	catalog: ReadonlyArray<Selection> = [],
 ): ReadonlyArray<Diagnostic> => {
 	const entries = Array.flatMap(selected, (item) => {
-		const entry = item.package.graft.entries[item.entry]
+		const entry = getEntry(item.package.graft, item.entry)
 		return entry === undefined ? [] : [{ ...item, manifest: entry }]
 	})
 	return [
 		...Array.flatMap(selected, (item) =>
-			item.package.graft.entries[item.entry] === undefined
+			getEntry(item.package.graft, item.entry) === undefined
 				? [
 						diagnostic(
 							"MissingEntry",
@@ -276,23 +312,28 @@ export const check = (
 			})),
 		]),
 		...Array.flatMap(entries, (entry) => {
-			const available = HashSet.fromIterable([
-				...Array.map(host.operations, (op) => op.identity),
+			const available = [
+				...host.services,
 				...Array.flatMap(entries, (other) =>
 					other === entry ? [] : other.manifest.services.implements,
 				),
-			])
+			]
 			const requirements = entry.manifest.requirements
 			const runtime = {
 				node: entry.package.engines.node,
 				effect: entry.package.peerDependencies.effect,
 				graft: entry.package.peerDependencies["@graftland/graft"],
 			}
-			const identities = sorted([
-				...entry.manifest.services.required,
-				...entry.manifest.services.optional,
-				...entry.manifest.services.implements,
-			])
+			const identities = sorted(
+				Array.flatMap(
+					[
+						...entry.manifest.services.required,
+						...entry.manifest.services.optional,
+						...entry.manifest.services.implements,
+					],
+					(service) => service.operations,
+				),
+			)
 			return [
 				...Array.flatMap(identities, (identity) =>
 					Array.some(
@@ -308,22 +349,28 @@ export const check = (
 								),
 							],
 				),
-				...Array.flatMap(entry.manifest.services.required, (identity) => {
-					if (HashSet.has(available, identity)) return []
+				...Array.flatMap(entry.manifest.services.required, (required) => {
+					if (Array.some(available, (service) => satisfies(service, required)))
+						return []
 					const providers = sorted(
-						Array.flatMap(catalog, (candidate) =>
-							candidate.package.graft.entries[
-								candidate.entry
-							]?.services.implements.includes(identity) === true
+						Array.flatMap(catalog, (candidate) => {
+							const manifest = getEntry(
+								candidate.package.graft,
+								candidate.entry,
+							)
+							return manifest !== undefined &&
+								Array.some(manifest.services.implements, (service) =>
+									satisfies(service, required),
+								)
 								? [candidate.package.name]
-								: [],
-						),
+								: []
+						}),
 					)
 					return [
 						diagnostic(
 							"MissingOperation",
 							entry.id,
-							`${entry.id} requires ${identity}; ${providers.length > 0 ? `enable a provider: ${Array.join(providers, ", ")}` : "add a package implementing this exact operation"}`,
+							`${entry.id} requires service ${required.key} with operations [${Array.join(required.operations, ", ")}]; ${providers.length > 0 ? `enable a provider: ${Array.join(providers, ", ")}` : "add a package implementing this service and its complete operation set"}`,
 							providers,
 						),
 					]

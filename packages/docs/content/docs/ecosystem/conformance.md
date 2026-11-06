@@ -48,7 +48,9 @@ fixture, not evidence of independent human adoption.
 There is no public `ContractFailure` union today. The kit checks the current
 Effect RPC boundary instead of relabeling its failures. Test the failures your
 operation can produce. Direct setup has a five-second deadline; a finite
-per-stage deadline defaults to five seconds. Failures retain their causes.
+per-stage deadline defaults to five seconds, including success and
+business-error equality comparisons. Comparison timeouts name the operation and
+comparison stage. Failures retain their causes.
 
 ## Prove cancellation
 

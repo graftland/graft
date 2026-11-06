@@ -55,7 +55,11 @@ graft remote manifest ./release --check
 
 Generation imports built declarations but never runs `apply` or probes. Run it
 only on code you intend to import. Module authors must keep imports free of I/O.
-Verification exits unsuccessfully on manifest/code disagreement.
+Each entry inspection uses a fresh disposable worker, including all imported
+dependencies. Repeated generation and verification see changed modules in the
+same caller process. Verification exits unsuccessfully on manifest/code
+disagreement. `Publication.inspectEntry` returns metadata, not live plugin
+objects.
 
 | Generated field       | Source                                                                                  |
 | --------------------- | --------------------------------------------------------------------------------------- |
@@ -63,6 +67,10 @@ Verification exits unsuccessfully on manifest/code disagreement.
 | `services.optional`   | `Plugin.optional` keys.                                                                 |
 | `services.implements` | `Plugin.provides`.                                                                      |
 | `operations`          | Exact `name@version`, contract package name/version, and its Artifact directory digest. |
+
+Each service set contains `{ "key": "service/key", "operations": ["read@1"] }`
+groups derived from Context keys and operation declarations. Matching operation
+strings alone does not make different service keys interchangeable.
 
 An ordinary service without a contract descriptor fails generation rather than
 disappearing from the manifest. Private services belong inside a packaged

@@ -37,6 +37,7 @@ export default async function setup(project) {
 			"Contract",
 			"internal/watchdogMain",
 			"internal/workerMain",
+			"internal/publicationMain",
 			"host/worker",
 			"host/local",
 			"host/websocket",
