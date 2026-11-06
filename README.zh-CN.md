@@ -10,8 +10,8 @@
 [![CI](https://github.com/graftland/graft/actions/workflows/ci.yml/badge.svg)](https://github.com/graftland/graft/actions/workflows/ci.yml)
 [![License](https://img.shields.io/github/license/graftland/graft)](LICENSE)
 
-Graft 是基于 [Effect](https://effect.website)
-的插件框架。改动一个插件，`graft start --watch`
+Graft 是面向长期运行的 TypeScript 应用、基于 [Effect](https://effect.website)
+的插件运行时。每项能力都是一个依赖显式、生命周期独立的插件，因此你能以可控的影响范围更换其中一项。改动一个插件，`graft start --watch`
 只在运行中的进程里替换受影响的插件。
 
 软件不是造出来的，是长出来的。应用是一棵插件树：每个插件嫁接在一个 scope 上，从周围汲取服务，也发布自己的服务。你可以在进程持续运行的同时加载、重新配置、替换和卸载任意一枝。剪掉哪里，树的其余部分都照常生长。
@@ -108,6 +108,10 @@ Graft 的插件模型借鉴自
 | [`@graftland/plugin-mcp-server`](packages/plugin-mcp-server) | 把插件的工具提供给 MCP 客户端；工具重载时客户端无需重连。                  |
 
 所有软件包以相同版本一起发布。它们都需要 `effect` 4.1.x。
+
+## 方向
+
+Graft 正朝着为长期运行的网关提供在线升级发展：在网关保持上游会话的同时，替换一个由他人编写的集成，并提供有界排空、就绪检查和如实的结局。设计是公开的：[价值定义](design/value.md)与[目标架构](design/upgrades.md)。本 README 只描述已经实现的能力。
 
 ## 参与贡献
 

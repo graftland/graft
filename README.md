@@ -10,9 +10,11 @@ English | [简体中文](README.zh-CN.md) | [繁體中文](README.zh-TW.md)
 [![CI](https://github.com/graftland/graft/actions/workflows/ci.yml/badge.svg)](https://github.com/graftland/graft/actions/workflows/ci.yml)
 [![License](https://img.shields.io/github/license/graftland/graft)](LICENSE)
 
-Graft is a plugin framework for [Effect](https://effect.website). Edit a plugin
-and `graft start --watch` swaps only the plugins your change affects, inside the
-running process.
+Graft is an [Effect](https://effect.website)-native plugin runtime for
+long-running TypeScript applications. Each capability is a plugin with explicit
+dependencies and its own lifecycle, so you can change one capability with a
+controlled blast radius. Edit a plugin and `graft start --watch` swaps only the
+plugins your change affects, inside the running process.
 
 Software is not built. It is grown. Your application is a tree of plugins. Each
 plugin is grafted onto a scope, draws on the services around it, and publishes
@@ -125,6 +127,15 @@ After those, larger applications show what Graft is for:
 
 All packages are released together with the same version. They all need `effect`
 4.1.x.
+
+## Direction
+
+Graft is growing toward live upgrades for long-running gateways: replace one
+independently authored integration while the gateway keeps its upstream session,
+with bounded drains, readiness checks and truthful outcomes. The design is
+public: the [value definition](design/value.md) and the
+[target architecture](design/upgrades.md), both in Chinese. This README
+describes only what is implemented.
 
 ## Contributing
 

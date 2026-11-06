@@ -10,8 +10,8 @@
 [![CI](https://github.com/graftland/graft/actions/workflows/ci.yml/badge.svg)](https://github.com/graftland/graft/actions/workflows/ci.yml)
 [![License](https://img.shields.io/github/license/graftland/graft)](LICENSE)
 
-Graft 是以 [Effect](https://effect.website)
-打造的外掛框架。修改一個外掛，`graft start --watch`
+Graft 是面向長期執行的 TypeScript 應用程式、以 [Effect](https://effect.website)
+打造的外掛執行環境。每項能力都是一個依賴明確、生命週期獨立的外掛，因此你能以可控的影響範圍更換其中一項。修改一個外掛，`graft start --watch`
 只在執行中的行程裡取代受影響的外掛。
 
 軟體不是造出來的，是長出來的。應用程式是一棵外掛樹：每個外掛嫁接在一個 scope 上，從周圍汲取服務，也發布自己的服務。你可以在行程持續執行的同時載入、重新設定、取代和卸載任意一枝。剪掉哪裡，樹的其餘部分都照常生長。
@@ -108,6 +108,10 @@ Graft 的外掛模型借鑑自
 | [`@graftland/plugin-mcp-server`](packages/plugin-mcp-server) | 把外掛的工具提供給 MCP 用戶端；工具重載時用戶端不必重新連線。              |
 
 所有套件以相同版本一起發布。它們都需要 `effect` 4.1.x。
+
+## 方向
+
+Graft 正朝著為長期執行的閘道提供線上升級發展：在閘道保持上游工作階段的同時，取代一個由他人撰寫的整合，並提供有界排空、就緒檢查與如實的結局。設計是公開的：[價值定義](design/value.md)與[目標架構](design/upgrades.md)。本 README 只描述已經實作的能力。
 
 ## 參與貢獻
 
