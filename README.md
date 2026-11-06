@@ -55,11 +55,17 @@ const hello = Plugin.make({
 - **Hot swap.** Change the variety without felling the tree.
   `graft start --watch` reimports only what your change affects and swaps the
   affected plugins in one transaction. If the new code fails to import or to
-  start, the old plugins keep running.
+  start, Graft restores the old plugins and reports whether they came back.
 - **Clean teardown.** Every plugin runs in its own `Scope`, and every fiber it
   starts has an owner. When a plugin goes away, the plugins that depend on it
-  stop first. Then its finalizers run. Nothing is left behind, and a failure
+  stop first. Then its finalizers run. A failure, including one during cleanup,
   keeps its full `Cause`.
+- **Live upgrades.** Replace a plugin running in a Worker or a child process
+  while the plugins that use it keep running. The candidate starts from an
+  immutable artifact and must pass its probes. New calls reach it while old
+  calls drain, then the old unit is terminated. Every upgrade ends as
+  `Accepted`, `Aborted`, `Recovered`, `RecoveryFailed` or `Stuck`. See
+  [transitions](https://graftland.github.io/graft/transitions/).
 - **Checked dependencies.** Services are Effect `Context` keys, provided by
   `Layer`s or by other plugins. A plugin declares what it needs in `inject`, and
   the compiler checks it.
@@ -132,9 +138,8 @@ All packages are released together with the same version. They all need `effect`
 
 ## Direction
 
-Graft is growing toward live upgrades for long-running gateways: replace one
-independently authored integration while the gateway keeps its upstream session,
-with bounded drains, readiness checks and truthful outcomes. The design is
+Live upgrades work today for plugins in Workers and child processes; runner
+placements, state handoff and release management come next. The design is
 public: the [value definition](design/value.md) and the
 [target architecture](design/upgrades.md), both in Chinese. This README
 describes only what is implemented.
