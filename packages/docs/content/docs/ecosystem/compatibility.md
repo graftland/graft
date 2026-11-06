@@ -43,6 +43,12 @@ Save a preflight file such as `graft.check.json`:
 | `catalog`         | Other packages available as suggestions. Listing a package here does not enable it.                                |
 | Paths             | Relative to this preflight file, including catalog paths.                                                          |
 
+Every operation in `host.services` needs a matching record in `host.operations`,
+including its contract package name, version and Artifact directory digest.
+Missing records produce `InvalidManifest` naming the host service and operation,
+even when no selected entry consumes it. Host and package records participate in
+the same provenance-conflict check.
+
 Entry names use `.` or concrete `./subpath` exports. Configuration rejects bare
 names, empty or dot path segments, traversal and wildcard patterns. Missing
 entries yield `MissingEntry`; inherited object properties are never entries.
@@ -67,7 +73,7 @@ scripts before those commands.
 | `ProvenanceConflict` | One operation comes from different contract package names or different directory digests. Both sources are named; select one package at one digest.                |
 | `Runtime`            | Use Node, Effect and Graft versions satisfying the package's ranges, or select another plugin version.                                                             |
 | `Placement`          | Choose a supported placement with the declared filesystem/native-module capabilities.                                                                              |
-| `InvalidManifest`    | Regenerate missing operation provenance with `graft remote manifest`.                                                                                              |
+| `InvalidManifest`    | Regenerate package metadata with `graft remote manifest`, or complete the named host service's provenance in `host.operations`.                                    |
 
 One contract package name at one directory digest never conflicts, including
 when multiple entries or exports declare the same operation. This is a

@@ -422,3 +422,63 @@ it.effect(
 			}
 		}),
 )
+
+it.effect(
+	"rejects host bindings without package provenance even when they satisfy a consumer",
+	() =>
+		Effect.gen(function* () {
+			const incomplete = yield* Schema.decodeEffect(Manifest.Host)({
+				...host,
+				services: [service],
+				operations: [],
+			})
+			const consumer = selection("consumer", {
+				...entry,
+				services: { required: [service], optional: [], implements: [] },
+			})
+			for (const selected of [[], [consumer]]) {
+				const diagnostics = Manifest.check(incomplete, selected)
+				assert.equal(diagnostics.length, 1)
+				assert.equal(diagnostics[0]?.code, "InvalidManifest")
+				assert.equal(diagnostics[0]?.entry, "host")
+				assert.include(diagnostics[0]!.message, service.key)
+				assert.include(diagnostics[0]!.message, operation.identity)
+				assert.include(diagnostics[0]!.message, "host.operations")
+				assert.include(
+					diagnostics[0]!.message,
+					"package name, version and Artifact directory digest",
+				)
+			}
+		}),
+)
+it("accepts complete matching host provenance", () => {
+	const consumer = selection("consumer", {
+		...entry,
+		services: { required: [service], optional: [], implements: [] },
+	})
+	assert.deepEqual(
+		Manifest.check({ ...host, services: [service], operations: [operation] }, [
+			consumer,
+		]),
+		[],
+	)
+})
+it("rejects conflicting host provenance and names both package sources", () => {
+	const consumer = selection("consumer", {
+		...entry,
+		services: { required: [service], optional: [], implements: [] },
+	})
+	const changed = {
+		...operation,
+		artifact: { ...operation.artifact, digest: String.repeat(64)("b") },
+	}
+	const diagnostics = Manifest.check(
+		{ ...host, services: [service], operations: [changed] },
+		[consumer],
+	)
+	assert.equal(diagnostics[0]?.code, "ProvenanceConflict")
+	assert.include(diagnostics[0]!.message, "host:")
+	assert.include(diagnostics[0]!.message, "consumer:")
+	assert.include(diagnostics[0]!.message, changed.artifact.digest)
+	assert.include(diagnostics[0]!.message, operation.artifact.digest)
+})

@@ -73,6 +73,8 @@ export default async function setup(project) {
 			"services-plugin",
 			"unit-contract",
 			"unit-plugin",
+			"conformance-contract",
+			"conformance-plugin",
 			"transition-contract",
 			"transition-plugin",
 			"loader-entry",

@@ -249,8 +249,9 @@ for (const entry of installed) {
 	for (const placement of ["Worker", "Local"]) {
 		test(`${entry.id}: public conformance on ${placement}`, async () => {
 			const { contract, Rejected } = await import(`${entry.id}-contract`)
-			const operation =
-				entry.package.graft.entries["."].services.implements[0].operations[0]
+			const binding = entry.package.graft.entries["."].services.implements[0]
+			const operation = binding.operations[0]
+			const service = binding.key
 			const isCounter = entry.id.includes("counter")
 			const input = (mode) =>
 				isCounter ? { mode, value: 4 } : { mode, text: "hello" }
@@ -307,6 +308,7 @@ for (const entry of installed) {
 						entry: entry.package.graft.entries["."],
 						examples: [
 							{
+								service,
 								operation,
 								payload: input("ok"),
 								expected: {
@@ -315,6 +317,7 @@ for (const entry of installed) {
 								},
 							},
 							{
+								service,
 								operation,
 								payload: input("reject"),
 								expected: {
@@ -323,15 +326,16 @@ for (const entry of installed) {
 								},
 							},
 							{
+								service,
 								operation,
 								payload: input("defect"),
 								expected: { _tag: "Defect" },
 							},
 						],
 						cancellation: {
-							request: { operation, payload: input("wait") },
-							started: { operation, payload: input("started") },
-							released: { operation, payload: input("released") },
+							request: { service, operation, payload: input("wait") },
+							started: { service, operation, payload: input("started") },
+							released: { service, operation, payload: input("released") },
 						},
 					})
 				}).pipe(

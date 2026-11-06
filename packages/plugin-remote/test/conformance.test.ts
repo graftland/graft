@@ -23,14 +23,18 @@ const entry: Manifest.Entry = {
 	},
 	operations: [],
 }
-const request = { operation: "example/read@1", payload: {} }
+const request = {
+	service: "example/Reader",
+	operation: "example/read@1",
+	payload: {},
+}
 const suite: Conformance.Suite = {
 	entry,
 	examples: [{ ...request, expected: { _tag: "Success", value: "ok" } }],
 	cancellation: { request, started: request, released: request },
 }
 const session: Conformance.Session = {
-	operations: [request.operation],
+	operations: [{ service: request.service, operation: request.operation }],
 	terminate: Effect.void,
 	call: () => Effect.succeed(Exit.succeed("ok")),
 	roundTrip: () => Effect.void,
@@ -251,3 +255,69 @@ for (const kind of ["Success", "BusinessError"] as const) {
 			}).pipe(Effect.scoped),
 	)
 }
+
+it.effect(
+	"session inventory must match the service binding of each declared operation",
+	() =>
+		Effect.gen(function* () {
+			const failure = yield* Effect.flip(
+				Conformance.run(
+					{
+						...session,
+						operations: [
+							{ service: "example/Other", operation: request.operation },
+						],
+						call: () => Effect.die("Coverage must reject before dispatch"),
+					},
+					suite,
+				),
+			)
+			const message = Cause.pretty(Cause.fail(failure))
+			assert.include(
+				message,
+				`Session does not provide service ${request.service}, operation ${request.operation}`,
+			)
+		}).pipe(Effect.scoped),
+)
+it.effect(
+	"a session cannot silently provide an untested second service with the same operation",
+	() =>
+		Effect.gen(function* () {
+			const failure = yield* Effect.flip(
+				Conformance.run(
+					{
+						...session,
+						operations: [
+							...session.operations,
+							{ service: "example/Other", operation: request.operation },
+						],
+						call: () => Effect.die("Coverage must reject before dispatch"),
+					},
+					suite,
+				),
+			)
+			assert.include(
+				Cause.pretty(Cause.fail(failure)),
+				`Session provides undeclared service example/Other, operation ${request.operation}`,
+			)
+		}).pipe(Effect.scoped),
+)
+it.effect(
+	"cancellation handshakes cannot name another service with the same operation",
+	() =>
+		Effect.gen(function* () {
+			const failure = yield* Effect.flip(
+				Conformance.run(session, {
+					...suite,
+					cancellation: {
+						...suite.cancellation,
+						started: { ...request, service: "example/Other" },
+					},
+				}),
+			)
+			assert.include(
+				Cause.pretty(Cause.fail(failure)),
+				`Conformance case addresses undeclared service example/Other, operation ${request.operation}`,
+			)
+		}).pipe(Effect.scoped),
+)

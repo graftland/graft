@@ -15,7 +15,7 @@ description: 使用與第一方外掛相同的公開測試工具驗證已發布�
 | 清單與程式碼一致 | `Conformance.agreement(directory)` 在啟用前驗證已安裝的建置套件。                                                             |
 | 放置位置         | `Conformance.direct(contract, options)` 開啟一個已擷取的 Worker 或 Local 單元，不向應用程式發布服務。對兩種受支援位置都執行。 |
 | 可攜編碼         | `Conformance.roundTrip(schema, value)` 使用 Remote 的可攜 JSON codec 與 schema 等價關係，包括非 JSON 值。                     |
-| 協定行為         | `Conformance.run(session, suite)` 執行領域範例、項目宣告的探針與取消檢查。每個實作操作都需要範例或握手。                      |
+| 協定行為         | `Conformance.run(session, suite)` 執行領域範例、項目宣告的探針與取消檢查。每個實作的服務與操作組合都需要範例或握手。          |
 | 資源歸屬         | 在 Effect scope 內提供 Node 服務與安全亂數 layer。關閉 scope 時終止直接單元。                                                 |
 
 ```ts
@@ -31,6 +31,23 @@ export const portableValue = Conformance.roundTrip(Schema.BigInt, 123n)
 
 ## 提供領域範例
 
+每個請求都用 `service` 指定 Context 服務鍵，用 `operation`
+指定精確操作身分。取消握手與 `Session.operations` 中列出的位址也使用這兩個欄位。
+
+```ts
+import { Conformance } from "@graftland/plugin-remote"
+
+declare const session: Conformance.Session
+
+export const forecast = session.call({
+	service: "@acme/Forecast",
+	operation: "@acme/forecast/read@1",
+	payload: { city: "Tokyo" },
+})
+```
+
+兩個服務可以宣告相同的操作身分。呼叫、codec 往返、相等性檢查與覆蓋率仍按服務分別計算。直接單元啟動時檢查實作提供的服務鍵與操作群組是否與契約一致。測試套件拒絕缺少或多餘的工作階段綁定，以及針對未宣告綁定的請求；測試一個服務不算覆蓋另一個服務。
+
 | 預期結果                | 斷言                                                                              |
 | ----------------------- | --------------------------------------------------------------------------------- |
 | `Success`               | 傳回值符合 schema 等價關係，並能完成可攜往返編碼。                                |
@@ -41,7 +58,7 @@ export const portableValue = Conformance.roundTrip(Schema.BigInt, 123n)
 目前沒有公開的 `ContractFailure` 聯合型別。工具檢查現有 Effect
 RPC 邊界，不替失敗重新貼標籤。測試操作能夠產生的失敗。直接單元的啟動期限為五秒；每階段期限必須有限，預設五秒。失敗保留其 cause。
 
-成功值與業務錯誤的相等性比較也受每階段截止時間約束。比較逾時的診斷包含操作身分與比較階段。
+成功值與業務錯誤的相等性比較也受每階段截止時間約束。比較逾時的診斷包含服務、操作身分與比較階段。
 
 ## 證明取消
 

@@ -24,8 +24,12 @@ import * as Publication from "./Publication"
 import { ConformanceError } from "./Testing"
 
 export { ConformanceError } from "./Testing"
-export interface Request {
+/** An operation is addressed within its Context service binding. */
+export interface Operation {
+	readonly service: string
 	readonly operation: string
+}
+export interface Request extends Operation {
 	readonly payload: unknown
 }
 export interface Example extends Request {
@@ -42,7 +46,7 @@ export interface Cancellation {
 	readonly released: Request
 }
 export interface Session {
-	readonly operations: ReadonlyArray<string>
+	readonly operations: ReadonlyArray<Operation>
 	/** Terminates the unit and waits for independently observed exit. */
 	readonly terminate: Effect.Effect<void, ConformanceError>
 	readonly call: (
@@ -70,6 +74,24 @@ const assert = (
 	message: string,
 	cause?: Cause.Cause<unknown>,
 ) => (test ? Effect.void : error(message, cause))
+
+const sameOperation = (left: Operation, right: Operation) =>
+	left.service === right.service && left.operation === right.operation
+const label = (operation: Operation) =>
+	`service ${operation.service}, operation ${operation.operation}`
+const operations = (
+	services: ReadonlyArray<Manifest.Service>,
+): ReadonlyArray<Operation> =>
+	Array.flatMap(services, (service) =>
+		Array.map(service.operations, (operation) => ({
+			service: service.key,
+			operation,
+		})),
+	)
+const sameService = (left: Manifest.Service, right: Manifest.Service) =>
+	left.key === right.key &&
+	Array.every(left.operations, (op) => right.operations.includes(op)) &&
+	Array.every(right.operations, (op) => left.operations.includes(op))
 
 /** Uses Remote's JSON codec, including a real JSON serialization boundary. */
 export const roundTrip = Effect.fn("Conformance.roundTrip")(
@@ -107,24 +129,37 @@ export const direct = Effect.fn("Conformance.direct")(
 			Effect.provideContext(transports),
 		)
 		const description = yield* unit.describe
-		const expected = Array.flatMap(
-			contract.provides,
-			(service) => service.operations,
+		const expected = Array.map(contract.provides, (service) => ({
+			key: service.key.key,
+			operations: Array.map(service.operations, Manifest.operationId),
+		}))
+		const actual = Array.map(description.provides, (service) => ({
+			key: service.key,
+			operations: Array.map(service.operations, Manifest.operationId),
+		}))
+		const missing = Array.filter(
+			expected,
+			(service) => !Array.some(actual, (other) => sameService(service, other)),
 		)
-		const actual = Array.flatMap(
-			description.provides,
-			(service) => service.operations,
+		const unexpected = Array.filter(
+			actual,
+			(service) =>
+				!Array.some(expected, (other) => sameService(service, other)),
 		)
-		yield* assert(
-			expected.length === actual.length &&
-				Array.every(expected, (op) =>
-					Array.some(
-						actual,
-						(item) => Manifest.operationId(op) === Manifest.operationId(item),
-					),
+		const describe = (services: ReadonlyArray<Manifest.Service>) =>
+			Array.join(
+				Array.map(
+					services,
+					(service) =>
+						`${service.key} [${Array.join(service.operations, ", ")}]`,
 				),
-			"The unit declarations disagree with the contract",
+				"; ",
+			)
+		yield* assert(
+			missing.length === 0 && unexpected.length === 0,
+			`The unit declarations disagree with the contract; missing: ${describe(missing)}; unexpected: ${describe(unexpected)}`,
 		)
+
 		yield* unit.serve(options.input)
 		yield* unit.ready
 		const methods = yield* Effect.forEach(contract.provides, (service) =>
@@ -169,7 +204,8 @@ export const direct = Effect.fn("Conformance.direct")(
 								? rpc.successSchema
 								: rpc.errorSchema
 					return {
-						id: Manifest.operationId(
+						service: service.key.key,
+						operation: Manifest.operationId(
 							identities({ requests: new Map([[rpc._tag, rpc]]) })[0]!,
 						),
 						call: (
@@ -190,27 +226,30 @@ export const direct = Effect.fn("Conformance.direct")(
 				})
 			}),
 		).pipe(Effect.map(Array.flatten))
-		const find = (id: string) =>
+		const find = (operation: Operation) =>
 			Effect.fromOption(
-				Array.findFirst(methods, (method) => method.id === id),
-				() => error(`Unknown operation: ${id}`),
+				Array.findFirst(methods, (method) => sameOperation(method, operation)),
+				() => error(`Unknown ${label(operation)}`),
 			)
 		return {
-			operations: Array.map(methods, (method) => method.id),
+			operations: Array.map(methods, ({ service, operation }) => ({
+				service,
+				operation,
+			})),
 			terminate: checked(
 				unit.terminate("forced").pipe(Effect.asVoid),
 				"Conformance unit termination failed",
 			),
 			call: (request) =>
-				find(request.operation).pipe(
+				find(request).pipe(
 					Effect.flatMap((method) => method.call(request.payload)),
 				),
 			roundTrip: (request, value, part) =>
-				find(request.operation).pipe(
+				find(request).pipe(
 					Effect.flatMap((method) => method.roundTrip(value, part)),
 				),
 			equal: (request, actual, expected, part) =>
-				find(request.operation).pipe(
+				find(request).pipe(
 					Effect.map((method) => method.equal(actual, expected, part)),
 				),
 			probe: (name) => checked(unit.probe(name), `Probe ${name} failed`),
@@ -246,34 +285,60 @@ export const run = Effect.fn("Conformance.run")(
 				Effect.timeout(effect, duration),
 				`${stage} failed or exceeded its deadline`,
 			)
-		const covered = [
-			...Array.map(suite.examples, (example) => example.operation),
-			suite.cancellation.request.operation,
-			suite.cancellation.started.operation,
-			suite.cancellation.released.operation,
+		const covered: ReadonlyArray<Operation> = [
+			...suite.examples,
+			suite.cancellation.request,
+			suite.cancellation.started,
+			suite.cancellation.released,
 		]
-		for (const operation of Array.flatMap(
-			suite.entry.services.implements,
-			(service) => service.operations,
-		))
+		const declared = operations(suite.entry.services.implements)
+		for (const operation of declared) {
 			yield* assert(
-				covered.includes(operation) && session.operations.includes(operation),
-				`Missing conformance case for ${operation}`,
+				Array.some(covered, (other) => sameOperation(operation, other)),
+				`Missing conformance case for ${label(operation)}`,
 			)
+			yield* assert(
+				Array.some(session.operations, (other) =>
+					sameOperation(operation, other),
+				),
+				`Session does not provide ${label(operation)}`,
+			)
+		}
+		for (const operation of session.operations)
+			yield* assert(
+				Array.some(declared, (other) => sameOperation(operation, other)),
+				`Session provides undeclared ${label(operation)}`,
+			)
+		for (const operation of covered)
+			yield* assert(
+				Array.some(declared, (other) => sameOperation(operation, other)),
+				`Conformance case addresses undeclared ${label(operation)}`,
+			)
+
 		for (const name of suite.entry.probes) yield* bounded(session.probe(name))
 		for (const example of suite.examples) {
-			yield* bounded(session.roundTrip(example, example.payload, "payload"))
-			const result = yield* bounded(session.call(example))
+			yield* bounded(
+				session.roundTrip(example, example.payload, "payload"),
+				`Payload round trip for ${label(example)}`,
+			)
+			const result = yield* bounded(
+				session.call(example),
+				`Call for ${label(example)}`,
+			)
 			if (example.expected._tag === "Success") {
 				yield* assert(
 					Exit.isSuccess(result),
-					`Expected success for ${example.operation}`,
+					`Expected success for ${label(example)}`,
 					Exit.isFailure(result) ? result.cause : undefined,
 				)
 				if (Exit.isSuccess(result)) {
-					yield* bounded(session.roundTrip(example, result.value, "success"))
+					yield* bounded(
+						session.roundTrip(example, result.value, "success"),
+						`Success round trip for ${label(example)}`,
+					)
 					yield* bounded(
 						session.roundTrip(example, example.expected.value, "success"),
+						`Expected success round trip for ${label(example)}`,
 					)
 					const equal = yield* bounded(
 						session.equal(
@@ -282,23 +347,20 @@ export const run = Effect.fn("Conformance.run")(
 							example.expected.value,
 							"success",
 						),
-						`Success comparison for ${example.operation}`,
+						`Success comparison for ${label(example)}`,
 					)
-					yield* assert(
-						equal,
-						`Unexpected success value for ${example.operation}`,
-					)
+					yield* assert(equal, `Unexpected success value for ${label(example)}`)
 				}
 			} else {
 				yield* assert(
 					Exit.isFailure(result),
-					`Expected failure for ${example.operation}`,
+					`Expected failure for ${label(example)}`,
 				)
 				if (Exit.isFailure(result)) {
 					if (example.expected._tag === "Defect") {
 						yield* assert(
 							Cause.hasDies(result.cause) && !Cause.hasFails(result.cause),
-							`Expected a remote defect for ${example.operation}`,
+							`Expected a remote defect for ${label(example)}`,
 							result.cause,
 						)
 						continue
@@ -309,33 +371,37 @@ export const run = Effect.fn("Conformance.run")(
 					)
 					yield* assert(
 						failures.length === 1 && result.cause.reasons.length === 1,
-						`Expected a typed boundary failure for ${example.operation}`,
+						`Expected a typed boundary failure for ${label(example)}`,
 						result.cause,
 					)
 					const value = failures[0]?.error
 					if (example.expected._tag === "InfrastructureFailure")
 						yield* assert(
 							Schema.is(RpcClientError.RpcClientError)(value),
-							`Expected RpcClientError for ${example.operation}`,
+							`Expected RpcClientError for ${label(example)}`,
 							result.cause,
 						)
 					else {
 						yield* assert(
 							!Schema.is(RpcClientError.RpcClientError)(value),
-							`Business failure became infrastructure failure for ${example.operation}`,
+							`Business failure became infrastructure failure for ${label(example)}`,
 							result.cause,
 						)
-						yield* bounded(session.roundTrip(example, value, "error"))
+						yield* bounded(
+							session.roundTrip(example, value, "error"),
+							`Business-error round trip for ${label(example)}`,
+						)
 						yield* bounded(
 							session.roundTrip(example, example.expected.value, "error"),
+							`Expected business-error round trip for ${label(example)}`,
 						)
 						const equal = yield* bounded(
 							session.equal(example, value, example.expected.value, "error"),
-							`Business-error comparison for ${example.operation}`,
+							`Business-error comparison for ${label(example)}`,
 						)
 						yield* assert(
 							equal,
-							`Unexpected business error for ${example.operation}`,
+							`Unexpected business error for ${label(example)}`,
 						)
 					}
 				}
@@ -345,7 +411,10 @@ export const run = Effect.fn("Conformance.run")(
 			session.call(suite.cancellation.request),
 			{ startImmediately: true },
 		)
-		const started = yield* bounded(session.call(suite.cancellation.started))
+		const started = yield* bounded(
+			session.call(suite.cancellation.started),
+			`Cancellation started call for ${label(suite.cancellation.started)}`,
+		)
 		yield* assert(
 			Exit.isSuccess(started),
 			"The cancellation start handshake failed",
@@ -374,14 +443,20 @@ export const run = Effect.fn("Conformance.run")(
 			"The request did not observe interruption",
 			Exit.isFailure(cancellation) ? cancellation.cause : undefined,
 		)
-		const released = yield* bounded(session.call(suite.cancellation.released))
+		const released = yield* bounded(
+			session.call(suite.cancellation.released),
+			`Cancellation released call for ${label(suite.cancellation.released)}`,
+		)
 		yield* assert(
 			Exit.isSuccess(released),
 			"The cancelled request did not release its resources",
 			Exit.isFailure(released) ? released.cause : undefined,
 		)
 		yield* bounded(session.terminate)
-		const unavailable = yield* bounded(session.call(suite.cancellation.started))
+		const unavailable = yield* bounded(
+			session.call(suite.cancellation.started),
+			`Cancellation started call for ${label(suite.cancellation.started)}`,
+		)
 		yield* assert(
 			Exit.isFailure(unavailable) &&
 				unavailable.cause.reasons.length === 1 &&

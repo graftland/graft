@@ -75,3 +75,11 @@ built packages, without workspace aliases or privileged first-party access.
   suggestions. Preflight configuration accepts concrete public export paths.
 - Every effectful conformance comparison shares the per-stage deadline; timeout
   diagnostics identify the operation and comparison stage.
+
+- Host bindings and package service groups use the same provenance-completeness
+  check. Every host operation needs package name/version and directory digest,
+  even without a selected consumer; missing records identify the host service.
+- Conformance addresses operations by `(service key, operation identity)` in
+  requests, session inventories, declaration agreement, codecs, dispatch and
+  coverage. Sharing an operation identity does not share coverage across service
+  keys. Session inventory and the suite's declared bindings must agree.

@@ -15,7 +15,7 @@ description: 使用与一方插件相同的公开测试工具验证已发布插�
 | 清单与代码一致 | `Conformance.agreement(directory)` 在激活前验证已安装的构建包。                                                           |
 | 放置位置       | `Conformance.direct(contract, options)` 打开一个已捕获的 Worker 或 Local 单元，不向应用发布服务。对两种受支持位置都运行。 |
 | 可移植编码     | `Conformance.roundTrip(schema, value)` 使用 Remote 的可移植 JSON codec 和 schema 等价关系，包括非 JSON 值。               |
-| 协议行为       | `Conformance.run(session, suite)` 运行领域样例、条目声明的探针和取消检查。每个实现操作都需要样例或握手。                  |
+| 协议行为       | `Conformance.run(session, suite)` 运行领域样例、条目声明的探针和取消检查。每个实现的服务与操作组合都需要样例或握手。      |
 | 资源归属       | 在 Effect scope 内提供 Node 服务和安全随机数 layer。关闭 scope 时终止直接单元。                                           |
 
 ```ts
@@ -31,6 +31,23 @@ export const portableValue = Conformance.roundTrip(Schema.BigInt, 123n)
 
 ## 提供领域样例
 
+每个请求都用 `service` 指定 Context 服务键，用 `operation`
+指定精确操作身份。取消握手和 `Session.operations` 中列出的地址也使用这两个字段。
+
+```ts
+import { Conformance } from "@graftland/plugin-remote"
+
+declare const session: Conformance.Session
+
+export const forecast = session.call({
+	service: "@acme/Forecast",
+	operation: "@acme/forecast/read@1",
+	payload: { city: "Tokyo" },
+})
+```
+
+两个服务可以声明相同的操作身份。调用、codec 往返、相等性检查和覆盖率仍按服务分别计算。直接单元启动时检查实现提供的服务键和操作组是否与契约一致。测试套件拒绝缺失或多余的会话绑定，以及针对未声明绑定的请求；测试一个服务不算覆盖另一个服务。
+
 | 预期结果                | 断言                                                                              |
 | ----------------------- | --------------------------------------------------------------------------------- |
 | `Success`               | 返回值符合 schema 等价关系，并能完成可移植往返编码。                              |
@@ -41,7 +58,7 @@ export const portableValue = Conformance.roundTrip(Schema.BigInt, 123n)
 当前没有公开的 `ContractFailure` 联合类型。工具检查现有 Effect
 RPC 边界，不给失败重新贴标签。测试操作能够产生的失败。直接单元的启动期限为五秒；每阶段期限必须有限，默认五秒。失败保留其 cause。
 
-成功值和业务错误的相等性比较也受每阶段截止时间约束。比较超时的诊断包含操作身份和比较阶段。
+成功值和业务错误的相等性比较也受每阶段截止时间约束。比较超时的诊断包含服务、操作身份和比较阶段。
 
 ## 证明取消
 

@@ -13,13 +13,13 @@ behavior; it does not turn the contract into a document.
 
 ## Run the kit
 
-| Check                   | Public call and required evidence                                                                                                                                             |
-| ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Manifest/code agreement | `Conformance.agreement(directory)` verifies the installed built package before activation.                                                                                    |
-| Placement               | `Conformance.direct(contract, options)` opens one captured Worker or Local unit without publishing services into the application. Run both supported placements.              |
-| Portable encoding       | `Conformance.roundTrip(schema, value)` uses Remote's portable JSON codec and the schema's equivalence, including non-JSON values.                                             |
-| Protocol behavior       | `Conformance.run(session, suite)` runs supplied domain examples, the entry's declared probes, and cancellation checks. Every implemented operation needs a case or handshake. |
-| Ownership               | Run in an Effect scope with the Node services and secure-random layers. Scope cleanup terminates the direct unit.                                                             |
+| Check                   | Public call and required evidence                                                                                                                                                          |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Manifest/code agreement | `Conformance.agreement(directory)` verifies the installed built package before activation.                                                                                                 |
+| Placement               | `Conformance.direct(contract, options)` opens one captured Worker or Local unit without publishing services into the application. Run both supported placements.                           |
+| Portable encoding       | `Conformance.roundTrip(schema, value)` uses Remote's portable JSON codec and the schema's equivalence, including non-JSON values.                                                          |
+| Protocol behavior       | `Conformance.run(session, suite)` runs supplied domain examples, the entry's declared probes, and cancellation checks. Every implemented service/operation pair needs a case or handshake. |
+| Ownership               | Run in an Effect scope with the Node services and secure-random layers. Scope cleanup terminates the direct unit.                                                                          |
 
 ```ts
 import { Schema } from "effect"
@@ -38,6 +38,28 @@ fixture, not evidence of independent human adoption.
 
 ## Supply domain examples
 
+Every request names both the Context service key in `service` and the exact
+identity in `operation`. This also applies to cancellation handshakes and the
+addresses listed by `Session.operations`.
+
+```ts
+import { Conformance } from "@graftland/plugin-remote"
+
+declare const session: Conformance.Session
+
+export const forecast = session.call({
+	service: "@acme/Forecast",
+	operation: "@acme/forecast/read@1",
+	payload: { city: "Tokyo" },
+})
+```
+
+Two services may declare the same operation identity. Calls, codec round trips,
+equality checks and coverage remain separate for each service. Direct setup
+checks the unit's service keys and operation groups against the contract. The
+suite rejects missing or extra session bindings and requests for undeclared
+bindings; testing one service never covers another.
+
 | Expected outcome        | Assertion                                                                                                                |
 | ----------------------- | ------------------------------------------------------------------------------------------------------------------------ |
 | `Success`               | The returned value matches the schema's equivalence and survives portable round trips.                                   |
@@ -49,8 +71,8 @@ There is no public `ContractFailure` union today. The kit checks the current
 Effect RPC boundary instead of relabeling its failures. Test the failures your
 operation can produce. Direct setup has a five-second deadline; a finite
 per-stage deadline defaults to five seconds, including success and
-business-error equality comparisons. Comparison timeouts name the operation and
-comparison stage. Failures retain their causes.
+business-error equality comparisons. Comparison timeouts name the service,
+operation and comparison stage. Failures retain their causes.
 
 ## Prove cancellation
 

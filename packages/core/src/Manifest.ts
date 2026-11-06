@@ -282,6 +282,27 @@ export const conflicts = (
 		}),
 	)
 
+/** Every referenced operation needs package provenance, regardless of who provides it. */
+const missingProvenance = (
+	entry: string,
+	services: ReadonlyArray<Service>,
+	operations: ReadonlyArray<Operation>,
+	action: string,
+): ReadonlyArray<Diagnostic> =>
+	Array.flatMap(services, (service) =>
+		Array.flatMap(sorted(service.operations), (identity) =>
+			Array.some(operations, (operation) => operation.identity === identity)
+				? []
+				: [
+						diagnostic(
+							"InvalidManifest",
+							entry,
+							`${entry} service ${service.key} references ${identity} without contract package provenance; ${action}`,
+						),
+					],
+		),
+	)
+
 /** Checks a flat selected deployment; the catalog suggests providers but does not enable them. */
 export const check = (
 	host: Host,
@@ -304,6 +325,12 @@ export const check = (
 					]
 				: [],
 		),
+		...missingProvenance(
+			"host",
+			host.services,
+			host.operations,
+			"add the contract package name, version and Artifact directory digest to host.operations",
+		),
 		...conflicts([
 			{ id: "host", operations: host.operations },
 			...Array.map(entries, (entry) => ({
@@ -324,30 +351,16 @@ export const check = (
 				effect: entry.package.peerDependencies.effect,
 				graft: entry.package.peerDependencies["@graftland/graft"],
 			}
-			const identities = sorted(
-				Array.flatMap(
+			return [
+				...missingProvenance(
+					entry.id,
 					[
 						...entry.manifest.services.required,
 						...entry.manifest.services.optional,
 						...entry.manifest.services.implements,
 					],
-					(service) => service.operations,
-				),
-			)
-			return [
-				...Array.flatMap(identities, (identity) =>
-					Array.some(
-						entry.manifest.operations,
-						(operation) => operation.identity === identity,
-					)
-						? []
-						: [
-								diagnostic(
-									"InvalidManifest",
-									entry.id,
-									`${identity} has no contract package provenance; regenerate the manifest`,
-								),
-							],
+					entry.manifest.operations,
+					"regenerate the manifest",
 				),
 				...Array.flatMap(entry.manifest.services.required, (required) => {
 					if (Array.some(available, (service) => satisfies(service, required)))
