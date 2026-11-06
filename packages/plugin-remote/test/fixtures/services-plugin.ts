@@ -5,11 +5,18 @@ import { Effect, FileSystem, Schedule, Stream } from "effect"
 import { Graft, Plugin } from "@graftland/graft"
 
 import { Instance } from "../../src/index"
-import { ChildApi, ChildLabel, config, HostApi } from "./services-contract"
+import {
+	ChildApi,
+	ChildLabel,
+	config,
+	contract,
+	HostApi,
+} from "./services-contract"
 
 export default Plugin.make({
 	name: "service-implementation",
 	config,
+	provides: contract.provides,
 	inject: [HostApi, FileSystem.FileSystem, Instance],
 	apply: Effect.fnUntraced(function* ({ directory, fail }) {
 		const fs = yield* FileSystem.FileSystem

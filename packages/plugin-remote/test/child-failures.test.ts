@@ -24,10 +24,11 @@ import { prepare } from "../src/internal/contract"
 import * as Port from "../src/internal/port"
 import { EndOfStream } from "../src/internal/runner/Framing"
 
+const implementation = new URL("./fixtures/empty-plugin.ts", import.meta.url)
+	.href
 const empty = Contract.make({
 	name: "child-failure-test",
 	config: Schema.Null,
-	module: new URL("./fixtures/empty-plugin.ts", import.meta.url).href,
 })
 class Exported extends Context.Service<Exported, string>()(
 	"@graftland/plugin-remote/test/child-failures.test/Exported",
@@ -38,7 +39,13 @@ it.effect(
 	() =>
 		Effect.gen(function* () {
 			const marker = new Error("handler mapping failed")
-			const group = RpcGroup.make(Rpc.make("Ping"))
+			const group = RpcGroup.make(
+				Contract.operation(
+					"@graftland/test/child-failures.test/Ping",
+					1,
+					Rpc.make("Ping"),
+				),
+			)
 			const service = Contract.service(Exported, group, {
 				toHandlers: () => {
 					throw marker
@@ -61,6 +68,7 @@ it.effect(
 			const telemetry = yield* Child.telemetry(contract)
 			const lifecycle = yield* Child.lifecycle(
 				contract,
+				implementation,
 				peer,
 				{ id: "test", generation: 1 },
 				telemetry,
@@ -87,7 +95,7 @@ it.effect(
 	() =>
 		Effect.gen(function* () {
 			const marker = TransportError.make({ cause: Cause.fail("read failed") })
-			const result = yield* Runtime.run(empty, {
+			const result = yield* Runtime.run(empty, implementation, {
 				input: Stream.fail(marker),
 				output: Sink.drain,
 			}).pipe(Effect.exit)
@@ -103,7 +111,7 @@ for (const input of [
 	it.effect(
 		`ends a child normally on ${input === Stream.empty ? "EOF" : "normal channel closure"}`,
 		() =>
-			Runtime.run(empty, { input, output: Sink.drain }).pipe(
+			Runtime.run(empty, implementation, { input, output: Sink.drain }).pipe(
 				Effect.provide(Graft.layer),
 			),
 	)
@@ -113,7 +121,7 @@ it.effect("retains writer cleanup failure after normal EOF", () =>
 	Effect.gen(function* () {
 		const started = yield* Deferred.make<void>()
 		const cleaned = yield* Ref.make(false)
-		const result = yield* Runtime.run(empty, {
+		const result = yield* Runtime.run(empty, implementation, {
 			input: Stream.fromEffect(Deferred.await(started)).pipe(Stream.drain),
 			output: Sink.unwrap(
 				Effect.acquireRelease(Deferred.succeed(started, undefined), () =>
@@ -134,7 +142,7 @@ it.effect("retains writer cleanup interruption after normal EOF", () =>
 	Effect.gen(function* () {
 		const started = yield* Deferred.make<void>()
 		const cleaned = yield* Ref.make(false)
-		const result = yield* Runtime.run(empty, {
+		const result = yield* Runtime.run(empty, implementation, {
 			input: Stream.fromEffect(Deferred.await(started)).pipe(Stream.drain),
 			output: Sink.unwrap(
 				Effect.acquireRelease(Deferred.succeed(started, undefined), () =>

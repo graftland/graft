@@ -8,16 +8,21 @@ import {
 } from "effect"
 import type { Rpc, RpcClient, RpcGroup, RpcServer } from "effect/rpc"
 
-import type { Graft } from "@graftland/graft"
+import type { Graft, Plugin } from "@graftland/graft"
 
 import * as Control from "./internal/control"
 
 export { service } from "./internal/services"
+export { operation } from "./internal/operations"
+export { compareOperations } from "@graftland/graft/Plugin"
+export type { OperationComparison } from "@graftland/graft/Plugin"
 
-const TypeId = "~@graftland/plugin-remote/Contract"
+/** Brands a remote contract descriptor. */
+export const TypeId = "~@graftland/plugin-remote/Contract"
 
 /** RPC types stay inside the descriptor; Graft supplies its dynamic activation context. */
-export interface Service<R = never, ClientR = never> {
+export interface Service<R = never, ClientR = never>
+	extends Plugin.ProvidedContract {
 	readonly key: Context.Key<unknown, unknown>
 	readonly group: Pick<RpcGroup.RpcGroup<Rpc.Any>, "requests">
 	readonly serve: (port: {
@@ -52,7 +57,6 @@ export interface Contract<
 	readonly name: string
 	readonly config: S
 	readonly error: E
-	readonly module: string
 	readonly inject: ReadonlyArray<Service>
 	readonly provides: ReadonlyArray<Service>
 	readonly [TypeId]: typeof TypeId
@@ -62,7 +66,6 @@ export interface Options<S extends ConfigSchema, E extends ErrorSchema> {
 	readonly name: string
 	readonly config: S
 	readonly error?: E
-	readonly module: string
 	readonly inject?: ReadonlyArray<Service>
 	readonly provides?: ReadonlyArray<Service>
 }

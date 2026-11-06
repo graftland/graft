@@ -5,77 +5,7 @@ description: 用契约描述远程插件，并从 YAML 或 TypeScript 加载它�
 
 宿主通过契约加载远程插件。契约是宿主唯一导入的模块，实现则在插件进程中运行。
 
-## 定义契约
-
-用 `Contract.service` 描述每个跨越边界的服务：它的键、列出其调用的 Effect
-`RpcGroup`，以及两个函数。
-
-```ts title="src/contract.ts"
-import { Context, Effect, Schema } from "effect"
-import { Rpc, RpcGroup } from "effect/rpc"
-
-import { Contract } from "@graftland/plugin-remote"
-
-export class GreetingUnavailable extends Schema.TaggedError<
-	GreetingUnavailable,
-	{ readonly brand: unique symbol }
->()("GreetingUnavailable", { cause: Schema.Defect() }) {}
-
-export class Greeter extends Context.Service<
-	Greeter,
-	{
-		readonly greet: (name: string) => Effect.Effect<string, GreetingUnavailable>
-	}
->()("app/Greeter") {}
-
-const api = RpcGroup.make(
-	Rpc.make("Greet", {
-		payload: { name: Schema.String },
-		success: Schema.String,
-		error: GreetingUnavailable,
-	}),
-)
-
-const greeter = Contract.service(Greeter, api, {
-	toHandlers: (service) => ({ Greet: ({ name }) => service.greet(name) }),
-	fromClient: (client) => ({
-		greet: (name) =>
-			client
-				.Greet({ name })
-				.pipe(
-					Effect.catchTag("RpcClientError", (cause) =>
-						GreetingUnavailable.make({ cause }),
-					),
-				),
-	}),
-})
-
-export const contract = Contract.make({
-	name: "app/greeter",
-	config: Schema.Struct({ greeting: Schema.String }),
-	module: new URL("./greeter.js", import.meta.url).href,
-	provides: [greeter],
-})
-```
-
-`toHandlers` 在服务实现的一侧运行，`fromClient` 在使用服务的一侧运行。在
-`fromClient` 中映射
-`RpcClientError`，连接断开时调用方看到的就是他们本来就会处理的错误。`Contract.make`
-再把这些描述汇总成契约：
-
-| 字段       | 含义                                                                    |
-| ---------- | ----------------------------------------------------------------------- |
-| `name`     | 插件名。                                                                |
-| `config`   | 配置 schema，必须能编码为 JSON。                                        |
-| `module`   | 构建后实现的 URL，通常是 `new URL("./impl.js", import.meta.url).href`。 |
-| `error`    | 插件声明的失败的 schema，默认 `Schema.Never`。                          |
-| `inject`   | 实现要使用的宿主服务。                                                  |
-| `provides` | 实现发布给宿主的服务。                                                  |
-
-- 契约中的任何 schema 都不能依赖服务来编码或解码。
-- 服务键在一个契约内唯一；RPC 名称可以在不同服务之间重复。
-- 以 `contract` 或默认导出的形式导出契约。
-- 双方导入同一份构建后的契约，所以键和 RPC schema 一致。
+在[契约](../contracts/)中定义共享协议，再在条目中独立指定实现。
 
 ## 从 YAML 加载
 
@@ -87,17 +17,19 @@ export const contract = Contract.make({
   name: remote
   config:
     contract: ./dist/contract.js
+    implementation: ./dist/greeter.js
     connect:
       local: {}
     config:
       greeting: Hello
 ```
 
-| 字段       | 含义                                                                                    |
-| ---------- | --------------------------------------------------------------------------------------- |
-| `contract` | 相对于配置文件的路径、`file:` URL 或包名。通过 runner 时只能是包名。                    |
-| `connect`  | 插件在哪里运行，取下表中的一种形式。                                                    |
-| `config`   | 插件自己的配置，采用编码后的 JSON 形式，在一切启动之前按契约的 schema 检查。默认 `{}`。 |
+| 字段             | 含义                                                                                     |
+| ---------------- | ---------------------------------------------------------------------------------------- |
+| `contract`       | 相对于配置文件的路径、`file:` URL 或包名。通过 runner 时只能是包名。                     |
+| `implementation` | 构建后的实现模块。直接执行可用相对配置文件的路径、file URL 或包导出；runner 使用包导出。 |
+| `connect`        | 插件在哪里运行，取下表中的一种形式。                                                     |
+| `config`         | 插件自己的配置，采用编码后的 JSON 形式，在一切启动之前按契约的 schema 检查。默认 `{}`。  |
 
 | `connect` 形式                | 插件运行在                             | 其他字段                                                                          |
 | ----------------------------- | -------------------------------------- | --------------------------------------------------------------------------------- |
@@ -122,15 +54,18 @@ export const contract = Contract.make({
 `Remote.plugin` 在代码中构建同样的插件，交给 `Graft.plugin`：
 
 ```ts title="src/entry.ts"
-import { Effect } from "effect"
+import { Effect, Schema } from "effect"
 
 import { Graft } from "@graftland/graft"
 import * as Remote from "@graftland/plugin-remote"
 
-import { contract } from "./contract.ts"
+declare const contract: Remote.Contract.Contract<
+	Schema.Struct<{ greeting: typeof Schema.String }>
+>
 
 const greeter = Remote.plugin(contract, {
 	contractModule: new URL("./contract.js", import.meta.url).href,
+	implementation: new URL("./greeter.js", import.meta.url).href,
 	connect: { local: {} },
 	shutdownTimeout: "5 seconds",
 })
@@ -146,12 +81,13 @@ export const program = Effect.gen(function* () {
 工厂只固定部署选项。业务配置传给 `Graft.plugin`；调用 `fork.update`
 会先停止旧执行单元，再用新配置启动一个新的执行单元。
 
-| 选项              | 含义                                                               |
-| ----------------- | ------------------------------------------------------------------ |
-| `contractModule`  | 插件进程从哪里导入契约。不是契约自己的 `module`。                  |
-| `connect`         | 与 YAML 相同，另外支持[凭证 Effect](../transport-auth/#凭证来源)。 |
-| `shutdownTimeout` | 优雅停止的时限，默认 `5 seconds`。                                 |
-| `retry`           | 插件失败后重启所用的 `Schedule`。调用本身从不重试。                |
+| 选项              | 含义                                                                                     |
+| ----------------- | ---------------------------------------------------------------------------------------- |
+| `contractModule`  | 执行单元从哪里导入契约。                                                                 |
+| `implementation`  | 构建后的实现模块。直接执行可用相对配置文件的路径、file URL 或包导出；runner 使用包导出。 |
+| `connect`         | 与 YAML 相同，另外支持[凭证 Effect](../transport-auth/#凭证来源)。                       |
+| `shutdownTimeout` | 优雅停止的时限，默认 `5 seconds`。                                                       |
+| `retry`           | 插件失败后重启所用的 `Schedule`。调用本身从不重试。                                      |
 
 `graft start` 已经提供 Remote 所需的一切。如果你自己构建
 `Graft.layer`，请在它的环境中提供 `NodeServices.layer` 和
@@ -187,31 +123,31 @@ export const program = Effect.gen(function* () {
 上表的公开错误都从包根导出。缺陷仍然是缺陷。下面这些嵌套标签是
 `RemoteError.cause` 携带的诊断信息：
 
-| 错误                         | 含义                                                      | 怎么办                                  |
-| ---------------------------- | --------------------------------------------------------- | --------------------------------------- |
-| `TransportError`             | 连接失败，`cause` 中是底层错误。                          | 检查网络、地址和 TLS 设置。             |
-| `CredentialsError`           | 读取宿主凭证失败，例如 token 文件不存在。                 | 检查 `cause` 中的来源。                 |
-| `ProcessExited`              | 插件进程或 worker 意外退出，附带退出码和 stderr。         | 读 `stderr` 和 `statusCause`。          |
-| `CommandExited`              | `command` 的程序退出，附带退出码和 stderr。               | 检查 SSH 访问和强制命令。               |
-| `CapabilityCombinationError` | 传输和认证不匹配，例如在 `ws` 上用 mTLS。                 | 见[组合](../transport-auth/#组合)。     |
-| `PackageError`               | runner 找不到、读不了或校验不了契约包，或 `expect` 不符。 | 把包安装到 `root` 下，或修正 `expect`。 |
-| `SessionAccessDenied`        | 会话属于另一个身份。                                      | 让每个宿主使用自己的凭证。              |
-| `StaleSession`               | 同一实例的另一次启动抢先了，或 runner 已不认识这个会话。  | 检查是否有两个宿主共用身份和实例名。    |
-| `SessionConflict`            | 同一会话上的请求相互冲突。                                | 同上。                                  |
-| `LeaseExpired`               | 宿主续期之前租约就到期了。                                | 检查网络，或使用更长的 `lease`。        |
-| `SessionStopped`             | 会话正在停止、已经停止，或在 runner 恢复期间被淘汰。      | 替换或恢复期间属于预期情况。            |
-| `TerminationUnconfirmed`     | runner 无法确认插件进程已经退出。                         | 检查 runner 所在机器。替换会一直等待。  |
-| `RunnerClosing`              | runner 正在关闭。                                         | 等它恢复。                              |
-| `StateDirectoryLocked`       | 状态目录被另一个 runner 占用，或无法加锁。                | 每个状态目录只运行一个 runner。         |
-| `StateStorageError`          | runner 无法读写自己的状态。                               | 检查磁盘和权限。                        |
-| `ExecutionError`             | runner 无法启动、监视或停止插件进程。                     | 读 `detail` 和 runner 的日志。          |
+| 错误                         | 含义                                                              | 怎么办                                  |
+| ---------------------------- | ----------------------------------------------------------------- | --------------------------------------- |
+| `TransportError`             | 连接失败，`cause` 中是底层错误。                                  | 检查网络、地址和 TLS 设置。             |
+| `CredentialsError`           | 读取宿主凭证失败，例如 token 文件不存在。                         | 检查 `cause` 中的来源。                 |
+| `ProcessExited`              | 插件进程或 worker 意外退出，附带退出码和 stderr。                 | 读 `stderr` 和 `statusCause`。          |
+| `CommandExited`              | `command` 的程序退出，附带退出码和 stderr。                       | 检查 SSH 访问和强制命令。               |
+| `CapabilityCombinationError` | 传输和认证不匹配，例如在 `ws` 上用 mTLS。                         | 见[组合](../transport-auth/#组合)。     |
+| `PackageError`               | runner 找不到、读不了或校验不了契约包或实现包，或 `expect` 不符。 | 把包安装到 `root` 下，或修正 `expect`。 |
+| `SessionAccessDenied`        | 会话属于另一个身份。                                              | 让每个宿主使用自己的凭证。              |
+| `StaleSession`               | 同一实例的另一次启动抢先了，或 runner 已不认识这个会话。          | 检查是否有两个宿主共用身份和实例名。    |
+| `SessionConflict`            | 同一会话上的请求相互冲突。                                        | 同上。                                  |
+| `LeaseExpired`               | 宿主续期之前租约就到期了。                                        | 检查网络，或使用更长的 `lease`。        |
+| `SessionStopped`             | 会话正在停止、已经停止，或在 runner 恢复期间被淘汰。              | 替换或恢复期间属于预期情况。            |
+| `TerminationUnconfirmed`     | runner 无法确认插件进程已经退出。                                 | 检查 runner 所在机器。替换会一直等待。  |
+| `RunnerClosing`              | runner 正在关闭。                                                 | 等它恢复。                              |
+| `StateDirectoryLocked`       | 状态目录被另一个 runner 占用，或无法加锁。                        | 每个状态目录只运行一个 runner。         |
+| `StateStorageError`          | runner 无法读写自己的状态。                                       | 检查磁盘和权限。                        |
+| `ExecutionError`             | runner 无法启动、监视或停止插件进程。                             | 读 `detail` 和 runner 的日志。          |
 
 ## 配置变更与热重载
 
 | 修改内容                                               | 结果                                                                                                   |
 | ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------ |
 | 通过 `fork.update` 或 YAML 修改业务配置                | 执行单元重启，不会原地更新。                                                                           |
-| YAML 中的 `connect`                                    | 先停止旧执行单元，再建立新连接。                                                                       |
+| YAML 中的 `implementation` 或 `connect`                | 先停止旧执行单元，再建立新连接。                                                                       |
 | `graft start --watch` 下 local/worker 的契约或实现文件 | 对应的远程 fork 用新代码重启，也会观察契约导入的依赖。入口指向构建后的 JavaScript 时，需要先重新构建。 |
 | 网络 runner 上的实现                                   | 宿主不观察它。在 runner 上安装新代码，再重启条目。                                                     |
 

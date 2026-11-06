@@ -58,6 +58,7 @@ const setup = (fail = false) =>
 		const proxy = yield* Graft.plugin(
 			Remote.plugin(contract, {
 				contractModule,
+				implementation: new URL("services-plugin.js", contractModule).href,
 				connect: { local: {} },
 			}),
 			{ directory, fail },
@@ -231,6 +232,7 @@ describe("cross-process services", () => {
 			const proxy = yield* Graft.plugin(
 				Remote.plugin(contract, {
 					contractModule,
+					implementation: new URL("services-plugin.js", contractModule).href,
 					connect: { local: {} },
 				}),
 				{ directory, fail: false },
@@ -279,6 +281,7 @@ describe("cross-process services", () => {
 				const proxy = yield* Graft.plugin(
 					Remote.plugin(contract, {
 						contractModule,
+						implementation: new URL("services-plugin.js", contractModule).href,
 						connect: { local: {} },
 					}),
 					{ directory, fail: false },
@@ -312,6 +315,7 @@ describe("cross-process services", () => {
 				const proxy = yield* Graft.plugin(
 					Remote.plugin(contract, {
 						contractModule,
+						implementation: new URL("services-plugin.js", contractModule).href,
 						connect: { local: {} },
 					}),
 					{ directory, fail: false },

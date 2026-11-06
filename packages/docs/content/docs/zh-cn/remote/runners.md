@@ -11,7 +11,8 @@ description: 用 `graft start runner.yml` 在另一台机器上运行插件。
 1. **安装**
    `@graftland/cli`、`@graftland/plugin-remote`、构建好的插件包及其依赖，放进某个安装目录的
    `node_modules`；系统为 Linux 或 macOS，Node.js 22.22 或更高。通过包的
-   `exports` 暴露每个契约，例如 `my-plugin/contract`，并在宿主上也安装同一个包。
+   `exports` 暴露契约与实现，例如 `my-plugin/contract` 和
+   `my-plugin`。宿主需要契约包，runner 需要这两个包。
 2. **编写**只含一个 `remote/runner` 条目的 `runner.yml`。
 3. **启动** runner：`graft start runner.yml`。
 4. **让**宿主的 `remote` 条目指向它，然后运行 `graft start host.yml`。
@@ -40,6 +41,7 @@ description: 用 `graft start runner.yml` 在另一台机器上运行插件。
   name: remote
   config:
     contract: my-plugin/contract
+    implementation: my-plugin
     connect:
       url: wss://runner.example:7443
       ca: ./certs/ca.crt
@@ -52,7 +54,7 @@ description: 用 `graft start runner.yml` 在另一台机器上运行插件。
 
 | 字段     | 必填 | 默认值       | 含义                                                           |
 | -------- | ---- | ------------ | -------------------------------------------------------------- |
-| `root`   | 是   | —            | 安装目录。契约包从它的 `node_modules` 中解析。                 |
+| `root`   | 是   | —            | 安装目录。契约包和实现包从它的 `node_modules` 中解析。         |
 | `state`  | 是   | —            | 状态目录，不存在时自动创建。规则见下表。                       |
 | `lease`  | 否   | `15 seconds` | 实例的默认[租约](../lifecycle/#租约与断网)。                   |
 | `grace`  | 否   | `5 seconds`  | 从中断插件进程到杀掉它的时间。                                 |
@@ -108,7 +110,7 @@ connect:
 
 | 字段      | 比较对象                                                                                     |
 | --------- | -------------------------------------------------------------------------------------------- |
-| `version` | runner 上契约包 `package.json` 中的 `version`。                                              |
+| `version` | runner 上实现包 `package.json` 中的 `version`。                                              |
 | `digest`  | 包内文件的 SHA-256 十六进制摘要，排除所有 `node_modules`，因此不涵盖依赖。只在设置时才计算。 |
 
 不匹配时以 `PackageError` 失败，消息中同时显示两个值。

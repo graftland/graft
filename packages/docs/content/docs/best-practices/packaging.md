@@ -67,7 +67,7 @@ Expose each part as its own entry point:
 | `.`          | The plugin, as the default export or as an export named `plugin`.      | The loader, for `name:` in `graft.yml`.                                                        |
 | `./tokens`   | Service keys, events, references, tagged errors and the config schema. | Consumer plugins, tests, and other packages that implement the same service.                   |
 | `./<plugin>` | A further plugin, one per module.                                      | Entries such as `name: postgres/migrations`.                                                   |
-| `./contract` | A [Remote contract](../../remote/hosts/#define-a-contract).            | Hosts and [runners](../../remote/runners/#set-up-a-runner), when the plugin can run elsewhere. |
+| `./contract` | A [Remote contract](../../remote/contracts/).                          | Hosts and [runners](../../remote/runners/#set-up-a-runner), when the plugin can run elsewhere. |
 | `./schema`   | The [editor registration](#editor-completion) of the config.           | [`graft schema`](../../cli/#graft-schema), for the application's editor schema.                |
 | `./cli`      | A command plugin that adds `graft` subcommands.                        | [`graft add --plugin <package>`](../../cli/#command-plugins), which enables `<package>/cli`.   |
 

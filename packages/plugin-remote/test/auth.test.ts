@@ -520,6 +520,7 @@ describe("runner authentication", () => {
 					Remote.plugin(contract, {
 						connect,
 						contractModule: "unused",
+						implementation: "unused",
 					}),
 					{ directory: "unused", mode: "normal", value: attempt },
 				)

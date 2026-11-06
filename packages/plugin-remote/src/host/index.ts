@@ -72,6 +72,9 @@ const directTarget = Effect.fnUntraced(function* <
 	const module = String.startsWith("file:")(input.contract)
 		? input.contract
 		: yield* resolveEntry(directory, input.contract)
+	const implementation = String.startsWith("file:")(input.implementation)
+		? input.implementation
+		: yield* resolveEntry(directory, input.implementation)
 	const capability = yield* resolve(
 		{
 			name:
@@ -104,15 +107,12 @@ const directTarget = Effect.fnUntraced(function* <
 	const consumer = Effect.succeed(
 		executionPlugin(
 			loaded,
-			{ ...options, contractModule: module },
+			{ ...options, contractModule: module, implementation },
 			selected,
 			annotations,
 		),
 	)
 	if (Option.isSome(watch)) {
-		const implementation = String.startsWith("file:")(loaded.module)
-			? loaded.module
-			: yield* resolveEntry(directory, loaded.module)
 		yield* ModuleResolver.observe([module, implementation])
 	}
 	const fork = yield* direct(
@@ -238,6 +238,7 @@ const load = Effect.fnUntraced(function* (
 	const failConnect = yield* boundary("connect")
 	const fork = yield* launch(contract, input, {
 		contractModule: input.contract,
+		implementation: input.implementation,
 	}).pipe(Effect.catchCause(failConnect))
 	yield* follow(fork, failConnect)
 })

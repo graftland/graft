@@ -135,6 +135,7 @@ declare const contract: Remote.Contract.Contract<
 
 export default Remote.plugin(contract, {
 	contractModule: new URL("./contract.js", import.meta.url).href,
+	implementation: new URL("./greeter.js", import.meta.url).href,
 	connect: { local: {} },
 	retry: Schedule.spaced("5 seconds"),
 })

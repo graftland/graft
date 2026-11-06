@@ -177,7 +177,8 @@ export const CodeIdentity = Schema.Struct({
 })
 export type CodeIdentity = typeof CodeIdentity.Type
 export const Load = Schema.Struct({
-	specifier: Schema.String,
+	contract: Schema.NonEmptyString,
+	implementation: Schema.NonEmptyString,
 	digest: Schema.optionalKey(Schema.Boolean),
 })
 export type Load = typeof Load.Type

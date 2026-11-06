@@ -84,6 +84,7 @@ const connected = Connection.of
 const Local = Effect.fnUntraced(function* (
 	target: LocalTarget | WorkerTarget,
 	contractModule: string,
+	implementation: string,
 	options: Port.Options,
 	resources: Scope.Scope,
 	processScope: Scope.Scope,
@@ -95,7 +96,12 @@ const Local = Effect.fnUntraced(function* (
 		Execution,
 		PlatformError.PlatformError | TransportError,
 		Scope.Scope
-	> = transport.start({ ...target, contractModule, session: options.session })
+	> = transport.start({
+		...target,
+		contractModule,
+		implementation,
+		session: options.session,
+	})
 	const execution = yield* started.pipe(Scope.provide(processScope))
 	return yield* LocalProcess.connect(execution, options).pipe(
 		Scope.provide(resources),
@@ -125,6 +131,7 @@ const scopes = Effect.acquireRelease(
 export const acquire = Effect.fnUntraced(function* <A, E, R, D, DR>(
 	target: Target,
 	contractModule: string,
+	implementation: string,
 	options: Port.Options,
 	setup: Effect.Effect<A, E, R | Connection>,
 	dispose: (value: A) => Effect.Effect<Cause.Cause<unknown>, D, DR>,
@@ -137,6 +144,7 @@ export const acquire = Effect.fnUntraced(function* <A, E, R, D, DR>(
 				? yield* Local(
 						target,
 						contractModule,
+						implementation,
 						options,
 						owned.resources,
 						owned.process,
@@ -144,6 +152,7 @@ export const acquire = Effect.fnUntraced(function* <A, E, R, D, DR>(
 				: yield* RunnerConnection.connect(
 						target,
 						contractModule,
+						implementation,
 						options,
 						owned.resources,
 						owned.process,

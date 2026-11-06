@@ -24,12 +24,28 @@ export class ChildApi extends Context.Service<
 	}
 >()("@graftland/plugin-remote/test/fixtures/services-contract/ChildApi") {}
 const HostRpc = RpcGroup.make(
-	Rpc.make("Double", { payload: { value: Schema.Int }, success: Schema.Int }),
+	Contract.operation(
+		"@graftland/test/services-contract/Double",
+		1,
+		Rpc.make("Double", { payload: { value: Schema.Int }, success: Schema.Int }),
+	),
 )
 const ChildRpc = RpcGroup.make(
-	Rpc.make("Load", { payload: { value: Schema.Int }, success: Reply }),
-	Rpc.make("Values", { success: Schema.Int, stream: true }),
-	Rpc.make("Hold"),
+	Contract.operation(
+		"@graftland/test/services-contract/Load",
+		1,
+		Rpc.make("Load", { payload: { value: Schema.Int }, success: Reply }),
+	),
+	Contract.operation(
+		"@graftland/test/services-contract/Values",
+		1,
+		Rpc.make("Values", { success: Schema.Int, stream: true }),
+	),
+	Contract.operation(
+		"@graftland/test/services-contract/Hold",
+		1,
+		Rpc.make("Hold"),
+	),
 )
 export const hostService = Contract.service(HostApi, HostRpc, {
 	toHandlers: (value) => ({
@@ -57,7 +73,13 @@ export class ChildLabel extends Context.Service<
 	ChildLabel,
 	{ readonly read: Effect.Effect<string> }
 >()("@graftland/plugin-remote/test/fixtures/services-contract/ChildLabel") {}
-const LabelRpc = RpcGroup.make(Rpc.make("Load", { success: Schema.String }))
+const LabelRpc = RpcGroup.make(
+	Contract.operation(
+		"@graftland/test/services-contract/Label",
+		1,
+		Rpc.make("Load", { success: Schema.String }),
+	),
+)
 const labelService = Contract.service(ChildLabel, LabelRpc, {
 	toHandlers: (value) => ({ Load: () => value.read }),
 	fromClient: (client) => ({ read: client.Load().pipe(Effect.orDie) }),
@@ -70,7 +92,7 @@ export const contract = Contract.make({
 	name: "service-fixture",
 	config,
 	error: Schema.String,
-	module: new URL("./services-plugin.js", import.meta.url).href,
+
 	inject: [hostService],
 	provides: [childService, labelService],
 })

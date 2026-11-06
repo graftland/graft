@@ -112,7 +112,11 @@ const setup = Effect.fnUntraced(function* (
 	const launched = yield* launch(
 		executionPlugin(
 			contract,
-			{ contractModule: servicesModule, shutdownTimeout },
+			{
+				contractModule: servicesModule,
+				implementation: new URL("services-plugin.js", servicesModule).href,
+				shutdownTimeout,
+			},
 			{ _tag: "Worker", execArgv: [] },
 		),
 		{ directory, fail: false },
@@ -192,7 +196,10 @@ describe("direct worker execution", () => {
 				const { proxy, execution } = yield* launch(
 					executionPlugin(
 						handles,
-						{ contractModule: handlesModule },
+						{
+							contractModule: handlesModule,
+							implementation: new URL("plugin.js", handlesModule).href,
+						},
 						{ _tag: "Worker" },
 					),
 					{ directory, mode: "leaked-handle", value: 1 },

@@ -10,6 +10,7 @@ import {
 import { Graft } from "@graftland/graft"
 
 import type { Service } from "../Contract"
+import { identities } from "./operations"
 
 export const service = <
 	I,
@@ -31,6 +32,7 @@ export const service = <
 > => ({
 	key,
 	group,
+	operations: identities(group),
 	serve: Effect.fnUntraced(function* (port) {
 		// Graft admits the activation from this descriptor's key before serving it.
 		const context = yield* Effect.context<never>()

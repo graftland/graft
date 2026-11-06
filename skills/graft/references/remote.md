@@ -46,22 +46,24 @@ const greeter = Contract.service(Greeter, api, {
 export const contract = Contract.make({
 	name: "app/greeter",
 	config,
-	module: new URL("./greeter.js", import.meta.url).href,
 	provides: [greeter],
 })
 ```
 
-- `api` is an Effect `RpcGroup` listing the service's calls. `fromClient` maps
-  `RpcClientError` into an error callers already handle.
+- `api` is an Effect `RpcGroup` listing the service's calls. Give each RPC an
+  immutable identity with `Contract.operation(name, version, rpc)`. `fromClient`
+  maps `RpcClientError` into an error callers already handle.
 - `provides` lists services the plugin publishes to the host; `inject` lists
   host services it uses. Only listed services cross the boundary.
 - `error` is optional and defaults to `Schema.Never`. Leave the contract
   unannotated; its type is inferred.
-- `module` and the entry's `contract` point at **built JavaScript**. The plugin
-  process does not use the host's TypeScript loader, so build both modules
-  before running.
+- The entry's `implementation` and `contract` point at **built JavaScript**. The
+  plugin process does not use the host's TypeScript loader, so build both
+  modules before running.
 - The implementation imports `config` and the service key from the contract and
-  stays an ordinary `Plugin.make` default export.
+  stays an ordinary `Plugin.make` default export. Declare exported descriptors
+  in `provides`; `overlap` defaults to false and currently changes no lifecycle
+  behavior.
 
 ## Load it
 
@@ -73,11 +75,13 @@ In `graft.yml`, replace only the provider's entry; `name: remote` resolves to
   name: remote
   config:
     contract: ./dist/contract.js
+    implementation: ./dist/greeter.js
     connect: { local: {} } # or { worker: {} }, or a runner below
     config: { greeting: Hello }
 ```
 
-From code, `Remote.plugin(contract, { contractModule, connect, config })` builds
+From code,
+`Remote.plugin(contract, { contractModule, implementation, connect })` builds
 the same plugin; load it with `Graft.plugin`. Only this form takes `retry` and
 `shutdownTimeout`. When embedding, provide `NodeServices.layer` and
 `SecureRandom.layerWebCrypto`; `graft start` already does.
@@ -103,12 +107,12 @@ host never uploads code), write `runner.yml` and start it:
 
 The host's `connect` becomes `url: wss://runner:7443` with
 `auth: { bearer: { token: { file: ./token } } }`, plus `ca` for a private CA;
-`contract` must then be a package name. `connect` also takes `unix` or `command`
-(such as SSH), and `auth` takes `mtls`, `bearer`, `jwt` or `none`; leaving
-`auth` out means none. The entry's `id` names the runner instance. Use
-`graft start runner.yml`; a stdio runner requires `--stdio`, which reserves
-stdout for protocol bytes. Enable certificate commands with
-`graft add --plugin remote`, then run `graft remote certificates`.
+`contract` and `implementation` must then be package exports. `connect` also
+takes `unix` or `command` (such as SSH), and `auth` takes `mtls`, `bearer`,
+`jwt` or `none`; leaving `auth` out means none. The entry's `id` names the
+runner instance. Use `graft start runner.yml`; a stdio runner requires
+`--stdio`, which reserves stdout for protocol bytes. Enable certificate commands
+with `graft add --plugin remote`, then run `graft remote certificates`.
 
 ## What changes for the app
 

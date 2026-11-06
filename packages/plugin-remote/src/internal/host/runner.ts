@@ -24,6 +24,7 @@ import * as Wire from "../runner/Wire"
 export const connect = Effect.fnUntraced(function* (
 	target: ConfiguredRunner,
 	contractModule: string,
+	implementation: string,
 	options: Port.Options,
 	resources: Scope.Scope,
 	processScope: Scope.Scope,
@@ -110,7 +111,8 @@ export const connect = Effect.fnUntraced(function* (
 	).pipe(Effect.forkIn(resources))
 	const code = yield* session.Load({
 		handle: record.handle,
-		specifier: contractModule,
+		contract: contractModule,
+		implementation,
 		digest: target.expect?.digest !== undefined,
 	})
 	yield* Packages.verify(code, target.expect)

@@ -217,6 +217,7 @@ const setup = (lease = 15000, partitionable = false) =>
 		const proxy = yield* Graft.plugin(
 			Remote.plugin(contract, {
 				contractModule: "remote-fixture",
+				implementation: "remote-implementation",
 				connect,
 			}),
 			{ directory, fail: false },
@@ -456,6 +457,7 @@ describe("network runner end to end", () => {
 						name: "remote",
 						config: {
 							contract: "remote-fixture",
+							implementation: "remote-implementation",
 							config: { directory, fail: false },
 							connect: {
 								transport: {
@@ -555,7 +557,8 @@ describe("network runner end to end", () => {
 				})
 				yield* first.Load({
 					handle: opened.handle,
-					specifier: "remote-fixture",
+					contract: "remote-fixture",
+					implementation: "remote-implementation",
 				})
 				const loaded = yield* first.Status(opened.handle)
 				const child = Option.getOrThrow(Model.childOf(loaded))
@@ -706,11 +709,11 @@ describe("network runner end to end", () => {
 				const empty = Remote.Contract.make({
 					name: "missing-instance",
 					config: Schema.Struct({}),
-					module: "unused",
 				})
 				const proxy = yield* Graft.plugin(
 					Remote.plugin(empty, {
 						contractModule: "unused",
+						implementation: "unused",
 						connect: {
 							...{
 								url: "wss://127.0.0.1:0",
@@ -942,7 +945,8 @@ describe("network runner end to end", () => {
 				})
 				yield* first.Load({
 					handle: opened.handle,
-					specifier: "remote-fixture",
+					contract: "remote-fixture",
+					implementation: "remote-implementation",
 				})
 				const loaded = yield* first.Status(opened.handle)
 				assert.isTrue(Option.isSome(Model.childOf(loaded)))
@@ -1004,7 +1008,8 @@ describe("network runner end to end", () => {
 				})
 				yield* client.Load({
 					handle: opened.handle,
-					specifier: "remote-fixture",
+					contract: "remote-fixture",
+					implementation: "remote-implementation",
 				})
 				const loaded = yield* client.Status(opened.handle)
 				const identity = Option.getOrThrow(Model.childOf(loaded))
@@ -1083,6 +1088,7 @@ describe("network runner end to end", () => {
 					const proxy = yield* Graft.plugin(
 						Remote.plugin(contract, {
 							contractModule: "remote-fixture",
+							implementation: "remote-implementation",
 							connect: {
 								instance: expect === undefined ? "" : "pin-" + index,
 								...{
@@ -1130,6 +1136,7 @@ it.live(
 			const certificate = yield* credentials("client")
 			const remote = Remote.plugin(contract, {
 				contractModule: "remote-fixture",
+				implementation: "remote-implementation",
 				connect: {
 					url: `wss://127.0.0.1:${daemon.port}`,
 					ca: inject("remoteTls") + "/ca.crt",

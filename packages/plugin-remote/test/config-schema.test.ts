@@ -11,10 +11,18 @@ import { entries } from "../src/schema"
 const valid = Schema.is(Schema.toEncoded(Config.Host))
 const host = (connect: unknown) => ({
 	contract: "./contract.js",
+	implementation: "./plugin.js",
 	connect,
 	config: {},
 })
 describe("remote editor schemas", () => {
+	it("requires implementation location in deployment configuration", () => {
+		assert.isFalse(
+			valid({ contract: "./contract.js", connect: { local: {} }, config: {} }),
+		)
+		assert.isFalse(valid({ ...host({ local: {} }), implementation: "" }))
+		assert.isTrue(valid(host({ local: {} })))
+	})
 	it("checks built-in credentials and mutually exclusive connection forms", () => {
 		assert.isTrue(valid(host({ local: {} })))
 		assert.isTrue(valid(host({ worker: { execArgv: [] } })))

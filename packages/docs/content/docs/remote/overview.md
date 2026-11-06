@@ -53,7 +53,6 @@ export const config = Schema.Struct({ greeting: Schema.String })
 export const contract = Contract.make({
 	name: "app/greeter",
 	config,
-	module: new URL("./greeter.js", import.meta.url).href,
 	provides: [greeter],
 })
 ```
@@ -63,11 +62,12 @@ import { Effect } from "effect"
 
 import { Graft, Plugin } from "@graftland/graft"
 
-import { config, Greeter } from "./contract.ts"
+import { config, contract, Greeter } from "./contract.ts"
 
 export default Plugin.make({
 	name: "app/greeter",
 	config,
+	provides: contract.provides,
 	apply: ({ greeting }) =>
 		Graft.provide(Greeter, {
 			greet: (name) => Effect.succeed(`${greeting}, ${name}!`),
@@ -80,6 +80,7 @@ export default Plugin.make({
   name: remote
   config:
     contract: ./dist/contract.js
+    implementation: ./dist/greeter.js
     connect:
       local: {}
     config:
@@ -87,7 +88,7 @@ export default Plugin.make({
 ```
 
 `greeter` describes how `Greeter` crosses the boundary; see
-[Define a contract](../hosts/#define-a-contract). Change `local: {}` to
-`worker: {}`, or to a runner's address, to move the plugin again. The
+[Define a contract](../contracts/). Change `local: {}` to `worker: {}`, or to a
+runner's address, to move the plugin again. The
 [06 · Remote](https://github.com/graftland/graft/tree/main/samples/06-remote)
 sample walks through all three.

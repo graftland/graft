@@ -160,6 +160,7 @@ export const Listen = Schema.Union([
 export type Listen = typeof Listen.Type
 export const Host = Schema.Struct({
 	contract: Schema.String,
+	implementation: Schema.NonEmptyString,
 	connect: Connect,
 	config: Schema.Json.pipe(Schema.withDecodingDefaultKey(Effect.succeed({}))),
 })

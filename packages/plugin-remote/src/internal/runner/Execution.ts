@@ -64,9 +64,10 @@ export const make = Effect.fnUntraced(function* (root: string) {
 			function* (handle, request, limits) {
 				const resolved = yield* Packages.resolve(
 					root,
-					request.specifier,
+					request.implementation,
 					request.digest,
 				)
+				const contract = yield* Packages.resolve(root, request.contract)
 				const argv = yield* command()
 				const child = yield* spawner.spawn(
 					ChildProcess.make(
@@ -74,6 +75,7 @@ export const make = Effect.fnUntraced(function* (root: string) {
 						[
 							...Array.drop(argv, 1),
 							"child",
+							contract.entry,
 							resolved.entry,
 							handle.token,
 							yield* Schema.encodeEffect(Schema.fromJsonString(Bootstrap))({

@@ -12,6 +12,8 @@ import type { Channel } from "../Transport"
 export interface LocalOptions {
 	readonly command?: readonly [string, ...string[]]
 	readonly contractModule: string
+	/** Implementation module selected by deployment, independently of the contract. */
+	readonly implementation: string
 	readonly session: string
 }
 export interface Execution {
@@ -33,6 +35,8 @@ export class LocalTransport extends Context.Service<
 export interface WorkerOptions {
 	readonly execArgv?: ReadonlyArray<string>
 	readonly contractModule: string
+	/** Implementation module selected by deployment, independently of the contract. */
+	readonly implementation: string
 	readonly session: string
 }
 export class WorkerTransport extends Context.Service<

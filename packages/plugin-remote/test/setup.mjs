@@ -95,6 +95,22 @@ export default async function setup(project) {
 			exports: "./services-contract.js",
 		}),
 	)
+	const implementation = installation + "/node_modules/remote-implementation"
+	await mkdir(implementation, { recursive: true })
+	await cp(
+		new URL("../.cache/integration", import.meta.url).pathname,
+		implementation,
+		{ recursive: true },
+	)
+	await writeFile(
+		implementation + "/package.json",
+		JSON.stringify({
+			name: "remote-implementation",
+			version: "2.0.0",
+			type: "module",
+			exports: "./services-plugin.js",
+		}),
+	)
 	project.provide("remoteRoot", installation)
 	await build({
 		...common,

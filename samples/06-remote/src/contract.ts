@@ -16,11 +16,15 @@ export class Greeter extends Context.Service<
 >()("@graftland/sample-remote/contract/Greeter") {}
 
 const api = RpcGroup.make(
-	Rpc.make("Greet", {
-		payload: { name: Schema.String },
-		success: Schema.String,
-		error: GreetingUnavailable,
-	}),
+	Contract.operation(
+		"@graftland/sample-remote/Greet",
+		1,
+		Rpc.make("Greet", {
+			payload: { name: Schema.String },
+			success: Schema.String,
+			error: GreetingUnavailable,
+		}),
+	),
 )
 const greeter = Contract.service(Greeter, api, {
 	toHandlers: (service) => ({ Greet: ({ name }) => service.greet(name) }),
@@ -39,6 +43,6 @@ export const config = Schema.Struct({ greeting: Schema.String })
 export const contract = Contract.make({
 	name: "@graftland/sample-remote/contract",
 	config,
-	module: new URL("./greeter.js", import.meta.url).href,
+
 	provides: [greeter],
 })

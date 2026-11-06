@@ -846,9 +846,14 @@ const protocol = Effect.fnUntraced(function* (
 					if (current._tag !== "Open") {
 						const before =
 							current._tag === "Loading" ? current.request : current.record.load
-						if (before.specifier !== request.specifier)
+						if (
+							before.contract !== request.contract ||
+							before.implementation !== request.implementation ||
+							(before.digest ?? false) !== (request.digest ?? false)
+						)
 							return yield* SessionConflict.make({
-								detail: "Load was already requested with a different specifier",
+								detail:
+									"Load was already requested with a different deployment",
 							})
 						return [
 							current._tag === "Loading"

@@ -109,6 +109,7 @@ export default defineConfig({
 					items: [
 						"remote/overview",
 						"remote/hosts",
+						"remote/contracts",
 						"remote/runners",
 						"remote/transport-auth",
 						"remote/lifecycle",

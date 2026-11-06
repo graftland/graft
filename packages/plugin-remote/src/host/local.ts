@@ -17,7 +17,12 @@ const make = Effect.map(ChildProcessSpawner.ChildProcessSpawner, (spawner) =>
 			const child = yield* spawner.spawn(
 				ChildProcess.make(
 					argv[0],
-					[...Array.drop(argv, 1), options.contractModule, options.session],
+					[
+						...Array.drop(argv, 1),
+						options.contractModule,
+						options.implementation,
+						options.session,
+					],
 					{
 						stdin: "pipe",
 						stdout: "pipe",

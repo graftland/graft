@@ -40,6 +40,8 @@ export interface Options<
 	readonly connect: Credential.Connect<D>
 	/** Contract module resolved independently in each execution environment. */
 	readonly contractModule: string
+	/** Implementation module selected by deployment, independently of the contract. */
+	readonly implementation: string
 	readonly retry?: Schedule.Schedule<unknown, unknown> | undefined
 	readonly shutdownTimeout?: Duration.Input | undefined
 }
@@ -108,6 +110,7 @@ export const plugin = <
 				const auth = Credential.invocation(options.connect)
 				const input = yield* Schema.decodeUnknownEffect(Configuration.Host)({
 					contract: options.contractModule,
+					implementation: options.implementation,
 					connect:
 						auth === undefined
 							? options.connect
@@ -120,6 +123,7 @@ export const plugin = <
 					input,
 					{
 						contractModule: options.contractModule,
+						implementation: options.implementation,
 						shutdownTimeout: options.shutdownTimeout,
 					},
 					auth,

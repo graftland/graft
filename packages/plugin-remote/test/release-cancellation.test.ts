@@ -113,6 +113,7 @@ it.effect(
 			const fiber = yield* Connection.acquire(
 				{ _tag: "Connector", instance: "test" },
 				"unused",
+				"unused-implementation",
 				{ session: "test", call: {}, serve: {} },
 				Effect.void,
 				() => Effect.succeed(Cause.empty),

@@ -10,8 +10,9 @@ description: 用 `graft start runner.yml` 在另一台機器上執行外掛。
 
 1. **安裝**：在 Linux 或 macOS 上、Node.js 22.22 以上，把
    `@graftland/cli`、`@graftland/plugin-remote`、建置好的外掛套件及其相依安裝到某個安裝目錄的
-   `node_modules`。透過套件的 `exports` 公開每份契約，例如
-   `my-plugin/contract`，並在宿主上安裝同一個套件。
+   `node_modules`。透過套件的 `exports` 公開契約與實作，例如
+   `my-plugin/contract` 和
+   `my-plugin`。宿主需要契約套件，runner 需要這兩個套件。
 2. **撰寫** `runner.yml`，其中只有一個 `remote/runner` 設定項目。
 3. **啟動** runner：`graft start runner.yml`。
 4. **指向** runner：讓宿主的 `remote` 設定項目指向它，再執行
@@ -41,6 +42,7 @@ description: 用 `graft start runner.yml` 在另一台機器上執行外掛。
   name: remote
   config:
     contract: my-plugin/contract
+    implementation: my-plugin
     connect:
       url: wss://runner.example:7443
       ca: ./certs/ca.crt
@@ -53,7 +55,7 @@ description: 用 `graft start runner.yml` 在另一台機器上執行外掛。
 
 | 欄位     | 必填 | 預設值       | 意義                                                           |
 | -------- | ---- | ------------ | -------------------------------------------------------------- |
-| `root`   | 是   | —            | 安裝目錄。契約套件從它的 `node_modules` 解析。                 |
+| `root`   | 是   | —            | 安裝目錄。契約與實作套件從它的 `node_modules` 解析。           |
 | `state`  | 是   | —            | 狀態目錄，不存在時會建立。規則見下表。                         |
 | `lease`  | 否   | `15 seconds` | 實例的預設[租約](../lifecycle/#租約與網路中斷)。               |
 | `grace`  | 否   | `5 seconds`  | 從中斷外掛行程到強制結束它之間的時間。                         |
@@ -109,7 +111,7 @@ connect:
 
 | 欄位      | 比對對象                                                                                     |
 | --------- | -------------------------------------------------------------------------------------------- |
-| `version` | runner 上契約套件 `package.json` 中的 `version`。                                            |
+| `version` | runner 上實作套件 `package.json` 中的 `version`。                                            |
 | `digest`  | 套件檔案的 SHA-256 十六進位摘要，排除所有 `node_modules`，因此不涵蓋相依。只有設定時才計算。 |
 
 不符時以 `PackageError` 失敗，訊息會同時顯示兩個值。

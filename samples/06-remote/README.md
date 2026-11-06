@@ -42,6 +42,7 @@ This sample's `graft.yml` replaces just that entry:
   name: remote
   config:
     contract: "@graftland/sample-remote/contract"
+    implementation: "@graftland/sample-remote/greeter"
     connect:
       local: {}
     config:

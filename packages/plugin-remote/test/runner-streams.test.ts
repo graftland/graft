@@ -105,6 +105,10 @@ const session = Effect.fnUntraced(function* (
 				id: "diagnostic",
 				name: "remote",
 				config: {
+					implementation: new URL(
+						"../.cache/integration/plugin.js",
+						import.meta.url,
+					).href,
 					contract: new URL(
 						"../.cache/integration/contract.js",
 						import.meta.url,
@@ -153,7 +157,12 @@ const session = Effect.fnUntraced(function* (
 		requestId: `stream-test-${generation ?? 0}`,
 		limits: defaults,
 	})
-	yield* client.Load({ handle: record.handle, specifier: "remote-fixture" })
+	const code = yield* client.Load({
+		handle: record.handle,
+		contract: "remote-fixture",
+		implementation: "remote-implementation",
+	})
+	assert.deepEqual(code, { name: "remote-implementation", version: "2.0.0" })
 	const loaded = yield* client.Status(record.handle)
 	const unit = yield* Effect.fromOption(childOf(loaded))
 	return { child, stderr, record, unit, validated: Deferred.await(validated) }
@@ -167,6 +176,7 @@ const proxy = Effect.fnUntraced(function* (
 	const remote = yield* Graft.plugin(
 		Remote.plugin(contract, {
 			contractModule: "remote-fixture",
+			implementation: "remote-implementation",
 			connect,
 		}),
 		{ directory, fail: false },
@@ -353,6 +363,7 @@ describe("runner stream transports", () => {
 				const fork = yield* Graft.plugin(
 					Remote.plugin(contract, {
 						contractModule: "unused",
+						implementation: "unused",
 						connect: { ...runtimeConnect, command: ["unused"] },
 					}),
 					{ directory: "unused", fail: false },

@@ -221,6 +221,7 @@ declare const contract: Remote.Contract.Contract<
 
 const greeter = Remote.plugin(contract, {
 	contractModule: new URL("./contract.js", import.meta.url).href,
+	implementation: new URL("./greeter.js", import.meta.url).href,
 	connect: { local: {} },
 })
 

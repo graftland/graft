@@ -18,7 +18,7 @@ const main = Effect.scoped(
 		const bootstrap = yield* Schema.decodeUnknownEffect(Bootstrap)(workerData)
 		const channel = yield* Channel.make(port)
 		const contract = yield* load(bootstrap.contractModule)
-		yield* run(contract, channel, bootstrap.session)
+		yield* run(contract, bootstrap.implementation, channel, bootstrap.session)
 	}),
 )
 NodeRuntime.runMain(

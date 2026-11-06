@@ -144,6 +144,7 @@ const cleanup = Effect.fnUntraced(function* (
 
 export const lifecycle = Effect.fnUntraced(function* (
 	contract: RunnerContract,
+	implementation: string,
 	peer: Peer,
 	identity: typeof Identity.Type,
 	telemetry: Telemetry,
@@ -208,7 +209,7 @@ export const lifecycle = Effect.fnUntraced(function* (
 					}),
 				),
 			)
-		const module = yield* loadModule(contract.module)
+		const module = yield* loadModule(implementation)
 		const plugin = Plugin.fromModule(module)
 		if (Option.isNone(plugin))
 			return yield* ActivationFailed.make({

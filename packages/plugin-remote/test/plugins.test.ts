@@ -188,6 +188,10 @@ describe("remote capability plugins", () => {
 							"../.cache/integration/contract.js",
 							import.meta.url,
 						).href,
+						implementation: new URL(
+							"../.cache/integration/plugin.js",
+							import.meta.url,
+						).href,
 					},
 					{ _tag: "Local" },
 				),

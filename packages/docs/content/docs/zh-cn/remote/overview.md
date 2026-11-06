@@ -44,7 +44,6 @@ export const config = Schema.Struct({ greeting: Schema.String })
 export const contract = Contract.make({
 	name: "app/greeter",
 	config,
-	module: new URL("./greeter.js", import.meta.url).href,
 	provides: [greeter],
 })
 ```
@@ -54,11 +53,12 @@ import { Effect } from "effect"
 
 import { Graft, Plugin } from "@graftland/graft"
 
-import { config, Greeter } from "./contract.ts"
+import { config, contract, Greeter } from "./contract.ts"
 
 export default Plugin.make({
 	name: "app/greeter",
 	config,
+	provides: contract.provides,
 	apply: ({ greeting }) =>
 		Graft.provide(Greeter, {
 			greet: (name) => Effect.succeed(`${greeting}, ${name}!`),
@@ -71,12 +71,13 @@ export default Plugin.make({
   name: remote
   config:
     contract: ./dist/contract.js
+    implementation: ./dist/greeter.js
     connect:
       local: {}
     config:
       greeting: Hello
 ```
 
-`greeter` 描述 `Greeter` 如何跨越边界，见[定义契约](../hosts/#定义契约)。把
+`greeter` 描述 `Greeter` 如何跨越边界，见[定义契约](../contracts/)。把
 `local: {}` 改成 `worker: {}`
 或 runner 的地址，就能再次挪动插件。[06 · 远程插件](https://github.com/graftland/graft/tree/main/samples/06-remote)示例把三种方式都走了一遍。

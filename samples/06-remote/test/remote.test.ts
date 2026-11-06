@@ -30,6 +30,8 @@ describe("06 · Remote", () => {
 								"../.cache/implementation/contract.js",
 								import.meta.url,
 							).href,
+							implementation: new URL("../dist/greeter.js", import.meta.url)
+								.href,
 							connect,
 						}),
 						{ greeting: "Hello" },
