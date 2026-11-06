@@ -2,6 +2,7 @@ import { createRequire } from "node:module"
 
 import {
 	Cause,
+	Context,
 	Deferred,
 	Effect,
 	Exit,
@@ -23,7 +24,7 @@ import { assert, describe, it } from "@effect/vitest"
 import type { Graft as GraftType, Plugin as PluginType } from "@graftland/graft"
 
 const runtimeUrl = new URL("../.cache/integration/runtime.mjs", import.meta.url)
-const { Hmr, Graft } = createRequire(import.meta.url)(
+const { Hmr, Graft, Plugin, Transition } = createRequire(import.meta.url)(
 	runtimeUrl.pathname,
 ) as typeof import("./runtime.ts")
 
@@ -336,3 +337,66 @@ ${source("pending")}
 			}).pipe(run),
 	)
 })
+
+it.effect("rejects HMR for managed forks before reloading modules", () =>
+	run(
+		Effect.gen(function* () {
+			const { hmr, source, write, load } = yield* setup()
+			yield* write("managed-check.mjs", source("before"))
+			const original = yield* load("./managed-check.mjs")
+			yield* write(
+				"managed-check.mjs",
+				'throw new Error("Reload preparation must not run");',
+			)
+			const managed = yield* Graft.plugin(
+				Plugin.make({
+					name: "managed",
+					apply: () =>
+						Transition.registerDriver(
+							{
+								name: "test",
+								allocate: () =>
+									Effect.gen(function* () {
+										const exit =
+											yield* Deferred.make<
+												import("@graftland/graft").Transition.Termination
+											>()
+										return {
+											start: Effect.void,
+											describe: Effect.succeed({ overlap: true, provides: [] }),
+											serve: Effect.void,
+											ready: Effect.succeed(Context.empty()),
+											probe: () => Effect.void,
+											stop: Effect.void,
+											terminate: Deferred.succeed(exit, { unit: "test" }).pipe(
+												Effect.asVoid,
+											),
+											exited: Deferred.await(exit),
+											failure: Effect.never,
+										}
+									}),
+							},
+							{
+								initial: {
+									driver: "test",
+									identity: "initial",
+									deployment: undefined,
+								},
+								required: [],
+								facades: [],
+							},
+						),
+				}),
+			)
+			yield* managed.await
+			const result = yield* hmr.reload
+			const resolved = yield* Graft.resolve(original)
+			assert.equal(resolved, original)
+			assert.deepEqual(result, {
+				_tag: "Skipped",
+				reason: "managed-fork",
+				modules: [],
+			})
+		}),
+	),
+)

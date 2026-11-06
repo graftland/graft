@@ -19,6 +19,10 @@ services in its environment.
 | [Change detection](#change-detection)                         | How are changes found?                   |
 | [Leases and observation](#leases-and-observation)             | Which files are watched, and until when? |
 
+HMR returns `Skipped` with reason `managed-fork` before preparing a reload when
+the runtime contains a managed fork. See
+[Execution transitions](../transitions/).
+
 ## What happens on a save
 
 1. **Check.** Graft checks observed files after merging native event paths. An

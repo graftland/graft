@@ -1,4 +1,4 @@
-import { Effect, HashMap, TxRef, TxSubscriptionRef } from "effect"
+import { Effect, HashMap, Option, TxRef, TxSubscriptionRef } from "effect"
 
 import { ForkState } from "../Fork"
 import * as Probes from "./probes"
@@ -24,6 +24,10 @@ export const make = Effect.fnUntraced(function* (
 ) {
 	const status: ForkStatus = {
 		parent,
+		managed: yield* TxRef.make<ForkStatus["managed"]["value"]>(Option.none()),
+		generations: yield* TxSubscriptionRef.make<
+			ReadonlyArray<import("../Transition").Generation>
+		>([]),
 		probes: yield* Probes.make,
 		loading: yield* TxRef.make(0),
 		snapshot: yield* TxSubscriptionRef.make<LocalSnapshot>({

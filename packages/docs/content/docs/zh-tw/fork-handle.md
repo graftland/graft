@@ -6,6 +6,11 @@ description: fork 的各個成員，以及 update、restart 和 dispose 的行�
 `Graft.plugin`
 會回傳 fork 控制代碼。本頁是其成員的參考。關於狀態，請參閱[生命週期](../lifecycle/)。
 
+`generations`
+以串流觀察受管理 fork 的執行單元代；未受管理的 fork 回傳空清單。`update` 和
+`restart` 在更改受管理 fork 或其祖先之前以 `ManagedFork`
+失敗。見[執行轉換](../transitions/)。
+
 ## 成員
 
 | 成員            | 作用                                                                                                   |

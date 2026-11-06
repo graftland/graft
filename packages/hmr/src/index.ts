@@ -28,7 +28,7 @@ import {
 	type PlatformError,
 } from "effect"
 
-import { Graft, Plugin } from "@graftland/graft"
+import { Graft, Plugin, Transition } from "@graftland/graft"
 
 import { changes } from "./internal/changes"
 import { digest } from "./internal/digest"
@@ -60,7 +60,10 @@ export type WatchResult = Data.TaggedEnum<{
 	Skipped: {
 		readonly modules: ReadonlyArray<string>
 		readonly reason:
-			"restart-required" | "ambiguous-exports" | "identity-conflict"
+			| "restart-required"
+			| "ambiguous-exports"
+			| "identity-conflict"
+			| "managed-fork"
 	}
 	/** The new code failed to start or timed out; counted restored forks are active or `Pending`. */
 	RolledBack: {
@@ -686,6 +689,12 @@ export const make: (
 			dirty: HashSet.HashSet<string> | undefined,
 		) {
 			yield* checkOpen
+			const unmanaged = yield* Transition.assertUnmanaged().pipe(
+				Effect.provideService(Graft.Graft, graft),
+				Effect.result,
+			)
+			if (unmanaged._tag === "Failure")
+				return WatchResult.Skipped({ reason: "managed-fork", modules: [] })
 			const fullRetry = yield* Ref.get(retryAll)
 			const force = dirty === undefined || fullRetry
 			const pendingDirty = yield* Ref.get(retryDirty)
@@ -1022,7 +1031,18 @@ export const make: (
 						return yield* commitReload(prepared)
 					}),
 				)
-			}).pipe(reloading.withPermits(1))
+			}).pipe(
+				(effect) =>
+					Transition.withUnmanaged(effect).pipe(
+						Effect.provideService(Graft.Graft, graft),
+						Effect.catchTag("ManagedFork", () =>
+							Effect.succeed(
+								WatchResult.Skipped({ reason: "managed-fork", modules: [] }),
+							),
+						),
+					),
+				reloading.withPermits(1),
+			)
 		return {
 			importer,
 			importerScoped,

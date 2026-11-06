@@ -1,0 +1,808 @@
+import {
+	Array,
+	Cause,
+	Context,
+	Deferred,
+	Effect,
+	Exit,
+	Fiber,
+	Option,
+	Ref,
+	Stream,
+} from "effect"
+import { TestClock } from "effect/testing"
+import { assert, it } from "@effect/vitest"
+
+import { Graft, Plugin, Transition } from "../src/index"
+
+class Value extends Context.Service<
+	Value,
+	{
+		readonly read: Effect.Effect<
+			string,
+			Transition.DriverError | Transition.Unavailable
+		>
+	}
+>()("@graftland/graft/test/transition.test/Value") {}
+const candidate = (identity: string): Transition.Candidate => ({
+	driver: "test",
+	identity,
+	deployment: undefined,
+})
+const problem = Transition.DriverError.make({
+	cause: Cause.combine(Cause.fail("broken"), Cause.die("defect")),
+})
+const policy: Transition.Policy = {
+	startup: 100,
+	probe: 100,
+	trial: 0,
+	drain: 100,
+	stop: 100,
+	terminate: 100,
+	probes: ["health"],
+}
+interface Control {
+	readonly id: number
+	readonly exited: Deferred.Deferred<Transition.Termination>
+	readonly failed: Deferred.Deferred<never, Transition.DriverError>
+	readonly entered: Deferred.Deferred<void>
+	readonly read: Deferred.Deferred<string>
+	readonly stopped: Deferred.Deferred<void>
+	readonly terminating: Deferred.Deferred<void>
+}
+interface Script {
+	readonly allocate?: Effect.Effect<void, Transition.DriverError>
+	readonly serve?: Effect.Effect<void, Transition.DriverError>
+	readonly missingServices?: boolean
+	readonly exitAtReadiness?: boolean
+	readonly start?: Effect.Effect<void, Transition.DriverError>
+	readonly describe?: Effect.Effect<
+		Transition.Description,
+		Transition.DriverError
+	>
+	readonly ready?: Effect.Effect<void, Transition.DriverError>
+	readonly probe?: Effect.Effect<void, Transition.DriverError>
+	readonly stop?: Effect.Effect<void, Transition.DriverError>
+	readonly noExit?: boolean
+	readonly holdRead?: boolean
+}
+const setup = Effect.fnUntraced(function* (
+	script: (id: number) => Script = () => ({}),
+) {
+	const controls = yield* Ref.make<ReadonlyArray<Control>>([])
+	const allocations = yield* Ref.make(0)
+	const driver: Transition.Driver = {
+		name: "test",
+		allocate: (artifact, id) =>
+			Effect.gen(function* () {
+				yield* Ref.update(allocations, (n) => n + 1)
+				const options = script(id)
+				yield* options.allocate ?? Effect.void
+				const control: Control = {
+					id,
+					exited: yield* Deferred.make<Transition.Termination>(),
+					failed: yield* Deferred.make<never, Transition.DriverError>(),
+					entered: yield* Deferred.make<void>(),
+					read: yield* Deferred.make<string>(),
+					stopped: yield* Deferred.make<void>(),
+					terminating: yield* Deferred.make<void>(),
+				}
+				yield* Ref.update(controls, Array.append(control))
+				return {
+					start: options.start ?? Effect.void,
+					describe:
+						options.describe ??
+						Effect.succeed({
+							overlap: true,
+							provides: [{ name: "read", version: 1 }],
+						}),
+					serve: options.serve ?? Effect.void,
+					ready: (options.exitAtReadiness === true
+						? Deferred.succeed(control.exited, { unit: `unit-${id}` }).pipe(
+								Effect.andThen(Effect.never),
+							)
+						: (options.ready ?? Effect.void)
+					).pipe(
+						Effect.as(
+							options.missingServices === true
+								? Context.empty()
+								: Context.make(Value, {
+										read: Deferred.succeed(control.entered, undefined).pipe(
+											Effect.andThen(
+												options.holdRead === true
+													? Deferred.await(control.read)
+													: Effect.succeed(artifact.identity),
+											),
+										),
+									}),
+						),
+					),
+					probe: () => options.probe ?? Effect.void,
+					stop: Deferred.succeed(control.stopped, undefined).pipe(
+						Effect.andThen(options.stop ?? Effect.void),
+					),
+					terminate: Deferred.succeed(control.terminating, undefined).pipe(
+						Effect.andThen(
+							options.noExit === true
+								? Effect.void
+								: Deferred.succeed(control.exited, { unit: `unit-${id}` }).pipe(
+										Effect.asVoid,
+									),
+						),
+					),
+					exited: Deferred.await(control.exited),
+					failure: Deferred.await(control.failed),
+				}
+			}),
+	}
+	const definition = Plugin.make({
+		name: "managed",
+		apply: () =>
+			Transition.registerDriver(driver, {
+				initial: candidate("old"),
+				required: [{ name: "read", version: 1 }],
+				policy,
+				facades: [
+					Transition.facade(Value, (invoke) => ({
+						read: invoke((service) => service.read),
+					})),
+				],
+			}),
+	})
+	const fork = yield* Graft.plugin(definition)
+	yield* fork.await
+	const service = yield* Deferred.make<Context.Service.Shape<typeof Value>>()
+	const activations = yield* Ref.make(0)
+	const consumer = yield* Graft.plugin(
+		Plugin.make({
+			name: "consumer",
+			inject: [Value],
+			apply: () =>
+				Effect.gen(function* () {
+					yield* Ref.update(activations, (n) => n + 1)
+					const value = yield* Value
+					yield* Deferred.succeed(service, value)
+				}),
+		}),
+	)
+	yield* consumer.await
+	const value = yield* Deferred.await(service)
+	const control = (id: number) =>
+		Ref.get(controls).pipe(
+			Effect.map((all) =>
+				Option.getOrThrow(Array.findFirst(all, (item) => item.id === id)),
+			),
+		)
+	return {
+		fork,
+		definition,
+		value,
+		activations,
+		controls,
+		control,
+		allocations,
+		request: (overrides?: Partial<Transition.Policy>) =>
+			Graft.transition({
+				fork: fork.id,
+				candidate: candidate("new"),
+				policy: overrides,
+			}),
+	}
+})
+
+it.effect(
+	"keeps the fork-owned facade and consumer alive across accepted generations",
+	() =>
+		Effect.gen(function* () {
+			const h = yield* setup()
+			const constructedBeforeCutover = h.value.read
+			const observed1 = yield* constructedBeforeCutover
+			assert.equal(observed1, "old")
+			const outcome = yield* h.request()
+			assert.equal(outcome._tag, "Accepted")
+			const observed2 = yield* constructedBeforeCutover
+			assert.equal(observed2, "new")
+			const observed3 = yield* Ref.get(h.activations)
+			assert.equal(observed3, 1)
+			const generations = yield* Stream.runHead(h.fork.generations)
+			assert.deepEqual(
+				Array.map(Option.getOrThrow(generations), (g) => g.state),
+				["Terminated", "Serving"],
+			)
+			assert.isTrue(
+				Array.some(outcome.evidence, (e) => e.termination?.unit === "unit-1"),
+			)
+		}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
+)
+
+it.effect("admits one transition and never queues a second request", () =>
+	Effect.gen(function* () {
+		const gate = yield* Deferred.make<void>()
+		const entered = yield* Deferred.make<void>()
+		const h = yield* setup((id) =>
+			id === 2
+				? {
+						ready: Deferred.succeed(entered, undefined).pipe(
+							Effect.andThen(Deferred.await(gate)),
+						),
+					}
+				: {},
+		)
+		const first = yield* Effect.forkScoped(h.request())
+		yield* Deferred.await(entered)
+		const busy = yield* h.request()
+		assert.deepEqual(busy, {
+			_tag: "Aborted",
+			reason: "Busy",
+			phase: "Admission",
+			evidence: [],
+		})
+		const observed4 = yield* Ref.get(h.allocations)
+		assert.equal(observed4, 2)
+		yield* Deferred.succeed(gate, undefined)
+		const observed5 = yield* Fiber.join(first)
+		assert.equal(observed5._tag, "Accepted")
+	}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
+)
+
+it.effect(
+	"keeps each admitted call on its attempt and drains before terminating",
+	() =>
+		Effect.gen(function* () {
+			const h = yield* setup((id) => ({ holdRead: id === 1 }))
+			const old = yield* h.control(1)
+			const running = yield* Effect.forkScoped(h.value.read)
+			yield* Deferred.await(old.entered)
+			const transition = yield* Effect.forkScoped(h.request())
+			yield* h.fork.generations.pipe(
+				Stream.filter((all) =>
+					Array.some(all, (g) => g.attempt === 1 && g.state === "Draining"),
+				),
+				Stream.runHead,
+			)
+			const observed6 = yield* h.value.read
+			assert.equal(observed6, "new")
+			const observed7 = yield* Deferred.isDone(old.exited)
+			assert.isFalse(observed7)
+			yield* Deferred.succeed(old.read, "completed on old")
+			const observed8 = yield* Fiber.join(running)
+			assert.equal(observed8, "completed on old")
+			const observed9 = yield* Fiber.join(transition)
+			assert.equal(observed9._tag, "Accepted")
+		}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
+)
+
+for (const failure of [
+	"start",
+	"ready",
+	"probe",
+	"contract",
+	"overlap",
+] as const) {
+	it.effect(`aborts before cutover when candidate ${failure} fails`, () =>
+		Effect.gen(function* () {
+			const h = yield* setup((id) =>
+				id !== 2
+					? {}
+					: failure === "contract"
+						? { describe: Effect.succeed({ overlap: true, provides: [] }) }
+						: failure === "overlap"
+							? { describe: Effect.succeed({ overlap: false, provides: [] }) }
+							: { [failure]: Effect.fail(problem) },
+			)
+			const outcome = yield* h.request()
+			assert.equal(outcome._tag, "Aborted")
+			const observed10 = yield* h.value.read
+			assert.equal(observed10, "old")
+			const next = yield* h.control(2)
+			const observed11 = yield* Deferred.isDone(next.exited)
+			assert.isTrue(observed11)
+		}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
+	)
+}
+
+for (const recoveryFails of [false, true]) {
+	it.effect(
+		recoveryFails
+			? "reports RecoveryFailed when a fresh old attempt fails"
+			: "recovers in a fresh attempt only after candidate termination",
+		() =>
+			Effect.gen(function* () {
+				const h = yield* setup((id) =>
+					id === 3 && recoveryFails ? { ready: Effect.fail(problem) } : {},
+				)
+				const running = yield* Effect.forkScoped(h.request({ trial: 50 }))
+				yield* h.fork.generations.pipe(
+					Stream.filter((all) =>
+						Array.some(all, (g) => g.attempt === 2 && g.state === "Serving"),
+					),
+					Stream.runHead,
+				)
+				const next = yield* h.control(2)
+				yield* Deferred.fail(next.failed, problem)
+				const outcome = yield* Fiber.join(running)
+				assert.equal(
+					outcome._tag,
+					recoveryFails ? "RecoveryFailed" : "Recovered",
+				)
+				const observed12 = yield* Deferred.isDone(next.exited)
+				assert.isTrue(observed12)
+				const observed13 = yield* Ref.get(h.allocations)
+				assert.equal(observed13, 3)
+				if (recoveryFails) {
+					const unavailable = yield* Effect.flip(h.value.read)
+					assert.equal(unavailable._tag, "Unavailable")
+				} else {
+					const restored = yield* h.value.read
+					assert.equal(restored, "old")
+				}
+			}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
+	)
+}
+
+it.effect(
+	"returns Stuck on transport loss without exit evidence and blocks later transitions",
+	() =>
+		Effect.gen(function* () {
+			const entered = yield* Deferred.make<void>()
+			const h = yield* setup((id) =>
+				id === 2
+					? {
+							ready: Deferred.succeed(entered, undefined).pipe(
+								Effect.andThen(Effect.fail(problem)),
+							),
+							noExit: true,
+						}
+					: {},
+			)
+			const running = yield* Effect.forkScoped(h.request())
+			yield* Deferred.await(entered)
+			const pending = yield* h.control(2)
+			yield* Deferred.await(pending.terminating)
+			yield* TestClock.adjust(100)
+			const outcome = yield* Fiber.join(running)
+			assert.equal(outcome._tag, "Stuck")
+			const later = yield* h.request()
+			assert.equal(later._tag, "Aborted")
+			if (later._tag === "Aborted") assert.equal(later.reason, "Stuck")
+			const observed16 = yield* Ref.get(h.allocations)
+			assert.equal(observed16, 2)
+			const next = yield* h.control(2)
+			yield* Deferred.succeed(next.exited, { unit: "unit-2" })
+		}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
+)
+
+it.effect("bounds readiness and preserves the old route", () =>
+	Effect.gen(function* () {
+		const h = yield* setup((id) => (id === 2 ? { ready: Effect.never } : {}))
+		const running = yield* Effect.forkScoped(h.request())
+		yield* TestClock.adjust(100)
+		const outcome = yield* Fiber.join(running)
+		assert.equal(outcome._tag, "Aborted")
+		if (outcome._tag === "Aborted") assert.equal(outcome.reason, "TimedOut")
+		const observed17 = yield* h.value.read
+		assert.equal(observed17, "old")
+	}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
+)
+
+it.effect("the coordinator owns recovery after its caller is cancelled", () =>
+	Effect.gen(function* () {
+		const h = yield* setup()
+		const caller = yield* Effect.forkScoped(h.request({ trial: 50 }))
+		yield* h.fork.generations.pipe(
+			Stream.filter((all) =>
+				Array.some(all, (g) => g.attempt === 2 && g.state === "Serving"),
+			),
+			Stream.runHead,
+		)
+		yield* Fiber.interrupt(caller)
+		const next = yield* h.control(2)
+		yield* Deferred.fail(next.failed, problem)
+		yield* h.fork.generations.pipe(
+			Stream.filter((all) =>
+				Array.some(all, (g) => g.attempt === 3 && g.state === "Serving"),
+			),
+			Stream.runHead,
+		)
+		const observed18 = yield* h.value.read
+		assert.equal(observed18, "old")
+	}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
+)
+
+it.effect("rejects bypasses before updating specs or aliases", () =>
+	Effect.gen(function* () {
+		const h = yield* setup()
+		const observed19 = yield* Effect.flip(h.fork.restart)
+		assert.equal(observed19._tag, "ManagedFork")
+		assert.equal(
+			(yield* Effect.flip(h.fork.update(undefined)))._tag,
+			"ManagedFork",
+		)
+		const other = Plugin.make({ name: "other", apply: () => Effect.void })
+		const replaced = yield* Effect.flip(Graft.replace([[h.definition, other]]))
+		assert.equal(replaced.reason, "ManagedFork")
+		const observed20 = yield* Graft.resolve(h.definition)
+		assert.equal(observed20, h.definition)
+		const observed21 = yield* Ref.get(h.allocations)
+		assert.equal(observed21, 1)
+	}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
+)
+
+it.effect(
+	"returns explicit unsupported and invalid-policy outcomes without allocating",
+	() =>
+		Effect.gen(function* () {
+			const unsupported = yield* Graft.transition({
+				fork: 100,
+				candidate: candidate("new"),
+			})
+			assert.equal(unsupported._tag, "Aborted")
+			const h = yield* setup()
+			const invalid = yield* h.request({ drain: Infinity })
+			assert.equal(invalid._tag, "Aborted")
+			if (invalid._tag === "Aborted")
+				assert.equal(invalid.reason, "InvalidPolicy")
+			const observed22 = yield* Ref.get(h.allocations)
+			assert.equal(observed22, 1)
+		}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
+)
+
+const waitFor = (
+	h: Effect.Success<ReturnType<typeof setup>>,
+	attempt: number,
+	state: Transition.Generation["state"],
+) =>
+	h.fork.generations.pipe(
+		Stream.filter((all) =>
+			Array.some(all, (g) => g.attempt === attempt && g.state === state),
+		),
+		Stream.runHead,
+	)
+
+it.effect(
+	"bounds drain and stopping, then uses exit evidence to finish calls",
+	() =>
+		Effect.gen(function* () {
+			const h = yield* setup((id) =>
+				id === 1 ? { holdRead: true, stop: Effect.never } : {},
+			)
+			const old = yield* h.control(1)
+			const call = yield* Effect.forkScoped(h.value.read)
+			yield* Deferred.await(old.entered)
+			const running = yield* Effect.forkScoped(h.request())
+			yield* waitFor(h, 1, "Draining")
+			yield* TestClock.adjust(200)
+			const outcome = yield* Fiber.join(running)
+			assert.equal(outcome._tag, "Accepted")
+			const ended = yield* Fiber.await(call)
+			assert.isTrue(Exit.isFailure(ended))
+			assert.isTrue(
+				Array.some(
+					outcome.evidence,
+					(e) => e.phase === "Draining" && e.cause !== undefined,
+				),
+			)
+			assert.isTrue(
+				Array.some(
+					outcome.evidence,
+					(e) => e.phase === "Stopping" && e.cause !== undefined,
+				),
+			)
+			assert.isTrue(
+				Array.some(outcome.evidence, (e) => e.termination?.unit === "unit-1"),
+			)
+		}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
+)
+
+it.effect("keeps the coordinator busy across the entire trial window", () =>
+	Effect.gen(function* () {
+		const h = yield* setup()
+		const running = yield* Effect.forkScoped(h.request({ trial: 50 }))
+		yield* waitFor(h, 2, "Serving")
+		const busy = yield* h.request()
+		assert.equal(busy._tag, "Aborted")
+		if (busy._tag === "Aborted") assert.equal(busy.reason, "Busy")
+		yield* TestClock.adjust(50)
+		const accepted = yield* Fiber.join(running)
+		assert.equal(accepted._tag, "Accepted")
+	}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
+)
+
+it.effect(
+	"does not let a stale failure or late readiness change the route",
+	() =>
+		Effect.gen(function* () {
+			const gate = yield* Deferred.make<void>()
+			const entered = yield* Deferred.make<void>()
+			const h = yield* setup((id) =>
+				id === 2
+					? {
+							ready: Deferred.succeed(entered, undefined).pipe(
+								Effect.andThen(Effect.uninterruptible(Deferred.await(gate))),
+							),
+						}
+					: {},
+			)
+			const running = yield* Effect.forkScoped(h.request())
+			yield* Deferred.await(entered)
+			yield* TestClock.adjust(100)
+			const aborted = yield* Fiber.join(running)
+			assert.equal(aborted._tag, "Aborted")
+			const later = yield* h.request()
+			assert.equal(later._tag, "Accepted")
+			const stale = yield* h.control(2)
+			yield* Deferred.fail(stale.failed, problem)
+			yield* Deferred.succeed(gate, undefined)
+			const current = yield* h.value.read
+			assert.equal(current, "new")
+			const all = yield* Stream.runHead(h.fork.generations)
+			assert.deepEqual(
+				Array.map(Option.getOrThrow(all), (g) => g.state),
+				["Terminated", "Terminated", "Serving"],
+			)
+		}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
+)
+
+it.effect(
+	"cancelling a call releases its admission without restarting the consumer",
+	() =>
+		Effect.gen(function* () {
+			const h = yield* setup((id) => ({ holdRead: id === 1 }))
+			const old = yield* h.control(1)
+			const call = yield* Effect.forkScoped(h.value.read)
+			yield* Deferred.await(old.entered)
+			yield* Fiber.interrupt(call)
+			const result = yield* h.request()
+			assert.equal(result._tag, "Accepted")
+			const consumers = yield* Ref.get(h.activations)
+			assert.equal(consumers, 1)
+		}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
+)
+
+it.effect("preserves complete lifecycle failure causes in the outcome", () =>
+	Effect.gen(function* () {
+		const cause = Cause.combine(
+			Cause.fail(problem),
+			Cause.die("lifecycle defect"),
+		)
+		const h = yield* setup((id) =>
+			id === 2 ? { probe: Effect.failCause(cause) } : {},
+		)
+		const outcome = yield* h.request()
+		assert.equal(outcome._tag, "Aborted")
+		const observed = Option.getOrThrow(
+			Array.findFirst(
+				outcome.evidence,
+				(e) => e.phase === "Probing" && e.cause !== undefined,
+			),
+		)
+		assert.isDefined(observed.cause)
+		const reasons = observed.cause?.reasons
+		assert.deepEqual(
+			Array.map(reasons ?? [], (reason) =>
+				reason._tag === "Fail"
+					? reason.error
+					: reason._tag === "Die"
+						? reason.defect
+						: reason.fiberId,
+			),
+			[problem, "lifecycle defect"],
+		)
+	}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
+)
+
+it.effect("does not recover before a failed candidate has exit evidence", () =>
+	Effect.gen(function* () {
+		const h = yield* setup((id) => ({ noExit: id === 2 }))
+		const running = yield* Effect.forkScoped(h.request({ trial: 50 }))
+		yield* waitFor(h, 2, "Serving")
+		const next = yield* h.control(2)
+		yield* Deferred.fail(next.failed, problem)
+		yield* Deferred.await(next.terminating)
+		yield* TestClock.adjust(100)
+		const outcome = yield* Fiber.join(running)
+		assert.equal(outcome._tag, "Stuck")
+		const allocated = yield* Ref.get(h.allocations)
+		assert.equal(allocated, 2)
+		yield* Deferred.succeed(next.exited, { unit: "unit-2" })
+	}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
+)
+
+it.effect("rejects replacement of an ancestor before changing any alias", () =>
+	Effect.gen(function* () {
+		const ready =
+			yield* Deferred.make<Effect.Success<ReturnType<typeof setup>>>()
+		const parent = Plugin.make({
+			name: "parent",
+			apply: () =>
+				setup().pipe(
+					Effect.flatMap((h) => Deferred.succeed(ready, h)),
+					Effect.asVoid,
+				),
+		})
+		const fork = yield* Graft.plugin(parent)
+		yield* fork.await
+		const h = yield* Deferred.await(ready)
+		const restarted = yield* Effect.flip(fork.restart)
+		assert.equal(restarted.fork, h.fork.id)
+		const changed = yield* Effect.flip(
+			Graft.replace([
+				[
+					parent,
+					Plugin.make({ name: "replacement", apply: () => Effect.void }),
+				],
+			]),
+		)
+		assert.equal(changed.reason, "ManagedFork")
+		const resolved = yield* Graft.resolve(parent)
+		assert.equal(resolved, parent)
+	}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
+)
+
+it.effect("guards external writes before running them", () =>
+	Effect.gen(function* () {
+		const h = yield* setup()
+		const writes = yield* Ref.make(0)
+		const failure = yield* Effect.flip(
+			Transition.withUnmanaged(
+				Ref.update(writes, (n) => n + 1),
+				h.fork.id,
+			),
+		)
+		assert.equal(failure._tag, "ManagedFork")
+		const count = yield* Ref.get(writes)
+		assert.equal(count, 0)
+	}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
+)
+
+it.effect("terminates the current unit when the owning fork is disposed", () =>
+	Effect.gen(function* () {
+		const h = yield* setup()
+		const current = yield* h.control(1)
+		yield* h.fork.dispose
+		const exited = yield* Deferred.isDone(current.exited)
+		assert.isTrue(exited)
+		const unavailable = yield* Effect.flip(h.value.read)
+		assert.equal(unavailable._tag, "Unavailable")
+	}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
+)
+
+it.effect(
+	"recovers when the candidate fails while the old unit is stopping",
+	() =>
+		Effect.gen(function* () {
+			const release = yield* Deferred.make<void>()
+			const h = yield* setup((id) =>
+				id === 1 ? { stop: Deferred.await(release) } : {},
+			)
+			const old = yield* h.control(1)
+			const running = yield* Effect.forkScoped(h.request())
+			yield* Deferred.await(old.stopped)
+			const next = yield* h.control(2)
+			yield* Deferred.fail(next.failed, problem)
+			yield* Deferred.succeed(release, undefined)
+			const result = yield* Fiber.join(running)
+			assert.equal(result._tag, "Recovered")
+			const current = yield* h.value.read
+			assert.equal(current, "old")
+		}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
+)
+
+for (const stage of [
+	"allocate",
+	"start",
+	"describe",
+	"serve",
+	"ready",
+	"probe",
+] as const) {
+	it.effect(`bounds candidate ${stage} without disturbing the old route`, () =>
+		Effect.gen(function* () {
+			const entered = yield* Deferred.make<void>()
+			const blocked = Deferred.succeed(entered, undefined).pipe(
+				Effect.andThen(Effect.never),
+			)
+			const h = yield* setup((id) => (id === 2 ? { [stage]: blocked } : {}))
+			const running = yield* Effect.forkScoped(h.request())
+			yield* Deferred.await(entered)
+			yield* TestClock.adjust(100)
+			const outcome = yield* Fiber.join(running)
+			assert.equal(outcome._tag, "Aborted")
+			if (outcome._tag === "Aborted") assert.equal(outcome.reason, "TimedOut")
+			const value = yield* h.value.read
+			assert.equal(value, "old")
+		}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
+	)
+}
+
+it.effect("rejects readiness without the facade's required service", () =>
+	Effect.gen(function* () {
+		const h = yield* setup((id) => ({ missingServices: id === 2 }))
+		const outcome = yield* h.request()
+		assert.equal(outcome._tag, "Aborted")
+		if (outcome._tag === "Aborted")
+			assert.equal(outcome.reason, "IncompatibleContract")
+		const current = yield* h.value.read
+		assert.equal(current, "old")
+	}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
+)
+
+it.effect(
+	"reports Stuck when the old unit cannot be confirmed terminated",
+	() =>
+		Effect.gen(function* () {
+			const h = yield* setup((id) => ({ noExit: id === 1 }))
+			const old = yield* h.control(1)
+			const running = yield* Effect.forkScoped(h.request())
+			yield* Deferred.await(old.terminating)
+			yield* TestClock.adjust(100)
+			const outcome = yield* Fiber.join(running)
+			assert.equal(outcome._tag, "Stuck")
+			const unavailable = yield* Effect.flip(h.value.read)
+			assert.equal(unavailable._tag, "Unavailable")
+			yield* Deferred.succeed(old.exited, { unit: "unit-1" })
+		}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
+)
+
+it.effect(
+	"rejects driver registration while an external write holds admission",
+	() =>
+		Effect.gen(function* () {
+			const entered = yield* Deferred.make<void>()
+			const release = yield* Deferred.make<void>()
+			const writing = yield* Effect.forkScoped(
+				Transition.withUnmanaged(
+					Deferred.succeed(entered, undefined).pipe(
+						Effect.andThen(Deferred.await(release)),
+					),
+				),
+			)
+			yield* Deferred.await(entered)
+			const rejected = yield* Effect.exit(setup())
+			assert.isTrue(Exit.isFailure(rejected))
+			yield* Deferred.succeed(release, undefined)
+			yield* Fiber.join(writing)
+		}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
+)
+
+it.effect(
+	"aborts on observed candidate exit even when the failure channel stays silent",
+	() =>
+		Effect.gen(function* () {
+			const h = yield* setup((id) => ({ exitAtReadiness: id === 2 }))
+			const result = yield* h.request()
+			assert.equal(result._tag, "Aborted")
+			const current = yield* h.value.read
+			assert.equal(current, "old")
+		}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
+)
+
+it.effect(
+	"recovers instead of claiming an abort preserved a failed old attempt",
+	() =>
+		Effect.gen(function* () {
+			const entered = yield* Deferred.make<void>()
+			const release = yield* Deferred.make<void>()
+			const h = yield* setup((id) =>
+				id === 2
+					? {
+							ready: Deferred.succeed(entered, undefined).pipe(
+								Effect.andThen(Deferred.await(release)),
+								Effect.andThen(Effect.fail(problem)),
+							),
+						}
+					: {},
+			)
+			const old = yield* h.control(1)
+			const running = yield* Effect.forkScoped(h.request())
+			yield* Deferred.await(entered)
+			yield* Deferred.fail(old.failed, problem)
+			yield* Deferred.succeed(release, undefined)
+			const result = yield* Fiber.join(running)
+			assert.equal(result._tag, "Recovered")
+			const current = yield* h.value.read
+			assert.equal(current, "old")
+			const count = yield* Ref.get(h.allocations)
+			assert.equal(count, 3)
+		}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
+)

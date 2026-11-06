@@ -41,6 +41,10 @@ const outcome = await Effect.runPromise(
 outcome // => ["Replaced", Option.some(["app/greeterV2", "app/greeterV2"])]
 ```
 
+`Graft.replace`
+会在更改别名或配置描述之前拒绝受管理 fork 及其祖先。`ManagedFork`
+冲突和协调器结局见[执行转换](../transitions/)。
+
 ## 类型规则
 
 TypeScript 会逐对独立检查：

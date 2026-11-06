@@ -10,9 +10,10 @@ import {
 import { SecureRandom } from "effect/crypto"
 import { ChildProcessSpawner } from "effect/process"
 
-import { Plugin } from "@graftland/graft"
+import { Plugin, type Transition } from "@graftland/graft"
 import { ModuleResolver } from "@graftland/loader"
 
+import type * as ArtifactModule from "./Artifact"
 import * as Contract from "./Contract"
 import { MissingInstance, RemoteError, RemoteWithdrawn } from "./Errors"
 import * as Credential from "./host/credentials"
@@ -136,3 +137,23 @@ export const plugin = <
 			}).pipe(Effect.mapError((error) => publicError(contract.error, error))),
 	})
 export { default } from "./host/index"
+
+/** Deployment data for a captured direct-unit candidate. No Remote transition driver is available yet. */
+export interface CandidateOptions {
+	readonly artifact: ArtifactModule.Artifact
+	readonly contractModule: string
+	readonly target:
+		| { readonly _tag: "Worker"; readonly execArgv?: ReadonlyArray<string> }
+		| {
+				readonly _tag: "Local"
+				readonly command?: readonly [string, ...string[]]
+		  }
+	readonly input: Schema.Json
+}
+
+/** Constructs an inert candidate; capture and verification remain explicit Effects. */
+export const candidate = (options: CandidateOptions): Transition.Candidate => ({
+	driver: "@graftland/plugin-remote/direct",
+	identity: `sha256-v${options.artifact.identity.version}:${options.artifact.identity.digest}:${options.artifact.identity.entry}`,
+	deployment: options,
+})

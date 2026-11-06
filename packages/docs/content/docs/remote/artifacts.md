@@ -52,6 +52,9 @@ verification. Run verification again before a later launch.
 | Dependencies | Files inside the directory are captured, including real `node_modules` directories. Imports outside it are not captured or pinned. Bundle implementation dependencies or keep the external runtime installation fixed. |
 | Trust        | This is content identity, not a sandbox. The store and runtime installation must be controlled by the operator.                                                                                                        |
 
+External runtime dependencies are not captured or pinned. They remain part of
+the operator-managed runtime installation.
+
 Do not modify captured directories. Verification detects changed content; it
 does not repair it. Workspace layouts with symlinked dependencies must be built
 into a supported package directory first. Code shipping, dependency installation

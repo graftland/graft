@@ -91,11 +91,16 @@ export interface LocalSnapshot<out E = unknown> {
 export interface ForkStatus {
 	readonly snapshot: TxSubscriptionRef.TxSubscriptionRef<LocalSnapshot>
 	readonly probes: import("./probes").Registry
+	readonly managed: TxRef.TxRef<Option.Option<import("./transition").Managed>>
+	readonly generations: TxSubscriptionRef.TxSubscriptionRef<
+		ReadonlyArray<import("../Transition").Generation>
+	>
 	readonly loading: TxRef.TxRef<number>
 	readonly parent: ForkStatus | undefined
 }
 
 export interface ForkEntry<out E = unknown> {
+	readonly scope: Scope.Scope
 	readonly status: ForkStatus
 	readonly id: number
 	readonly node: GraphNode
@@ -136,6 +141,9 @@ export interface Handler<
 }
 
 export interface Runtime {
+	readonly mutations: TxRef.TxRef<number>
+	readonly transitionBusy: TxRef.TxRef<boolean>
+	readonly transitionStuck: TxRef.TxRef<boolean>
 	/** Services from the environment `Graft.layer` was built in; they satisfy `inject` too. */
 	readonly ambient: Context.Context<never>
 	readonly slots: TxRef.TxRef<HashMap.HashMap<ServiceKey, Slot>>

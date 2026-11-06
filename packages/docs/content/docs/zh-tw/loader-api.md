@@ -58,6 +58,8 @@ entries[0]?.disabled // => true
 entries[1]?.config // => { every: "5 minutes" }
 ```
 
+樹中存在受管理 fork 時，Loader 在呼叫儲存修改之前拒絕編輯、重新整理和重試。繞過保護見[執行轉換](../transitions/)。
+
 ## 透過程式碼編輯設定項目
 
 | 成員                      | 作用                                                                     |

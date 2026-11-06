@@ -60,6 +60,10 @@ entries[0]?.disabled // => true
 entries[1]?.config // => { every: "5 minutes" }
 ```
 
+For a tree containing a managed fork, Loader rejects edits, refreshes and retry
+before invoking store mutations. See [Execution transitions](../transitions/)
+for bypass protection.
+
 ## Edit entries from code
 
 | Member                    | What it does                                                                                   |

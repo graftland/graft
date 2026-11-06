@@ -55,7 +55,9 @@ import {
 import { RuntimeContext } from "./internal/runtimeContext"
 import { ownedScope } from "./internal/scope"
 import * as Slots from "./internal/slots"
+import * as Coordinator from "./internal/transition"
 import type { ErrorOf, InputOf, Plugin } from "./Plugin"
+import type * as Transition from "./Transition"
 
 /** Identifies the current runtime. Use the module's operations to access it; its state is private. */
 export class Graft extends Context.Service<Graft, unknown>()(GraftKey) {}
@@ -158,6 +160,9 @@ const runtimeLayer = Layer.effect(
 	Effect.gen(function* () {
 		const ambient = yield* Effect.context<never>()
 		const runtime: Runtime = {
+			mutations: yield* TxRef.make(0),
+			transitionBusy: yield* TxRef.make(false),
+			transitionStuck: yield* TxRef.make(false),
 			ambient,
 			slots: yield* TxRef.make(HashMap.empty<ServiceKey, Slot>()),
 			forks: yield* TxSubscriptionRef.make(HashMap.empty<number, ForkEntry>()),
@@ -260,14 +265,21 @@ const isolation =
  * updated in place, or begun restarting. A later change also counts.
  */
 const accept = Effect.fnUntraced(function* (
+	runtime: Runtime,
+	id: number,
 	status: ForkStatusHandle,
 	spec: TxRef.TxRef<Spec>,
 	f: (current: Spec) => Spec,
 ) {
-	const next = yield* TxRef.modify(spec, (current) => {
-		const next = f(current)
-		return [next, next]
-	})
+	const next = yield* Effect.tx(
+		Effect.gen(function* () {
+			yield* Coordinator.check(runtime, id)
+			return yield* TxRef.modify(spec, (current) => {
+				const next = f(current)
+				return [next, next]
+			})
+		}),
+	)
 	yield* Effect.tx(
 		Effect.gen(function* () {
 			const snapshot = yield* TxSubscriptionRef.get(status.snapshot)
@@ -280,6 +292,7 @@ const accept = Effect.fnUntraced(function* (
 })
 
 const makeFork = <I, E>(
+	runtime: Runtime,
 	status: ForkStatusHandle,
 	id: number,
 	spec: TxRef.TxRef<Spec>,
@@ -288,13 +301,19 @@ const makeFork = <I, E>(
 	const state = TxSubscriptionRef.changesStream(status.snapshot).pipe(
 		// The definition's error bound is retained under compatible replacements.
 		Stream.map(
-			(snapshot) => (snapshot as LocalSnapshot<E | Schema.SchemaError>).state,
+			(snapshot) =>
+				(
+					snapshot as LocalSnapshot<
+						E | Schema.SchemaError | Transition.ManagedFork
+					>
+				).state,
 		),
 		Stream.changes,
 		Stream.takeUntil(ForkState.$is("Disposed")),
 	)
 	return {
 		id,
+		generations: TxSubscriptionRef.changesStream(status.generations),
 		probes: Probes.names(status.probes),
 		probe: (name) => Probes.run(status.probes, name),
 		state,
@@ -309,8 +328,8 @@ const makeFork = <I, E>(
 		),
 		stable: ForkStatus.stable(status),
 		update: (input) =>
-			accept(status, spec, (current) => ({ ...current, input })),
-		restart: accept(status, spec, (current) => ({
+			accept(runtime, id, status, spec, (current) => ({ ...current, input })),
+		restart: accept(runtime, id, status, spec, (current) => ({
 			...current,
 			revision: current.revision + 1,
 		})),
@@ -372,6 +391,7 @@ export const plugin: <P extends Plugin>(
 								initialSpec,
 							)
 							const entry: ForkEntry = {
+								scope: forkScope,
 								id,
 								node,
 								status,
@@ -505,6 +525,7 @@ export const plugin: <P extends Plugin>(
 						}),
 				).pipe(Scope.provide(forkScope))
 				return makeFork<InputOf<P>, ErrorOf<P>>(
+					runtime,
 					status,
 					id,
 					spec,
@@ -638,3 +659,9 @@ export const forks: Stream.Stream<
 export const logs: Stream.Stream<LogEntry, never, Graft> = Stream.unwrap(
 	Effect.map(RuntimeContext, ({ runtime }) => Stream.fromPubSub(runtime.logs)),
 )
+
+/** Runs one coordinator-owned transition. Unsupported targets return Aborted. */
+export const transition: (
+	request: Transition.Request,
+) => Effect.Effect<Transition.Outcome, never, Graft> = (request) =>
+	Coordinator.transition(request)

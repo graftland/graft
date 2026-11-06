@@ -85,7 +85,13 @@ export default defineConfig({
 				{
 					label: "Structure",
 					translations: { "zh-CN": "组织与变更", "zh-TW": "組織與變更" },
-					items: ["lifecycle", "isolation", "intercepts", "replace"],
+					items: [
+						"lifecycle",
+						"isolation",
+						"intercepts",
+						"replace",
+						"transitions",
+					],
 				},
 				{
 					label: "Applications",

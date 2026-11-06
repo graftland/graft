@@ -44,6 +44,10 @@ const outcome = await Effect.runPromise(
 outcome // => ["Replaced", Option.some(["app/greeterV2", "app/greeterV2"])]
 ```
 
+`Graft.replace` rejects managed forks and their ancestors before changing
+aliases or specs. See [Execution transitions](../transitions/) for the
+`ManagedFork` conflict and coordinator outcomes.
+
 ## Type rules
 
 TypeScript checks each pair on its own:

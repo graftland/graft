@@ -25,7 +25,7 @@ import {
 	type PlatformError,
 } from "effect"
 
-import { Graft, Plugin, type Fork } from "@graftland/graft"
+import { Graft, Plugin, Transition, type Fork } from "@graftland/graft"
 
 import { Entry, type NewEntry } from "./Entry"
 import { Group } from "./Group"
@@ -55,6 +55,7 @@ export type EditError =
 	| PlatformError.PlatformError
 	| StoreError
 	| LoaderClosed
+	| Transition.ManagedFork
 
 export class LoaderClosed extends Schema.TaggedError<
 	LoaderClosed,
@@ -76,7 +77,7 @@ export class Loader extends Context.Service<
 		 * rereads its environment; ordinary edits only reconcile changed entries.
 		 * Returns after publishing the target; use ready to await reconciliation.
 		 */
-		readonly retry: Effect.Effect<void>
+		readonly retry: Effect.Effect<void, Transition.ManagedFork>
 		/**
 		 * Waits for the current target and every descendant, including module resolution,
 		 * to leave Loading, for discovered entry-list ids to finish persistence,
@@ -138,6 +139,7 @@ export const newId = Effect.map(Random.nextIntBetween(0, 0xffffffff), (n) =>
 
 /** Runs the entries of a store under a root group and publishes the `Loader` service. */
 export const start = Effect.fnUntraced(function* (store: Store) {
+	const graft = yield* Graft.Graft
 	const initial = yield* Effect.fromResult(validate(store.initial))
 	const state = yield* SubscriptionRef.make({
 		entries: initial,
@@ -210,10 +212,13 @@ export const start = Effect.fnUntraced(function* (store: Store) {
 				lock,
 				1,
 			)(
-				Effect.flatMap(
-					Effect.suspend(() => store.apply(op)),
-					publish,
-				),
+				Transition.withUnmanaged(
+					Effect.flatMap(
+						Effect.suspend(() => store.apply(op)),
+						publish,
+					),
+					root.id,
+				).pipe(Effect.provideService(Graft.Graft, graft)),
 			).pipe(
 				Effect.onExit((exit) => Deferred.done(reply, exit)),
 				Effect.catchCause((cause) =>
@@ -257,10 +262,15 @@ export const start = Effect.fnUntraced(function* (store: Store) {
 			lock,
 			1,
 		)(
-			operation.pipe(
-				Effect.flatMap(
-					Option.match({ onNone: () => Effect.void, onSome: publish }),
+			Transition.withUnmanaged(
+				operation.pipe(
+					Effect.flatMap(
+						Option.match({ onNone: () => Effect.void, onSome: publish }),
+					),
 				),
+				root.id,
+			).pipe(
+				Effect.provideService(Graft.Graft, graft),
 				Effect.catchCause((cause) =>
 					Effect.logError("Refreshing loader entries failed", cause),
 				),
@@ -354,11 +364,14 @@ export const start = Effect.fnUntraced(function* (store: Store) {
 			lock,
 			1,
 		)(
-			SubscriptionRef.update(state, (current) => ({
-				...current,
-				version: current.version + 1,
-				epoch: nextEpoch(),
-			})),
+			Transition.withUnmanaged(
+				SubscriptionRef.update(state, (current) => ({
+					...current,
+					version: current.version + 1,
+					epoch: nextEpoch(),
+				})),
+				root.id,
+			).pipe(Effect.provideService(Graft.Graft, graft)),
 		),
 		ready,
 		create: Effect.fnUntraced(function* (entry, options) {

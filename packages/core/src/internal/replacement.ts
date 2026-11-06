@@ -20,6 +20,7 @@ import {
 import type { Plugin } from "../Plugin"
 import * as Aliases from "./aliases"
 import type { ForkEntry, Runtime, Spec } from "./runtime"
+import { check } from "./transition"
 
 /** The requested identities cannot be represented by the runtime's flat aliases. */
 export class ReplacementConflict extends Schema.TaggedError<
@@ -27,6 +28,7 @@ export class ReplacementConflict extends Schema.TaggedError<
 	{ readonly brand: unique symbol }
 >()("ReplacementConflict", {
 	indices: Schema.Array(Schema.Int),
+	reason: Schema.optionalKey(Schema.Literal("ManagedFork")),
 }) {}
 
 /** A fork failed during replacement or recovery, or a replacement did not settle in time. */
@@ -89,6 +91,26 @@ interface Swapped {
 const swap = (runtime: Runtime, pairs: ReadonlyArray<Pair>) =>
 	Effect.tx(
 		Effect.gen(function* () {
+			const before = yield* TxSubscriptionRef.get(runtime.forks)
+			for (const entry of HashMap.values(before)) {
+				const spec = yield* TxRef.get(entry.spec)
+				if (
+					Array.some(
+						pairs,
+						([from, to]) =>
+							from !== to && (from === spec.plugin || from === spec.requested),
+					)
+				) {
+					yield* check(runtime, entry.id).pipe(
+						Effect.mapError(() =>
+							ReplacementConflict.make({
+								indices: Array.map(pairs, (_, i) => i),
+								reason: "ManagedFork",
+							}),
+						),
+					)
+				}
+			}
 			const { conflicts, undo } = yield* Aliases.replace(runtime.aliases, pairs)
 			if (conflicts.length > 0)
 				return yield* ReplacementConflict.make({ indices: conflicts })

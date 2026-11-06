@@ -19,7 +19,7 @@ import {
 } from "effect"
 import { NodeServices } from "@effect/platform-node"
 
-import { Graft, Plugin } from "@graftland/graft"
+import { Graft, Plugin, type Transition } from "@graftland/graft"
 import * as Hmr from "@graftland/hmr"
 import {
 	Entry,
@@ -69,6 +69,7 @@ export const run = (
 	void,
 	| ApplicationError
 	| Graft.ServiceConflict
+	| Transition.ManagedFork
 	| PlatformError.BadArgument
 	| PlatformError.PlatformError
 	| Schema.SchemaError

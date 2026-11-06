@@ -24,7 +24,7 @@ import {
 	type Config,
 } from "effect"
 
-import { Fork, Graft, Plugin } from "@graftland/graft"
+import { Fork, Graft, Plugin, Transition } from "@graftland/graft"
 
 import {
 	CurrentId,
@@ -64,7 +64,7 @@ type Request =
 	| {
 			readonly _tag: "Reconcile"
 			readonly entries: ReadonlyArray<Entry>
-			readonly reply: Deferred.Deferred<void>
+			readonly reply: Deferred.Deferred<void, Transition.ManagedFork>
 	  }
 	| {
 			readonly _tag: "Refresh"
@@ -72,7 +72,7 @@ type Request =
 			readonly identity: symbol
 			readonly generation: number
 			readonly source: Fork.Fork
-			readonly reply: Deferred.Deferred<void>
+			readonly reply: Deferred.Deferred<void, Transition.ManagedFork>
 	  }
 
 /** Everything about an entry except its configuration: changing any of it means loading it again. */
@@ -85,7 +85,10 @@ const shape = (entry: Entry) => [
 ]
 
 /** Waiters observe state only; the group executor owns every submitted update. */
-const onceActive = (fork: Fork.Fork, request: Effect.Effect<void>) =>
+const onceActive = (
+	fork: Fork.Fork,
+	request: Effect.Effect<void, Transition.ManagedFork>,
+) =>
 	fork.state.pipe(
 		Stream.filter((state) => state._tag !== "Loading"),
 		Stream.runHead,
@@ -101,7 +104,7 @@ const updateTarget = Effect.fnUntraced(function* (
 	fork: Fork.Fork,
 	initial: unknown,
 	forward: boolean,
-	refresh: (source: Fork.Fork) => Effect.Effect<void>,
+	refresh: (source: Fork.Fork) => Effect.Effect<void, Transition.ManagedFork>,
 ) {
 	const previous = yield* Ref.make(initial)
 	return Effect.fnUntraced(function* (next: unknown) {
@@ -133,7 +136,7 @@ const waitingFor = (
 	keys: ReadonlyArray<string>,
 	plugin: Plugin.Plugin,
 	group: boolean,
-	refresh: (source: Fork.Fork) => Effect.Effect<void>,
+	refresh: (source: Fork.Fork) => Effect.Effect<void, Transition.ManagedFork>,
 	observe: (
 		fork: Fork.Fork,
 	) => Effect.Effect<void, never, Graft.Graft | Scope.Scope>,
@@ -299,7 +302,7 @@ const definition = Plugin.make({
 			const current = yield* Ref.get(children)
 			const child = HashMap.get(current, id)
 			if (Option.isNone(child) || child.value.identity !== identity) return
-			const reply = yield* Deferred.make<void>()
+			const reply = yield* Deferred.make<void, Transition.ManagedFork>()
 			const request: Request = {
 				_tag: "Refresh",
 				id,
@@ -607,7 +610,7 @@ const definition = Plugin.make({
 			Effect.forkScoped,
 		)
 		const update = Effect.fnUntraced(function* (entries: ReadonlyArray<Entry>) {
-			const reply = yield* Deferred.make<void>()
+			const reply = yield* Deferred.make<void, Transition.ManagedFork>()
 			yield* submit({
 				_tag: "Reconcile",
 				entries: withEpoch(copyGroup(entries), epochOf(entries) ?? nextEpoch()),

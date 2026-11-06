@@ -6,6 +6,11 @@ description: fork 的成员，以及 update、restart 和 dispose 的行为。
 `Graft.plugin`
 返回一个 fork 句柄。本页是它各成员的参考。关于状态，参见[生命周期](../lifecycle/)。
 
+`generations`
+以流的形式观察受管理 fork 的执行单元代；未受管理的 fork 返回空列表。`update` 和
+`restart` 在更改受管理 fork 或其祖先之前以 `ManagedFork`
+失败。见[执行转换](../transitions/)。
+
 ## 成员
 
 | 成员            | 作用                                                                                                        |

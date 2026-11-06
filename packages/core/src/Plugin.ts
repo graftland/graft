@@ -105,7 +105,11 @@ export type Requirements<Inject extends ReadonlyArray<Dependency>> =
  */
 export type Update<Config, E = never, R = never> = (
 	next: Config,
-) => Effect.Effect<boolean, never, Graft | Scope.Scope | R | Tasks<E>>
+) => Effect.Effect<
+	boolean,
+	import("./Transition").ManagedFork,
+	Graft | Scope.Scope | R | Tasks<E>
+>
 
 /** Starts an activation-owned worker. Its unhandled errors belong to the plugin, not the launch operation. */
 export const fork: <A, E, R>(
