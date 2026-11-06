@@ -1,0 +1,97 @@
+---
+title: 應用程式發佈
+description: 在一個應用程式中建置、檢查、套用和回復不可變的受管部署。
+---
+
+**應用程式發佈**是由 `@graftland/plugin-release` 管理的內容定址目錄。其
+`Releases`
+服務透過[執行切換](../transitions/)更新具名的受管 Worker 和子行程整合。
+
+- 所有變更項目都傳回 `Accepted` 後，目前發佈 id 才會前進。
+- 規劃時解碼設定，套用時執行探針和試運行。
+- 啟動時選擇日誌中最後一次完整接受的發佈。
+
+## 版本化內容
+
+| 內容         | 發佈中記錄的內容                                                                                       |
+| ------------ | ------------------------------------------------------------------------------------------------------ |
+| 實作套件     | 完整的擷取目錄，透過 [Artifact](../remote/artifacts/) 驗證。                                           |
+| 設定         | 正規化的 `graft.yml`：項目 id、編碼後的輸入、契約模組、直接部署位置和探針名稱。                        |
+| 發佈中繼資料 | `manifests.json` 中產生的清單和以套件為基礎的來源記錄。來源記錄不等於相容性。                          |
+| 發佈清單     | `release.json`：項目、能力和憑證參照、撤銷清單。                                                       |
+| 不包含       | 業務資料、解析後的秘密值、宿主外掛、宿主切換策略和外部執行階段相依套件。外部相依套件不會被擷取或固定。 |
+
+將儲存目錄放在應用程式的相依解析樹中。套件檔案和設定字面值不得包含秘密值：建置器無法識別任意秘密字面值。使用
+`!env NAME` 或
+`{ "$env": "NAME" }`；發佈只儲存名稱，在記憶體中解析值。環境參照會自動以
+`env:NAME`
+加入參照清單。其他能力和憑證參照必須明確列出。回復會重新解析參照，不會還原舊秘密值。
+
+## 建置發佈
+
+發佈來源使用 Loader 項目 id，但只接受受管 Remote 項目。套件目錄相對於來源檔案。
+`entry`
+選擇套件的公開匯出；套件需要[發佈清單](../ecosystem/manifest/)中由作者維護的欄位。
+
+```yaml title="forecast-release.yml"
+- id: forecasts
+  name: "@graftland/plugin-remote"
+  config:
+    package: ./packages/forecasts
+    entry: .
+    contract: "@example/forecast-contract"
+    target: { _tag: Worker }
+    config:
+      release: unused
+      started: unused
+      prefix: updated
+      credential: !env FORECAST_TOKEN
+    probes: [health]
+```
+
+先用匯出的 `build` effect 建立首個發佈，再在宿主中安裝
+`plugin({ store, initial, host, socket })`。`host`
+提供實際的 Node、Effect、Graft 版本、服務來源記錄和部署能力。預設 Loader 入口接受相同設定，但不含
+`policy`；嵌入式宿主可向 `plugin`
+傳入切換策略。試運行預設兩秒，其餘預算採用核心預設值。外掛擁有這些整合，不要再透過 Loader 重複載入它們。
+
+## 規劃和套用
+
+將 `@graftland/plugin-release/cli`
+啟用為命令外掛。所有命令都連線至執行中應用程式的 Unix
+socket；建置路徑也在該處解析。
+
+```sh
+graft release build /app/forecast-release.yml --socket /app/control.sock --json
+graft release plan TARGET --socket /app/control.sock --json
+graft release apply TARGET --expected CURRENT --socket /app/control.sock --json
+graft release rollback --expected CURRENT --socket /app/control.sock --json
+graft release history --socket /app/control.sock --json
+graft release status --socket /app/control.sock --json
+```
+
+| 操作     | 規則                                                                                                                          |
+| -------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `plan`   | 驗證位元組，檢查服務綁定、來源和執行階段要求，解碼設定。列出程式碼、設定、新增和移除變更。                                    |
+| `apply`  | 在發佈鎖內檢查預期的目前 id。僅設定變更也會以新輸入切換同一產物。                                                             |
+| 失敗     | `Aborted` 或 `Recovered` 保留先前的 id。較早接受的項目依反向順序透過新的切換補償。                                            |
+| 補償失敗 | 將部署標記為 `Degraded`，重新啟動前拒絕後續套用。`RecoveryFailed` 和 `Stuck` 不會被回報為成功回復。                           |
+| 邊界     | 拒絕線上新增、移除、契約或部署位置變更，以及非受管編輯。新的項目集合需要另外初始化儲存並重新啟動應用程式。                    |
+| 並行     | 一個行程擁有一個儲存。已接納的套用操作屬於外掛作用域，不屬於請求連線。對這些項目只使用 Releases；觀察到外部切換會使規劃無效。 |
+
+多項目變更依序進行，不保證整組原子可見。最後接受的 id 與 `Applying` 或
+`Degraded`
+狀態同時顯示。結束代碼零表示命令成功；拒絕、不成功的切換結果和傳輸失敗傳回非零。`--json`
+輸出結構化回覆。
+
+## 日誌和撤銷
+
+同步並原子替換的日誌記錄意圖、安全的切換結果摘要、目前和先前的 id，以及啟動選擇。中斷的意圖不會繼續執行：啟動從最後接受的發佈建立單元。損毀時拒絕啟動。一起保護日誌和發佈儲存。原始 cause 和解碼後的輸入不會寫入磁碟或控制回覆；行程內呼叫者保留完整 cause。損毀的日誌不會自動修復。
+
+建置會繼承已提交的 `revocations`。`--revoke credential:old` 新增撤銷；
+`--reference credential:old`
+宣告使用中的參照。套用發佈（包括回復）時，如果其參照與累計撤銷相交就會失敗。`--override-revocations`
+明確授權還原，並記錄於日誌；它不會刪除撤銷記錄。撤銷控制發佈選擇，不控制外部憑證簽發方。
+
+socket 目錄僅允許應用程式擁有者存取；socket 權限為
+`0600`。宿主閘道放在發佈外掛子樹之外。Graft 負責一個應用程式內的切換；跨執行個體發佈使用現有部署工具。外部步驟和不可逆點不屬於這一發佈層。

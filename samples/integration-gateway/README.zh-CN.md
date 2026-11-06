@@ -62,3 +62,20 @@ devenv shell -- pnpm --filter @graftland/sample-integration-gateway test
 - 被拒绝的 Loader 编辑不改变文件和已接受目标。
 
 工作区测试套件运行同一套已安装消费者测试。
+
+## 配置发布
+
+`src/release-app.ts` 通过公开的发布插件运行同一个 WebSocket 网关。打包测试为
+`release-forecast`
+构建不可变发布，检查正常配置、拒绝解码错误、因探针失败中止、回滚，并检查撤销和显式覆盖。测试断言只登录一次、会话相同、消费者激活次数不变。第二个集成验证后续条目失败时的补偿；CLI 测试验证 Unix
+socket。
+
+使用同一个命令运行证明：
+
+```sh
+node scripts/packed-gateway.mjs test
+```
+
+发布源在各托管条目下使用 `package`、`entry`、`contract`、`target`、`config` 和
+`probes`。`Releases.build` 保存编码后的输入；秘密使用 `!env` 或 `$env`
+引用。外部依赖不会被捕获或固定。

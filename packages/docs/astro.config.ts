@@ -91,6 +91,7 @@ export default defineConfig({
 						"intercepts",
 						"replace",
 						"transitions",
+						"application-releases",
 					],
 				},
 				{

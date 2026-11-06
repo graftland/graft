@@ -318,3 +318,8 @@ const environment = Layer.mergeAll(
 报告成功前记录结果和退出证据。`Recovered` 表示旧制品的新单元正在服务；
 `RecoveryFailed` 使集成不可用，但宿主仍可保留会话。`Stuck`
 需要操作人员介入。另行保存下次启动宿主时需要的制品：transition 不持久化 Loader 配置。
+
+## 版本化托管部署
+
+使用[应用发布](../../application-releases/)一起持久化托管集成的产物和编码后的配置。将网关放在发布插件子树之外。保护存储和 Unix
+socket 目录，并让一个应用独占存储。崩溃后日志选择最后完整接受的发布。跨实例发布仍由现有部署工具负责。

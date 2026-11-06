@@ -351,3 +351,12 @@ a fresh previous artifact is serving; `RecoveryFailed` leaves the integration
 unavailable while the host can keep its session. `Stuck` requires operator
 intervention. Store the intended artifact for the next host start separately:
 transitions do not persist Loader configuration.
+
+## Version managed deployments
+
+Use [application releases](../../application-releases/) to persist a managed
+integration's artifacts and encoded configuration together. Keep the gateway
+outside the release plugin's subtree. Protect its store and Unix socket
+directory, and give the store one application owner. The journal selects the
+last fully accepted release after a crash. Fleet rollout remains in your
+deployment tooling.

@@ -1,0 +1,567 @@
+import {
+	Array,
+	Cause,
+	Effect,
+	Fiber,
+	FileSystem,
+	Option,
+	Path,
+	Ref,
+	Schema,
+	Semaphore,
+	Stream,
+} from "effect"
+
+import { Graft, Manifest, Transition } from "@graftland/graft"
+import { ModuleResolver } from "@graftland/loader"
+import * as Remote from "@graftland/plugin-remote"
+
+import {
+	Journal,
+	ReleaseError,
+	Releases,
+	summarize,
+	type Applied,
+	type Apply,
+	type Change,
+	type Diagnostic,
+	type Entry,
+	type Options,
+} from "../Model"
+import {
+	build,
+	durable,
+	equal,
+	failure,
+	load,
+	protect,
+	read,
+	resolveInput,
+} from "./storage"
+
+export const make = Effect.fnUntraced(function* (options: Options) {
+	const fs = yield* FileSystem.FileSystem
+	const path = yield* Path.Path
+	const resolver = yield* ModuleResolver.ModuleResolver
+	const scope = yield* Effect.scope
+	const environment = yield* Effect.context<
+		| Effect.Services<ReturnType<typeof build>>
+		| Graft.Graft
+		| import("effect").Scope.Scope
+	>()
+	const store = path.resolve(options.store)
+	yield* fs.makeDirectory(store, { recursive: true })
+	const journalFile = path.join(store, "journal.json")
+	const saved = (yield* fs.exists(journalFile))
+		? yield* read(journalFile, Journal)
+		: undefined
+	const initial = saved?.status.current ?? options.initial
+	const initialRelease = yield* load(store, initial)
+	const state = yield* Ref.make<Journal>(
+		saved ?? {
+			version: 1,
+			status: {
+				current: initial,
+				previous: null,
+				state: "Ready",
+				revocations: initialRelease.revocations,
+			},
+			events: [],
+		},
+	)
+	const lock = yield* Semaphore.make(1)
+	const persist = (journal: Journal) =>
+		durable(journalFile, journal).pipe(Effect.andThen(Ref.set(state, journal)))
+	const event = (
+		kind: import("../Model").Event["kind"],
+		target: string,
+		entry?: string,
+		outcome?: Transition.Outcome,
+	) =>
+		Ref.get(state).pipe(
+			Effect.flatMap((journal) =>
+				persist({
+					...journal,
+					events: [
+						...journal.events,
+						{
+							kind,
+							current: journal.status.current,
+							target,
+							...(entry === undefined ? {} : { entry }),
+							...(outcome === undefined ? {} : { outcome: summarize(outcome) }),
+						},
+					],
+				}),
+			),
+		)
+	const contract = Effect.fnUntraced(function* (entry: Entry) {
+		const module = yield* resolver.importModule(entry.contract)
+		const found = Remote.Contract.fromModule(module)
+		if (Option.isNone(found))
+			return yield* failure("Contract", "No contract exported for " + entry.id)
+		return found.value
+	})
+	const prepared = Effect.fnUntraced(function* (entry: Entry) {
+		const declaration = yield* contract(entry)
+		const input = yield* resolveInput(entry.input)
+		// Decoded values never enter release files, plans, or the durable journal.
+		yield* Schema.decodeEffect(declaration.config)(input).pipe(
+			Effect.mapError((cause) => importError(entry.id, cause)),
+		)
+		return { declaration, input }
+	})
+	const candidate = Effect.fnUntraced(function* (id: string, entry: Entry) {
+		const { input } = yield* prepared(entry)
+		return Remote.candidate({
+			artifact: {
+				...entry.artifact,
+				directory: path.join(store, id, entry.artifact.directory),
+			},
+			contractModule: entry.contract,
+			target: entry.target,
+			input,
+		})
+	})
+	const inspect = Effect.fnUntraced(function* (target: string) {
+		const journal = yield* Ref.get(state)
+		const current = yield* load(store, journal.status.current)
+		const next = yield* load(store, target)
+		const changes: Array<Change> = []
+		const diagnostics: Array<Diagnostic> = []
+		const selections = Array.map(next.entries, (entry) => ({
+			id: entry.id,
+			package: entry.package,
+			entry: entry.entry,
+		}))
+		for (const entry of next.entries) {
+			const before = Array.findFirst(
+				current.entries,
+				(old) => old.id === entry.id,
+			)
+			const reasons: Array<Change["reasons"][number]> = []
+			if (Option.isNone(before)) {
+				reasons.push("added")
+				diagnostics.push({
+					entry: entry.id,
+					code: "Membership",
+					message: "Live additions require application restart",
+				})
+			} else {
+				if (
+					!(yield* equal(
+						before.value.artifact.identity,
+						entry.artifact.identity,
+					))
+				)
+					reasons.push("code")
+				if (
+					!(yield* equal(before.value.input, entry.input)) ||
+					!(yield* equal(before.value.probes, entry.probes))
+				)
+					reasons.push("config")
+				if (
+					before.value.contract !== entry.contract ||
+					!(yield* equal(before.value.target, entry.target))
+				) {
+					if (!Array.contains(reasons, "config")) reasons.push("config")
+					diagnostics.push({
+						entry: entry.id,
+						code: "Deployment",
+						message:
+							"Contract or placement changes require application restart",
+					})
+				}
+			}
+			if (reasons.length > 0) changes.push({ entry: entry.id, reasons })
+			diagnostics.push(
+				...Array.filter(
+					Manifest.check(
+						{ ...options.host, placement: entry.target._tag },
+						selections,
+					),
+					(item) => item.entry === entry.id || item.entry === "host",
+				),
+			)
+			const decoded = yield* prepared(entry).pipe(Effect.exit)
+			if (decoded._tag === "Failure") {
+				if (Cause.hasInterrupts(decoded.cause))
+					return yield* Effect.failCause(decoded.cause)
+				diagnostics.push({
+					entry: entry.id,
+					code: "Configuration",
+					message:
+						"Configuration or its references cannot be decoded for " + entry.id,
+					cause: decoded.cause,
+				})
+			} else {
+				const declared = Manifest.getEntry(entry.package.graft, entry.entry)
+				for (const service of decoded.value.declaration.provides) {
+					const operations = Array.map(service.operations, Manifest.operationId)
+					if (
+						declared === undefined ||
+						!Array.some(
+							declared.services.implements,
+							(binding) =>
+								binding.key === service.key.key &&
+								Array.every(operations, (identity) =>
+									Array.contains(binding.operations, identity),
+								),
+						)
+					)
+						diagnostics.push({
+							entry: entry.id,
+							code: "Contract",
+							message:
+								"Implementation does not provide the configured service binding " +
+								service.key.key,
+						})
+				}
+				if (
+					decoded.value.declaration.inject.length > 0 ||
+					!Array.every(
+						decoded.value.declaration.provides,
+						(service) => service.unary,
+					)
+				)
+					diagnostics.push({
+						entry: entry.id,
+						code: "Placement",
+						message:
+							"Managed direct releases require unary contracts without injected services",
+					})
+			}
+		}
+		for (const old of current.entries) {
+			if (!Array.some(next.entries, (entry) => entry.id === old.id)) {
+				changes.push({ entry: old.id, reasons: ["removed"] })
+				diagnostics.push({
+					entry: old.id,
+					code: "Membership",
+					message: "Live removals require application restart",
+				})
+			}
+		}
+		for (const reference of next.references)
+			if (
+				Array.contains(
+					[...journal.status.revocations, ...next.revocations],
+					reference,
+				)
+			)
+				diagnostics.push({
+					entry: "release",
+					code: "Revoked",
+					message: "Release restores revoked reference " + reference,
+				})
+		return { current: journal.status.current, target, changes, diagnostics }
+	})
+	const startupPlan = yield* inspect(initial)
+	const acceptedOverride =
+		saved !== undefined &&
+		Array.some(
+			saved.events,
+			(event) =>
+				event.kind === "Commit" &&
+				event.current === initial &&
+				event.overrideRevocations === true,
+		)
+	const startupDiagnostics = Array.filter(
+		startupPlan.diagnostics,
+		(item) => item.code !== "Revoked" || !acceptedOverride,
+	)
+	if (startupDiagnostics.length > 0) return yield* planError(startupDiagnostics)
+	const forks = yield* Effect.forEach(
+		initialRelease.entries,
+		Effect.fnUntraced(function* (entry) {
+			const { declaration, input } = yield* prepared(entry)
+			const fork = yield* Graft.plugin(
+				Remote.plugin(declaration, {
+					instance: entry.id,
+					artifact: {
+						...entry.artifact,
+						directory: path.join(store, initial, entry.artifact.directory),
+					},
+					contractModule: entry.contract,
+					target: entry.target,
+					policy: {
+						trial: "2 seconds",
+						...options.policy,
+						probes: entry.probes,
+					},
+				}),
+				input,
+			).pipe(
+				Effect.provideService(
+					Transition.CurrentInstance,
+					Option.some(entry.id),
+				),
+			)
+			yield* fork.await
+			return { id: entry.id, fork }
+		}),
+	)
+	const generations = Effect.forEach(
+		forks,
+		Effect.fnUntraced(function* ({ id, fork }) {
+			const snapshot = yield* Stream.runHead(fork.generations)
+			return {
+				id,
+				attempt: Option.isSome(snapshot)
+					? Array.findFirst(
+							snapshot.value,
+							(generation) => generation.state === "Serving",
+						).pipe(
+							Option.map((generation) => generation.attempt),
+							Option.getOrElse(() => -1),
+						)
+					: -1,
+			}
+		}),
+	)
+	const initialGenerations = yield* generations
+	const known = yield* Ref.make(initialGenerations)
+	const plan = Effect.fnUntraced(function* (target: string) {
+		const result = yield* inspect(target)
+		const expected = yield* Ref.get(known)
+		const actual = yield* generations
+		return (yield* equal(expected, actual))
+			? result
+			: {
+					...result,
+					diagnostics: [
+						...result.diagnostics,
+						{
+							entry: "release",
+							code: "ExternalChange",
+							message:
+								"Managed generations changed outside Releases; restart from the accepted release",
+						},
+					],
+				}
+	})
+	yield* Ref.update(state, (journal) => ({
+		...journal,
+		status: { ...journal.status, state: "Ready" as const },
+	}))
+	yield* event("Startup", initial)
+	const execute = Effect.fnUntraced(function* (request: Apply) {
+		const journal = yield* Ref.get(state)
+		if (journal.status.current !== request.expected)
+			return yield* failure(
+				"Conflict",
+				"Expected current release does not match",
+			)
+		if (journal.status.state !== "Ready")
+			return yield* failure(
+				"Degraded",
+				"Restart from the last accepted release before applying again",
+			)
+		const planned = yield* plan(request.target)
+		const diagnostics = Array.filter(
+			planned.diagnostics,
+			(diagnostic) =>
+				diagnostic.code !== "Revoked" || request.overrideRevocations !== true,
+		)
+		if (diagnostics.length > 0) return yield* planError(diagnostics)
+		if (request.target === journal.status.current)
+			return { status: journal.status, outcomes: [] }
+		const previous = yield* load(store, journal.status.current)
+		const next = yield* load(store, request.target)
+		// Prepare all in-memory recovery inputs before admitting any transition.
+		const work = yield* Effect.forEach(
+			planned.changes,
+			Effect.fnUntraced(function* (change) {
+				const old = Option.getOrThrow(
+					Array.findFirst(
+						previous.entries,
+						(entry) => entry.id === change.entry,
+					),
+				)
+				const target = Option.getOrThrow(
+					Array.findFirst(next.entries, (entry) => entry.id === change.entry),
+				)
+				return {
+					old,
+					target,
+					before: yield* candidate(journal.status.current, old),
+					after: yield* candidate(request.target, target),
+				}
+			}),
+		)
+		yield* persist({
+			...journal,
+			status: { ...journal.status, state: "Applying" },
+			events: [
+				...journal.events,
+				{
+					kind: "Intent",
+					current: journal.status.current,
+					target: request.target,
+					overrideRevocations: request.overrideRevocations === true,
+				},
+			],
+		})
+		const outcomes: Array<Applied["outcomes"][number]> = []
+		const accepted: Array<(typeof work)[number]> = []
+		let failed = false
+		let degraded = false
+		for (const item of work) {
+			const outcome = yield* Graft.transition({
+				target: item.target.id,
+				candidate: item.after,
+				policy: {
+					trial: "2 seconds",
+					...options.policy,
+					probes: item.target.probes,
+				},
+			})
+			outcomes.push({ entry: item.target.id, compensation: false, outcome })
+			yield* event("Outcome", request.target, item.target.id, outcome)
+			if (outcome._tag !== "Accepted") {
+				failed = true
+				degraded = outcome._tag === "RecoveryFailed" || outcome._tag === "Stuck"
+				break
+			}
+			accepted.push(item)
+		}
+		if (failed)
+			for (const item of Array.reverse(accepted)) {
+				const outcome = yield* Graft.transition({
+					target: item.old.id,
+					candidate: item.before,
+					policy: {
+						trial: "2 seconds",
+						...options.policy,
+						probes: item.old.probes,
+					},
+				})
+				outcomes.push({ entry: item.old.id, compensation: true, outcome })
+				yield* event(
+					"Compensation",
+					journal.status.current,
+					item.old.id,
+					outcome,
+				)
+				if (outcome._tag !== "Accepted") degraded = true
+			}
+		const finished = yield* Ref.get(state)
+		const status: import("../Model").Status = failed
+			? { ...journal.status, state: degraded ? "Degraded" : "Ready" }
+			: {
+					current: request.target,
+					previous: journal.status.current,
+					state: "Ready",
+					revocations: Array.dedupe([
+						...journal.status.revocations,
+						...next.revocations,
+					]),
+				}
+		yield* persist({
+			...finished,
+			status,
+			events: [
+				...finished.events,
+				{
+					kind: failed ? "Rejected" : "Commit",
+					current: status.current,
+					target: request.target,
+					overrideRevocations: request.overrideRevocations === true,
+				},
+			],
+		})
+		const finalGenerations = yield* generations
+		yield* Ref.set(known, finalGenerations)
+		return { status, outcomes }
+	})
+	const owned = <A, E>(
+		effect: Effect.Effect<
+			A,
+			E,
+			| Graft.Graft
+			| FileSystem.FileSystem
+			| Path.Path
+			| import("effect").Scope.Scope
+		>,
+	) =>
+		Effect.uninterruptibleMask((restore) =>
+			Effect.forkIn(
+				lock
+					.withPermit(
+						effect.pipe(
+							Effect.catchCause((cause) =>
+								Effect.gen(function* () {
+									const journal = yield* Ref.get(state)
+									if (journal.status.state !== "Applying")
+										return yield* Effect.failCause(cause)
+									const degraded: Journal = {
+										...journal,
+										status: { ...journal.status, state: "Degraded" },
+									}
+									yield* Ref.set(state, degraded)
+									const persisted = yield* Effect.exit(persist(degraded))
+									return yield* Effect.failCause(
+										persisted._tag === "Failure"
+											? Cause.combine(cause, persisted.cause)
+											: cause,
+									)
+								}),
+							),
+						),
+					)
+					.pipe(Effect.provideContext(environment)),
+				scope,
+			).pipe(Effect.flatMap((fiber) => restore(Fiber.join(fiber)))),
+		)
+	return Releases.of({
+		build: (request) =>
+			protect(
+				Ref.get(state).pipe(
+					Effect.flatMap((journal) =>
+						build(store, request, journal.status.revocations),
+					),
+					Effect.provideContext(environment),
+				),
+			),
+		plan: (target) =>
+			protect(
+				lock.withPermit(plan(target)).pipe(Effect.provideContext(environment)),
+			),
+		apply: (request) => execute(request).pipe(owned, protect),
+		rollback: (expected, overrideRevocations) =>
+			Effect.gen(function* () {
+				const journal = yield* Ref.get(state)
+				if (journal.status.previous === null)
+					return yield* failure("Previous", "No previous accepted release")
+				return yield* execute({
+					target: journal.status.previous,
+					expected,
+					...(overrideRevocations === undefined ? {} : { overrideRevocations }),
+				})
+			}).pipe(owned, protect),
+		observe: Ref.get(state).pipe(Effect.map((journal) => journal.status)),
+		history: Ref.get(state).pipe(Effect.map((journal) => journal.events)),
+	})
+}, protect)
+
+const importError = (entry: string, cause: Schema.SchemaError) =>
+	importReleaseError(entry, Cause.fail(cause))
+
+const importReleaseError = (entry: string, cause: Cause.Cause<unknown>) =>
+	ReleaseError.make({
+		code: "Configuration",
+		message: "Invalid configuration for " + entry,
+		cause,
+	})
+
+const planError = (diagnostics: ReadonlyArray<Diagnostic>) =>
+	ReleaseError.make({
+		code: "Plan",
+		message: "Release plan has diagnostics; inspect plan before applying",
+		cause: Array.reduce<Diagnostic, Cause.Cause<unknown>>(
+			diagnostics,
+			Cause.empty,
+			(cause, diagnostic) =>
+				Cause.combine(cause, diagnostic.cause ?? Cause.empty),
+		),
+	})

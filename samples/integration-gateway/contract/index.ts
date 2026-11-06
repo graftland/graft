@@ -15,6 +15,10 @@ export class Forecast extends Context.Service<
 export const config = Schema.Struct({
 	release: Schema.String,
 	started: Schema.String,
+	prefix: Schema.optionalKey(Schema.String),
+	unhealthy: Schema.optionalKey(Schema.Boolean),
+	holdProbe: Schema.optionalKey(Schema.Boolean),
+	credential: Schema.optionalKey(Schema.String),
 })
 export const service = Contract.service(
 	Forecast,

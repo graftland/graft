@@ -72,3 +72,23 @@ Tests run both direct placements and the real `graft start` command. They check:
 - Rejected Loader edits leaving the file and accepted target unchanged.
 
 The workspace test suite runs the same installed-consumer test.
+
+## Config releases
+
+`src/release-app.ts` runs the same WebSocket gateway with the public release
+plugin. The packed test builds immutable releases for `release-forecast`, checks
+a good config, rejects a schema error, aborts a failed probe, rolls back, and
+checks revocation and explicit override. It asserts one login, the same session
+and unchanged consumer activations. A second integration verifies compensation
+when a later entry fails; CLI tests exercise the Unix socket.
+
+Run the proof with the same command:
+
+```sh
+node scripts/packed-gateway.mjs test
+```
+
+The release source uses `package`, `entry`, `contract`, `target`, `config` and
+`probes` under each managed entry. `Releases.build` stores encoded input;
+secrets use `!env` or `$env` references. External dependencies are not captured
+or pinned.

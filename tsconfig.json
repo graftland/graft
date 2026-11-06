@@ -105,6 +105,12 @@
 		},
 		{
 			"path": "packages/plugin-http-api/tsconfig.test.json"
+		},
+		{
+			"path": "./packages/plugin-release"
+		},
+		{
+			"path": "./packages/plugin-release/tsconfig.test.json"
 		}
 	]
 }

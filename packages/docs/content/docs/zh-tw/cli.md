@@ -327,3 +327,11 @@ graft remote manifest ./release --check --provenance ./provenance.json
 
 由已啟用的 `remote/cli` 命令外掛提供。從已建置宣告產生或驗證 `graft`
 欄位，並可記錄套件來源。發布流程見[外掛清單](../ecosystem/manifest/)。
+
+## 應用程式發佈
+
+啟用 `@graftland/plugin-release/cli` 後可使用 `graft release build`、`plan`、
+`apply`、`rollback`、`history` 和 `status`。命令必須提供 `--socket`； `apply` 和
+`rollback` 還必須提供 `--expected`。CI 輸出使用
+`--json`。拒絕和不成功的切換結果傳回非零結束代碼。來源格式、撤銷和持久化啟動選擇見
+[應用程式發佈](../application-releases/)。

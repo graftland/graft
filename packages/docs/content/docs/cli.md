@@ -371,3 +371,12 @@ graft remote manifest ./release --check --provenance ./provenance.json
 Provided by the enabled `remote/cli` command plugin. Generates or verifies the
 `graft` field from built declarations and optionally records package provenance.
 See [Plugin manifests](../ecosystem/manifest/) for the publication workflow.
+
+## Application releases
+
+Enable `@graftland/plugin-release/cli` to use `graft release build`, `plan`,
+`apply`, `rollback`, `history` and `status`. Commands require `--socket`;
+`apply` and `rollback` also require `--expected`. Use `--json` for CI output.
+Rejections and unsuccessful transition outcomes exit nonzero. See
+[Application releases](../application-releases/) for the source format,
+revocations and durable startup selection.

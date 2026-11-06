@@ -320,3 +320,8 @@ const environment = Layer.mergeAll(
 回報成功前記錄結果和結束證據。`Recovered` 表示舊產物的新單元正在服務；
 `RecoveryFailed` 使整合無法使用，但宿主仍可保留工作階段。`Stuck`
 需要操作人員介入。另行儲存下次啟動宿主時需要的產物：transition 不持久化 Loader 設定。
+
+## 版本化受管部署
+
+使用[應用程式發佈](../../application-releases/)一起持久化受管整合的產物和編碼後的設定。將閘道放在發佈外掛子樹之外。保護儲存和 Unix
+socket 目錄，並讓一個應用程式獨占儲存。崩潰後日誌選擇最後完整接受的發佈。跨執行個體發佈仍由現有部署工具負責。

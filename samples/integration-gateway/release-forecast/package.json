@@ -1,0 +1,59 @@
+{
+	"name": "@example/forecasts-release",
+	"version": "1.0.0",
+	"type": "module",
+	"exports": {
+		".": "./dist/index.js",
+		"./audit": "./dist/audit.js"
+	},
+	"files": [
+		"dist"
+	],
+	"engines": {
+		"node": ">=22.22.0"
+	},
+	"peerDependencies": {
+		"effect": "4.1.*",
+		"@graftland/graft": "0.0.0",
+		"@example/forecast-contract": "1.0.0"
+	},
+	"graft": {
+		"version": 1,
+		"entries": {
+			".": {
+				"implementation": "dist/index.js",
+				"contracts": [
+					"@example/forecast-contract"
+				],
+				"requirements": {
+					"placements": [
+						"Worker",
+						"Local"
+					],
+					"filesystem": false,
+					"nativeModules": false
+				},
+				"probes": [
+					"health"
+				]
+			},
+			"./audit": {
+				"implementation": "dist/audit.js",
+				"contracts": [
+					"@example/forecast-contract/audit"
+				],
+				"requirements": {
+					"placements": [
+						"Worker",
+						"Local"
+					],
+					"filesystem": false,
+					"nativeModules": false
+				},
+				"probes": [
+					"health"
+				]
+			}
+		}
+	}
+}

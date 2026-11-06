@@ -1,0 +1,64 @@
+{
+	"name": "@graftland/plugin-release",
+	"version": "0.0.0",
+	"type": "module",
+	"description": "Immutable releases for managed Graft integrations",
+	"license": "Apache-2.0",
+	"sideEffects": false,
+	"files": [
+		"dist",
+		"src",
+		"README.zh-CN.md",
+		"README.zh-TW.md"
+	],
+	"scripts": {
+		"build": "tsc -b && tsdown",
+		"test": "vitest run"
+	},
+	"peerDependencies": {
+		"@graftland/graft": "workspace:^",
+		"@graftland/loader": "workspace:^",
+		"@graftland/cli": "workspace:^",
+		"@graftland/plugin-remote": "workspace:^",
+		"effect": "4.1.*"
+	},
+	"dependencies": {
+		"yaml": "2.9.1"
+	},
+	"devDependencies": {
+		"effect": "4.1.2",
+		"@effect/platform-node": "4.1.2",
+		"@effect/vitest": "4.1.2",
+		"vitest": "5.1.0",
+		"@graftland/graft": "workspace:*",
+		"@graftland/loader": "workspace:*",
+		"@graftland/cli": "workspace:*",
+		"@graftland/plugin-remote": "workspace:*"
+	},
+	"engines": {
+		"node": ">=22.22.0"
+	},
+	"exports": {
+		".": {
+			"source": "./src/index.ts",
+			"default": "./dist/index.js"
+		},
+		"./cli": {
+			"source": "./src/cli.ts",
+			"default": "./dist/cli.js"
+		},
+		"./package.json": "./package.json"
+	},
+	"publishConfig": {
+		"exports": {
+			".": "./dist/index.js",
+			"./cli": "./dist/cli.js",
+			"./package.json": "./package.json"
+		}
+	},
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/graftland/graft.git",
+		"directory": "packages/plugin-release"
+	}
+}

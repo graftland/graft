@@ -58,6 +58,7 @@ export function prepare() {
 					"@graftland/loader",
 					"@graftland/cli",
 					"@graftland/plugin-remote",
+					"@graftland/plugin-release",
 					"@graftland/hmr",
 					"@graftland/create",
 					"@graftland/package-manager",
@@ -138,6 +139,7 @@ export function prepare() {
 			"v2",
 			"broken-probe",
 			"broken-trial",
+			"release-forecast",
 		]) {
 			const staged = join(directory, "author", name)
 			cpSync(join(sample, name), staged, { recursive: true })
@@ -174,6 +176,7 @@ export function prepare() {
 			"v2",
 			"broken-probe",
 			"broken-trial",
+			"release-forecast",
 		]) {
 			const source = readFileSync(join(sample, name, "index.ts"), "utf8")
 			if (source.includes("/internal/") || source.includes("/src/"))
@@ -191,7 +194,11 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	try {
 		if (process.argv[2] === "test")
 			process.stdout.write(
-				run("node", ["--test", "test/gateway.test.mjs"], directory),
+				run(
+					"node",
+					["--test", "test/gateway.test.mjs", "test/releases.test.mjs"],
+					directory,
+				),
 			)
 		else if (process.argv[2] === "start")
 			execFileSync("node", ["host/dist/main.js"], {
