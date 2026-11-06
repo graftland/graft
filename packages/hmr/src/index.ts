@@ -62,10 +62,16 @@ export type WatchResult = Data.TaggedEnum<{
 		readonly reason:
 			"restart-required" | "ambiguous-exports" | "identity-conflict"
 	}
-	/** The new code was imported but failed to start; the old plugins run again. */
+	/** The new code failed to start or timed out; counted restored forks are active or `Pending`. */
 	RolledBack: {
 		readonly entries: ReadonlyArray<string>
 		readonly failures: ReadonlyArray<Graft.ReplacementFailure>
+	}
+	/** The new code was abandoned, and previous code failed to restart. */
+	RecoveryFailed: {
+		readonly entries: ReadonlyArray<string>
+		readonly failures: ReadonlyArray<Graft.ReplacementFailure>
+		readonly recovery: ReadonlyArray<Graft.ReplacementFailure>
 	}
 	Failed: { readonly cause: Cause.Cause<HmrError> }
 }>
@@ -996,12 +1002,22 @@ export const make: (
 							})
 						}
 						// Keep the old generation and the dirty modules, so the next change retries.
-						if (replacement.success._tag === "RolledBack") {
+						if (replacement.success._tag !== "Replaced") {
 							yield* restoreEntries(prepared)
-							return WatchResult.RolledBack({
-								entries: Array.map(candidates, (candidate) => candidate.url),
-								failures: replacement.success.failures,
-							})
+							const entries = Array.map(
+								candidates,
+								(candidate) => candidate.url,
+							)
+							return replacement.success._tag === "RecoveryFailed"
+								? WatchResult.RecoveryFailed({
+										entries,
+										failures: replacement.success.failures,
+										recovery: replacement.success.recovery,
+									})
+								: WatchResult.RolledBack({
+										entries,
+										failures: replacement.success.failures,
+									})
 						}
 						return yield* commitReload(prepared)
 					}),

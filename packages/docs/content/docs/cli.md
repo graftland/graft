@@ -134,10 +134,13 @@ How the two interact:
 How the CLI drives reload:
 
 1. It calls `hmr.watch` with a module-file filter.
-2. After each attempt that ends with `Reloaded`, `RolledBack` or `Skipped`, it
-   calls `loader.retry`, to retry failed entries and refresh `!env` values.
-   `RolledBack` logs one warning per plugin that failed to start or timed out,
-   with `graft.fork` and `graft.plugin`, and the `Cause` of a failure.
+2. After each attempt that ends with `Reloaded`, `RolledBack`, `RecoveryFailed`
+   or `Skipped`, it calls `loader.retry`, to retry failed entries and refresh
+   `!env` values. `RolledBack` logs one warning per plugin that failed to start
+   or timed out, with `graft.fork` and `graft.plugin`, and the `Cause` of a
+   failure. `RecoveryFailed` logs errors for both the replacement and recovery
+   failures, with the same annotations and full causes. It says that the
+   previous code failed to restart.
 3. Reload and retry failures are logged with their complete `Cause`, and
    watching goes on.
 

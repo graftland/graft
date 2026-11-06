@@ -558,9 +558,14 @@ export type CompatibleReplacements<
  * Each pair keeps the same input type and can only narrow the source's error bound.
  *
  * Then it waits for the forks running a replacement. If one fails, or
- * `timeout` passes first, every fork goes back to the old plugin and the
- * result is `RolledBack` with the failures. A `Pending` fork counts as
- * started. Interrupting the wait keeps the swap.
+ * `timeout` passes first, forks still owned by this replacement go back to
+ * the old plugins. After recovery settles, the result is `RolledBack` if no
+ * counted restored fork failed, or `RecoveryFailed` otherwise. Both carry the
+ * replacement `failures`; `RecoveryFailed.recovery` carries one `Failed` per
+ * failed restored fork, with its full cause. Disposed forks and forks taken over by a later replacement or
+ * restart no longer count. A `Pending` fork waiting for a dependency counts as
+ * started or restored. Recovery is not bounded by `timeout`.
+ * Interrupting the replacement wait keeps the swap.
  */
 export const replace: <const Pairs extends ReadonlyArray<ReplacementPair>>(
 	pairs: Pairs & CompatibleReplacements<NoInfer<Pairs>>,

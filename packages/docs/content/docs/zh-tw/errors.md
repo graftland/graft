@@ -56,14 +56,15 @@ Graft 會保留每個失敗的完整 `Cause`
 
 ## 熱重載
 
-| 名稱／結果                      | 含義                                                                      |
-| ------------------------------- | ------------------------------------------------------------------------- |
-| `HmrError`                      | 模組無法匯入，或沒有匯出外掛。`cause` 是原始錯誤。                        |
-| `Skipped` / `restart-required`  | 原生載入能力或符號連結目標的變更需要重新啟動。                            |
-| `Skipped` / `ambiguous-exports` | 原本共用同一個 Plugin 物件的項目，現在匯出了不同的物件。                  |
-| `Skipped` / `identity-conflict` | 取代的身分與執行階段的 alias 不相容。                                     |
-| `RolledBack`                    | 重載後的外掛啟動失敗或逾時。舊外掛重新執行；`Failed` 失敗保留其 `Cause`。 |
-| `Failed`                        | 重載失敗。值中包含完整的 `Cause`；舊外掛繼續執行。                        |
+| 名稱／結果                      | 含義                                                                                           |
+| ------------------------------- | ---------------------------------------------------------------------------------------------- |
+| `HmrError`                      | 模組無法匯入，或沒有匯出外掛。`cause` 是原始錯誤。                                             |
+| `Skipped` / `restart-required`  | 原生載入能力或符號連結目標的變更需要重新啟動。                                                 |
+| `Skipped` / `ambiguous-exports` | 原本共用同一個 Plugin 物件的項目，現在匯出了不同的物件。                                       |
+| `Skipped` / `identity-conflict` | 取代的身分與執行階段的 alias 不相容。                                                          |
+| `RolledBack`                    | 取代失敗或逾時；計入的恢復 fork 為活躍或 `Pending`。`failures` 保留取代失敗及其完整 cause。    |
+| `RecoveryFailed`                | 舊程式碼重新啟動失敗。`failures` 保留取代失敗；`recovery` 列出恢復失敗的 fork 及其完整 cause。 |
+| `Failed`                        | 重載失敗。值中包含完整的 `Cause`；舊外掛繼續執行。                                             |
 
 請參閱[重載不適用的情況](../hot-reload/#重載不適用的情況)。
 

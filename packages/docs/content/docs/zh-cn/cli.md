@@ -121,10 +121,11 @@ secrets 或 Kubernetes Secret 卷。
 CLI 如何驱动重载：
 
 1. 它使用带模块文件过滤的 `hmr.watch`。
-2. 每次重载尝试返回 `Reloaded`、`RolledBack` 或 `Skipped` 后，它会调用
-   `loader.retry`，重试失败项并刷新 `!env` 值。`RolledBack`
+2. 每次重载尝试返回 `Reloaded`、`RolledBack`、`RecoveryFailed` 或 `Skipped`
+   后，它会调用 `loader.retry`，重试失败项并刷新 `!env` 值。`RolledBack`
    会为每个启动失败或超时的插件记录一条警告，带有 `graft.fork` 和
-   `graft.plugin`；启动失败时还带有其 `Cause`。
+   `graft.plugin`；启动失败时还带有其 `Cause`。 `RecoveryFailed`
+   会将替换及恢复失败都记录为错误，带有相同注解和完整 cause，并明确指出旧代码重启失败。
 3. 重载和 retry 的失败会记录完整 `Cause`，监听继续。
 
 YAML 和模块 watcher 使用原生文件系统通知，不做轮询。YAML

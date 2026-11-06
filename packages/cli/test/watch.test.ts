@@ -142,6 +142,77 @@ describe("module watching", () => {
 	)
 
 	it.effect(
+		"reports recovery failure as errors with both full causes and retries",
+		() =>
+			Effect.gen(function* () {
+				const { logged, layer } = yield* logging
+				const retried = yield* Deferred.make<void>()
+				const replacement = Cause.combine(
+					Cause.fail("replacement failed"),
+					Cause.die("replacement defect"),
+				)
+				const recovery = Cause.combine(
+					Cause.fail("recovery failed"),
+					Cause.die("recovery defect"),
+				)
+				const hmr = {
+					watch: () =>
+						Stream.make(
+							WatchResult.RecoveryFailed({
+								entries: ["file:///app/a.mjs"],
+								failures: [
+									Graft.ReplacementFailure.Failed({
+										fork: 7,
+										plugin: "new",
+										cause: replacement,
+									}),
+									Graft.ReplacementFailure.TimedOut({
+										fork: 8,
+										plugin: "slow",
+									}),
+								],
+								recovery: [
+									Graft.ReplacementFailure.Failed({
+										fork: 7,
+										plugin: "old",
+										cause: recovery,
+									}),
+								],
+							}),
+						),
+				}
+				const watching = yield* watchModules(
+					hmr,
+					"/app",
+					Deferred.succeed(retried, undefined).pipe(Effect.asVoid),
+				).pipe(Effect.provide(layer), Effect.forkScoped)
+				yield* Deferred.await(retried)
+				const logs = yield* Queue.takeAll(logged)
+				assert.deepStrictEqual(
+					Array.map(logs, (log) => [log.logLevel, log.message, log.cause]),
+					[
+						[
+							"Error",
+							['Replacement abandoned: plugin "new" failed to start'],
+							replacement,
+						],
+						[
+							"Error",
+							['Replacement abandoned: plugin "slow" did not start in time'],
+							Cause.empty,
+						],
+						[
+							"Error",
+							['Previous code failed to restart: plugin "old" failed to start'],
+							recovery,
+						],
+					],
+				)
+				yield* Fiber.interrupt(watching)
+			}).pipe(Effect.scoped, Effect.provide(FileSystem.layerNoop({}))),
+	)
+
+	it.effect(
 		"uses the HMR filter, retries after reload, and preserves failures without stopping",
 		() =>
 			Effect.gen(function* () {

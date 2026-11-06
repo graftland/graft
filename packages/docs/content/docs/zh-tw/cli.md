@@ -121,10 +121,11 @@ secrets 或 Kubernetes Secret 卷冊。
 CLI 驅動重載的方式：
 
 1. 它以模組檔案過濾器呼叫 `hmr.watch`。
-2. 每次嘗試以 `Reloaded`、`RolledBack` 或 `Skipped` 結束後，它會呼叫
-   `loader.retry`，以重試失敗的項目並重新整理 `!env` 值。`RolledBack`
-   會為每個啟動失敗或逾時的外掛記錄一則警告，帶有 `graft.fork` 和
-   `graft.plugin`；啟動失敗時還帶有其 `Cause`。
+2. 每次嘗試以 `Reloaded`、`RolledBack`、`RecoveryFailed` 或 `Skipped`
+   結束後，它會呼叫 `loader.retry`，以重試失敗的項目並重新整理 `!env`
+   值。`RolledBack` 會為每個啟動失敗或逾時的外掛記錄一則警告，帶有 `graft.fork`
+   和 `graft.plugin`；啟動失敗時還帶有其 `Cause`。 `RecoveryFailed`
+   會將取代及恢復失敗都記錄為錯誤，帶有相同註記和完整 cause，並明確指出舊程式碼重新啟動失敗。
 3. 重載和重試的失敗會連同完整的 `Cause` 一併記錄，監看繼續進行。
 
 YAML 和模組監看器使用原生檔案系統通知，不做輪詢。YAML 監看器安裝後會重新讀取檔案，以捕捉安裝期間的變更。任一監看器的後端失敗時，只記錄錯誤，不會重新安裝該監看器。

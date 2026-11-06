@@ -29,7 +29,7 @@ export class ReplacementConflict extends Schema.TaggedError<
 	indices: Schema.Array(Schema.Int),
 }) {}
 
-/** Why a replacement was rolled back: a fork running it failed or did not settle in time. */
+/** A fork failed during replacement or recovery, or a replacement did not settle in time. */
 export type ReplacementFailure = Data.TaggedEnum<{
 	Failed: {
 		readonly fork: number
@@ -44,8 +44,15 @@ export const ReplacementFailure = Data.taggedEnum<ReplacementFailure>()
 export type ReplaceResult = Data.TaggedEnum<{
 	/** Every fork running a replacement started, or is `Pending`. */
 	Replaced: {}
-	/** A fork running a replacement failed; every fork runs the old plugin again. */
+	/** The replacement was abandoned; counted restored forks are active or `Pending`. */
 	RolledBack: { readonly failures: ReadonlyArray<ReplacementFailure> }
+	/** The replacement was abandoned, and at least one counted restored fork failed. */
+	RecoveryFailed: {
+		/** Why the replacement was abandoned, as in `RolledBack`. */
+		readonly failures: ReadonlyArray<ReplacementFailure>
+		/** One `Failed` per counted restored fork that failed, with its full cause. */
+		readonly recovery: ReadonlyArray<ReplacementFailure>
+	}
 }>
 export const ReplaceResult = Data.taggedEnum<ReplaceResult>()
 
@@ -334,29 +341,39 @@ const rollBack = (
 	)
 
 /**
- * Waits until each reverted fork has restarted, whatever the outcome, so that
- * `RolledBack` means the old plugins run again. A fork that is disposed or
- * changed by someone else in the meantime no longer counts.
+ * Waits until each counted reverted fork settles and collects its full failure
+ * cause in the same transaction. Pending forks count as restored; disposed
+ * forks and forks taken over by another replacement or restart no longer count.
  */
 const restarted = (
 	reverted: ReadonlyArray<{ readonly entry: ForkEntry; readonly spec: Spec }>,
 ) =>
 	Effect.tx(
 		Effect.gen(function* () {
-			const starting = yield* Effect.forEach(reverted, ({ entry, spec }) =>
+			const recovery = yield* Effect.forEach(reverted, ({ entry, spec }) =>
 				Effect.gen(function* () {
 					const current = yield* TxRef.get(entry.spec)
 					const snapshot = yield* TxSubscriptionRef.get(entry.status.snapshot)
-					return (
-						sameSpec(current, spec) &&
-						!snapshot.disposed &&
-						(snapshot.accepted === undefined ||
-							!sameSpec(snapshot.accepted, spec) ||
-							snapshot.state._tag === "Loading")
+					if (!sameSpec(current, spec) || snapshot.disposed)
+						return Option.none<ReplacementFailure>()
+					if (
+						snapshot.accepted === undefined ||
+						!sameSpec(snapshot.accepted, spec) ||
+						snapshot.state._tag === "Loading"
 					)
+						return yield* Effect.txRetry
+					return snapshot.state._tag === "Failed"
+						? Option.some(
+								ReplacementFailure.Failed({
+									fork: entry.id,
+									plugin: spec.plugin.name,
+									cause: snapshot.state.cause,
+								}),
+							)
+						: Option.none()
 				}),
 			)
-			if (Array.some(starting, (value) => value)) return yield* Effect.txRetry
+			return Array.getSomes(recovery)
 		}),
 	)
 
@@ -385,7 +402,9 @@ export const replace = Effect.fnUntraced(function* (
 				)
 	if (failures.length === 0) return ReplaceResult.Replaced()
 	const reverted = yield* rollBack(runtime, pairs, swapped)
-	// Not bounded by `timeout`: `RolledBack` means the old plugins run again.
-	yield* restarted(reverted)
-	return ReplaceResult.RolledBack({ failures })
+	// Recovery is not bounded by the replacement startup timeout.
+	const recovery = yield* restarted(reverted)
+	return recovery.length > 0
+		? ReplaceResult.RecoveryFailed({ failures, recovery })
+		: ReplaceResult.RolledBack({ failures })
 })

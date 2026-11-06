@@ -6,6 +6,7 @@ import {
 	Effect,
 	Fiber,
 	Option,
+	Ref,
 	Schedule,
 	Stream,
 } from "effect"
@@ -94,6 +95,146 @@ describe("replacement rollback", () => {
 		}).pipe(run),
 	)
 
+	it.effect(
+		"reports every restored failure with its fork, plugin and full cause",
+		() =>
+			Effect.gen(function* () {
+				const restored = yield* Effect.forEach(["old-a", "old-b"], (name) =>
+					Effect.gen(function* () {
+						const runs = yield* Ref.make(0)
+						const cause = Cause.combine(
+							Cause.fail(`${name} failed`),
+							Cause.die(`${name} defect`),
+						)
+						const plugin = Plugin.make({
+							name,
+							apply: () =>
+								Effect.gen(function* () {
+									if ((yield* Ref.updateAndGet(runs, (n) => n + 1)) > 1)
+										return yield* Effect.failCause(cause)
+								}),
+						})
+						const fork = yield* Graft.plugin(plugin)
+						yield* fork.await
+						return { plugin, fork, cause }
+					}),
+				)
+				const replacementCause = Cause.combine(
+					Cause.fail("replacement failed"),
+					Cause.die("replacement defect"),
+				)
+				const broken = Plugin.make({
+					name: "broken",
+					apply: () => Effect.failCause(replacementCause),
+				})
+				const result = yield* Graft.replace(
+					Array.map(restored, ({ plugin }) => [plugin, broken] as const),
+				)
+				assert(result._tag === "RecoveryFailed")
+				assert.isNotEmpty(result.failures)
+				for (const failure of result.failures) {
+					assert(failure._tag === "Failed")
+					assert.strictEqual(failure.plugin, "broken")
+					assert.strictEqual(failure.cause.reasons.length, 2)
+					assert.deepInclude(failure.cause.reasons[0], {
+						_tag: "Fail",
+						error: "replacement failed",
+					})
+					assert.deepInclude(failure.cause.reasons[1], {
+						_tag: "Die",
+						defect: "replacement defect",
+					})
+				}
+				assert.strictEqual(result.recovery.length, restored.length)
+				for (const { plugin, fork } of restored) {
+					const snapshot = yield* Stream.runHead(fork.state)
+					const state = Option.getOrThrow(snapshot)
+					assert(state._tag === "Failed")
+					const failure = Array.findFirst(
+						result.recovery,
+						(failure) => failure.fork === fork.id,
+					)
+					assert.deepStrictEqual(
+						Option.getOrThrow(failure),
+						Graft.ReplacementFailure.Failed({
+							fork: fork.id,
+							plugin: plugin.name,
+							cause: state.cause,
+						}),
+					)
+					assert.strictEqual(state.cause.reasons.length, 2)
+					assert.deepInclude(state.cause.reasons[0], {
+						_tag: "Fail",
+						error: `${plugin.name} failed`,
+					})
+					assert.deepInclude(state.cause.reasons[1], {
+						_tag: "Die",
+						defect: `${plugin.name} defect`,
+					})
+				}
+			}).pipe(run),
+	)
+
+	it.effect.each(["dispose", "restart", "replace"] as const)(
+		"does not count a restored fork after a later %s takes it over",
+		(action) =>
+			Effect.gen(function* () {
+				const runs = yield* Ref.make(0)
+				const recovering = yield* Deferred.make<void>()
+				const old = Plugin.make({
+					name: "old",
+					apply: () =>
+						Effect.gen(function* () {
+							const run = yield* Ref.updateAndGet(runs, (n) => n + 1)
+							if (run === 2) {
+								yield* Deferred.succeed(recovering, undefined)
+								return yield* Effect.never
+							}
+							if (run > 2) return yield* Effect.fail("later restart failed")
+						}),
+				})
+				const broken = Plugin.make({
+					name: "broken",
+					apply: () => Effect.fail("replacement failed"),
+				})
+				const fork = yield* Graft.plugin(old)
+				yield* fork.await
+				const replacing = yield* Graft.replace([[old, broken]]).pipe(
+					Effect.forkScoped,
+				)
+				yield* Deferred.await(recovering)
+				if (action === "dispose") yield* fork.dispose
+				else if (action === "restart") {
+					yield* fork.restart
+					yield* reach(fork, "Failed")
+				} else {
+					const result = yield* Graft.replace([[old, quiet("later")]])
+					assert.strictEqual(result._tag, "Replaced")
+				}
+				const result = yield* Fiber.join(replacing)
+				assert.strictEqual(result._tag, "RolledBack")
+			}).pipe(run),
+	)
+
+	it.effect("counts a restored pending fork as rolled back", () =>
+		Effect.gen(function* () {
+			const old = Plugin.make({
+				name: "waiting",
+				inject: [Store],
+				apply: (): Effect.Effect<void, string> => Effect.void,
+			})
+			const broken = Plugin.make({
+				name: "broken",
+				apply: () => Effect.fail("replacement failed"),
+			})
+			const fork = yield* Graft.plugin(old)
+			yield* reach(fork, "Pending")
+			const failures = yield* rolledBack(Graft.replace([[old, broken]]))
+			assert.strictEqual(failures[0]?.plugin, "broken")
+			yield* reach(fork, "Pending")
+		}).pipe(run),
+	)
+
 	it.effect("rolls back every pair of a batch when one fails", () =>
 		Effect.gen(function* () {
 			const journal = yield* makeJournal
@@ -172,16 +313,25 @@ describe("replacement rollback", () => {
 			const b = yield* Graft.plugin(b1)
 			yield* Effect.exit(a.await)
 			yield* b.await
-			const failures = yield* rolledBack(
-				Graft.replace([
-					[a1, a2],
-					[b1, b2],
-				]),
-			)
+			const result = yield* Graft.replace([
+				[a1, a2],
+				[b1, b2],
+			])
+			assert(result._tag === "RecoveryFailed")
 			assert.deepStrictEqual(
-				Array.map(failures, (failure) => failure.plugin),
+				Array.map(result.failures, (failure) => failure.plugin),
 				["b2"],
 			)
+			const snapshot = yield* Stream.runHead(a.state)
+			const state = Option.getOrThrow(snapshot)
+			assert(state._tag === "Failed")
+			assert.deepStrictEqual(result.recovery, [
+				Graft.ReplacementFailure.Failed({
+					fork: a.id,
+					plugin: "a1",
+					cause: state.cause,
+				}),
+			])
 			yield* reach(b, "Active")
 			const names = yield* running
 			assert.deepStrictEqual(names, ["a1", "b1"])

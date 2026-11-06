@@ -4,7 +4,7 @@ description: 在一次交易中把外掛換成新版本，啟動失敗時回滾�
 ---
 
 `Graft.replace`
-把外掛換成新版本。舊外掛的每個 fork 都會使用新版本重新啟動，之後再載入舊外掛，也會載入新版本。重新啟動的 fork 啟動後它才回傳：
+把外掛換成新版本。舊外掛的每個 fork 都會使用新版本重新啟動，之後再載入舊外掛，也會載入新版本。取代或恢復穩定後它才回傳：
 
 ```ts import.meta.vitest name="replace: swap a plugin for a new version"
 import { Array, Effect, Option, Stream } from "effect"
@@ -76,8 +76,10 @@ Graft 在一次交易中套用所有配對，因此任何 fork 都不會看到�
 
 ## 回滾
 
-如果執行替換外掛的某個 fork 啟動失敗，Graft 會回滾整批替換：每個 fork 回到舊外掛，之後載入舊外掛也會再次載入舊外掛；舊外掛重新啟動後，`replace`
-回傳帶有失敗資訊的 `RolledBack`：
+如果執行替換外掛的某個 fork 啟動失敗，Graft 會回滾整批替換並恢復舊外掛。恢復穩定後，若計入的舊 fork 均未失敗，`replace`
+回傳 `RolledBack`；否則回傳 `RecoveryFailed`。兩種結果的 `failures`
+都記錄放棄替換的原因；`RecoveryFailed.recovery` 為每個恢復失敗的 fork 記錄一個
+`Failed`，保留完整 `Cause`：
 
 ```ts import.meta.vitest name="replace: roll back a replacement that fails"
 import { Array, Effect, Option, Stream } from "effect"
@@ -117,16 +119,22 @@ const outcome = await Effect.runPromise(
 outcome // => [["app/greeterV2"], Option.some(["app/greeterV1"])]
 ```
 
-| 情形                                               | 結果                                               |
-| -------------------------------------------------- | -------------------------------------------------- |
-| 執行替換外掛的每個 fork 都是 `Active` 或 `Pending` | `Replaced`。                                       |
-| 其中一個失敗，包括被替換的父外掛載入的子外掛       | `RolledBack`，帶有 `Failed` 失敗及其完整 `Cause`。 |
-| 到 `timeout` 時仍有 fork 在啟動                    | `RolledBack`，帶有 `TimedOut` 失敗。               |
-| 外掛設定了 `retry` 排程                            | 第一次失敗即作決定；Graft 不等待重試。             |
-| 某個 fork 在 `replace` 之前就已失敗                | 它的結果不計入，但會一起回滾。                     |
-| 某個 fork 在 `replace` 之前或期間直接請求目標外掛  | 不計入，回滾後仍留在目標外掛上。                   |
-| 之後的 `replace` 或 `restart` 接管了某個 fork      | 該 fork 及其子 fork 不再計入，它也不會回滾。       |
-| 呼叫端在 `replace` 等待時被中斷                    | 保留替換。                                         |
+| 情形                                               | 結果                                                              |
+| -------------------------------------------------- | ----------------------------------------------------------------- |
+| 執行替換外掛的每個 fork 都是 `Active` 或 `Pending` | `Replaced`。                                                      |
+| 其中一個失敗，包括被替換的父外掛載入的子外掛       | 回滾，記錄 `Failed` 失敗及其完整 `Cause`。                        |
+| 到 `timeout` 時仍有 fork 在啟動                    | 回滾，記錄 `TimedOut` 失敗。                                      |
+| 計入的恢復 fork 都是 `Active` 或 `Pending`         | `RolledBack`，帶有替換的 `failures`。                             |
+| 計入的恢復 fork 中有 `Failed`                      | `RecoveryFailed`，帶有替換的 `failures` 和恢復失敗的 `recovery`。 |
+| 外掛設定了 `retry` 排程                            | 第一次失敗即作決定；Graft 不等待重試。                            |
+| 某個 fork 在 `replace` 之前就已失敗                | 不影響是否回滾，但會一起回滾；恢復失敗會計入。                    |
+| 某個 fork 在 `replace` 之前或期間直接請求目標外掛  | 不計入，回滾後仍留在目標外掛上。                                  |
+| 之後的 `replace` 或 `restart` 接管了某個 fork      | 該 fork 及其子 fork 不再計入，它也不會回滾。                      |
+| 呼叫端在 `replace` 等待時被中斷                    | 保留替換。                                                        |
+
+恢復後的 fork 只有仍處於回滾恢復的外掛、且未被卸載時才計入。後續取代或重新啟動會接管它。
+`Pending` 表示等待相依項目，與取代前一樣算作已恢復。`timeout`
+不限制恢復等待時間。
 
 - `timeout`
   是一個選項：`Graft.replace(pairs, { timeout: "30 seconds" })`。不設定時，`replace`

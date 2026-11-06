@@ -7,7 +7,7 @@ description:
 
 `Graft.replace` swaps plugins for new versions. Every fork of an old plugin
 restarts with its replacement, and loading the old plugin later loads the new
-one. It returns once the restarted forks have started:
+one. It returns once the replacement or recovery settles:
 
 ```ts import.meta.vitest name="replace: swap a plugin for a new version"
 import { Array, Effect, Option, Stream } from "effect"
@@ -88,10 +88,11 @@ Then each affected fork stops and starts as usual, in the
 
 ## Rollback
 
-If a fork running a replacement fails to start, Graft rolls the whole batch
-back: every fork returns to the old plugin, loading the old plugin loads it
-again, and `replace` returns `RolledBack` with the failures once the old plugins
-have restarted:
+If a fork running a replacement fails to start, Graft rolls the whole batch back
+and restores the old plugins. Once recovery settles, `replace` returns
+`RolledBack` if no counted restored fork failed, or `RecoveryFailed` otherwise.
+Both outcomes carry the replacement `failures`; `RecoveryFailed.recovery`
+contains one `Failed` per failed restored fork, with its full `Cause`:
 
 ```ts import.meta.vitest name="replace: roll back a replacement that fails"
 import { Array, Effect, Option, Stream } from "effect"
@@ -131,16 +132,24 @@ const outcome = await Effect.runPromise(
 outcome // => [["app/greeterV2"], Option.some(["app/greeterV1"])]
 ```
 
-| Situation                                                    | Outcome                                                                |
-| ------------------------------------------------------------ | ---------------------------------------------------------------------- |
-| Every fork running a replacement is `Active` or `Pending`    | `Replaced`.                                                            |
-| One fails, including a child that a replaced parent loads    | `RolledBack`, with a `Failed` failure and its full `Cause`.            |
-| One is still starting when `timeout` passes                  | `RolledBack`, with a `TimedOut` failure.                               |
-| The plugin has a `retry` schedule                            | The first failure decides; Graft does not wait for retries.            |
-| A fork had already failed before `replace`                   | Its result does not count, but it is rolled back too.                  |
-| A fork asked for a target itself, before or during `replace` | It is not judged and stays on the target.                              |
-| A later `replace` or `restart` takes a fork over             | That fork and its children no longer count, and it is not rolled back. |
-| The caller is interrupted while `replace` waits              | The swap stays.                                                        |
+| Situation                                                    | Outcome                                                                                       |
+| ------------------------------------------------------------ | --------------------------------------------------------------------------------------------- |
+| Every fork running a replacement is `Active` or `Pending`    | `Replaced`.                                                                                   |
+| One fails, including a child that a replaced parent loads    | Roll back, recording a `Failed` failure and its full `Cause`.                                 |
+| One is still starting when `timeout` passes                  | Roll back, recording a `TimedOut` failure.                                                    |
+| All counted restored forks are `Active` or `Pending`         | `RolledBack`, with the replacement `failures`.                                                |
+| Any counted restored fork is `Failed`                        | `RecoveryFailed`, with replacement `failures` and restored failures in `recovery`.            |
+| The plugin has a `retry` schedule                            | The first failure decides; Graft does not wait for retries.                                   |
+| A fork had already failed before `replace`                   | It does not decide whether to roll back, but is rolled back too. Its recovery failure counts. |
+| A fork asked for a target itself, before or during `replace` | It is not judged and stays on the target.                                                     |
+| A later `replace` or `restart` takes a fork over             | That fork and its children no longer count, and it is not rolled back.                        |
+| The caller is interrupted while `replace` waits              | The swap stays.                                                                               |
+
+A restored fork counts only while it remains on the plugin restored by rollback
+and has not been disposed. A later replacement or restart takes it over.
+`Pending` means it is waiting for a dependency and counts as restored, just as
+it counts as started before replacement. Recovery waits are not bounded by
+`timeout`.
 
 - `timeout` is an option: `Graft.replace(pairs, { timeout: "30 seconds" })`.
   Without it, `replace` waits as long as the forks take.

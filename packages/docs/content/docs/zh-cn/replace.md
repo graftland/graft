@@ -4,7 +4,7 @@ description: 在一个事务中把插件替换为新版本，启动失败时回�
 ---
 
 `Graft.replace`
-将插件替换为新版本。旧插件的每个 fork 都会使用替换后的插件重启；之后再加载旧插件，也会加载新插件。重启的 fork 启动后它才返回：
+将插件替换为新版本。旧插件的每个 fork 都会使用替换后的插件重启；之后再加载旧插件，也会加载新插件。替换或恢复稳定后它才返回：
 
 ```ts import.meta.vitest name="replace: swap a plugin for a new version"
 import { Array, Effect, Option, Stream } from "effect"
@@ -76,8 +76,10 @@ Graft 在一个事务中应用所有配对，任何 fork 都不会看到只完�
 
 ## 回滚
 
-如果运行替换插件的某个 fork 启动失败，Graft 会回滚整批替换：每个 fork 回到旧插件，之后加载旧插件也会再次加载旧插件；旧插件重启后，`replace`
-返回带有失败信息的 `RolledBack`：
+如果运行替换插件的某个 fork 启动失败，Graft 会回滚整批替换并恢复旧插件。恢复稳定后，若计入的旧 fork 均未失败，`replace`
+返回 `RolledBack`；否则返回 `RecoveryFailed`。两种结果的 `failures`
+都记录放弃替换的原因；`RecoveryFailed.recovery` 为每个恢复失败的 fork 记录一个
+`Failed`，保留完整 `Cause`：
 
 ```ts import.meta.vitest name="replace: roll back a replacement that fails"
 import { Array, Effect, Option, Stream } from "effect"
@@ -117,16 +119,21 @@ const outcome = await Effect.runPromise(
 outcome // => [["app/greeterV2"], Option.some(["app/greeterV1"])]
 ```
 
-| 情形                                               | 结果                                               |
-| -------------------------------------------------- | -------------------------------------------------- |
-| 运行替换插件的每个 fork 都是 `Active` 或 `Pending` | `Replaced`。                                       |
-| 其中一个失败，包括被替换的父插件加载的子插件       | `RolledBack`，带有 `Failed` 失败及其完整 `Cause`。 |
-| 到 `timeout` 时仍有 fork 在启动                    | `RolledBack`，带有 `TimedOut` 失败。               |
-| 插件设置了 `retry` 调度                            | 第一次失败即作决定；Graft 不等待重试。             |
-| 某个 fork 在 `replace` 之前就已失败                | 它的结果不计入，但会一起回滚。                     |
-| 某个 fork 在 `replace` 之前或期间直接请求目标插件  | 不计入，回滚后仍留在目标插件上。                   |
-| 之后的 `replace` 或 `restart` 接管了某个 fork      | 该 fork 及其子 fork 不再计入，它也不会回滚。       |
-| 调用方在 `replace` 等待时被中断                    | 保留替换。                                         |
+| 情形                                               | 结果                                                              |
+| -------------------------------------------------- | ----------------------------------------------------------------- |
+| 运行替换插件的每个 fork 都是 `Active` 或 `Pending` | `Replaced`。                                                      |
+| 其中一个失败，包括被替换的父插件加载的子插件       | 回滚，记录 `Failed` 失败及其完整 `Cause`。                        |
+| 到 `timeout` 时仍有 fork 在启动                    | 回滚，记录 `TimedOut` 失败。                                      |
+| 计入的恢复 fork 都是 `Active` 或 `Pending`         | `RolledBack`，带有替换的 `failures`。                             |
+| 计入的恢复 fork 中有 `Failed`                      | `RecoveryFailed`，带有替换的 `failures` 和恢复失败的 `recovery`。 |
+| 插件设置了 `retry` 调度                            | 第一次失败即作决定；Graft 不等待重试。                            |
+| 某个 fork 在 `replace` 之前就已失败                | 不影响是否回滚，但会一起回滚；恢复失败会计入。                    |
+| 某个 fork 在 `replace` 之前或期间直接请求目标插件  | 不计入，回滚后仍留在目标插件上。                                  |
+| 之后的 `replace` 或 `restart` 接管了某个 fork      | 该 fork 及其子 fork 不再计入，它也不会回滚。                      |
+| 调用方在 `replace` 等待时被中断                    | 保留替换。                                                        |
+
+恢复后的 fork 只有仍处于回滚恢复的插件、且未被卸载时才计入。后续替换或重启会接管它。
+`Pending` 表示等待依赖，与替换前一样算作已恢复。`timeout` 不限制恢复等待时间。
 
 - `timeout`
   是一个选项：`Graft.replace(pairs, { timeout: "30 seconds" })`。不设置时，`replace`

@@ -204,6 +204,103 @@ export default Plugin.make({
 			}).pipe(run),
 	)
 
+	it.live.each(["reload", "watch"] as const)(
+		"reports recovery failure through %s and retries the retained generation",
+		(mode) =>
+			Effect.gen(function* () {
+				const {
+					hmr,
+					fs,
+					directory,
+					write,
+					load,
+					reach,
+					runtimeSource,
+					effectSource,
+				} = yield* setup
+				yield* write(
+					"a.mjs",
+					`
+import { Plugin } from ${runtimeSource};
+import { Cause, Effect, Ref } from ${effectSource};
+export default Plugin.make({
+  name: 'old',
+  apply: (() => {
+    const runs = Ref.makeUnsafe(0);
+    return () => Effect.gen(function* () {
+      if ((yield* Ref.updateAndGet(runs, n => n + 1)) > 1)
+        return yield* Effect.failCause(Cause.combine(Cause.fail('recovery failed'), Cause.die('recovery defect')));
+    });
+  })(),
+});
+`,
+				)
+				const plugin = yield* load("./a.mjs")
+				const fork = yield* Graft.plugin(plugin)
+				yield* fork.await
+				const reload =
+					mode === "watch"
+						? (yield* watchEvents(hmr, directory, fs)).changed("a.mjs")
+						: hmr.reload
+				yield* write(
+					"a.mjs",
+					`
+import { Plugin } from ${runtimeSource};
+import { Cause, Effect } from ${effectSource};
+export default Plugin.make({ name: 'new', apply: () =>
+  Effect.failCause(Cause.combine(Cause.fail('replacement failed'), Cause.die('replacement defect'))) });
+`,
+				)
+				const result = yield* reload
+				assert(result._tag === "RecoveryFailed")
+				assert.deepStrictEqual(result.entries, [
+					new URL("a.mjs", `file://${directory}/`).href,
+				])
+				for (const [failures, name, phase] of [
+					[result.failures, "new", "replacement"],
+					[result.recovery, "old", "recovery"],
+				] as const) {
+					assert.strictEqual(failures.length, 1)
+					const [failure] = failures
+					assert(failure?._tag === "Failed")
+					assert.strictEqual(failure.fork, fork.id)
+					assert.strictEqual(failure.plugin, name)
+					assert.strictEqual(failure.cause.reasons.length, 2)
+					assert.deepInclude(failure.cause.reasons[0], {
+						_tag: "Fail",
+						error: `${phase} failed`,
+					})
+					assert.deepInclude(failure.cause.reasons[1], {
+						_tag: "Die",
+						defect: `${phase} defect`,
+					})
+				}
+				const snapshot = yield* Stream.runHead(fork.state)
+				const state = Option.getOrThrow(snapshot)
+				assert(state._tag === "Failed")
+				assert.deepStrictEqual(result.recovery, [
+					Graft.ReplacementFailure.Failed({
+						fork: fork.id,
+						plugin: "old",
+						cause: state.cause,
+					}),
+				])
+				yield* reach(["old"])
+				const resolved = yield* Graft.resolve(plugin)
+				assert.strictEqual(resolved, plugin)
+				yield* write(
+					"a.mjs",
+					`
+import { Plugin } from ${runtimeSource};
+import { Effect } from ${effectSource};
+export default Plugin.make({ name: 'fixed', apply: () => Effect.void });
+`,
+				)
+				assert.strictEqual((yield* reload)._tag, "Reloaded")
+				yield* reach(["fixed"])
+			}).pipe(run),
+	)
+
 	it.live("rolls back plugins that do not start within activationTimeout", () =>
 		Effect.gen(function* () {
 			const { write, base, runtimeSource, effectSource } = yield* setup
