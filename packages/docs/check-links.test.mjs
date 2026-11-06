@@ -1,5 +1,12 @@
 import { strict as assert } from "node:assert"
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import {
+	mkdirSync,
+	mkdtempSync,
+	readdirSync,
+	readFileSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs"
 import { dirname, join } from "node:path"
 import { test } from "node:test"
 import { fileURLToPath } from "node:url"
@@ -47,3 +54,20 @@ for (const [name, href, reason] of [
 			assert.throws(() => checkLinks(directory, site), new RegExp(reason)),
 		))
 }
+
+test("docs content links within the site relatively", () => {
+	// A root-absolute link such as `/reference/…` ignores the deployment base.
+	const content = fileURLToPath(new URL("./content/docs/", import.meta.url))
+	const offenders = readdirSync(content, { recursive: true })
+		.filter((file) => /\.mdx?$/.test(file))
+		.flatMap((file) =>
+			readFileSync(join(content, file), "utf8")
+				.split("\n")
+				.flatMap((line, index) =>
+					/\]\(\/(?!\/)/.test(line)
+						? [`${file}:${index + 1}: ${line.trim()}`]
+						: [],
+				),
+		)
+	assert.deepEqual(offenders, [])
+})

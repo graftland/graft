@@ -186,4 +186,5 @@ partially failed installation.
 Run the transport kit once with `close` and once without it to check both
 dependency withdrawal and input closure. Protocol-layer
 [limits](../contributing/#limits) remain Effect's responsibility. See the
-generated [API reference](/reference/plugin-mcp-server/readme/) for exact types.
+generated [API reference](../../reference/plugin-mcp-server/readme/) for exact
+types.

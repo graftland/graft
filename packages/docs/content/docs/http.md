@@ -57,7 +57,7 @@ path parameters. List handler dependencies in the mounting plugin's `inject`.
 | `Http.mount`                | Build the layer and return its services; own requests until unload.                                                       |
 | `Http.advertise`            | Advertise an existing app; the caller must own its resources and request lifetime.                                        |
 
-See the [API reference](/reference/plugin-http/http/readme/) and the runnable
+See the [API reference](../reference/plugin-http/http/readme/) and the runnable
 [http-gateway sample](https://github.com/graftland/graft/tree/main/samples/http-gateway).
 
 ## Routing and conflicts

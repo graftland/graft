@@ -26,8 +26,10 @@ import type { Tasks } from "./internal/tasks"
 
 export type { Tasks } from "./internal/tasks"
 
-const TypeId = "~@graftland/graft/Plugin"
-const Contract = "~@graftland/graft/Plugin/Contract"
+/** Brands a plugin definition; `isPlugin` checks for it. */
+export const TypeId = "~@graftland/graft/Plugin"
+/** Keys the input and error contract that keeps a definition's types invariant. */
+export const Contract = "~@graftland/graft/Plugin/Contract"
 
 /**
  * Marks a dependency as optional: the plugin starts without it and restarts

@@ -170,4 +170,4 @@ export default Plugin.make({
 
 分別提供和省略 `close`
 各執行一次傳輸測試，以檢查依賴撤回和輸入關閉。協定層[限制](../contributing/#限制)仍由 Effect 負責。完整型別見自動產生的
-[API 參考](/reference/plugin-mcp-server/readme/)。
+[API 參考](../../reference/plugin-mcp-server/readme/)。

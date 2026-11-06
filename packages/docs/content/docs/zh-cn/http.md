@@ -56,7 +56,7 @@ export default Plugin.make({
 | `Http.mount`                | 构建层并返回服务；管理请求直至卸载。                       |
 | `Http.advertise`            | 发布已有应用；调用者负责资源和请求的生命周期。             |
 
-参见 [API 参考](/reference/plugin-http/http/readme/)和可运行的
+参见 [API 参考](../reference/plugin-http/http/readme/)和可运行的
 [http-gateway 示例](https://github.com/graftland/graft/tree/main/samples/http-gateway)。
 
 ## 路由与冲突

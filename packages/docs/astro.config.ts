@@ -6,9 +6,12 @@ import { referenceLinkCheck } from "./check-links.mjs"
 import { hoverTypes } from "./hover-types.mjs"
 import { reference } from "./reference.mjs"
 
-// DOCS_URL is the public address of the site, such as
-// https://graftland.github.io/graft/. Its path becomes the base of every page.
-const url = new URL(process.env["DOCS_URL"] ?? "http://localhost:4321/")
+// DOCS_URL is the public address of the site. Its path becomes the base of
+// every page. The default is the deployed address, so a local build checks
+// links against the same base as the deployed site.
+const url = new URL(
+	process.env["DOCS_URL"] ?? "https://graftland.github.io/graft/",
+)
 
 export default defineConfig({
 	site: url.origin,
