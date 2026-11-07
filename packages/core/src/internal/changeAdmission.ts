@@ -53,13 +53,14 @@ const footprint = Effect.fnUntraced(function* (managed: Managed) {
 			} satisfies Change.ObjectKey,
 			write: true,
 		},
+		// Phase 1 preserves facade publication and ownership; cutover changes only the route.
 		...Array.map(managed.facades, (facade) => ({
 			object: {
 				_tag: "Slot",
 				realm: realmOf(realms, facade.key),
 				key: facade.key,
 			} satisfies Change.ObjectKey,
-			write: true,
+			write: false,
 		})),
 	]
 })

@@ -177,7 +177,7 @@ it.effect(
 )
 
 it.effect(
-	"shares captured facade read premises and fences only their conflicting writer",
+	"allows a stable facade provider to change while both consumers are changing",
 	() =>
 		run(
 			Effect.gen(function* () {
@@ -203,25 +203,19 @@ it.effect(
 				})
 				yield* Deferred.await(a.ready)
 				yield* Deferred.await(b.ready)
-				const conflict = yield* Effect.flip(
-					Change.submit({
-						instance: "c",
-						candidate: candidate("c-next"),
-						budget,
-					}),
-				)
-				assert.strictEqual(conflict.reason._tag, "Busy")
+				const provider = yield* Change.submit({
+					instance: "c",
+					candidate: candidate("c-next"),
+					budget,
+				})
+				assert.strictEqual((yield* provider.await)._tag, "Accepted")
+				const firstStatus = yield* Change.get(first.id)
+				const secondStatus = yield* Change.get(second.id)
+				assert.isTrue(Option.isNone(Option.getOrThrow(firstStatus).outcome))
+				assert.isTrue(Option.isNone(Option.getOrThrow(secondStatus).outcome))
 				yield* Deferred.succeed(ready, undefined)
 				assert.strictEqual((yield* first.await)._tag, "Accepted")
 				assert.strictEqual((yield* second.await)._tag, "Accepted")
-				assert.strictEqual(
-					(yield* Change.run({
-						instance: "c",
-						candidate: candidate("c-next"),
-						budget,
-					}))._tag,
-					"Accepted",
-				)
 			}),
 		),
 )
