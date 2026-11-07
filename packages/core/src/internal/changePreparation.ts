@@ -1,4 +1,13 @@
-import { Cause, Effect, Exit, HashSet, Option, Scope, TxRef } from "effect"
+import {
+	Cause,
+	Effect,
+	Exit,
+	Fiber,
+	HashSet,
+	Option,
+	Scope,
+	TxRef,
+} from "effect"
 
 import * as Change from "../Change"
 import * as Release from "../Release"
@@ -33,6 +42,21 @@ export const observeCleanup = (
 		Effect.asVoid,
 	)
 
+const closeScopes = Effect.fnUntraced(function* (
+	execution: Scope.Closeable,
+	resources: Scope.Closeable,
+) {
+	const stopped = yield* Effect.exit(Release.close(execution, Exit.void))
+	const cleaned = yield* Effect.exit(Release.close(resources, Exit.void))
+	if (Exit.isFailure(stopped))
+		return yield* Effect.failCause(
+			Exit.isFailure(cleaned)
+				? Cause.combine(stopped.cause, cleaned.cause)
+				: stopped.cause,
+		)
+	if (Exit.isFailure(cleaned)) return yield* Effect.failCause(cleaned.cause)
+})
+
 /** Preparation and its admission handoff share one interruption-safe resource boundary. */
 export const prepare = Effect.fnUntraced(function* <A, E, R>(
 	runtime: Runtime,
@@ -50,10 +74,11 @@ export const prepare = Effect.fnUntraced(function* <A, E, R>(
 					close: Effect.void,
 					await: Effect.succeed(Exit.void),
 				})
+			const execution = yield* Scope.fork(runtime.changes.scope)
 			const scope = yield* Scope.make()
 			const owner: AsyncClose.Close = yield* AsyncClose.make(
 				runtime.changes.scope,
-				Release.close(scope, Exit.void),
+				closeScopes(execution, scope),
 				(exit) =>
 					Exit.isSuccess(exit) || !Cause.hasInterruptsOnly(exit.cause)
 						? TxRef.update(
@@ -62,19 +87,41 @@ export const prepare = Effect.fnUntraced(function* <A, E, R>(
 							)
 						: Effect.void,
 			)
-			yield* TxRef.update(
-				runtime.changes.preparations,
-				HashSet.add(owner.dispose),
+			yield* Effect.tx(
+				Effect.gen(function* () {
+					if (!(yield* TxRef.get(runtime.changes.open)))
+						return yield* Change.ChangeRejected.make({
+							reason: { _tag: "Closing" },
+						})
+					yield* TxRef.update(
+						runtime.changes.preparations,
+						HashSet.add(owner.dispose),
+					)
+				}),
+			).pipe(
+				Effect.onExit((exit) =>
+					Exit.isFailure(exit) ? owner.dispose : Effect.void,
+				),
 			)
 			const load = managed.driver.prepare
 			return yield* Effect.gen(function* () {
-				const result = yield* Effect.exit(
-					restore(
-						Scope.provide(
-							Effect.suspend(() => load(candidate)),
-							scope,
-						).pipe(Effect.timeout(limits.startup)),
+				const loading = yield* Scope.provide(
+					Effect.suspend(() => load(candidate)),
+					scope,
+				).pipe(
+					Effect.onExit((exit) =>
+						Exit.isFailure(exit)
+							? Effect.logError(
+									"Change metadata preparation failed",
+									exit.cause,
+								)
+							: Effect.void,
 					),
+					Effect.annotateLogs({ instance: managed.instance, key }),
+					Effect.forkIn(execution),
+				)
+				const result = yield* Effect.exit(
+					restore(Fiber.join(loading).pipe(Effect.timeout(limits.startup))),
 				)
 				if (Exit.isSuccess(result))
 					return yield* use({

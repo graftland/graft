@@ -1,11 +1,14 @@
 import {
+	Array,
 	Cause,
 	Deferred,
 	Effect,
 	Fiber,
+	HashMap,
 	HashSet,
 	Logger,
 	Queue,
+	String,
 	TxRef,
 } from "effect"
 import { TestClock } from "effect/testing"
@@ -173,3 +176,119 @@ it.effect(
 			}),
 		),
 )
+
+it.effect("metadata preparation respects its startup deadline", () =>
+	run(
+		Effect.gen(function* () {
+			const entered = yield* Deferred.make<void>()
+			const release = yield* Deferred.make<void>()
+			yield* register("a", {
+				prepare: () =>
+					Effect.uninterruptible(
+						Deferred.succeed(entered, undefined).pipe(
+							Effect.andThen(Deferred.await(release)),
+							Effect.as({ overlap: true }),
+						),
+					),
+			})
+			const submission = yield* Change.submit({
+				instance: "a",
+				candidate: candidate("next"),
+				budget,
+			}).pipe(Effect.exit, Effect.forkScoped)
+			yield* Deferred.await(entered)
+			yield* TestClock.adjust(10000)
+			const observed = submission.pollUnsafe()
+			yield* Deferred.succeed(release, undefined)
+			yield* Fiber.join(submission)
+			assert.isDefined(
+				observed,
+				"Metadata preparation is still waiting after 100 startup budgets",
+			)
+		}),
+	),
+)
+
+for (const fails of [false, true])
+	it.effect(
+		fails
+			? "retains a late uninterruptible preparation failure and cleans its resources after execution ends"
+			: "cleans both early and late resources only after timed-out preparation execution ends",
+		() =>
+			Effect.gen(function* () {
+				const logs = yield* Queue.unbounded<Logger.Options<unknown>>()
+				const logging = Logger.layer([
+					Logger.make((entry) => {
+						Queue.offerUnsafe(logs, entry)
+					}),
+				])
+				yield* run(
+					Effect.gen(function* () {
+						const events = yield* TxRef.make<ReadonlyArray<string>>([])
+						const entered = yield* Deferred.make<void>()
+						const release = yield* Deferred.make<void>()
+						yield* register("a", {
+							prepare: () =>
+								Effect.uninterruptible(
+									Effect.gen(function* () {
+										yield* Effect.addFinalizer(() =>
+											TxRef.update(events, Array.append("early cleanup")),
+										)
+										yield* Deferred.succeed(entered, undefined)
+										yield* Deferred.await(release)
+										yield* Effect.addFinalizer(() =>
+											TxRef.update(events, Array.append("late cleanup")),
+										)
+										yield* TxRef.update(events, Array.append("execution ended"))
+										return yield* fails
+											? Effect.die("Late metadata execution failed")
+											: Effect.succeed({ overlap: true })
+									}),
+								),
+						})
+						const submission = yield* Change.submit({
+							instance: "a",
+							key: "timed-out-metadata",
+							candidate: candidate("next"),
+							budget,
+						}).pipe(Effect.exit, Effect.forkScoped)
+						yield* Deferred.await(entered)
+						yield* TestClock.adjust(200)
+						assert.isDefined(submission.pollUnsafe())
+						const result = yield* Fiber.join(submission)
+						assert.isTrue(result._tag === "Failure")
+						const before = yield* TxRef.get(events)
+						assert.deepStrictEqual(before, [])
+						const { runtime } = yield* RuntimeContext
+						const retained = yield* TxRef.get(runtime.changes.preparations)
+						assert.strictEqual(HashSet.size(retained), 1)
+						yield* Deferred.succeed(release, undefined)
+						yield* Effect.tx(
+							TxRef.get(runtime.changes.preparations).pipe(
+								Effect.flatMap((pending) =>
+									HashSet.size(pending) === 0 ? Effect.void : Effect.txRetry,
+								),
+							),
+						)
+						const after = yield* TxRef.get(events)
+						assert.deepStrictEqual(after, [
+							"execution ended",
+							"late cleanup",
+							"early cleanup",
+						])
+						const changes = yield* TxRef.get(runtime.changes.records)
+						assert.strictEqual(HashMap.size(changes), 0)
+					}),
+				).pipe(Effect.provide(logging))
+				if (fails) {
+					const observed = yield* Queue.clear(logs)
+					assert.isTrue(
+						Array.some(observed, (entry) =>
+							String.includes("Late metadata execution failed")(
+								Cause.pretty(entry.cause),
+							),
+						),
+					)
+				}
+			}),
+	)
