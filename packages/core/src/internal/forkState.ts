@@ -1,7 +1,8 @@
-import { Effect, HashMap, TxRef, TxSubscriptionRef } from "effect"
+import { Effect, HashMap, TxRef } from "effect"
 
 import { ForkState } from "../Fork"
 import type { ForkStatus, LocalSnapshot, Runtime, Spec } from "./runtime"
+import * as Snapshots from "./snapshot"
 
 /** Update ancestors in the same transaction as the state or topology change. */
 const adjustLoading = Effect.fnUntraced(function* (
@@ -10,7 +11,7 @@ const adjustLoading = Effect.fnUntraced(function* (
 ) {
 	if (delta === 0) return
 	for (let current = status; current !== undefined; current = current.parent) {
-		const snapshot = yield* TxSubscriptionRef.get(current.snapshot)
+		const snapshot = yield* Snapshots.get(current.snapshot)
 		if (snapshot.disposed) return
 		yield* TxRef.update(current.loading, (count) => count + delta)
 	}
@@ -21,17 +22,19 @@ export const make = Effect.fnUntraced(function* (
 	parent: ForkStatus | undefined,
 	spec: Spec,
 ) {
+	const snapshot = yield* Snapshots.make<LocalSnapshot>({
+		state: ForkState.Loading(),
+		accepted: undefined,
+		name: spec.plugin.name,
+		input: spec.input,
+		disposed: false,
+	})
 	const status: ForkStatus = {
 		parent,
 		loading: yield* TxRef.make(0),
-		snapshot: yield* TxSubscriptionRef.make<LocalSnapshot>({
-			state: ForkState.Loading(),
-			accepted: undefined,
-			name: spec.plugin.name,
-			input: spec.input,
-			disposed: false,
-		}),
+		snapshot,
 	}
+
 	yield* adjustLoading(status, 1)
 	return status
 })
@@ -43,7 +46,7 @@ export const setState = Effect.fnUntraced(function* (
 	state: ForkState,
 	spec: Spec,
 ) {
-	const current = yield* TxSubscriptionRef.get(status.snapshot)
+	const current = yield* Snapshots.get(status.snapshot)
 	if (current.disposed) return
 	const next: LocalSnapshot = {
 		state,
@@ -56,9 +59,9 @@ export const setState = Effect.fnUntraced(function* (
 		status,
 		Number(state._tag === "Loading") - Number(current.state._tag === "Loading"),
 	)
-	yield* TxSubscriptionRef.set(status.snapshot, next)
+	yield* Snapshots.set(status.snapshot, next)
 	// Display snapshots contain values, so previously emitted trees never change.
-	yield* TxSubscriptionRef.update(runtime.forks, (forks) =>
+	yield* Snapshots.update(runtime.forks, (forks) =>
 		HashMap.modify(forks, id, (entry) => ({ ...entry, ...next })),
 	)
 }, Effect.tx)
@@ -69,17 +72,17 @@ export const dispose = Effect.fnUntraced(function* (
 	id: number,
 	status: ForkStatus,
 ) {
-	const current = yield* TxSubscriptionRef.get(status.snapshot)
+	const current = yield* Snapshots.get(status.snapshot)
 	if (current.disposed) return
 	const loading = yield* TxRef.get(status.loading)
 	yield* adjustLoading(status.parent, -loading)
 	yield* TxRef.set(status.loading, 0)
-	yield* TxSubscriptionRef.set(status.snapshot, {
+	yield* Snapshots.set(status.snapshot, {
 		...current,
 		state: ForkState.Disposed(),
 		disposed: true,
 	})
-	yield* TxSubscriptionRef.update(runtime.forks, HashMap.remove(id))
+	yield* Snapshots.update(runtime.forks, HashMap.remove(id))
 })
 
 /** Only the subtree's own counter belongs to this waiting transaction's read set. */

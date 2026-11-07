@@ -9,7 +9,6 @@ import {
 	Order,
 	Stream,
 	TxRef,
-	TxSubscriptionRef,
 } from "effect"
 import { assert, describe, it } from "@effect/vitest"
 
@@ -17,6 +16,7 @@ import { Graft, Plugin } from "../src/index.ts"
 import { realmKey } from "../src/internal/runtime.ts"
 import { RuntimeContext } from "../src/internal/runtimeContext"
 import * as Slots from "../src/internal/slots.ts"
+import * as Snapshots from "../src/internal/snapshot.ts"
 import { reach, registrySnapshot, run } from "./utils.ts"
 
 class Required extends Context.Service<Required, number>()(
@@ -232,7 +232,7 @@ describe("transactional service slots", () => {
 					}),
 				)
 				yield* reach(failed, "Failed")
-				const entries = yield* TxSubscriptionRef.get(runtime.forks)
+				const entries = yield* Snapshots.get(runtime.forks)
 				const node = Option.getOrThrow(HashMap.get(entries, failed.id)).node
 				yield* subscribed(node.state)
 				const slots = yield* TxRef.get(runtime.slots)

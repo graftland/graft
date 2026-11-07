@@ -13,6 +13,39 @@ export class ReleaseInterrupted extends Schema.TaggedError<
 	}
 }
 
+/** Separates pending external cancellation from interrupted finalizers in an interrupt-only release cause. */
+// Built once at module load: close runs on every scoped handler invocation.
+const markReleaseInterrupts = Effect.fnUntraced(function* (
+	cause: Cause.Cause<never>,
+): Effect.fn.Return<never> {
+	// Re-entering interruptibility observes pending external cancellation without producing a self-interrupt.
+	// Read it after release so cancellation arriving during a finalizer is included too.
+	const pending = yield* Effect.exit(Effect.interruptible(Effect.void))
+	const [cancelled, interrupted] = Array.partition(cause.reasons, (reason) =>
+		Exit.isFailure(pending) &&
+		Array.some(
+			pending.cause.reasons,
+			(external) =>
+				reason._tag === "Interrupt" &&
+				external._tag === "Interrupt" &&
+				reason.fiberId === external.fiberId,
+		)
+			? Result.succeed(reason)
+			: Result.fail(reason),
+	)
+	if (interrupted.length === 0) return yield* Effect.failCause(cause)
+	return yield* Effect.failCause(
+		Cause.combine(
+			Cause.fromReasons(cancelled),
+			Cause.die(
+				ReleaseInterrupted.make({
+					cause: Cause.fromReasons(interrupted),
+				}),
+			),
+		),
+	)
+})
+
 /**
  * Closes a scope without losing interrupted finalizers through enclosing cancellation.
  * When the release cause contains only interrupts, pending external cancellation
@@ -25,39 +58,7 @@ export const close = (
 ) =>
 	Effect.uninterruptible(
 		Scope.close(scope, exit).pipe(
-			Effect.catchCauseIf(
-				Cause.hasInterruptsOnly,
-				Effect.fnUntraced(function* (cause) {
-					// Re-entering interruptibility observes pending external cancellation without producing a self-interrupt.
-					// Read it after release so cancellation arriving during a finalizer is included too.
-					const pending = yield* Effect.exit(Effect.interruptible(Effect.void))
-					const [cancelled, interrupted] = Array.partition(
-						cause.reasons,
-						(reason) =>
-							Exit.isFailure(pending) &&
-							Array.some(
-								pending.cause.reasons,
-								(external) =>
-									reason._tag === "Interrupt" &&
-									external._tag === "Interrupt" &&
-									reason.fiberId === external.fiberId,
-							)
-								? Result.succeed(reason)
-								: Result.fail(reason),
-					)
-					if (interrupted.length === 0) return yield* Effect.failCause(cause)
-					return yield* Effect.failCause(
-						Cause.combine(
-							Cause.fromReasons(cancelled),
-							Cause.die(
-								ReleaseInterrupted.make({
-									cause: Cause.fromReasons(interrupted),
-								}),
-							),
-						),
-					)
-				}),
-			),
+			Effect.catchCauseIf(Cause.hasInterruptsOnly, markReleaseInterrupts),
 		),
 	)
 
@@ -65,18 +66,24 @@ export const close = (
  * Runs an effect in its own scope and closes it with close.
  * Body and release failures are combined; a failed release never hides the body cause.
  */
-export const scoped = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+// Event dispatch runs this once per handler invocation, so it chains combinators instead of a generator.
+export const scoped = <A, E, R>(
+	effect: Effect.Effect<A, E, R>,
+): Effect.Effect<A, E, Exclude<R, Scope.Scope>> =>
 	Effect.uninterruptibleMask((restore) =>
-		Effect.gen(function* () {
-			const scope = yield* Scope.make()
-			const body = yield* Effect.exit(restore(Scope.provide(scope)(effect)))
-			const closed = yield* Effect.exit(close(scope, body))
-			if (Exit.isFailure(closed))
-				return yield* Effect.failCause(
-					Exit.isFailure(body)
-						? Cause.combine(body.cause, closed.cause)
-						: closed.cause,
-				)
-			return yield* body
-		}),
+		Effect.flatMap(Scope.make(), (scope) =>
+			Effect.flatMap(
+				Effect.exit(restore(Scope.provide(scope)(effect))),
+				(body) =>
+					Effect.flatMap(Effect.exit(close(scope, body)), (closed) =>
+						Exit.isFailure(closed)
+							? Effect.failCause(
+									Exit.isFailure(body)
+										? Cause.combine(body.cause, closed.cause)
+										: closed.cause,
+								)
+							: body,
+					),
+			),
+		),
 	)

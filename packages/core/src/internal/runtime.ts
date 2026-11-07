@@ -11,12 +11,12 @@ import {
 	type PubSub,
 	type Scope,
 	type TxRef,
-	type TxSubscriptionRef,
 } from "effect"
 
 import type { ForkState } from "../Fork"
 import type { Plugin } from "../Plugin"
 import type { Aliases } from "./aliases"
+import type { Snapshot } from "./snapshot"
 import type { Group } from "./tasks"
 
 /** Length-prefixed encoding keeps realm and service identities unambiguous. */
@@ -87,7 +87,7 @@ export interface LocalSnapshot<out E = unknown> {
 
 /** Loading counts include the fork itself and its live descendants. */
 export interface ForkStatus {
-	readonly snapshot: TxSubscriptionRef.TxSubscriptionRef<LocalSnapshot>
+	readonly snapshot: Snapshot<LocalSnapshot>
 	readonly loading: TxRef.TxRef<number>
 	readonly parent: ForkStatus | undefined
 }
@@ -128,6 +128,8 @@ export interface Handler<
 	readonly scope: Scope.Closeable
 	/** Identifies the owner closer so normal dispatch can distinguish withdrawal from self-interruption. */
 	readonly closing: Deferred.Deferred<number>
+	/** Claims one invocation: false once unregistration has started, or once a once handler was taken. */
+	readonly claim: Effect.Effect<boolean>
 	readonly run: (args: Args) => Effect.Effect<Out, E>
 }
 
@@ -135,9 +137,7 @@ export interface Runtime {
 	/** Services from the environment `Graft.layer` was built in; they satisfy `inject` too. */
 	readonly ambient: Context.Context<never>
 	readonly slots: TxRef.TxRef<HashMap.HashMap<ServiceKey, Slot>>
-	readonly forks: TxSubscriptionRef.TxSubscriptionRef<
-		HashMap.HashMap<number, ForkEntry>
-	>
+	readonly forks: Snapshot<HashMap.HashMap<number, ForkEntry>>
 	readonly aliases: Aliases
 	readonly events: TxRef.TxRef<HashMap.HashMap<string, ReadonlyArray<Handler>>>
 	readonly ids: TxRef.TxRef<number>

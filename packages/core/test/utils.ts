@@ -7,12 +7,12 @@ import {
 	Ref,
 	Stream,
 	TxRef,
-	TxSubscriptionRef,
 	type Scope,
 } from "effect"
 import { assert } from "@effect/vitest"
 
 import { Graft, type Fork } from "../src/index.ts"
+import * as Snapshots from "../src/internal/snapshot.ts"
 
 /** Runs a test inside a fresh root graft. */
 export const run = <A, E>(
@@ -73,7 +73,7 @@ export const registrySnapshot = Effect.fn("registrySnapshot")(function* (
 export const activeSnapshot = Effect.fn("activeSnapshot")(function* (
 	runtime: import("../src/internal/runtime.ts").Runtime,
 ) {
-	const forks = yield* TxSubscriptionRef.get(runtime.forks)
+	const forks = yield* Snapshots.get(runtime.forks)
 	let active = HashMap.empty<
 		number,
 		import("../src/internal/runtime.ts").ActiveResolution

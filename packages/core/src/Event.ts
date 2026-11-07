@@ -13,6 +13,7 @@ import {
 	FiberSet,
 	HashMap,
 	Option,
+	Ref,
 	Scope,
 	TxRef,
 } from "effect"
@@ -111,11 +112,36 @@ const register = Effect.fnUntraced(function* <
 	const owner = yield* Effect.scope
 	const scope = yield* Scope.fork(owner)
 	const closing = yield* Deferred.make<number>()
+	const active = yield* Ref.make(true)
 	const fibers = yield* FiberSet.make<Out, E>().pipe(Scope.provide(scope))
 	// This finalizer runs before FiberSet interrupts the group's invocations.
 	yield* Scope.addFinalizer(
 		scope,
 		Effect.withFiber((fiber) => Deferred.succeed(closing, fiber.id)),
+	)
+	// A once handler leaves the map in the same transaction that claims it, so
+	// re-entrant and concurrent dispatches never see it again. Other handlers
+	// only read a flag; unregistration clears it before leaving the map.
+	const claimOnce: Effect.Effect<boolean> = Effect.tx(
+		Effect.flatMap(TxRef.get(runtime.events), (events) => {
+			const handlers = Option.getOrElse(
+				HashMap.get(events, event.key),
+				() => [],
+			)
+			return Array.some(handlers, (current) => current === entry)
+				? Effect.as(
+						TxRef.set(
+							runtime.events,
+							setHandlers(
+								events,
+								event.key,
+								Array.filter(handlers, (other) => other !== entry),
+							),
+						),
+						true,
+					)
+				: Effect.succeed(false)
+		}),
 	)
 	const entry: Handler<Args, Out, E> = {
 		realm: realmOf(realms, event.key),
@@ -125,6 +151,7 @@ const register = Effect.fnUntraced(function* <
 		fibers,
 		scope,
 		closing,
+		claim: options.once ? claimOnce : Ref.get(active),
 		run: (args) =>
 			Effect.updateContext(
 				// Restore services first; the invocation then supplies its own Scope.
@@ -148,7 +175,12 @@ const register = Effect.fnUntraced(function* <
 				? Array.prepend(handlers, entry)
 				: Array.append(handlers, entry),
 		),
-		() => update(Array.filter((handler) => handler !== entry)),
+		// Deactivating first means no dispatch can claim a handler that is leaving.
+		() =>
+			Effect.andThen(
+				Ref.set(active, false),
+				update(Array.filter((handler) => handler !== entry)),
+			),
 	).pipe(Scope.provide(scope))
 }, Effect.uninterruptible)
 
@@ -176,119 +208,119 @@ export const once = <Args extends ReadonlyArray<unknown>, Out, E, R>(
 	register(event, handler, { ...options, once: true })
 
 /** The handlers a dispatch from the current context reaches, in order. */
-const handlersFor = Effect.fnUntraced(function* <
-	Args extends ReadonlyArray<unknown>,
-	Out,
-	E,
->(event: Event<Args, Out, E>) {
-	const { runtime } = yield* RuntimeContext
-	const realms = yield* Realms
-	const filter = yield* Filter
-	const realm = realmOf(realms, event.key)
-	const events = yield* TxRef.get(runtime.events)
-	const handlers = Option.getOrElse(
-		HashMap.get(events, event.key),
-		() => [],
-	) as ReadonlyArray<Handler<Args, Out, E>>
-	return Array.filter(
-		handlers,
-		(handler) =>
-			handler.global || (handler.realm === realm && filter(handler.context)),
+// Runs once per dispatch; combinators avoid a generator on this path.
+const handlersFor = <Args extends ReadonlyArray<unknown>, Out, E>(
+	event: Event<Args, Out, E>,
+): Effect.Effect<ReadonlyArray<Handler<Args, Out, E>>, never, Graft> =>
+	Effect.flatMap(RuntimeContext, ({ runtime }) =>
+		Effect.flatMap(Realms, (realms) =>
+			Effect.flatMap(Filter, (filter) =>
+				Effect.map(TxRef.get(runtime.events), (events) => {
+					const realm = realmOf(realms, event.key)
+					const handlers = Option.getOrElse(
+						HashMap.get(events, event.key),
+						() => [],
+					) as ReadonlyArray<Handler<Args, Out, E>>
+					return Array.filter(
+						handlers,
+						(handler) =>
+							handler.global ||
+							(handler.realm === realm && filter(handler.context)),
+					)
+				}),
+			),
+		),
 	)
+
+const skipped = Effect.succeedNone
+
+/**
+ * Settles an invocation that did not succeed. Only interruption by the owner's
+ * teardown skips the handler; every other cause, including a release failure, propagates.
+ */
+const settle = Effect.fnUntraced(function* <Out, E>(
+	handler: Handler<never, Out, E>,
+	started: Deferred.Deferred<void>,
+	cause: Cause.Cause<E>,
+) {
+	if (
+		Cause.hasInterruptsOnly(cause) &&
+		(yield* Deferred.isDone(handler.closing))
+	) {
+		const ran = yield* Deferred.isDone(started)
+		// A closed FiberSet can refuse to start the invocation.
+		if (!ran) return Option.none<Out>()
+		const closer = yield* Deferred.await(handler.closing)
+		// Without dispatcher cancellation, only the owner's interruption permits skipping a handler.
+		if (
+			Array.every(
+				cause.reasons,
+				(reason) => reason._tag === "Interrupt" && reason.fiberId === closer,
+			)
+		)
+			return Option.none<Out>()
+	}
+	return yield* Effect.failCause(cause)
 })
+
+/** Interrupts a cancelled invocation and waits for it; release interruptions are defects, bare body cancellation is quiet. */
+const cancel = <Out, E>(fiber: Fiber.Fiber<Out, E>) =>
+	Effect.andThen(
+		Fiber.interrupt(fiber),
+		Effect.flatMap(Fiber.await(fiber), (stopped) =>
+			Exit.isFailure(stopped) && !Cause.hasInterruptsOnly(stopped.cause)
+				? Effect.failCause(stopped.cause)
+				: Effect.void,
+		),
+	)
 
 /**
  * Runs one handler in its owner's fiber set. Resolves to `None` if the
  * handler was unregistered before it could run, or its owner was torn down
  * while it ran.
  */
+// Runs once per handler per dispatch: the success path chains combinators instead of generators.
 const invoke = <Args extends ReadonlyArray<unknown>, Out, E>(
-	event: Event<Args, Out, E>,
 	handler: Handler<Args, Out, E>,
 	args: Args,
-): Effect.Effect<Option.Option<Out>, E, Graft> =>
+): Effect.Effect<Option.Option<Out>, E> =>
 	Effect.uninterruptibleMask((restore) =>
-		Effect.gen(function* () {
-			const { runtime } = yield* RuntimeContext
-			const claimed = yield* Effect.tx(
-				Effect.gen(function* () {
-					const events = yield* TxRef.get(runtime.events)
-					const handlers = Option.getOrElse(
-						HashMap.get(events, event.key),
-						() => [],
-					)
-					if (!Array.some(handlers, (current) => current === handler))
-						return false
-					if (handler.once) {
-						yield* TxRef.set(
-							runtime.events,
-							setHandlers(
-								events,
-								event.key,
-								Array.filter(handlers, (other) => other !== handler),
+		Effect.flatMap(handler.claim, (claimed) => {
+			if (!claimed) return skipped
+			const run = Effect.flatMap(Deferred.make<void>(), (started) =>
+				Effect.flatMap(
+					// Starting the handler and installing its cancellation cleanup are atomic.
+					FiberSet.run(
+						handler.fibers,
+						Effect.uninterruptible(
+							Effect.withFiber((self) =>
+								// FiberSet.run registers after starting; register here before any user code.
+								// This is the invocation fiber whose result has the handler's exact bounds.
+								FiberSet.add(handler.fibers, self as Fiber.Fiber<Out, E>),
+							).pipe(
+								Effect.andThen(Deferred.succeed(started, undefined)),
+								Effect.andThen(
+									restore(Effect.suspend(() => handler.run(args))),
+								),
 							),
-						)
-					}
-					return true
-				}),
-			)
-			if (!claimed) return Option.none()
-			return yield* Effect.gen(function* () {
-				// Starting the handler and installing its cancellation cleanup are atomic.
-				const started = yield* Deferred.make<void>()
-				const fiber = yield* FiberSet.run(
-					handler.fibers,
-					Effect.uninterruptible(
-						Effect.withFiber((self) =>
-							// FiberSet.run registers after starting; register here before any user code.
-							// This is the invocation fiber whose result has the handler's exact bounds.
-							FiberSet.add(handler.fibers, self as Fiber.Fiber<Out, E>),
-						).pipe(
-							Effect.andThen(Deferred.succeed(started, undefined)),
-							Effect.andThen(restore(Effect.suspend(() => handler.run(args)))),
 						),
+						{ startImmediately: true },
 					),
-					{ startImmediately: true },
-				)
-				const exit = yield* Effect.onInterrupt(
-					restore(Fiber.await(fiber)),
-					() =>
-						Effect.gen(function* () {
-							yield* Fiber.interrupt(fiber)
-							const stopped = yield* Fiber.await(fiber)
-							// Release interruptions are defects; only bare body cancellation is quiet.
-							if (
-								Exit.isFailure(stopped) &&
-								!Cause.hasInterruptsOnly(stopped.cause)
-							)
-								return yield* Effect.failCause(stopped.cause)
-						}),
-				)
-				if (exit._tag === "Success") return Option.some(exit.value)
-				if (
-					Cause.hasInterruptsOnly(exit.cause) &&
-					(yield* Deferred.isDone(handler.closing))
-				) {
-					const ran = yield* Deferred.isDone(started)
-					// A closed FiberSet can refuse to start the invocation.
-					if (!ran) return Option.none()
-					const closer = yield* Deferred.await(handler.closing)
-					// Without dispatcher cancellation, only the owner's interruption permits skipping a handler.
-					if (
-						Array.every(
-							exit.cause.reasons,
-							(reason) =>
-								reason._tag === "Interrupt" && reason.fiberId === closer,
-						)
-					)
-						return Option.none()
-				}
-				return yield* Effect.failCause(exit.cause)
-			}).pipe(
-				Effect.onExit((exit) =>
-					handler.once ? Release.close(handler.scope, exit) : Effect.void,
+					(fiber) =>
+						Effect.flatMap(
+							Effect.onInterrupt(restore(Fiber.await(fiber)), () =>
+								cancel(fiber),
+							),
+							(exit) =>
+								Exit.isSuccess(exit)
+									? Effect.succeedSome(exit.value)
+									: settle(handler, started, exit.cause),
+						),
 				),
 			)
+			return handler.once
+				? Effect.onExit(run, (exit) => Release.close(handler.scope, exit))
+				: run
 		}),
 	)
 
@@ -298,7 +330,7 @@ export const emit = <Args extends ReadonlyArray<unknown>, Out, E>(
 	...args: Args
 ): Effect.Effect<void, E, Graft> =>
 	Effect.flatMap(handlersFor(event), (handlers) =>
-		Effect.forEach(handlers, (handler) => invoke(event, handler, args), {
+		Effect.forEach(handlers, (handler) => invoke(handler, args), {
 			discard: true,
 		}),
 	)
@@ -318,7 +350,7 @@ const dispatchParallel = Effect.fnUntraced(function* <
 	const handlers = yield* handlersFor(event)
 	return yield* Effect.acquireUseRelease(
 		Effect.forEach(handlers, (handler) =>
-			Effect.forkScoped(invoke(event, handler, args)),
+			Effect.forkScoped(invoke(handler, args)),
 		),
 		(fibers) =>
 			Effect.forEach(fibers, Fiber.await).pipe(
@@ -361,7 +393,7 @@ const dispatchBail = Effect.fnUntraced(function* <
 >(event: Event<Args, Option.Option<A>, E>, args: Args) {
 	const handlers = yield* handlersFor(event)
 	for (const handler of handlers) {
-		const result = yield* invoke(event, handler, args)
+		const result = yield* invoke(handler, args)
 		if (Option.isSome(result) && Option.isSome(result.value))
 			return result.value
 	}
@@ -369,25 +401,30 @@ const dispatchBail = Effect.fnUntraced(function* <
 })
 
 /** Shares the first execution, including its failure or interruption, with all callers. */
-const shareNext = Effect.fnUntraced(function* <I, O, E>(run: Next<I, O, E>) {
-	const started = yield* Deferred.make<void>()
-	const result = yield* Deferred.make<O, E>()
-	return (input: I): Effect.Effect<O, E> =>
-		Effect.uninterruptibleMask((restore) =>
-			Effect.gen(function* () {
-				if (yield* Deferred.succeed(started, undefined)) {
-					yield* Deferred.complete(
-						result,
-						restore(Effect.suspend(() => run(input))),
-					)
-					// Completion guarantees this cannot suspend. Observe its full
-					// Cause before a pending interrupt can replace it.
-					return yield* Deferred.await(result)
-				}
-				return yield* restore(Deferred.await(result))
-			}),
-		)
-})
+// Built per handler per waterfall dispatch, so it chains combinators instead of generators.
+const shareNext = <I, O, E>(run: Next<I, O, E>): Effect.Effect<Next<I, O, E>> =>
+	Effect.flatMap(Deferred.make<void>(), (started) =>
+		Effect.map(
+			Deferred.make<O, E>(),
+			(result) =>
+				(input: I): Effect.Effect<O, E> =>
+					Effect.uninterruptibleMask((restore) =>
+						Effect.flatMap(Deferred.succeed(started, undefined), (first) =>
+							first
+								? Effect.andThen(
+										Deferred.complete(
+											result,
+											restore(Effect.suspend(() => run(input))),
+										),
+										// Completion guarantees this cannot suspend. Observe its full
+										// Cause before a pending interrupt can replace it.
+										Deferred.await(result),
+									)
+								: restore(Deferred.await(result)),
+						),
+					),
+		),
+	)
 
 /**
  * Passes `input` through every handler as middleware, ending with `last`.
@@ -409,21 +446,22 @@ export const waterfall: <I, O, E, R>(
 		last: (input: I) => Effect.Effect<O, E, R>,
 	) {
 		const handlers = yield* handlersFor(event)
-		const context = yield* Effect.context<Graft | Exclude<R, Scope.Scope>>()
-		const step: (index: number, input: I) => Effect.Effect<O, E> =
-			Effect.fnUntraced(function* (index: number, input: I) {
-				const handler = handlers[index]
-				if (handler === undefined)
-					return yield* Effect.suspend(() => last(input)).pipe(
-						Release.scoped,
-						Effect.updateContext<never, Exclude<R, Scope.Scope>>(() => context),
-					)
-				const next = yield* shareNext((input: I) => step(index + 1, input))
-				const result = yield* invoke(event, handler, [input, next]).pipe(
-					Effect.updateContext<never, Graft>(() => context),
+		const context = yield* Effect.context<Exclude<R, Scope.Scope>>()
+		const step = (index: number, input: I): Effect.Effect<O, E> => {
+			const handler = handlers[index]
+			if (handler === undefined)
+				return Effect.suspend(() => last(input)).pipe(
+					Release.scoped,
+					Effect.updateContext<never, Exclude<R, Scope.Scope>>(() => context),
 				)
-				return Option.isSome(result) ? result.value : yield* next(input)
-			})
+			return Effect.flatMap(
+				shareNext((input: I) => step(index + 1, input)),
+				(next) =>
+					Effect.flatMap(invoke(handler, [input, next]), (result) =>
+						Option.isSome(result) ? Effect.succeed(result.value) : next(input),
+					),
+			)
+		}
 		return yield* step(0, input)
 	},
 )

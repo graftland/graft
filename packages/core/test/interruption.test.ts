@@ -10,7 +10,6 @@ import {
 	References,
 	Scope,
 	TxRef,
-	TxSubscriptionRef,
 } from "effect"
 import { assert, it } from "@effect/vitest"
 
@@ -19,6 +18,7 @@ import { supervise } from "../src/internal/activation.ts"
 import * as ForkStatus from "../src/internal/forkState.ts"
 import { realmKey, type GraphNode, type Spec } from "../src/internal/runtime.ts"
 import { RuntimeContext } from "../src/internal/runtimeContext"
+import * as Snapshots from "../src/internal/snapshot.ts"
 import { registrySnapshot, run } from "./utils.ts"
 
 class Service extends Context.Service<Service, string>()(
@@ -103,13 +103,13 @@ it.effect(
 			)
 			yield* Effect.tx(
 				Effect.gen(function* () {
-					const forks = yield* TxSubscriptionRef.get(runtime.forks)
+					const forks = yield* Snapshots.get(runtime.forks)
 					if (HashMap.size(forks) === 0) return yield* Effect.txRetry
 				}),
 			)
 			yield* Fiber.interrupt(registering)
 			yield* Scope.close(owner, Exit.void)
-			const remaining = yield* TxSubscriptionRef.get(runtime.forks)
+			const remaining = yield* Snapshots.get(runtime.forks)
 			assert.strictEqual(HashMap.size(remaining), 0)
 		}).pipe(run),
 )

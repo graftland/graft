@@ -23,7 +23,6 @@ import {
 	Scope,
 	Stream,
 	TxRef,
-	TxSubscriptionRef,
 } from "effect"
 
 import { CleanupError, ForkState, type Fork, type ForkTree } from "./Fork"
@@ -53,6 +52,7 @@ import {
 import { RuntimeContext } from "./internal/runtimeContext"
 import { ownedScope } from "./internal/scope"
 import * as Slots from "./internal/slots"
+import * as Snapshots from "./internal/snapshot"
 import type { ErrorOf, InputOf, Plugin } from "./Plugin"
 
 /** Identifies the current runtime. Use the module's operations to access it; its state is private. */
@@ -155,10 +155,11 @@ const runtimeLayer = Layer.effect(
 	Graft,
 	Effect.gen(function* () {
 		const ambient = yield* Effect.context<never>()
+		const forks = yield* Snapshots.make(HashMap.empty<number, ForkEntry>())
 		const runtime: Runtime = {
 			ambient,
 			slots: yield* TxRef.make(HashMap.empty<ServiceKey, Slot>()),
-			forks: yield* TxSubscriptionRef.make(HashMap.empty<number, ForkEntry>()),
+			forks,
 			aliases: Aliases.make(),
 			events: yield* TxRef.make(
 				HashMap.empty<string, ReadonlyArray<Handler>>(),
@@ -268,7 +269,7 @@ const accept = Effect.fnUntraced(function* (
 	})
 	yield* Effect.tx(
 		Effect.gen(function* () {
-			const snapshot = yield* TxSubscriptionRef.get(status.snapshot)
+			const snapshot = yield* Snapshots.get(status.snapshot)
 			if (snapshot.disposed || snapshot.accepted === next) return
 			const current = yield* TxRef.get(spec)
 			if (current !== next) return
@@ -283,7 +284,14 @@ const makeFork = <I, E>(
 	spec: TxRef.TxRef<Spec>,
 	dispose: Effect.Effect<void, CleanupError>,
 ): Fork<I, E> => {
-	const state = TxSubscriptionRef.changesStream(status.snapshot).pipe(
+	const snapshot = status.snapshot as Snapshots.Snapshot<
+		LocalSnapshot<E | Schema.SchemaError>
+	>
+	const settled = (value: LocalSnapshot<E | Schema.SchemaError>) =>
+		value.state._tag === "Failed"
+			? Effect.failCause(value.state.cause)
+			: Effect.void
+	const state = Snapshots.changesStream(snapshot).pipe(
 		// The definition's error bound is retained under compatible replacements.
 		Stream.map(
 			(snapshot) => (snapshot as LocalSnapshot<E | Schema.SchemaError>).state,
@@ -294,14 +302,16 @@ const makeFork = <I, E>(
 	return {
 		id,
 		state,
-		await: state.pipe(
-			Stream.filter((state) => !ForkState.$is("Loading")(state)),
-			Stream.runHead,
-			Effect.flatMap((state) =>
-				Option.isSome(state) && state.value._tag === "Failed"
-					? Effect.failCause(state.value.cause)
-					: Effect.void,
-			),
+		await: Effect.flatMap(Snapshots.get(snapshot), (current) =>
+			current.state._tag === "Loading"
+				? Effect.flatMap(
+						Snapshots.waitFor(
+							snapshot,
+							(value) => value.state._tag !== "Loading",
+						),
+						settled,
+					)
+				: settled(current),
 		),
 		stable: ForkStatus.stable(status),
 		update: (input) =>
@@ -377,10 +387,7 @@ export const plugin: <P extends Plugin>(
 								input,
 								state: ForkState.Loading(),
 							}
-							yield* TxSubscriptionRef.update(
-								runtime.forks,
-								HashMap.set(id, entry),
-							)
+							yield* Snapshots.update(runtime.forks, HashMap.set(id, entry))
 							return { id, spec, node, status }
 						}),
 					),
@@ -566,7 +573,7 @@ export const replace: <const Pairs extends ReadonlyArray<ReplacementPair>>(
 				const conflicts = yield* Aliases.replace(runtime.aliases, pairs)
 				if (conflicts.length > 0)
 					return yield* ReplacementConflict.make({ indices: conflicts })
-				const forks = yield* TxSubscriptionRef.get(runtime.forks)
+				const forks = yield* Snapshots.get(runtime.forks)
 				for (const entry of HashMap.values(forks)) {
 					const spec = yield* TxRef.get(entry.spec)
 					const next = yield* Aliases.resolve(runtime.aliases, spec.plugin)
@@ -619,7 +626,7 @@ export const forks: Stream.Stream<
 	Graft
 > = Stream.unwrap(
 	Effect.map(RuntimeContext, ({ runtime }) =>
-		TxSubscriptionRef.changesStream(runtime.forks).pipe(Stream.map(buildTree)),
+		Snapshots.changesStream(runtime.forks).pipe(Stream.map(buildTree)),
 	),
 )
 

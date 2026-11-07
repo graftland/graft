@@ -8,20 +8,19 @@ import {
 	Option,
 	Schema,
 	Stream,
-	TxQueue,
 	TxRef,
-	TxSubscriptionRef,
 } from "effect"
 import { assert, describe, it } from "@effect/vitest"
 
 import { Fork, Graft, Plugin } from "../src/index.ts"
 import { setState } from "../src/internal/forkState.ts"
 import { RuntimeContext } from "../src/internal/runtimeContext"
+import * as Snapshots from "../src/internal/snapshot.ts"
 import { reach, run } from "./utils.ts"
 
 const entryOf = Effect.fnUntraced(function* (fork: Fork.Fork) {
 	const { runtime } = yield* RuntimeContext
-	const entries = yield* TxSubscriptionRef.get(runtime.forks)
+	const entries = yield* Snapshots.get(runtime.forks)
 	return Option.getOrThrow(HashMap.get(entries, fork.id))
 })
 
@@ -41,15 +40,15 @@ describe("fork-local state", () => {
 				const first = yield* Graft.plugin(definition)
 				yield* first.await
 				const entry = yield* entryOf(first)
-				const changes = yield* TxSubscriptionRef.changes(entry.status.snapshot)
-				const initial = yield* TxQueue.take(changes)
+				const changes = yield* Snapshots.changes(entry.status.snapshot)
+				const initial = yield* Snapshots.take(changes)
 				assert.strictEqual(initial.state._tag, "Active")
 				const second = yield* Graft.plugin(definition)
 				yield* second.await
 				yield* second.restart
 				yield* second.await
 				yield* second.dispose
-				const changed = yield* TxQueue.poll(changes)
+				const changed = yield* Snapshots.poll(changes)
 				assert.isTrue(Option.isNone(changed))
 			}).pipe(run),
 	)
@@ -75,9 +74,9 @@ describe("fork-local state", () => {
 				)
 				yield* Deferred.await(subscribed)
 				const entry = yield* entryOf(fork)
-				const previous = yield* TxSubscriptionRef.get(entry.status.snapshot)
+				const previous = yield* Snapshots.get(entry.status.snapshot)
 				yield* fork.update("updated")
-				const next = yield* TxSubscriptionRef.get(entry.status.snapshot)
+				const next = yield* Snapshots.get(entry.status.snapshot)
 				assert.strictEqual(next.state._tag, "Active")
 				assert.notStrictEqual(next.accepted, previous.accepted)
 				assert.strictEqual(next.accepted?.input, "updated")
@@ -255,7 +254,7 @@ describe("subtree stability", () => {
 				const childEntry = yield* entryOf(child)
 				const { runtime } = yield* RuntimeContext
 				const spec = yield* TxRef.get(childEntry.spec)
-				const before = yield* TxSubscriptionRef.get(childEntry.status.snapshot)
+				const before = yield* Snapshots.get(childEntry.status.snapshot)
 				yield* Effect.tx(
 					setState(
 						runtime,
@@ -265,7 +264,7 @@ describe("subtree stability", () => {
 						spec,
 					).pipe(Effect.andThen(Effect.fail("roll back"))),
 				).pipe(Effect.flip)
-				const after = yield* TxSubscriptionRef.get(childEntry.status.snapshot)
+				const after = yield* Snapshots.get(childEntry.status.snapshot)
 				const count = yield* TxRef.get(parentEntry.status.loading)
 				const display = yield* entryOf(child)
 				assert.strictEqual(after, before)

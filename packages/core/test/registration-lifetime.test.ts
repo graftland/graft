@@ -9,12 +9,12 @@ import {
 	Scope,
 	Stream,
 	TxRef,
-	TxSubscriptionRef,
 } from "effect"
 import { assert, describe, it } from "@effect/vitest"
 
 import { Event, Graft, Plugin } from "../src/index.ts"
 import { RuntimeContext } from "../src/internal/runtimeContext"
+import * as Snapshots from "../src/internal/snapshot.ts"
 import { run } from "./utils.ts"
 
 describe("registration lifetime", () => {
@@ -51,7 +51,7 @@ describe("registration lifetime", () => {
 				for (let tick = 0; tick < ticks; tick++) yield* Effect.yieldNow
 				yield* Fiber.interrupt(registering)
 				yield* Scope.close(owner, Exit.void)
-				const entries = yield* TxSubscriptionRef.get(runtime.forks)
+				const entries = yield* Snapshots.get(runtime.forks)
 				assert.strictEqual(
 					HashMap.size(entries),
 					0,
@@ -112,7 +112,7 @@ describe("registration lifetime", () => {
 				// A published fork must have a supervisor even when the caller never gets its handle.
 				yield* Effect.tx(
 					Effect.gen(function* () {
-						const entries = yield* TxSubscriptionRef.get(runtime.forks)
+						const entries = yield* Snapshots.get(runtime.forks)
 						if (
 							Array.some(
 								HashMap.toValues(entries),

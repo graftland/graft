@@ -8,13 +8,13 @@ import {
 	Schema,
 	Stream,
 	TxRef,
-	TxSubscriptionRef,
 } from "effect"
 import { TestClock } from "effect/testing"
 import { assert, it } from "@effect/vitest"
 
 import { Graft, Plugin } from "../src/index.ts"
 import { RuntimeContext } from "../src/internal/runtimeContext"
+import * as Snapshots from "../src/internal/snapshot.ts"
 import { reach, run } from "./utils.ts"
 
 it.effect(
@@ -106,7 +106,7 @@ it.effect(
 			const { runtime } = yield* RuntimeContext
 			yield* Effect.tx(
 				Effect.gen(function* () {
-					const entries = yield* TxSubscriptionRef.get(runtime.forks)
+					const entries = yield* Snapshots.get(runtime.forks)
 					const entry = Option.getOrThrow(HashMap.get(entries, fork.id))
 					const spec = yield* TxRef.get(entry.spec)
 					if (spec.input !== "unprocessed") return yield* Effect.txRetry
