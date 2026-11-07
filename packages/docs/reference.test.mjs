@@ -8,7 +8,7 @@ import { publicEntries } from "../../scripts/public-api.mjs"
 
 // Exercise real Effect Schema classes and overloaded APIs, where flattening or
 // filtering reflections can silently lose fields or leave stale navigation.
-test("preserves core exports, re-exports, overloads, and local Schema fields", async () => {
+test("preserves core exports, re-exports, overloads, and local Schema fields", async (t) => {
 	const root = fileURLToPath(new URL("../../", import.meta.url))
 	const entries = publicEntries(root).filter(
 		(entry) => entry.packageName === "@graftland/graft",
@@ -67,6 +67,7 @@ test("preserves core exports, re-exports, overloads, and local Schema fields", a
 	)
 	const index = project.children.find((entry) => entry.name === "index")
 	assert.deepEqual(index.children.map((child) => child.name).sort(), [
+		"Change",
 		"Event",
 		"Fork",
 		"Graft",
@@ -78,5 +79,67 @@ test("preserves core exports, re-exports, overloads, and local Schema fields", a
 	])
 	assert.ok(
 		index.children.every((child) => child.kindOf(ReflectionKind.Reference)),
+	)
+	await t.test(
+		"preserves Change requests, handles, current status, and rejection reference fields",
+		() => {
+			const change = project.children.find((entry) => entry.name === "Change")
+			assert.ok(change)
+			for (const name of [
+				"submit",
+				"run",
+				"get",
+				"changes",
+				"Outcome",
+				"Rejection",
+				"Candidate",
+				"ObjectKey",
+			])
+				assert.ok(
+					change.children.some((child) => child.name === name),
+					`Change.${name}`,
+				)
+			const fields = (name, expected) => {
+				const declaration = change.children.find((child) => child.name === name)
+				assert.ok(declaration, `Change.${name}`)
+				for (const field of expected)
+					assert.ok(
+						declaration.children.some((child) => child.name === field),
+						`Change.${name}.${field}`,
+					)
+				return declaration
+			}
+			const request = fields("Request", [
+				"instance",
+				"candidate",
+				"key",
+				"expected",
+				"strategy",
+				"budget",
+				"requirements",
+			])
+			assert.ok(
+				request.children.find((child) => child.name === "expected").flags
+					.isOptional,
+			)
+			fields("Handle", ["id", "await", "cancel"])
+			fields("Status", [
+				"id",
+				"trace",
+				"sequence",
+				"members",
+				"remaining",
+				"leaseHolders",
+				"unconfirmedUnits",
+				"outcome",
+			])
+			const rejected = fields("ChangeRejected", [
+				"constructor",
+				"_tag",
+				"reason",
+				"cause",
+			])
+			assert.ok(rejected.kindOf(ReflectionKind.Class))
+		},
 	)
 })
