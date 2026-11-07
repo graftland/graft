@@ -3,16 +3,17 @@ import { assert, it } from "@effect/vitest"
 
 import * as Graft from "../src/Graft.ts"
 import { withdraw } from "../src/internal/activation.ts"
-import { publicationCycle } from "../src/internal/dependencies.ts"
 import * as Generations from "../src/internal/generations.ts"
 import {
 	realmKey,
 	type Activation,
+	type ActiveResolution,
 	type GraphNode,
 	type Provision,
 	type Slot,
 } from "../src/internal/runtime.ts"
 import { RuntimeContext } from "../src/internal/runtimeContext.ts"
+import * as Slots from "../src/internal/slots.ts"
 import { run } from "./utils.ts"
 
 const node = (id: number, parent?: GraphNode): GraphNode => ({
@@ -131,39 +132,103 @@ it.effect(
 		),
 )
 
+class Dependency extends Context.Service<Dependency, string>()(
+	"@graftland/graft/test/generation-ownership.test/Dependency",
+) {}
+class Published extends Context.Service<Published, string>()(
+	"@graftland/graft/test/generation-ownership.test/Published",
+) {}
+
 it.effect(
-	"checks withdrawn generations and parent ownership when detecting publication cycles",
+	"rejects publication cycles through a withdrawn generation until its captured lease settles",
 	() =>
 		run(
 			Effect.gen(function* () {
-				const { runtime } = yield* RuntimeContext
+				const { runtime, activation: root } = yield* RuntimeContext
+				const provider = node(10)
 				const parent = node(1)
 				const child = node(2, parent)
-				const watched: Slot = {
-					key: "watched",
-					provision: TxRef.makeUnsafe(Option.none()),
-					holders: TxRef.makeUnsafe(1),
-				}
-				const old = yield* Effect.tx(
-					Generations.acquire(runtime, parent, {
-						watch: HashMap.make([watched.key, watched]),
-						provisions: [],
+				const watched = yield* Effect.tx(
+					Slots.retain(runtime, realmKey("", Value.key)),
+				)
+				const make = Effect.fnUntraced(function* (
+					logical: GraphNode,
+					resolution: ActiveResolution,
+				) {
+					const generation = yield* Effect.tx(
+						Generations.acquire(runtime, logical, resolution),
+					)
+					return {
+						...root,
+						node: logical,
+						fork: logical.id,
+						generation,
+						published: yield* TxRef.make(
+							Option.some<ReadonlyArray<Provision>>([]),
+						),
+					} satisfies Activation
+				})
+				const source = yield* make(provider, {
+					watch: HashMap.make([watched.key, watched]),
+					provisions: [],
+				})
+				yield* Graft.provide(Dependency, "provider").pipe(
+					Effect.provideService(RuntimeContext, {
+						runtime,
+						activation: source,
 					}),
 				)
-				const next = yield* Effect.tx(
-					Generations.acquire(runtime, parent, {
-						watch: HashMap.empty(),
-						provisions: [],
+				const sourcePublished = yield* TxRef.get(source.published)
+				const sourcePublications = Option.getOrThrow(sourcePublished)
+				const provision = sourcePublications[0]!
+				const old = yield* make(parent, {
+					watch: HashMap.empty(),
+					provisions: [provision],
+				})
+				yield* Graft.provide(Published, "old publication").pipe(
+					Effect.provideService(RuntimeContext, { runtime, activation: old }),
+				)
+				const oldPublished = yield* TxRef.get(old.published)
+				const publishing = Option.getOrThrow(oldPublished)
+				assert.equal(publishing.length, 1)
+				yield* withdraw(runtime, old)
+				const removed = yield* TxRef.get(publishing[0]!.slot.provision)
+				assert.isTrue(Option.isNone(removed))
+				const retained = yield* TxRef.get(provision.consumers)
+				assert.isTrue(HashSet.has(retained, old.generation))
+				const next = yield* make(parent, {
+					watch: HashMap.empty(),
+					provisions: [],
+				})
+				const descendant = yield* make(child, {
+					watch: HashMap.empty(),
+					provisions: [],
+				})
+				const publish = Graft.provide(Value, "child publication").pipe(
+					Effect.provideService(RuntimeContext, {
+						runtime,
+						activation: descendant,
 					}),
 				)
-				const before = yield* Effect.tx(publicationCycle(child, watched.key))
-				assert.isTrue(before)
-				yield* Effect.tx(Generations.settle(runtime, parent, next))
-				const retained = yield* Effect.tx(publicationCycle(child, watched.key))
-				assert.isTrue(retained)
-				yield* Effect.tx(Generations.settle(runtime, parent, old))
-				const settled = yield* Effect.tx(publicationCycle(child, watched.key))
-				assert.isFalse(settled)
+				const first = yield* publish.pipe(Effect.flip)
+				assert.equal(first.reason, "DependencyCycle")
+				yield* Effect.tx(Generations.settle(runtime, parent, next.generation))
+				yield* withdraw(runtime, old)
+				const repeated = yield* publish.pipe(Effect.flip)
+				assert.equal(repeated.reason, "DependencyCycle")
+				yield* Effect.tx(Generations.settle(runtime, parent, old.generation))
+				yield* publish
+				const current = yield* TxRef.get(watched.provision)
+				assert.equal(Option.getOrThrow(current).value, "child publication")
+				yield* withdraw(runtime, descendant)
+				yield* Effect.tx(
+					Generations.settle(runtime, child, descendant.generation),
+				)
+				yield* withdraw(runtime, source)
+				yield* Effect.tx(
+					Generations.settle(runtime, provider, source.generation),
+				)
+				yield* Effect.tx(Slots.release(runtime, watched))
 			}),
 		),
 )
