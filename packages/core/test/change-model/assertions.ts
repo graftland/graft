@@ -43,6 +43,9 @@ export const conclusion = (
 // This observer scans the entire small world on purpose. It is an independent
 // oracle and is excluded from the protocol's access accounting.
 export const invariant = (state: Model): void => {
+	assert.isAtLeast(state.capacity.used, 0)
+	assert.isAtLeast(state.capacity.reserved, 0)
+	assert.isAtMost(state.capacity.used + state.capacity.reserved, state.maxUnits)
 	for (const [key, lock] of state.reservations) {
 		assert.isTrue(
 			Option.isNone(lock.writer) || HashSet.size(lock.readers) === 0,
@@ -54,8 +57,7 @@ export const invariant = (state: Model): void => {
 			)
 	}
 	for (const c of HashMap.values(state.changes)) {
-		const retained =
-			Option.isNone(c.conclusion) || c.conclusion.value.outcome === "Stuck"
+		const retained = !c.reservationsReleased
 		for (const key of c.plan.writes) {
 			const lock = Option.getOrThrow(HashMap.get(state.reservations, key))
 			assert.strictEqual(
@@ -73,6 +75,13 @@ export const invariant = (state: Model): void => {
 			assert.strictEqual(
 				HashMap.size(c.conclusion.value.members),
 				HashMap.size(c.plan.members),
+			)
+		if (
+			c.reservationsReleased &&
+			Option.exists(c.conclusion, (v) => v.outcome === "Stuck")
+		)
+			assert.isTrue(
+				HashSet.every(c.settlement, (id) => generation(state, id).retired),
 			)
 	}
 	for (const gen of HashMap.values(state.generations)) {

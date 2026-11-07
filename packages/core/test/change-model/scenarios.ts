@@ -33,6 +33,9 @@ export const fixture = (
 ): Model => {
 	const empty: Model = {
 		open: true,
+		maxUnits: Number.POSITIVE_INFINITY,
+		capacity: { used: members.length, reserved: 0 },
+		unitOwners: HashMap.empty(),
 		cells: HashMap.empty(),
 		reservations: HashMap.empty(),
 		changes: HashMap.empty(),

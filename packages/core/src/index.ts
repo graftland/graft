@@ -1,6 +1,7 @@
 /**
  * Graft is a plugin framework built on Effect.
  */
+export * as Change from "./Change"
 export * as Graft from "./Graft"
 export * as Event from "./Event"
 export * as Fork from "./Fork"

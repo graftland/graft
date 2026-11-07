@@ -114,9 +114,15 @@ export interface Change {
 	readonly viewSequence: number
 	readonly cause: Cause.Cause<string>
 	readonly conclusion: Option.Option<Conclusion>
+	readonly reservationsReleased: boolean
+	readonly settlement: HashSet.HashSet<string>
+	readonly capacity: { readonly peak: number; readonly units: number }
 }
 export interface Model {
 	readonly open: boolean
+	readonly maxUnits: number
+	readonly capacity: { readonly used: number; readonly reserved: number }
+	readonly unitOwners: HashMap.HashMap<string, string>
 	readonly cells: HashMap.HashMap<ObjectKey, Cell>
 	readonly reservations: HashMap.HashMap<ObjectKey, Reservation>
 	readonly changes: HashMap.HashMap<string, Change>
@@ -151,6 +157,7 @@ export type Action = Data.TaggedEnum<{
 	Recover: { readonly change: string; readonly allowed: boolean }
 	Finish: { readonly change: string }
 	Deadline: { readonly change: string }
+	ReleaseReservations: { readonly change: string }
 	Close: {}
 }>
 export const Action = Data.taggedEnum<Action>()
@@ -163,6 +170,7 @@ export type Decision =
 	| "RejectedAck"
 	| "InvalidPhase"
 	| "InvalidPlan"
+	| "Capacity"
 export interface Step {
 	readonly state: Model
 	readonly decision: Decision
@@ -368,6 +376,13 @@ const submit = (initial: Model, plan: Plan): Step => {
 	if (HashSet.size(inspected.conflicts) > 0)
 		return result(inspected.state, "Busy", inspected.conflicts)
 	if (inspected.stale) return result(inspected.state, "Stale")
+	const units = HashMap.size(plan.members)
+	const extra = plan.strategy === "Overlap" ? units : 0
+	if (
+		initial.capacity.used + initial.capacity.reserved + extra >
+		initial.maxUnits
+	)
+		return result(inspected.state, "Capacity")
 	const state = HashSet.reduce(allKeys(plan), inspected.state, (s, key) => {
 		const [next, lock] = readReservation(s, key)
 		return {
@@ -382,18 +397,35 @@ const submit = (initial: Model, plan: Plan): Step => {
 		}
 	})
 	return result(
-		save(state, {
-			plan,
-			phase: "Admitted",
-			oldChanged: false,
-			invalidated: false,
-			created: HashSet.empty(),
-			ownedVersions: HashMap.map(plan.reads, (v) => v.version),
-			view: Option.none(),
-			viewSequence: 0,
-			cause: Cause.empty,
-			conclusion: Option.none(),
-		}),
+		save(
+			{
+				...state,
+				capacity: {
+					...state.capacity,
+					reserved: state.capacity.reserved + extra,
+				},
+				unitOwners: HashMap.reduce(
+					plan.members,
+					state.unitOwners,
+					(owners, m) => HashMap.set(owners, m.old, plan.id),
+				),
+			},
+			{
+				plan,
+				phase: "Admitted",
+				oldChanged: false,
+				invalidated: false,
+				created: HashSet.empty(),
+				ownedVersions: HashMap.map(plan.reads, (v) => v.version),
+				view: Option.none(),
+				viewSequence: 0,
+				cause: Cause.empty,
+				conclusion: Option.none(),
+				reservationsReleased: false,
+				settlement: HashSet.empty(),
+				capacity: { peak: units + extra, units },
+			},
+		),
 	)
 }
 
@@ -539,6 +571,7 @@ const prepare = (initial: Model, c: Change, recovery: boolean): Step => {
 					...acc.state,
 					terms: HashMap.set(acc.state.terms, member.instance, term),
 					generations: HashMap.set(acc.state.generations, id, gen),
+					unitOwners: HashMap.set(acc.state.unitOwners, id, c.plan.id),
 					leaseHolders: HashSet.reduce(
 						leases,
 						acc.state.leaseHolders,
@@ -744,6 +777,33 @@ const commit = (initial: Model, c: Change): Step => {
 	)
 }
 
+const releaseReservations = (initial: Model, c: Change): Model => {
+	if (c.reservationsReleased) return initial
+	const released = HashSet.reduce(allKeys(c.plan), initial, (s, key) => {
+		const [next, lock] = readReservation(s, key)
+		return {
+			...next,
+			reservations: HashMap.set(next.reservations, key, {
+				writer: Option.contains(lock.writer, c.plan.id)
+					? Option.none()
+					: lock.writer,
+				readers: HashSet.remove(lock.readers, c.plan.id),
+			}),
+		}
+	})
+	return save(
+		{
+			...released,
+			capacity: {
+				...released.capacity,
+				reserved:
+					released.capacity.reserved - (c.capacity.peak - c.capacity.units),
+			},
+		},
+		{ ...c, reservationsReleased: true },
+	)
+}
+
 const finish = (initial: Model, c: Change, outcome: Outcome): Step => {
 	const members = HashMap.map(c.plan.members, (member): MemberFact => {
 		const current = cell(initial, ObjectKey.Instance({ id: member.instance }))
@@ -815,6 +875,7 @@ const finish = (initial: Model, c: Change, outcome: Outcome): Step => {
 	const settled: Change = {
 		...c,
 		phase: "Settled",
+		settlement: cleanup(c),
 		conclusion: Option.some({
 			outcome,
 			phase: c.phase,
@@ -826,22 +887,10 @@ const finish = (initial: Model, c: Change, outcome: Outcome): Step => {
 			members,
 		}),
 	}
-	const state =
-		outcome === "Stuck"
-			? initial
-			: HashSet.reduce(allKeys(c.plan), initial, (s, key) => {
-					const [next, lock] = readReservation(s, key)
-					return {
-						...next,
-						reservations: HashMap.set(next.reservations, key, {
-							writer: Option.contains(lock.writer, c.plan.id)
-								? Option.none()
-								: lock.writer,
-							readers: HashSet.remove(lock.readers, c.plan.id),
-						}),
-					}
-				})
-	return result(save(state, settled))
+	const saved = save(initial, settled)
+	return result(
+		outcome === "Stuck" ? saved : releaseReservations(saved, settled),
+	)
 }
 
 const retire = (initial: Model, id: string): Step => {
@@ -879,6 +928,14 @@ const retire = (initial: Model, id: string): Step => {
 
 export const step = (s: Model, action: Action): Step => {
 	switch (action._tag) {
+		case "ReleaseReservations": {
+			const found = HashMap.get(s.changes, action.change)
+			if (Option.isNone(found) || Option.isNone(found.value.conclusion))
+				return result(s, "InvalidPhase")
+			const c = found.value
+			if (!retired(s, c.settlement)) return result(s, "Blocked")
+			return result(releaseReservations(s, c))
+		}
 		case "Submit":
 			return submit(s, action.plan)
 		case "Close": {
@@ -954,14 +1011,39 @@ export const step = (s: Model, action: Action): Step => {
 						),
 					),
 			)
+			const owner = Option.flatMap(HashMap.get(s.unitOwners, gen.id), (id) =>
+				HashMap.get(s.changes, id),
+			)
+			const ended = gen.started && gen.evidence === "Missing"
+			const accounted =
+				ended && Option.isSome(owner)
+					? save(
+							{
+								...s,
+								capacity: {
+									used: s.capacity.used - 1,
+									reserved:
+										s.capacity.reserved +
+										(owner.value.reservationsReleased ? 0 : 1),
+								},
+							},
+							{
+								...owner.value,
+								capacity: {
+									...owner.value.capacity,
+									units: owner.value.capacity.units - 1,
+								},
+							},
+						)
+					: s
 			return result({
-				...s,
+				...accounted,
 				leaseHolders,
 				generations: HashMap.set(s.generations, gen.id, {
 					...gen,
 					leases: HashSet.empty(),
 					evidence: action.evidence,
-					cleanup: action.cleanup ?? "Unknown",
+					cleanup: action.cleanup ?? gen.cleanup,
 					exitCause: Cause.combine(gen.exitCause, action.cause ?? Cause.empty),
 				}),
 			})
@@ -1007,6 +1089,9 @@ export const step = (s: Model, action: Action): Step => {
 						return result(s, "InvalidPhase")
 					if (c.plan.strategy === "Restart" && !retired(s, oldGenerations(c)))
 						return result(s, "Blocked")
+					const added = HashMap.size(c.view.value.generations)
+					if (c.capacity.units + added > c.capacity.peak)
+						return result(s, "Capacity")
 					const generations = HashMap.reduce(
 						c.view.value.generations,
 						s.generations,
@@ -1014,7 +1099,21 @@ export const step = (s: Model, action: Action): Step => {
 							HashMap.set(map, id, { ...generation(s, id), started: true }),
 					)
 					return result(
-						save({ ...s, generations }, { ...c, phase: "Installed" }),
+						save(
+							{
+								...s,
+								generations,
+								capacity: {
+									used: s.capacity.used + added,
+									reserved: s.capacity.reserved - added,
+								},
+							},
+							{
+								...c,
+								phase: "Installed",
+								capacity: { ...c.capacity, units: c.capacity.units + added },
+							},
+						),
 					)
 				}
 				case "Commit":

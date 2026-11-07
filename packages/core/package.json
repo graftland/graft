@@ -56,7 +56,11 @@
 			"source": "./src/Trust.ts",
 			"default": "./dist/Trust.js"
 		},
-		"./package.json": "./package.json"
+		"./package.json": "./package.json",
+		"./Change": {
+			"source": "./src/Change.ts",
+			"default": "./dist/Change.js"
+		}
 	},
 	"scripts": {
 		"build": "tsc -b && tsdown",
@@ -81,7 +85,8 @@
 			"./Release": "./dist/Release.js",
 			"./Transition": "./dist/Transition.js",
 			"./Trust": "./dist/Trust.js",
-			"./package.json": "./package.json"
+			"./package.json": "./package.json",
+			"./Change": "./dist/Change.js"
 		}
 	}
 }

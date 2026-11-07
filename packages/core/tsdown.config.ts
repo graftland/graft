@@ -6,6 +6,7 @@ export default defineConfig({
 	...config,
 	entry: [
 		"src/index.ts",
+		"src/Change.ts",
 		"src/Graft.ts",
 		"src/Plugin.ts",
 		"src/Event.ts",
