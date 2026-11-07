@@ -482,6 +482,7 @@ export const engine = (
 	const allocateUnit = Effect.fnUntraced(function* (
 		desired: Change.Candidate,
 		lease: HostLease,
+		recovery: boolean,
 	): Effect.fn.Return<Attempt, Failed> {
 		const { id } = lease
 		const routeVersion = yield* Effect.tx(
@@ -506,6 +507,14 @@ export const engine = (
 			"Starting",
 			Scope.provide(
 				Effect.gen(function* () {
+					if (recovery && change !== undefined) {
+						// Recovery metadata owns the scoped binding before authorization is captured.
+						if (managed.driver.prepare !== undefined)
+							yield* managed.driver.prepare(desired)
+						yield* ChangeTable.authorizeRecovery(change, desired.identity).pipe(
+							Effect.mapError((cause) => T.DriverError.make({ cause })),
+						)
+					}
 					const candidate = yield* Effect.suspend(() =>
 						managed.resolve(desired),
 					)
@@ -600,12 +609,13 @@ export const engine = (
 
 	const allocate = (
 		desired: Change.Candidate,
+		recovery = false,
 	): Effect.Effect<Attempt, Failed> =>
 		Effect.uninterruptibleMask((restore) =>
 			Effect.gen(function* () {
 				const lease = yield* acquireLease()
 				const allocated = yield* Effect.exit(
-					restore(allocateUnit(desired, lease)),
+					restore(allocateUnit(desired, lease, recovery)),
 				)
 				return Exit.isSuccess(allocated)
 					? allocated.value

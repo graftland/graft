@@ -123,13 +123,21 @@ const recover = Effect.fnUntraced(function* (
 ): Effect.fn.Return<void, Failed> {
 	yield* retirePrevious(coordinator, run.previous)
 	yield* TxRef.set(run.budget.reserved, derive(policy).cleanup)
-	const restored = yield* prepareCandidate(
-		coordinator,
-		run,
-		run.previousDesired,
+	const restored = yield* coordinator.allocate(run.previousDesired, true)
+	yield* TxRef.set(run.candidate, Option.some(restored))
+	const record = run.record
+	if (record === undefined)
+		return yield* Effect.die(
+			new Error("Recovery requires an admitted Change record"),
+		)
+	yield* Effect.raceFirst(
+		Effect.gen(function* () {
+			yield* coordinator.start(restored)
+			yield* coordinator.cutover(restored)
+			yield* observeTrial(coordinator, policy, restored)
+		}),
+		waitInvalidation(record, run),
 	)
-	yield* coordinator.cutover(restored)
-	yield* observeTrial(coordinator, policy, restored)
 })
 
 /** Strategies compose the same owned primitives; only their order differs. */
@@ -280,24 +288,10 @@ export const execute = Effect.fnUntraced(function* (
 			return yield* complete("Stuck", failure.phase, failure.reason)
 		}
 		const recovered = yield* Effect.result(
-			ChangeTable.authorizeRecovery(record, run.previousDesired.identity).pipe(
-				Effect.mapError((cause) =>
-					failed({
-						reason: "Stale",
-						phase: "Recovery",
-						cause,
-					}),
-				),
-				Effect.andThen(
-					Effect.interruptible(
-						Effect.raceFirst(
-							recover(coordinator, policy, run),
-							Effect.raceFirst(
-								waitClosing(managed, run),
-								waitInvalidation(record, run),
-							),
-						),
-					),
+			Effect.interruptible(
+				Effect.raceFirst(
+					recover(coordinator, policy, run),
+					waitClosing(managed, run),
 				),
 			),
 		)

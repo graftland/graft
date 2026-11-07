@@ -110,10 +110,11 @@ Cancellation and expiry remove a waiter exactly once.
 
 Cancellation before the old generation may have changed can leave it serving
 with `Aborted`. After that boundary, recovery resolves the previous desired
-target again and completes its probes and full trial. Recovery takes a fresh
-authorization premise for that target and retains the Change’s object versions
-and reservations. Unconfirmed exit or host cleanup can produce `Stuck`; late
-settlement never resumes that Change.
+target again and completes its probes and full trial. Recovery establishes fresh
+metadata and scoped policy bindings before taking an authorization premise for
+that target. It checks approval again before execution and retains the Change’s
+object versions and reservations. Unconfirmed exit or host cleanup can produce
+`Stuck`; late settlement never resumes that Change.
 
 `Graft.Options.maxUnits` defaults to 256. Initial registrations, reserved
 allocations, serving units, draining units and units without exit evidence count
