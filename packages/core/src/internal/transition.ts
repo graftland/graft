@@ -1178,7 +1178,13 @@ export const register = Effect.fnUntraced(function* (
 				context: yield* Effect.context<never>(),
 				entry,
 			}
-			yield* admitRegistration(managed)
+			yield* admitRegistration(managed).pipe(
+				Effect.onExit((exit) =>
+					Exit.isFailure(exit)
+						? Release.close(managed.scope, exit)
+						: Effect.void,
+				),
+			)
 			const evidence = yield* TxRef.make<ReadonlyArray<Change.Evidence>>([])
 			const initializationReserve = yield* TxRef.make(derive(policy).cleanup)
 			const coordinator = engine(managed, policy, evidence, {

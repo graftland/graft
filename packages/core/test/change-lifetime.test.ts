@@ -86,3 +86,26 @@ it.effect(
 			}),
 		),
 )
+
+it.effect(
+	"releases the unadmitted registration scope when its instance name is already registered",
+	() =>
+		run(
+			Effect.gen(function* () {
+				yield* register("a")
+				const { runtime } = yield* RuntimeContext
+				const retained = () => {
+					const state = runtime.changes.scope.state
+					return state._tag !== "Open"
+						? 0
+						: (state.finalizer === undefined ? 0 : 1) +
+								(state.finalizers?.size ?? 0)
+				}
+				const before = retained()
+				yield* Effect.forEach(Array.range(1, 3), () =>
+					Effect.result(register("a")),
+				)
+				assert.strictEqual(retained(), before)
+			}),
+		),
+)
