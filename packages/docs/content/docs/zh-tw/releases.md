@@ -179,54 +179,57 @@ devenv shell -- pnpm packages:publish npm
 ## 文件網站
 
 工作流程 `.github/workflows/docs.yml` 從 `packages/docs`
-建置本網站，並部署到Cloudflare
-Pages：[graft-docs-ekb.pages.dev](https://graft-docs-ekb.pages.dev/)。`main`
-上的每個 commit 和每個發佈 tag 都會保留當時的文件。
+建置本站，並部署到Cloudflare
+Worker：[docs.graft.land](https://docs.graft.land/)。最新的 15 個發佈 tag 和
+`main` 上最新的 30 個 commit 還會各自保留當時的文件，每份文件是一個 **Worker
+Preview**。
 
-| 位址                                                      | 內容                                                |
-| --------------------------------------------------------- | --------------------------------------------------- |
-| `https://graft-docs-ekb.pages.dev/`                       | **預設版本**：有文件的最新穩定 tag，例如 `v1.2.3`。 |
-| `https://<hash 前 12 碼>.graft-docs-ekb.pages.dev/`       | 該 commit，永久保留。                               |
-| `https://versions.graft-docs-ekb.pages.dev/versions.json` | 所有已部署的 commit，及其日期、標題和 tag。         |
-| `https://graftland.github.io/graft/<path>`                | 重新導向到預設版本的 `<path>`。                     |
+| 位址                                             | 內容                                          |
+| ------------------------------------------------ | --------------------------------------------- |
+| `https://docs.graft.land/`                       | **預設版本**：最新的穩定 tag，例如 `v1.2.3`。 |
+| `https://<hash 前 12 位>.docs.graft.land/`       | 該 commit，在保留期間可用。                   |
+| `https://versions.docs.graft.land/versions.json` | 所有保留的 commit，及其日期、標題和 tag。     |
+| `https://graftland.github.io/graft/<path>`       | 重新導向到預設版本的 `<path>`。               |
+| `https://graft-docs-ekb.pages.dev/<path>`        | 重新導向到預設版本的 `<path>`。               |
 
 ### 每次執行做什麼
 
-| 觸發方式                         | 建置                                                                | 之後                                                  |
-| -------------------------------- | ------------------------------------------------------------------- | ----------------------------------------------------- |
-| 推送到 `main`                    | 推送的 commit。                                                     | 加入清單。                                            |
-| 推送 `v1.2.3` 這類 tag           | tag 指向的 commit，僅在它還沒有文件時。                             | 為該 commit 標上 tag。較新的穩定 tag 會成為預設版本。 |
-| 在 Actions 分頁勾選 **backfill** | 文件網站出現以來 `main` 上的每個 commit 和每個 tag 中還沒有文件的。 | 加入清單。                                            |
-| 在 Actions 分頁填寫 **rebuild**  | 填寫的 commit，即使它們已有文件。                                   | 取代它們的部署並更新清單。                            |
+| 觸發方式                        | 建置                                        | 之後                                                  |
+| ------------------------------- | ------------------------------------------- | ----------------------------------------------------- |
+| 推送到 `main`                   | 推送的 commit，以及保留範圍內還沒有文件的。 | 更新清單，並刪除不再保留的 commit 的文件。            |
+| 推送 `v1.2.3` 這樣的 tag        | tag 指向的 commit，僅當它還沒有文件時。     | 為該 commit 標上 tag。更新的穩定 tag 會成為預設版本。 |
+| 在 Actions 頁面手動執行         | 保留範圍內還沒有文件的 commit。             | 與推送相同。                                          |
+| 在 Actions 頁面填寫 **rebuild** | 另外建置填寫的 commit，即使它們已有文件。   | 取代它們的文件並更新清單。                            |
 
+- **保留範圍。** 最新 15 個發佈 tag（包括預發佈）指向的 commit、`main`
+  上最新的 30 個 commit，以及預設版本。一個 commit 可以同時屬於兩者。其他 commit 的文件會被刪除，並移出清單。
 - **每個 commit 只建置一次。**
-  使用該 commit 自己的 lockfile 與工具鏈建置，上傳後不再取代。正式位址直接提供預設版本自己的部署，所以切換預設版本不會上傳任何建置。
-- **預設版本。** 與 npm 相同，`v1.2.3-beta.0`
-  這類預發佈版本不會成為預設版本。最後一次發佈之後 `main`
-  上的 commit 會出現在清單中，但不是預設版本。
-- **順序。**
-  各次執行逐一更新清單。預設版本一律是有文件的最高穩定版本，較晚完成的執行不會讓它倒退。
+  使用該 commit 自己的 lockfile 和工具鏈建置。新的預設版本會再建置一次，部署為正式網站。Cloudflare 只上傳它還沒有的檔案。
+- **預設版本。** 與 npm 一樣，`v1.2.3-beta.0`
+  這樣的預發佈版本不會成為預設版本。最後一次發佈之後 `main`
+  上的 commit 會出現在清單中，但不是預設版本。只有發佈版本建置成功後，正式網站才會切換。
+- **順序。** 各次執行逐一更新清單。
 - **失敗。**
-  已經無法建置的 commit 會被略過，其他 commit 照常部署。讀取線上清單失敗時，執行會停止，而不是建立新的清單。
-- **上限。** 一次 backfill 最多建置 256 個 commit，其餘的再執行一次。
+  無法建置的 commit 會被略過，其他 commit 照常部署；只要它還在保留範圍內，下次執行會再試。讀取線上清單失敗時，執行會停止，而不是新建一份清單。
+- **搜尋引擎。** 只有正式網站會被收錄；每個 commit 的位址都帶有
+  `X-Robots-Tag: noindex`。
 
 ### 切換版本
 
-每個已部署的頁面都從版本位址載入下拉選單，所以在它出現之前建置的版本也有。
+每個已部署的頁面都從版本位址載入下拉選單。
 
 - **下拉選單。**
-  在主題選單旁邊。由新到舊列出所有已部署的 commit，顯示 tag 或短 hash，並標出預設版本。選取後開啟同一頁面在該版本中的位址；當時還不存在的頁面會顯示該版本的 404 頁。
+  在主題選擇器旁邊。依從新到舊列出所有保留的 commit，顯示 tag 或短 hash，並標出預設版本。選取後開啟同一頁面在該版本中的位址；當時還不存在的頁面會顯示該版本的 404 頁。
 - **提示。** 其他 commit 的頁面頂端會說明這一點，並連結到預設版本中的同一頁面。
 
 ### 設定
 
-| 任務                 | 做法                                                                                                                                                                        |
-| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Cloudflare 專案      | 執行一次 `npx wrangler pages project create graft-docs --production-branch main`，再把 Cloudflare 分配的 `*.pages.dev` 名稱填入工作流程的 `DOCS_PAGES_HOST` 和 `DOCS_URL`。 |
-| `docs` 環境的 secret | `CLOUDFLARE_API_TOKEN`（需要 **Cloudflare Pages: Edit** 權限）和 `CLOUDFLARE_ACCOUNT_ID`。                                                                                  |
-| 舊位址               | 將版本庫的 Pages 來源設為 **GitHub Actions**。                                                                                                                              |
-| 補齊以前的文件       | 在 Actions 分頁對 `main` 手動執行該工作流程，並勾選 **backfill**。                                                                                                          |
-| 在本機處理網站       | `devenv shell -- pnpm --filter @graftland/docs dev`；下拉選單只出現在已部署的頁面上。                                                                                       |
+| 工作                 | 方法                                                                                                                                                             |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 網域                 | `DOCS_URL` 所在網域的 zone 位於同一個 Cloudflare 帳號。首次執行會建立 `DOCS_WORKER` 指定的 Worker、該網域及其萬用字元憑證。                                      |
+| `docs` 環境的 secret | `CLOUDFLARE_ACCOUNT_ID`，以及 `CLOUDFLARE_API_TOKEN`：帳號層級的 **Workers Scripts: Edit** 和 **Cloudflare Pages: Edit**，zone 層級的 **Workers Routes: Edit**。 |
+| 舊位址               | 將儲存庫的 Pages 發佈來源設為 **GitHub Actions**。`DOCS_PAGES_PROJECT` 指定的 Cloudflare Pages 專案只保留重新導向。                                              |
+| 本機開發文件網站     | `devenv shell -- pnpm --filter @graftland/docs dev`；下拉選單只出現在已部署的頁面上。                                                                            |
 
 ### 撰寫頁面
 

@@ -47,7 +47,7 @@
 	`
 
 	// The commit this page belongs to, read from the address: production, or
-	// `<first 12 hash characters>.<project>.pages.dev`.
+	// `<first 12 hash characters>.<site host>`.
 	const currentCommit = ({ site, production, versions }) => {
 		if (location.host === new URL(site).host) return production
 		const label = location.hostname.split(".")[0]

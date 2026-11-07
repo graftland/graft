@@ -17,34 +17,38 @@ import { fileURLToPath } from "node:url"
 // Pinned so that every deploy uploads with the same client.
 const wrangler = "wrangler@4.152.0"
 
-// The Cloudflare Pages branch that serves the commit list and the select.
-const versionsBranch = "versions"
+// The Preview that serves the commit list and the select.
+const versionsPreview = "versions"
+
+// How many versions keep their docs: the newest release tags, and the newest
+// commits on main. A commit can be both. Together they stay well under the 100
+// Previews a Worker has on the Free plan, past which Cloudflare deletes the
+// least recently deployed one on its own.
+export const keptReleases = 15
+export const keptCommits = 30
 
 // A GitHub Actions matrix holds at most 256 jobs.
 const matrixLimit = 256
 
 /**
- * The Cloudflare Pages branch that keeps one commit's deployment. Its alias is
- * `<branch>.<host>`, where the host is the project's `*.pages.dev` name;
- * Cloudflare cuts aliases at 28 characters, so a
- * 12-character prefix of the hash stays whole.
+ * The Worker Preview that keeps one commit's docs, named after the first 12
+ * characters of its hash. Its address is `<name>.<site host>`.
  */
-export const commitBranch = (commit) => {
+export const previewName = (commit) => {
 	if (!/^[0-9a-f]{40}$/.test(commit))
 		throw new Error(`Expected a full commit hash, got: ${commit}`)
 	return commit.slice(0, 12)
 }
 
-const branchUrl = (branch, host, site) =>
-	new URL(site.pathname, `https://${branch}.${host}`).href
+const previewUrl = (name, site) =>
+	new URL(site.pathname, `https://${name}.${site.host}`).href
 
-/** The address of the deployment that keeps one commit, under the site's base path. */
-export const commitUrl = (commit, host, site) =>
-	branchUrl(commitBranch(commit), host, site)
+/** The address of one commit's docs, under the site's base path. */
+export const commitUrl = (commit, site) => previewUrl(previewName(commit), site)
 
 /** Where every build loads the select from, and where the list lives. */
-export const versionsUrl = (host) =>
-	new URL(`https://${versionsBranch}.${host}/`)
+export const versionsUrl = (site) =>
+	new URL(`https://${versionsPreview}.${site.host}/`)
 
 const isVersion = (value) =>
 	typeof value === "object" &&
@@ -72,9 +76,22 @@ export function parseVersions(value) {
  * Read the live list. Only a missing file starts a new one: any other failure
  * stops, so a deploy never drops the history.
  */
-export async function readVersions(host, site, fetchUrl = fetch) {
-	const url = new URL("versions.json", versionsUrl(host))
-	const response = await fetchUrl(url, { cache: "no-store" })
+export async function readVersions(
+	site,
+	{ fetchUrl = fetch, beforeFirstDeploy = false } = {},
+) {
+	const url = new URL("versions.json", versionsUrl(site))
+	let response
+	try {
+		response = await fetchUrl(url, { cache: "no-store" })
+	} catch (cause) {
+		// Before the first deploy, the domain has no records yet. Only planning
+		// accepts that: at worst it builds commits again, while publishing a
+		// new list would drop the history.
+		if (beforeFirstDeploy && cause?.cause?.code === "ENOTFOUND")
+			return { site: site.href, production: "", versions: [] }
+		throw new Error(`Could not read ${url.href}`, { cause })
+	}
 	if (response.status === 404)
 		return { site: site.href, production: "", versions: [] }
 	if (!response.ok)
@@ -82,10 +99,55 @@ export async function readVersions(host, site, fetchUrl = fetch) {
 	return parseVersions(await response.json())
 }
 
+const releasePattern = /^v(\d+)\.(\d+)\.(\d+)(?:-(.+))?$/
+
 /**
- * The commits to build, oldest first, leaving out the ones already deployed.
- * Forced commits are built even if they are deployed: the pushed commit, so a
- * run started again deploys it again, and any commit named to be rebuilt.
+ * Order release tags, newest first. A prerelease comes before its release,
+ * as in semver; tags that are not versions are dropped.
+ */
+export function sortTags(tags) {
+	const parsed = tags
+		.map((tag) => ({ ...tag, match: releasePattern.exec(tag.name) }))
+		.filter(({ match }) => match)
+	const compare = (a, b) => {
+		for (const index of [1, 2, 3]) {
+			const order = Number(a.match[index]) - Number(b.match[index])
+			if (order) return order
+		}
+		const [left, right] = [a.match[4], b.match[4]]
+		if (left === right) return 0
+		if (left === undefined) return 1
+		if (right === undefined) return -1
+		return left.localeCompare(right, "en", { numeric: true })
+	}
+	return parsed
+		.sort((a, b) => compare(b, a))
+		.map(({ name, commit }) => ({ name, commit }))
+}
+
+/**
+ * The commits whose docs are kept: those of the newest release tags and the
+ * newest commits on main, plus the production commit, which is never removed.
+ */
+export function keptCommitsOf({ tags, main, production = "" }) {
+	const kept = new Set()
+	for (const { commit } of sortTags(tags)) {
+		if (kept.size >= keptReleases) break
+		kept.add(commit)
+	}
+	for (const commit of main.slice(0, keptCommits)) kept.add(commit)
+	if (production) kept.add(production)
+	return kept
+}
+
+/** The commit of the newest stable release, or "" if there is none. */
+export const latestRelease = (tags) =>
+	sortTags(tags).find(({ name }) => !releasePattern.exec(name)[4])?.commit ?? ""
+
+/**
+ * The commits to build, leaving out the ones already deployed. Forced
+ * commits are built even if they are deployed: the pushed commit, so a run
+ * started again deploys it again, and any commit named to be rebuilt.
  */
 export function planCommits({ wanted, deployed, forced = [] }) {
 	const seen = new Set(deployed)
@@ -99,14 +161,23 @@ export function planCommits({ wanted, deployed, forced = [] }) {
 }
 
 /**
- * The new list: every deployed commit, newest first, with the tags and
- * details git has for it. Production moves only forward along history.
+ * The new list: every commit that has docs, newest first, with the tags and
+ * details git has for it.
  */
-export function updateVersions({ live, added, details, site, production }) {
-	const commits = new Set([
-		...live.versions.map(({ commit }) => commit),
-		...added,
-	])
+export function updateVersions({
+	live,
+	added,
+	removed,
+	details,
+	site,
+	production,
+}) {
+	const gone = new Set(removed)
+	const commits = new Set(
+		[...live.versions.map(({ commit }) => commit), ...added].filter(
+			(commit) => !gone.has(commit),
+		),
+	)
 	return {
 		site: site.href,
 		production,
@@ -117,68 +188,48 @@ export function updateVersions({ live, added, details, site, production }) {
 }
 
 /**
- * The commit of the newest stable release among the deployed ones, or "" if
- * none is deployed. Prereleases never become the default, as on npm.
+ * The Wrangler configuration of the docs Worker. It only serves static
+ * assets: production on the site's host, and every Preview on a subdomain of
+ * it.
  */
-export function latestRelease(tags, deployed) {
-	let best
-	for (const [commit, names] of tags) {
-		if (!deployed.has(commit)) continue
-		for (const name of names) {
-			const match = /^v(\d+)\.(\d+)\.(\d+)$/.exec(name)
-			if (!match) continue
-			const version = match.slice(1).map(Number)
-			const order = best
-				? version[0] - best.version[0] ||
-					version[1] - best.version[1] ||
-					version[2] - best.version[2]
-				: 1
-			if (order > 0) best = { commit, version }
-		}
-	}
-	return best?.commit ?? ""
-}
+export const workerConfig = ({ name, directory, site }) => ({
+	name,
+	compatibility_date: "2026-11-01",
+	assets: {
+		directory,
+		html_handling: "auto-trailing-slash",
+		not_found_handling: "404-page",
+	},
+	workers_dev: false,
+	preview_urls: false,
+	routes: [{ pattern: site.host, custom_domain: true, previews_enabled: true }],
+	previews: {},
+})
 
-/**
- * The production site: a Pages Function that serves every request from the
- * release commit's own deployment, so moving production uploads no build.
- */
-export const productionWorker = (target) => `// Serves the docs from ${target}.
-const target = ${JSON.stringify(target)}
-
-export const onRequest = async ({ request }) => {
-	const url = new URL(request.url)
-	const host = url.host
-	url.host = target
-	const response = await fetch(new Request(url, request))
-	const location = response.headers.get("location")
-	if (!location) return response
-	const next = new URL(location, url)
-	if (next.host !== target) return response
-	next.host = host
-	const headers = new Headers(response.headers)
-	headers.set("location", next.href)
-	return new Response(response.body, { status: response.status, headers })
-}
+// Previews on a custom domain are indexed unless they say otherwise; only
+// production should show up in search results.
+export const noindexHeaders = `
+/*
+  X-Robots-Tag: noindex
 `
 
-const script = (host) =>
-	`<script src="${new URL("select.js", versionsUrl(host)).href}" defer></script>`
+const script = (site) =>
+	`<script src="${new URL("select.js", versionsUrl(site)).href}" defer></script>`
 
 /**
  * Add the select's script to a built page. Builds made before the select
- * existed get it the same way, so they are never built again.
+ * existed get it the same way, so they are never changed at the source.
  */
-export function injectScript(html, host) {
-	const tag = script(host)
+export function injectScript(html, site) {
+	const tag = script(site)
 	if (html.includes(tag)) return html
 	if (!html.includes("</head>")) return html
 	return html.replace("</head>", `${tag}</head>`)
 }
 
 /**
- * A page for the old GitHub Pages address that sends every path to the same
- * path on the new site.
+ * A page for an old address that sends every path to the same path on the
+ * new site.
  */
 export function redirectPage(from, to) {
 	const target = JSON.stringify(to.href)
@@ -210,44 +261,73 @@ function required(name) {
 	return value
 }
 
+const site = () => new URL(required("DOCS_URL"))
+
 const git = (...args) => execFileSync("git", args, { encoding: "utf8" }).trim()
 
 const lines = (text) => text.split("\n").filter(Boolean)
 
-/** Release tags by the commit they point to, newest version first. */
-function tagsByCommit() {
-	const tags = new Map()
-	for (const line of lines(
+/** Every release tag and the commit it points to. */
+function releaseTags() {
+	return lines(
 		git(
 			"for-each-ref",
-			"--sort=-v:refname",
 			"--format=%(refname:short) %(*objectname) %(objectname)",
 			"refs/tags/v*",
 		),
-	)) {
-		const [name, ...objects] = line.split(" ").filter(Boolean)
+	).map((line) => {
 		// An annotated tag names its commit in the second field.
-		const target = objects[0]
-		tags.set(target, [...(tags.get(target) ?? []), name])
-	}
-	return tags
+		const [name, commit] = line.split(" ").filter(Boolean)
+		return { name, commit }
+	})
 }
 
-function deploy(directory, branch, commit, cwd) {
-	const args = [
-		"--yes",
-		wrangler,
-		"pages",
-		"deploy",
-		directory,
-		`--project-name=${required("DOCS_PROJECT")}`,
-		`--branch=${branch}`,
-		...(commit ? [`--commit-hash=${commit}`] : []),
-		// The checkout holds the build output, which git does not track.
-		"--commit-dirty=true",
-	]
-	console.log(`$ npx ${args.join(" ")}`)
-	execFileSync("npx", args, { stdio: "inherit", cwd })
+/** The newest commits on main, newest first. */
+const mainCommits = () =>
+	lines(
+		git(
+			"rev-list",
+			"--first-parent",
+			`--max-count=${keptCommits}`,
+			process.env["DOCS_MAIN_REF"] ?? "origin/main",
+		),
+	)
+
+function npx(args) {
+	console.log(`$ npx ${wrangler} ${args.join(" ")}`)
+	execFileSync("npx", ["--yes", wrangler, ...args], { stdio: "inherit" })
+}
+
+/** Write the Worker's configuration for a directory of assets. */
+function configFor(directory) {
+	const folder = mkdtempSync(join(tmpdir(), "graft-worker-"))
+	const path = join(folder, "wrangler.json")
+	writeFileSync(
+		path,
+		JSON.stringify(
+			workerConfig({
+				name: required("DOCS_WORKER"),
+				directory: resolve(directory),
+				site: site(),
+			}),
+			null,
+			"\t",
+		),
+	)
+	return path
+}
+
+/** Upload a directory as one Preview of the Worker. */
+function preview(directory, name, message) {
+	const headers = join(directory, "_headers")
+	const existing = existsSync(headers) ? readFileSync(headers, "utf8") : ""
+	writeFileSync(headers, existing + noindexHeaders)
+	npx([
+		"preview",
+		`--config=${configFor(directory)}`,
+		`--name=${name}`,
+		`--message=${message}`,
+	])
 }
 
 function output(name, value) {
@@ -256,103 +336,99 @@ function output(name, value) {
 		appendFileSync(process.env["GITHUB_OUTPUT"], `${name}=${value}\n`)
 }
 
-/** Choose the commits a run builds, from the event that started it. */
+/**
+ * Choose what a run builds: every kept commit that has no docs yet, and the
+ * newest stable release when production does not serve it.
+ */
 async function plan() {
-	const host = required("DOCS_PAGES_HOST")
-	const site = new URL(required("DOCS_URL"))
-	const mode = required("DOCS_MODE")
-	const pushed = git("rev-parse", "HEAD")
-	const live = await readVersions(host, site)
-	let wanted = [pushed]
-	if (mode === "backfill") {
-		// Every commit on main since the docs site existed, and every tag.
-		const first = lines(
-			git(
-				"rev-list",
-				"--reverse",
-				"HEAD",
-				"--",
-				"packages/docs/astro.config.ts",
-			),
-		)[0]
-		wanted = [
-			...lines(
-				git("rev-list", "--reverse", "--first-parent", `${first}^..HEAD`),
-			),
-			...tagsByCommit().keys(),
-		]
-	}
+	const live = await readVersions(site(), { beforeFirstDeploy: true })
+	const tags = releaseTags()
+	const release = latestRelease(tags)
+	const production = release && release !== live.production ? release : ""
+	const kept = keptCommitsOf({
+		tags,
+		main: mainCommits(),
+		production: release || live.production,
+	})
 	// Commits named by hand, such as one whose deployment is broken.
 	const rebuild = (process.env["DOCS_REBUILD"] ?? "")
 		.split(/[\s,]+/)
 		.filter(Boolean)
 		.map((name) => git("rev-parse", "--verify", `${name}^{commit}`))
-	// A tag on a deployed commit needs no build: the list job labels it.
+	const pushed =
+		process.env["DOCS_MODE"] === "main" ? [git("rev-parse", "HEAD")] : []
 	const { commits, remaining } = planCommits({
-		wanted,
+		wanted: [...kept],
 		deployed: live.versions.map(({ commit }) => commit),
-		forced: [...(mode === "main" ? [pushed] : []), ...rebuild],
+		forced: [...pushed, ...rebuild],
 	})
 	if (remaining)
-		console.log(`${remaining} more commits remain; run the backfill again.`)
-	output("commits", JSON.stringify(commits))
+		console.log(`${remaining} more commits remain; run the workflow again.`)
+	output("production", production)
+	// The production job deploys its commit's Preview too.
+	output("commits", JSON.stringify(commits.filter((c) => c !== production)))
 }
 
-/** Add the select to a build and deploy it as its commit's own deployment. */
-function commit(directory, hash) {
-	const host = required("DOCS_PAGES_HOST")
+/**
+ * Add the select to a build and upload it as its commit's Preview, and as
+ * production first when asked.
+ */
+function commit(directory, hash, target) {
 	for (const file of readdirSync(directory, { recursive: true }))
 		if (file.endsWith(".html")) {
 			const path = join(directory, file)
 			const html = readFileSync(path, "utf8")
-			const injected = injectScript(html, host)
+			const injected = injectScript(html, site())
 			if (injected !== html) writeFileSync(path, injected)
 		}
-	deploy(directory, commitBranch(hash), hash)
-}
-
-/** Upload the production site that serves one commit's deployment. */
-function deployProduction(commit, host, site) {
-	const directory = mkdtempSync(join(tmpdir(), "graft-production-"))
-	mkdirSync(join(directory, "functions"))
-	mkdirSync(join(directory, "static"))
-	writeFileSync(
-		join(directory, "functions", "[[path]].js"),
-		productionWorker(new URL(commitUrl(commit, host, site)).host),
-	)
-	writeFileSync(
-		join(directory, "static", "_routes.json"),
-		JSON.stringify({ version: 1, include: ["/*"], exclude: [] }),
-	)
-	// Wrangler reads the functions from the directory it runs in.
-	deploy("static", "main", commit, directory)
+	// Production also creates the Worker and its domain on the first run, so
+	// it goes before the Preview, which adds the noindex header.
+	if (target === "production")
+		npx(["deploy", `--config=${configFor(directory)}`])
+	preview(directory, previewName(hash), hash)
 }
 
 /**
- * Publish the list with every deployed commit, and point production at the
- * newest stable release when that changes.
+ * Publish the list of commits that have docs, and delete the Previews of
+ * commits that are no longer kept.
  */
 async function list(deployedDirectory) {
-	const host = required("DOCS_PAGES_HOST")
-	const site = new URL(required("DOCS_URL"))
-	const live = await readVersions(host, site)
+	const live = await readVersions(site())
 	// Each successful build leaves an empty file named after its commit.
 	const added = existsSync(deployedDirectory)
 		? readdirSync(deployedDirectory)
 		: []
-	const tags = tagsByCommit()
-	const deployed = new Set([
+	const production = process.env["DOCS_PRODUCTION"] || live.production
+	const tags = releaseTags()
+	const kept = keptCommitsOf({ tags, main: mainCommits(), production })
+	const removed = []
+	for (const hash of new Set([
 		...live.versions.map(({ commit }) => commit),
 		...added,
-	])
-	const release = latestRelease(tags, deployed)
-	const production = release || live.production
-	if (release && release !== live.production)
-		deployProduction(release, host, site)
+	])) {
+		if (kept.has(hash)) continue
+		try {
+			npx([
+				"preview",
+				"delete",
+				`--worker-name=${required("DOCS_WORKER")}`,
+				`--name=${previewName(hash)}`,
+				"--skip-confirmation",
+			])
+			removed.push(hash)
+		} catch (cause) {
+			// It stays in the list, and the next run tries again.
+			console.error(`Could not delete the docs of ${hash}`, cause)
+		}
+	}
+	const names = new Map()
+	for (const { name, commit } of sortTags(tags))
+		names.set(commit, [...(names.get(commit) ?? []), name])
 	const versions = updateVersions({
 		live,
 		added,
-		site,
+		removed,
+		site: site(),
 		production,
 		details: (hash) => {
 			const [date, subject] = git("log", "-1", "--format=%cI%n%s", hash).split(
@@ -361,8 +437,8 @@ async function list(deployedDirectory) {
 			return {
 				date,
 				subject,
-				tags: tags.get(hash) ?? [],
-				url: commitUrl(hash, host, site),
+				tags: names.get(hash) ?? [],
+				url: commitUrl(hash, site()),
 			}
 		},
 	})
@@ -371,30 +447,42 @@ async function list(deployedDirectory) {
 		recursive: true,
 	})
 	writeFileSync(join(directory, "versions.json"), JSON.stringify(versions))
-	deploy(directory, versionsBranch)
+	preview(directory, versionsPreview, "The commit list and the select")
 }
 
-/** Write the redirect site for the old address into a directory. */
-function redirect(directory) {
-	const from = new URL(required("DOCS_OLD_URL"))
-	const to = new URL(required("DOCS_URL"))
+/** Write a redirect site from an old address into a directory. */
+function redirect(directory, from) {
 	mkdirSync(directory, { recursive: true })
 	for (const file of ["index.html", "404.html"])
-		writeFileSync(join(directory, file), redirectPage(from, to))
+		writeFileSync(join(directory, file), redirectPage(new URL(from), site()))
+}
+
+/** Replace the old Cloudflare Pages site with a redirect to the new one. */
+function retirePages(directory) {
+	redirect(directory, required("DOCS_PAGES_URL"))
+	npx([
+		"pages",
+		"deploy",
+		resolve(directory),
+		`--project-name=${required("DOCS_PAGES_PROJECT")}`,
+		"--branch=main",
+		"--commit-dirty=true",
+	])
 }
 
 if (resolve(process.argv[1] ?? "") === fileURLToPath(import.meta.url)) {
 	const [command, ...args] = process.argv.slice(2)
 	const commands = {
 		plan: () => plan(),
-		commit: () => commit(args[0], args[1]),
+		commit: () => commit(args[0], args[1], args[2]),
 		list: () => list(args[0]),
-		redirect: () => redirect(args[0]),
+		redirect: () => redirect(args[0], required("DOCS_OLD_URL")),
+		"retire-pages": () => retirePages(args[0]),
 	}
 	if (Object.hasOwn(commands, command)) await commands[command]()
 	else {
 		console.error(
-			"Usage: node publish.mjs plan | commit <dist> <hash> | list <deployed> | redirect <directory>",
+			"Usage: node publish.mjs plan | commit <dist> <hash> [production] | list <deployed> | redirect <directory> | retire-pages <directory>",
 		)
 		process.exitCode = 2
 	}

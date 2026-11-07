@@ -1,0 +1,70 @@
+name: Build and deploy one commit's docs
+description:
+  Builds the docs site of one commit with that commit's own toolchain and
+  lockfile, deploys it as the commit's Worker Preview, and records it. Expects
+  this run's checkout at the root, for the publishing tools, and the Cloudflare
+  credentials in the environment.
+
+inputs:
+  commit:
+    description: The full hash of the commit to build
+    required: true
+  production:
+    description: Also deploy the build as the production site
+    default: "false"
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        ref: ${{ inputs.commit }}
+        path: commit-site
+    - uses: DeterminateSystems/nix-installer-action@3138316df39ed29be04236d7ffc686fa525866aa # v23
+      with:
+        # Download prebuilt devenv packages instead of building them.
+        extra-conf: |
+          extra-substituters = https://devenv.cachix.org
+          extra-trusted-public-keys = devenv.cachix.org-1:w1cLUi8dv3hnoSPGAuibQv+f9TZLr6cv/Hm9XgU50cw=
+    # Keeps Nix build results in the GitHub Actions cache between runs.
+    - uses: DeterminateSystems/magic-nix-cache-action@84c0677f58dcedf3b91f8223ce36a9ea5b3c84b7 # v15
+      with:
+        use-flakehub: false
+        diagnostic-endpoint: ""
+    - name: Install devenv
+      shell: bash
+      run: nix profile add github:cachix/devenv/v2.4.0
+    - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: commit-site/.cache/pnpm
+        key:
+          pnpm-${{ runner.os }}-${{ hashFiles('commit-site/pnpm-lock.yaml') }}
+        restore-keys: pnpm-${{ runner.os }}-
+    - name: Install dependencies
+      shell: bash
+      working-directory: commit-site
+      run:
+        devenv shell -- env CI=true pnpm install --frozen-lockfile
+        --config.confirmModulesPurge=false --store-dir .cache/pnpm
+    - name: Test docs tooling
+      if: inputs.commit == github.sha
+      shell: bash
+      working-directory: commit-site
+      run: devenv shell -- pnpm --filter @graftland/docs test
+    - name: Build
+      shell: bash
+      working-directory: commit-site
+      run: devenv shell -- pnpm --filter @graftland/docs build
+    - name: Deploy
+      shell: bash
+      run:
+        node packages/docs/publish.mjs commit commit-site/packages/docs/dist ${{
+        inputs.commit }} ${{ inputs.production == 'true' && 'production' ||
+        'preview' }}
+    - name: Record the deployment
+      shell: bash
+      run: mkdir -p deployed && touch deployed/${{ inputs.commit }}
+    - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      with:
+        name: deployed-${{ inputs.commit }}
+        path: deployed

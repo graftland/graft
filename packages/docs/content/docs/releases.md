@@ -211,45 +211,50 @@ devenv shell -- pnpm packages:publish npm
 ## Docs site
 
 The workflow `.github/workflows/docs.yml` builds this site from `packages/docs`
-and deploys it to Cloudflare Pages at
-[graft-docs-ekb.pages.dev](https://graft-docs-ekb.pages.dev/). Every commit on
-`main` and every release tag keeps the docs as they were at that commit.
+and deploys it to a Cloudflare Worker at
+[docs.graft.land](https://docs.graft.land/). The newest 15 release tags and the
+newest 30 commits on `main` also keep the docs as they were at that commit, each
+as a **Worker Preview**.
 
-| Address                                                        | Shows                                                                            |
-| -------------------------------------------------------------- | -------------------------------------------------------------------------------- |
-| `https://graft-docs-ekb.pages.dev/`                            | The **default release**: the newest stable tag, such as `v1.2.3`, that has docs. |
-| `https://<first 12 hash characters>.graft-docs-ekb.pages.dev/` | That commit, forever.                                                            |
-| `https://versions.graft-docs-ekb.pages.dev/versions.json`      | Every deployed commit, its date, subject and tags.                               |
-| `https://graftland.github.io/graft/<path>`                     | Redirects to `<path>` on the default release.                                    |
+| Address                                               | Shows                                                             |
+| ----------------------------------------------------- | ----------------------------------------------------------------- |
+| `https://docs.graft.land/`                            | The **default release**: the newest stable tag, such as `v1.2.3`. |
+| `https://<first 12 hash characters>.docs.graft.land/` | That commit, while it is kept.                                    |
+| `https://versions.docs.graft.land/versions.json`      | Every kept commit, its date, subject and tags.                    |
+| `https://graftland.github.io/graft/<path>`            | Redirects to `<path>` on the default release.                     |
+| `https://graft-docs-ekb.pages.dev/<path>`             | Redirects to `<path>` on the default release.                     |
 
 ### What a run does
 
-| Started by                         | Builds                                                                                   | Then                                                                    |
-| ---------------------------------- | ---------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
-| A push to `main`                   | The pushed commit.                                                                       | Adds it to the list.                                                    |
-| A tag like `v1.2.3`                | The tagged commit, only if it has no docs yet.                                           | Labels the commit with the tag. A newer stable tag becomes the default. |
-| Actions tab, **backfill** selected | Every commit on `main` since the docs site existed, and every tag, that has no docs yet. | Adds them to the list.                                                  |
-| Actions tab, **rebuild** filled in | The named commits, even if they have docs.                                               | Replaces their deployments and updates the list.                        |
+| Started by                         | Builds                                               | Then                                                                    |
+| ---------------------------------- | ---------------------------------------------------- | ----------------------------------------------------------------------- |
+| A push to `main`                   | The pushed commit, and any kept commit without docs. | Updates the list and deletes the docs of commits no longer kept.        |
+| A tag like `v1.2.3`                | The tagged commit, only if it has no docs yet.       | Labels the commit with the tag. A newer stable tag becomes the default. |
+| Actions tab                        | Any kept commit without docs.                        | Same as a push.                                                         |
+| Actions tab, **rebuild** filled in | The named commits too, even if they have docs.       | Replaces their docs and updates the list.                               |
 
+- **Kept.** The commits of the newest 15 release tags, prereleases included, the
+  newest 30 commits on `main`, and the default release. A commit can be both a
+  tag and one of the 30. The docs of any other commit are deleted, and it leaves
+  the list.
 - **Once per commit.** A commit is built once, with its own lockfile and
-  toolchain, and its upload is never replaced. The production address serves the
-  default release's own deployment, so changing the default uploads no build.
+  toolchain. A new default release is built once more to deploy it as
+  production. Cloudflare uploads only files it does not have yet.
 - **Default.** Prereleases such as `v1.2.3-beta.0` never become the default, as
   on npm. Commits on `main` after the last release are listed but are not the
-  default.
-- **Order.** Runs update the list one at a time. The default is always the
-  highest stable version that has docs, so a late run never moves it back.
-- **Failures.** A commit that no longer builds is left out; the others still
-  deploy. If the live list cannot be read, the run stops rather than start a new
-  one.
-- **Limit.** One backfill builds at most 256 commits. Run it again for the rest.
+  default. Production moves only after the release's build succeeds.
+- **Order.** Runs update the list one at a time.
+- **Failures.** A commit that does not build is left out; the others still
+  deploy, and the next run tries it again while it is kept. If the live list
+  cannot be read, the run stops rather than start a new one.
+- **Search engines.** Only production is indexed; every commit address sends
+  `X-Robots-Tag: noindex`.
 
 ### Switching versions
 
-Every deployed page loads the select from the versions address, so builds made
-before the select existed get it too.
+Every deployed page loads the select from the versions address.
 
-- **Select.** Next to the theme select. It lists every deployed commit, newest
+- **Select.** Next to the theme select. It lists every kept commit, newest
   first, by its tag or short hash, and marks the default release. It opens the
   same page in the chosen version; a page that did not exist yet shows that
   version's 404 page.
@@ -258,13 +263,12 @@ before the select existed get it too.
 
 ### Set up
 
-| Task                       | How                                                                                                                                                                                |
-| -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Cloudflare project         | `npx wrangler pages project create graft-docs --production-branch main`, once. Put the `*.pages.dev` name Cloudflare gives it in `DOCS_PAGES_HOST` and `DOCS_URL` of the workflow. |
-| `docs` environment secrets | `CLOUDFLARE_API_TOKEN`, with the **Cloudflare Pages: Edit** permission, and `CLOUDFLARE_ACCOUNT_ID`.                                                                               |
-| Old address                | Set the repository's Pages source to **GitHub Actions**.                                                                                                                           |
-| Docs of earlier commits    | Start the workflow on `main` from the Actions tab with **backfill** selected.                                                                                                      |
-| Work on the site locally   | `devenv shell -- pnpm --filter @graftland/docs dev`; the select appears only on deployed pages.                                                                                    |
+| Task                       | How                                                                                                                                                                         |
+| -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Domain                     | The zone of `DOCS_URL`'s domain is on the same Cloudflare account. The first run creates the Worker named in `DOCS_WORKER`, the domain, and its wildcard certificate.       |
+| `docs` environment secrets | `CLOUDFLARE_ACCOUNT_ID`, and `CLOUDFLARE_API_TOKEN` with **Workers Scripts: Edit** and **Cloudflare Pages: Edit** on the account, and **Workers Routes: Edit** on the zone. |
+| Old addresses              | Set the repository's Pages source to **GitHub Actions**. The Cloudflare Pages project in `DOCS_PAGES_PROJECT` keeps only the redirect.                                      |
+| Work on the site locally   | `devenv shell -- pnpm --filter @graftland/docs dev`; the select appears only on deployed pages.                                                                             |
 
 ### Writing pages
 
