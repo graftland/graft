@@ -80,8 +80,8 @@ export const activeSnapshot = Effect.fn("activeSnapshot")(function* (
 	>()
 	for (const [id, entry] of forks) {
 		const state = yield* TxRef.get(entry.node.state)
-		if (state.resolution !== undefined)
-			active = HashMap.set(active, id, state.resolution)
+		for (const resolution of HashMap.values(state.resolutions))
+			active = HashMap.set(active, id, resolution)
 	}
 	return active
 }, Effect.tx)

@@ -18,6 +18,7 @@ import {
 import type { ForkState } from "../Fork"
 import type { Plugin } from "../Plugin"
 import type { Aliases } from "./aliases"
+import type { Token } from "./generations"
 import type { Snapshot } from "./snapshot"
 import type { Group } from "./tasks"
 
@@ -37,7 +38,7 @@ export interface GraphNode {
 	readonly parent: GraphNode | undefined
 	readonly state: TxRef.TxRef<{
 		readonly live: boolean
-		readonly resolution: ActiveResolution | undefined
+		readonly resolutions: HashMap.HashMap<Token, ActiveResolution>
 	}>
 }
 
@@ -47,15 +48,17 @@ export interface Provision {
 	readonly service: string
 	readonly value: unknown
 	readonly owner: number
+	readonly generation: Token
 	readonly node: GraphNode
 	readonly slot: Slot
-	readonly consumers: TxRef.TxRef<HashSet.HashSet<number>>
+	readonly consumers: TxRef.TxRef<HashSet.HashSet<Token>>
 }
 
 /** One run of a plugin's `apply`, from dependency acquisition to teardown. */
 export interface Activation {
 	readonly status: ForkStatus | undefined
 	readonly fork: number
+	readonly generation: Token
 	readonly node: GraphNode
 	readonly tasks: Option.Option<Group>
 	/** Context keys supplied by this activation's resolved provisions, never inherited by children. */
@@ -161,6 +164,7 @@ export interface Runtime {
 	readonly aliases: Aliases
 	readonly events: TxRef.TxRef<HashMap.HashMap<string, ReadonlyArray<Handler>>>
 	readonly ids: TxRef.TxRef<number>
+	readonly generationIds: TxRef.TxRef<number>
 	readonly logs: PubSub.PubSub<LogEntry>
 }
 

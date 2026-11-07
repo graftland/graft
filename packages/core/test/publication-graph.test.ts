@@ -259,7 +259,10 @@ describe("publication dependency graph", () => {
 					HashMap.get(registry, realmKey("", Target.key)),
 				)
 				const leased = yield* TxRef.get(provision.consumers)
-				assert.deepStrictEqual(leased, HashSet.make(consumer.id))
+				assert.strictEqual(HashSet.size(leased), 1)
+				assert.isTrue(
+					HashSet.every(leased, (token) => token.fork === consumer.id),
+				)
 				yield* consumer.dispose
 				yield* provider.dispose
 				const active = yield* activeSnapshot(runtime)

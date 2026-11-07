@@ -34,6 +34,7 @@ import * as Aliases from "./internal/aliases"
 import { inheritContext } from "./internal/context"
 import { publicationCycle, resolutionChanged } from "./internal/dependencies"
 import * as ForkStatus from "./internal/forkState"
+import * as Generations from "./internal/generations"
 import * as Probes from "./internal/probes"
 import * as Replacement from "./internal/replacement"
 import {
@@ -109,7 +110,10 @@ export const provide = Effect.fnUntraced(function* <I, S>(
 					),
 				)
 			}
-			const { resolution } = yield* TxRef.get(activation.node.state)
+			const state = yield* TxRef.get(activation.node.state)
+			const resolution = Option.getOrUndefined(
+				HashMap.get(state.resolutions, activation.generation),
+			)
 			if (resolution !== undefined && (yield* resolutionChanged(resolution))) {
 				return yield* ServiceConflict.make({
 					service: key.key,
@@ -141,9 +145,10 @@ export const provide = Effect.fnUntraced(function* <I, S>(
 				service: key.key,
 				value,
 				owner: activation.fork,
+				generation: activation.generation,
 				node: activation.node,
 				slot,
-				consumers: TxRef.makeUnsafe(HashSet.empty<number>()),
+				consumers: TxRef.makeUnsafe(HashSet.empty<Generations.Token>()),
 			}
 			yield* TxRef.set(slot.provision, Option.some(provision))
 			yield* TxRef.set(
@@ -177,6 +182,7 @@ const runtimeLayer = Layer.effect(
 				HashMap.empty<string, ReadonlyArray<Handler>>(),
 			),
 			ids: yield* TxRef.make(1),
+			generationIds: yield* TxRef.make(1),
 			logs: yield* PubSub.sliding<LogEntry>({
 				capacity: logReplay,
 				replay: logReplay,
@@ -187,12 +193,13 @@ const runtimeLayer = Layer.effect(
 		)
 		const activation: Activation = {
 			fork: 0,
+			generation: new Generations.Token({ fork: 0, generation: 0 }),
 			node: {
 				id: 0,
 				parent: undefined,
 				state: TxRef.makeUnsafe<GraphNode["state"]["value"]>({
 					live: true,
-					resolution: undefined,
+					resolutions: HashMap.empty(),
 				}),
 			},
 			status: undefined,
@@ -402,7 +409,7 @@ export const plugin: <P extends Plugin>(
 								parent: activation.node.id === 0 ? undefined : activation.node,
 								state: TxRef.makeUnsafe<GraphNode["state"]["value"]>({
 									live: true,
-									resolution: undefined,
+									resolutions: HashMap.empty(),
 								}),
 							}
 							const initialSpec = yield* TxRef.get(spec)
@@ -430,10 +437,10 @@ export const plugin: <P extends Plugin>(
 					({ id, node, status }) =>
 						Effect.tx(
 							Effect.gen(function* () {
-								yield* TxRef.set(node.state, {
+								yield* TxRef.update(node.state, (state) => ({
+									...state,
 									live: false,
-									resolution: undefined,
-								})
+								}))
 								yield* ForkStatus.dispose(runtime, id, status)
 							}),
 						),

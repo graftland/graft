@@ -134,11 +134,16 @@ continue until the consumers drain.
 - An explicit `dispose` reports a cleanup failure as `Fork.CleanupError`. Its
   `cause` keeps the original failure reasons.
 
+An interrupted finalizer without reliable attribution remains a cleanup failure
+with its complete cause. Cancellation does not prove cleanup succeeded.
+
 ### Leases
 
-A plugin that starts using a service holds it until the plugin stops. Graft
-counts these uses in the same transaction that checks the plugin's dependencies,
-so a service is never withdrawn while a plugin is half started.
+A **generation** holds one lease per provision, even when it injects the same
+service more than once. Overlapping generations hold separate leases. Settling
+or tearing down an old generation leaves newer leases and publications intact.
+Cycle checks include every generation that still holds leases, including
+withdrawn generations.
 
 ## Services from the environment
 

@@ -4,6 +4,7 @@ import {
 	Effect,
 	Exit,
 	Fiber,
+	HashMap,
 	Option,
 	PubSub,
 	Ref,
@@ -54,7 +55,7 @@ it.effect(
 					parent: undefined,
 					state: TxRef.makeUnsafe<GraphNode["state"]["value"]>({
 						live: true,
-						resolution: undefined,
+						resolutions: HashMap.empty(),
 					}),
 				}
 				const status = yield* ForkStatus.make(undefined, initial)

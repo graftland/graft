@@ -64,7 +64,7 @@ for (const phase of ["Loading", "Active"]) {
 							)
 							const repeated = yield* Effect.exit(fork.dispose)
 							for (const result of [first, repeated]) {
-								if (finalizer === "masked" || finalizer === "interruptible") {
+								if (finalizer === "masked") {
 									assert.deepStrictEqual(result, Exit.void)
 								} else {
 									assert(Exit.isFailure(result))
@@ -74,6 +74,8 @@ for (const phase of ["Loading", "Active"]) {
 									if (finalizer === "self") {
 										assert(Schema.is(ReleaseInterrupted)(released))
 										assert.isTrue(Cause.hasInterruptsOnly(released.cause))
+									} else if (finalizer === "interruptible") {
+										assert.isTrue(Cause.hasInterruptsOnly(error.cause))
 									} else assert.strictEqual(released, defect)
 								}
 							}
@@ -100,7 +102,7 @@ for (const phase of ["Loading", "Active"]) {
 						)
 						assert.strictEqual(
 							releaseLogs.length,
-							finalizer === "self" || finalizer === "die" ? 1 : 0,
+							finalizer === "masked" ? 0 : 1,
 						)
 					}),
 			)

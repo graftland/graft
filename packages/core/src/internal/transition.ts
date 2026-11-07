@@ -24,6 +24,7 @@ import * as Plugin from "../Plugin"
 import * as Release from "../Release"
 import * as T from "../Transition"
 import { withdraw } from "./activation"
+import * as Generations from "./generations"
 import type { Activation, ForkEntry, Provision, Runtime } from "./runtime"
 import { RuntimeContext } from "./runtimeContext"
 import * as Snapshots from "./snapshot"
@@ -39,6 +40,7 @@ type HostRelease =
 	| { readonly _tag: "Completed"; readonly exit: Exit.Exit<void> }
 
 interface HostLease {
+	readonly generation: Generations.Token
 	readonly id: number
 	readonly scope: Scope.Closeable
 	readonly hostRelease: Ref.Ref<HostRelease>
@@ -311,6 +313,12 @@ const engine = (
 				const id = yield* Ref.getAndUpdate(managed.next, (id) => id + 1)
 				const scope = yield* Scope.fork(managed.scope)
 				const lease: HostLease = {
+					generation: yield* Effect.tx(
+						Generations.acquire(managed.runtime, managed.entry.node, {
+							watch: HashMap.empty(),
+							provisions: [],
+						}),
+					),
 					id,
 					scope,
 					hostRelease: yield* Ref.make<HostRelease>({ _tag: "Pending" }),
@@ -328,7 +336,13 @@ const engine = (
 				).pipe(
 					Effect.onExit((exit) =>
 						Exit.isFailure(exit)
-							? awaitHostRelease(lease).pipe(Effect.asVoid)
+							? awaitHostRelease(lease).pipe(
+									Effect.andThen(
+										Effect.tx(
+											Generations.settle(managed.entry.node, lease.generation),
+										),
+									),
+								)
 							: Effect.void,
 					),
 				)
@@ -564,6 +578,9 @@ const engine = (
 					termination: observed.success,
 				})
 				yield* Ref.set(attempt.terminated, Option.some(observed.success))
+				yield* Effect.tx(
+					Generations.settle(managed.entry.node, attempt.generation),
+				)
 				yield* beginHostRelease(attempt)
 				yield* generation(managed, attempt, "Terminated")
 			}),

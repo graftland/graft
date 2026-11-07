@@ -54,7 +54,7 @@ it.effect(
 					parent: undefined,
 					state: TxRef.makeUnsafe<GraphNode["state"]["value"]>({
 						live: true,
-						resolution: undefined,
+						resolutions: HashMap.empty(),
 					}),
 				}
 				const status = yield* ForkStatus.make(undefined, initial)
@@ -74,8 +74,8 @@ it.effect(
 				const count = yield* TxRef.get(provision.consumers)
 				const graph = yield* TxRef.get(node.state)
 				assert.strictEqual(
-					graph.resolution,
-					undefined,
+					HashMap.size(graph.resolutions),
+					0,
 					`Activation leaked after ${ticks} yields`,
 				)
 				assert.strictEqual(

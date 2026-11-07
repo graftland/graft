@@ -36,12 +36,12 @@ export const publicationCycle = Effect.fnUntraced(function* (
 		if (HashSet.has(seen, node.id)) continue
 		seen = HashSet.add(seen, node.id)
 		const state = yield* TxRef.get(node.state)
-		if (!state.live) continue
-		const resolution =
+		if (!state.live && HashMap.size(state.resolutions) === 0) continue
+		const resolutions =
 			node === publisher && candidate !== undefined
-				? candidate
-				: state.resolution
-		if (resolution !== undefined) {
+				? [candidate, ...HashMap.values(state.resolutions)]
+				: HashMap.values(state.resolutions)
+		for (const resolution of resolutions) {
 			if (HashMap.has(resolution.watch, key)) return true
 			for (const provision of resolution.provisions) {
 				pending = { node: provision.node, next: pending }

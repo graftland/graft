@@ -45,6 +45,7 @@ import { isOptional, type Update } from "../Plugin"
 import * as Release from "../Release"
 import { publicationCycle, resolutionChanged } from "./dependencies"
 import { setState } from "./forkState"
+import * as Generations from "./generations"
 import {
 	realmKey,
 	realmOf,
@@ -245,13 +246,11 @@ export const withdraw = Effect.fnUntraced(function* (
 			yield* TxRef.set(activation.published, Option.none())
 			yield* TxRef.update(activation.node.state, (state) => ({
 				...state,
-				resolution:
-					state.resolution === undefined
-						? undefined
-						: {
-								...state.resolution,
-								watch: HashMap.empty(),
-							},
+				resolutions: HashMap.modify(
+					state.resolutions,
+					activation.generation,
+					(resolution) => ({ ...resolution, watch: HashMap.empty() }),
+				),
 			}))
 			for (const provision of published) {
 				const current = yield* TxRef.get(provision.slot.provision)
@@ -356,26 +355,23 @@ export const supervise = Effect.fnUntraced(function* (
 	}, Effect.tx)
 
 	const acquire = Effect.gen(function* () {
-		const resolution = yield* Effect.tx(
+		const acquired = yield* Effect.tx(
 			Effect.gen(function* () {
 				const prepared = yield* prepare
 				const resolution = yield* resolveCurrent(prepared)
 				yield* TxRef.set(processing, resolution.spec)
-				if (resolution.missing.length === 0) {
-					for (const provision of resolution.provisions)
-						yield* TxRef.update(provision.consumers, HashSet.add(id))
-					yield* TxRef.update(node.state, (state) => ({
-						...state,
-						resolution: {
-							watch: resolution.watch,
-							provisions: resolution.provisions,
-						},
-					}))
-				}
-				return resolution
+				const generation =
+					resolution.missing.length === 0
+						? yield* Generations.acquire(runtime, node, {
+								watch: resolution.watch,
+								provisions: resolution.provisions,
+							})
+						: undefined
+				return { resolution, generation }
 			}),
 		)
-		if (resolution.missing.length > 0) return Acquired.Missing({ resolution })
+		const { resolution, generation } = acquired
+		if (generation === undefined) return Acquired.Missing({ resolution })
 		const scope = yield* Scope.make()
 		const tasks = yield* TaskGroup.make
 		const published = yield* TxRef.make(
@@ -383,6 +379,7 @@ export const supervise = Effect.fnUntraced(function* (
 		)
 		const activation: Activation = {
 			fork: id,
+			generation,
 			node,
 			status,
 			tasks: Option.some(tasks),
@@ -548,26 +545,13 @@ export const supervise = Effect.fnUntraced(function* (
 				withdraw(runtime, running.activation),
 			)
 			// Leased services may need these workers during consumer finalization.
-			// Release.close marks independent interruptions; a pure interruption is pending cancellation.
-			const tasksClosed = yield* Release.close(running.tasks.scope, exit).pipe(
-				Effect.catchCauseIf(Cause.hasInterruptsOnly, () => Effect.void),
-				Effect.exit,
+			// Unmarked interruptions have unresolved attribution; retain their full causes.
+			const tasksClosed = yield* Effect.exit(
+				Release.close(running.tasks.scope, exit),
 			)
-			const closed = yield* Release.close(running.scope, exit).pipe(
-				Effect.catchCauseIf(Cause.hasInterruptsOnly, () => Effect.void),
-				Effect.exit,
-			)
+			const closed = yield* Effect.exit(Release.close(running.scope, exit))
 			const released = yield* Effect.exit(
-				Effect.tx(
-					Effect.gen(function* () {
-						for (const provision of running.resolution.provisions)
-							yield* TxRef.update(provision.consumers, HashSet.remove(id))
-						yield* TxRef.update(node.state, (state) => ({
-							...state,
-							resolution: undefined,
-						}))
-					}),
-				),
+				Effect.tx(Generations.settle(node, running.activation.generation)),
 			)
 			const tasks = yield* Ref.get(running.tasks.failures)
 			const updates = yield* Ref.get(running.updateCleanup)
