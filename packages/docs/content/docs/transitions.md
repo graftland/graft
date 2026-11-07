@@ -1,191 +1,63 @@
 ---
 title: Changes
-description: Submit, await and observe independent runtime changes.
+description: Submit, await and observe kernel changes.
 ---
 
-A **Change** is one admitted runtime replacement with a stable id. The runtime
-owns it through trial, recovery and settlement. Unrelated instances can change
-while another Change waits or is Stuck.
+A **Change** replaces one fixed kernel instance. The kernel owns trial, recovery
+and settlement. Embedded `Graft.plugin` composition offers cooperative lifecycle
+and does not install the kernel service.
 
 ## Submit and await
+
+Build the kernel layer separately from the embedded runtime. A request contains
+deployment data; it cannot pass a closure or a Context. Cancelling the waiting
+fiber does not cancel the Change. Use `handle.cancel` to request cancellation.
 
 ```ts
 import { Effect } from "effect"
 
 import { Change } from "@graftland/graft"
 
-declare const candidate: Change.Candidate
-
-export const replacement = Effect.gen(function* () {
+declare const target: Change.Target
+export const upgrade = Effect.gen(function* () {
 	const handle = yield* Change.submit({
 		key: "forecasts-v2",
 		instance: "forecasts",
-		candidate,
-		strategy: "Overlap",
-		requirements: { probes: ["health"], trial: "2 seconds" },
+		target,
 	})
-	return yield* handle.await
+	const conclusion = yield* handle.await
+	const current = yield* Change.get(handle.id)
+	return { conclusion, current }
 })
 ```
 
-`Change.run` submits and awaits in one call. Cancelling a wait leaves the Change
-running; `handle.cancel` explicitly requests cancellation and is idempotent.
-Awaiting the same handle again returns the same outcome.
-
 ## Observe
 
-`Change.get(id)` returns the current status, or `None` for an unknown or evicted
-id. `Change.changes` sends bounded notifications with per-Change sequence
-numbers. Slow observers never block execution; reconcile gaps with `get`. Status
-includes the Change id, available trace correlation, member facts and settlement
-evidence. Diagnostics carry the same correlation. Settled observation history
-retains 128 Changes. Keyed admission records and unresolved records are retained
-separately.
-
-Member actual facts follow the current route, version and availability,
-including during trial, recovery and recreation of the logical instance.
-Recorded outcome members remain an immutable snapshot.
-
-## Request keys
-
-The same key and normalized request return the original handle before admission
-checks, even after a version change or history eviction. Changing the instance,
-candidate, expected version, strategy, budgets or requirements under that key
-produces `KeyConflict`. Keys remain in memory for the runtime lifetime.
-
-Concurrent retries return that handle independently of redundant metadata
-cleanup; late cleanup failures are logged with their full cause.
-
-## Admission
-
-Rejections are `ChangeRejected` errors with no Change id. Nothing queues behind
-a conflicting Change.
-
-| Reason              | Meaning                                                                   |
-| ------------------- | ------------------------------------------------------------------------- |
-| `Busy`              | Conflicting objects and their owning Change ids.                          |
-| `Closing`           | Runtime or instance admission is closed.                                  |
-| `UnsupportedTarget` | No matching registered driver.                                            |
-| `InvalidBudget`     | Limits are invalid or omit required trial, cleanup or recovery allowance. |
-| `Stale`             | The caller version or an internal prepared premise no longer matches.     |
-| `KeyConflict`       | A request key already identifies different normalized input.              |
-| `Capacity`          | Managed-unit capacity cannot cover the strategy and recovery.             |
-| `Unsupported`       | The requested strategy or member closure is unavailable.                  |
+`Change.get` returns current facts. `Change.changes` publishes sequenced
+snapshots. Reconcile sequence gaps with `get`; a slow subscriber does not block
+coordination. A handle retains its immutable conclusion even after bounded
+unkeyed history expires.
 
 ## Outcomes
 
 | Outcome          | Meaning                                                            |
 | ---------------- | ------------------------------------------------------------------ |
-| `Accepted`       | The candidate serves and required settlement is complete.          |
-| `Aborted`        | The old generation was not stopped or rerouted and remains usable. |
-| `Recovered`      | A fresh recovery generation meets Serving requirements.            |
-| `RecoveryFailed` | Recovery did not restore service.                                  |
-| `Stuck`          | Required settlement evidence remains unresolved.                   |
+| `Accepted`       | Target passes trial and required retirement evidence settles.      |
+| `Aborted`        | Failure leaves the old healthy, authorized generation unchanged.   |
+| `Recovered`      | Fresh exclusive recovery passes its full trial.                    |
+| `RecoveryFailed` | Recovery fails and all required exits are known.                   |
+| `Stuck`          | Required execution evidence is missing; ownership remains visible. |
 
-Outcomes retain their Change id, phase, members and full causes. Shutdown
-reports actual availability. A Stuck conclusion never changes; late evidence
-updates settlement facts. Reservations remain local to the affected objects
-until settlement or safe fencing.
+## Limits
 
-Terminal settlement includes every retired forward, previous and recovery
-generation and metadata cleanup. Missing exit or cleanup evidence keeps the
-Change Stuck and its reservations held. Completed cleanup failures retain their
-full causes and enter failure or recovery handling.
+Budgets are milliseconds and cover the whole submission. Request keys retain
+their identity for the runtime lifetime; another normalized request under the
+same key is rejected. Unknown cleanup after forced exit does not establish
+successful finalizers. Missing exit evidence retains unit capacity and
+reservations. Unrelated instances may progress within capacity.
 
-A generation that remains serving belongs to its registration. Later retirement
-does not become a new settlement obligation of an earlier Change.
+## Embedded lifecycle
 
-## Budgets and calls
-
-`budget` limits total time and each startup, probe, drain, stop and termination
-operation. Defaults are five minutes total, thirty seconds startup, and five
-seconds for other operations. `requirements.probes` defaults to empty and
-`requirements.trial` to zero. Trial is a minimum observation period; both
-forward and recovery trial consume the total. Initial driver registrations use
-the same budget validation.
-
-Metadata cleanup is included in admission reserves and shares the original total
-deadline. A cleanup wait never receives extra time after that deadline; its
-original owner continues if the wait expires.
-
-## Strategy
-
-Overlap requires a driver-verified declaration before allocation. The candidate
-starts before the old generation retires. Drivers without a verified declaration
-reject explicit Overlap. Restart pauses new facade calls, drains and stops the
-old generation, waits for exit and required host cleanup, then starts the
-candidate. Queued calls choose their generation only when the new route opens.
-
-`Registration.queue` defaults to 256 waiters and a five-second wait. Overflow,
-expiry, closing and failed recovery reject calls before choosing a generation.
-Cancellation and expiry remove a waiter exactly once.
-
-Cancellation before the old generation may have changed can leave it serving
-with `Aborted`. After that boundary, recovery resolves the previous desired
-target again and completes its probes and full trial. Recovery establishes fresh
-metadata and scoped policy bindings before taking an authorization premise for
-that target. It checks approval again before execution and retains the Change’s
-object versions and reservations. Unconfirmed exit or host cleanup can produce
-`Stuck`; late settlement never resumes that Change.
-
-Recovery starts after previous retirement, so the previous target does not need
-an Overlap declaration.
-
-`Graft.Options.maxUnits` defaults to 256. Initial registrations, reserved
-allocations, serving units, draining units and units without exit evidence count
-toward the limit. Restart can reuse capacity after confirmed old-unit exit;
-recovery capacity stays reserved from other Changes.
-
-## Start a managed Remote plugin
-
-Artifact-backed Remote deployments register their driver through
-`Remote.plugin`; Loader binds the entry id, while embedded registrations supply
-an explicit instance name. See [artifacts](../remote/artifacts/).
-
-## Driver extension point
-
-`Transition.registerDriver` publishes stable facades once. Changes that preserve
-a facade binding share its read premise, so its provider and compatible
-consumers can change concurrently. Phase 1 does not change facade publication or
-ownership. A generation owns its execution, resolution and leases. Allocation
-deadlines limit waiting; resources and capacity remain owned until the
-allocation executor actually ends. An executor still running after termination
-waits leaves the Change Stuck, with late settlement retaining the original
-outcome. Driver allocation must not start execution; execution begins in
-`Unit.start`. `Registration.resolve` receives the unresolved desired candidate
-before every allocation, including startup and recovery. Each allocation
-receives a fresh monotonic term and a Change, generation and route version
-token; the unit echoes the token in its acknowledgement. An acknowledged stop,
-disconnected transport or closed scope never replaces exit evidence.
-
-`Transition.Driver.prepare` verifies deployment metadata before admission
-without executing the plugin. Authorization versions are checked again at route
-commit; removal and recreation cannot hide a stale premise. Metadata cleanup
-keeps its original completion record and may also leave a Change Stuck.
-Cancelling submission before admission starts cleanup; slow cleanup remains
-owned by the runtime. The startup deadline bounds the wait for metadata,
-including uninterruptible preparation; resources close after preparation
-execution ends. Cleanup failures remain logged with their full cause and request
-correlation even after submission has returned.
-
-Each managed generation keeps its own leases to captured providers and retained
-service slots. Confirmed unit exit releases those runtime leases independently
-of host cleanup. Host resources stay open until all resource-using lifecycle
-operations actually end, including a delayed termination command. Ending the
-registration scope closes facade admission; an unconfirmed generation keeps the
-instance name fenced until late settlement. Runtime ownership of a disposed
-registration ends after its execution, cleanup and admitted Changes have all
-settled. Runtime shutdown still closes pending host resources when unit exit is
-unconfirmed and reports the unresolved execution separately.
-
-## Remote drain
-
-RPC results and client cancellation do not establish remote request-scope
-completion, including ordinary unary calls. General remote request-scope drain
-remains unsupported until the phase 2 completion record.
-
-## Bypass protection
-
-`Fork.update`, `Fork.restart`, Loader mutations and replacement reject managed
-trees through the existing `ManagedFork` protection. Explicit disposal remains
-available.
+Code changes in embedded mode require process restart. Embedded restart,
+replacement and HMR do not provide kernel Change outcomes or native termination
+guarantees.

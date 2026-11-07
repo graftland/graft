@@ -58,7 +58,7 @@ it.effect(
 						resolutions: HashMap.empty(),
 					}),
 				}
-				const status = yield* ForkStatus.make(undefined, initial)
+				const status = yield* ForkStatus.make(false, undefined, initial)
 				const supervisor = yield* supervise(
 					runtime,
 					-1,

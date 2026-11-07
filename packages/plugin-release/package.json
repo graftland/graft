@@ -43,21 +43,11 @@
 			"source": "./src/index.ts",
 			"default": "./dist/index.js"
 		},
-		"./approve-cli": {
-			"source": "./src/approve-cli.ts",
-			"default": "./dist/approve-cli.js"
-		},
-		"./cli": {
-			"source": "./src/cli.ts",
-			"default": "./dist/cli.js"
-		},
 		"./package.json": "./package.json"
 	},
 	"publishConfig": {
 		"exports": {
 			".": "./dist/index.js",
-			"./approve-cli": "./dist/approve-cli.js",
-			"./cli": "./dist/cli.js",
 			"./package.json": "./package.json"
 		}
 	},

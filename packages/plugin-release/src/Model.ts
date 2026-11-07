@@ -1,10 +1,17 @@
-import { Array, Context, Data, Effect, Schema } from "effect"
+import { Schema } from "effect"
 
-import { Manifest, Change as RuntimeChange } from "@graftland/graft"
+import { Manifest } from "@graftland/graft"
 import { Artifact, Publication } from "@graftland/plugin-remote"
-import * as RemoteConfig from "@graftland/plugin-remote/Config"
 import * as Policy from "@graftland/plugin-remote/Policy"
 
+export const Placement = Schema.Union([
+	Schema.TaggedStruct("Worker", {
+		execArgv: Schema.optionalKey(Schema.Array(Schema.String)),
+	}),
+	Schema.TaggedStruct("Local", {
+		command: Schema.optionalKey(Schema.NonEmptyArray(Schema.String)),
+	}),
+])
 export const Id = Schema.String.check(Schema.isPattern(/^[a-f0-9]{64}$/))
 export const SourceEntry = Schema.Struct({
 	id: Schema.NonEmptyString,
@@ -13,7 +20,7 @@ export const SourceEntry = Schema.Struct({
 		package: Schema.NonEmptyString,
 		entry: Manifest.PublicEntry,
 		contract: Schema.NonEmptyString,
-		target: RemoteConfig.ManagedHost.fields.target,
+		target: Placement,
 		config: Schema.Json,
 		probes: Schema.Array(Schema.NonEmptyString),
 	}),
@@ -22,7 +29,7 @@ export type SourceEntry = typeof SourceEntry.Type
 export const Entry = Schema.Struct({
 	id: Schema.NonEmptyString,
 	contract: Schema.String.check(Schema.isPattern(/^file:\/\//)),
-	target: RemoteConfig.ManagedHost.fields.target,
+	target: Placement,
 	input: Schema.Json,
 	probes: Schema.Array(Schema.NonEmptyString),
 	artifact: Artifact.Artifact,
@@ -76,7 +83,7 @@ export const Status = Schema.Struct({
 export type Status = typeof Status.Type
 /** Safe durable summary: never serializes arbitrary causes or resolved configuration. */
 export const OutcomeSummary = Schema.Struct({
-	change: RuntimeChange.Id,
+	change: Schema.String,
 	_tag: Schema.Literals([
 		"Accepted",
 		"Aborted",
@@ -101,33 +108,37 @@ export const OutcomeSummary = Schema.Struct({
 	),
 })
 export type OutcomeSummary = typeof OutcomeSummary.Type
-export const summarize = (outcome: RuntimeChange.Outcome): OutcomeSummary => ({
-	change: outcome.change,
-	_tag: outcome._tag,
-	phase: outcome.phase,
-	...(outcome._tag === "Accepted" ? {} : { reason: outcome.reason }),
-	evidence: Array.map(outcome.evidence, (evidence) => ({
-		...(evidence.attempt === undefined ? {} : { attempt: evidence.attempt }),
-		phase: evidence.phase,
-		hasCause: evidence.cause !== undefined,
-		...(evidence.termination === undefined
-			? {}
-			: {
-					termination: {
-						unit: evidence.termination.unit,
-						state: evidence.termination.state,
-					},
-				}),
-	})),
+/** Version-one journal data, independent of a runtime execution adapter. */
+export const JournalObject = Schema.TaggedUnion({
+	Instance: { instance: Schema.String },
+	Slot: { realm: Schema.String, key: Schema.String },
+	Edge: { consumer: Schema.String, provider: Schema.String },
 })
+export type JournalObject = typeof JournalObject.Type
 export const RejectionSummary = Schema.Struct({
-	reason: RuntimeChange.Rejection,
+	reason: Schema.TaggedUnion({
+		Busy: {
+			conflicts: Schema.Array(
+				Schema.Struct({
+					object: JournalObject,
+					holders: Schema.Array(Schema.String),
+				}),
+			),
+		},
+		Closing: {},
+		UnsupportedTarget: { instance: Schema.String },
+		InvalidBudget: { message: Schema.String },
+		Stale: {
+			object: JournalObject,
+			expected: Schema.Finite,
+			actual: Schema.Finite,
+		},
+		KeyConflict: { key: Schema.String },
+		Capacity: { maxUnits: Schema.Finite, required: Schema.Finite },
+		Unsupported: { message: Schema.String },
+	}),
 })
 export type RejectionSummary = typeof RejectionSummary.Type
-export const summarizeRejection = (
-	rejection: RuntimeChange.ChangeRejected,
-): RejectionSummary => ({ reason: rejection.reason })
-
 export const Event = Schema.Struct({
 	approval: Schema.optionalKey(Policy.Approval),
 	projection: Schema.optionalKey(Policy.ProjectionChange),
@@ -169,65 +180,3 @@ export class ReleaseError extends Schema.TaggedError<
 	message: Schema.String,
 	cause: Schema.optionalKey(Schema.Cause(Schema.Unknown, Schema.Unknown)),
 }) {}
-export type Observation = Data.TaggedEnum<{
-	Admitted: {
-		readonly entry: string
-		readonly compensation: boolean
-		readonly outcome: RuntimeChange.Outcome
-	}
-	Rejected: {
-		readonly entry: string
-		readonly compensation: boolean
-		readonly rejection: RuntimeChange.ChangeRejected
-	}
-}>
-export const Observation = Data.taggedEnum<Observation>()
-export interface Applied {
-	readonly status: Status
-	readonly outcomes: ReadonlyArray<Observation>
-}
-export const Apply = Schema.Struct({
-	target: Id,
-	expected: Id,
-	overrideRevocations: Schema.optionalKey(Schema.Boolean),
-})
-export type Apply = typeof Apply.Type
-export interface Options {
-	readonly trust?: string
-	readonly store: string
-	readonly initial: string
-	readonly host: Manifest.Host
-	readonly socket?: string
-	readonly budget?: Partial<RuntimeChange.Budget>
-	readonly requirements?: Partial<RuntimeChange.Requirements>
-}
-export const Config = Schema.Struct({
-	trust: Schema.optionalKey(Schema.NonEmptyString),
-	store: Schema.NonEmptyString,
-	initial: Id,
-	host: Manifest.Host,
-	socket: Schema.optionalKey(Schema.NonEmptyString),
-})
-export type Config = typeof Config.Type
-export class Releases extends Context.Service<
-	Releases,
-	{
-		readonly approvals: Effect.Effect<ReadonlyArray<Policy.Statement>>
-		readonly approve: (
-			request: Policy.Approve,
-		) => Effect.Effect<Policy.Approval, ReleaseError>
-		readonly revoke: (
-			references: ReadonlyArray<string>,
-			who: string,
-		) => Effect.Effect<void, ReleaseError>
-		readonly build: (request: Build) => Effect.Effect<string, ReleaseError>
-		readonly plan: (target: string) => Effect.Effect<Plan, ReleaseError>
-		readonly apply: (request: Apply) => Effect.Effect<Applied, ReleaseError>
-		readonly rollback: (
-			expected: string,
-			overrideRevocations?: boolean,
-		) => Effect.Effect<Applied, ReleaseError>
-		readonly observe: Effect.Effect<Status>
-		readonly history: Effect.Effect<ReadonlyArray<Event>>
-	}
->()("@graftland/plugin-release/Model/Releases") {}

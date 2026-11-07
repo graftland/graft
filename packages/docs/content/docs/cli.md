@@ -339,16 +339,6 @@ and Graft does not promise them.
 
 :::
 
-## Managed upgrades
-
-`graft start` loads
-[managed Remote entries](../config-file/#managed-integrations) through the same
-public Loader and driver APIs as an embedded host. Use an application-owned
-operator endpoint that calls `Change.run` with the entry id. There is no
-built-in Change subcommand. `--watch` does not upgrade managed units: HMR skips
-managed runtimes and Loader rejects managed-tree refreshes before changing its
-target.
-
 ## graft check
 
 ```sh
@@ -371,26 +361,3 @@ graft remote manifest ./release --check --provenance ./provenance.json
 Provided by the enabled `remote/cli` command plugin. Generates or verifies the
 `graft` field from built declarations and optionally records package provenance.
 See [Plugin manifests](../ecosystem/manifest/) for the publication workflow.
-
-## Application releases
-
-Enable `@graftland/plugin-release/cli` to use `graft release build`, `plan`,
-`apply`, `rollback`, `history` and `status`. Commands require `--socket`;
-`apply` and `rollback` also require `--expected`. Use `--json` for CI output.
-Rejections and unsuccessful transition outcomes exit nonzero. See
-[Application releases](../application-releases/) for the source format,
-revocations and durable startup selection.
-
-## graft approve
-
-Enable `@graftland/plugin-release/approve-cli` to use
-`graft approve statement.json --who operator@example --socket /app/control.sock --json`.
-Enable `@graftland/plugin-release/cli` for the release commands.
-`graft release approvals` returns reviewable statements;
-`graft release revoke GRANT --who operator@example` records revocation and
-terminates affected units. Both release commands require `--socket`. Rejections
-exit nonzero. See [trust and isolation](../trust/).
-
-`graft add` disables lifecycle scripts for all packages, including recovery
-installs. This also applies to `add --plugin`; enabling a CLI extension still
-grants it execution in the host.

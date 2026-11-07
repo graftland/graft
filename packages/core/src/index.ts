@@ -12,3 +12,5 @@ export * as Transition from "./Transition"
 export * as Manifest from "./Manifest"
 
 export * as Trust from "./Trust"
+
+export * as Kernel from "./Kernel"

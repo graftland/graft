@@ -2,12 +2,12 @@ import { createRequire } from "node:module"
 
 import {
 	Cause,
-	Context,
 	Deferred,
 	Effect,
 	Exit,
 	Fiber,
 	FileSystem,
+	Layer,
 	Logger,
 	Option,
 	Path,
@@ -34,9 +34,16 @@ const run = <A, E>(
 		E,
 		GraftType.Graft | FileSystem.FileSystem | Path.Path | Scope.Scope
 	>,
+	unit?: string,
 ) =>
 	effect.pipe(
-		Effect.provide(Graft.layer),
+		Effect.provide(
+			Graft.layer.pipe(
+				Layer.provide(
+					Layer.succeed(Transition.UnitMember, Option.fromNullishOr(unit)),
+				),
+			),
+		),
 		Effect.provide([NodeFileSystem.layer, Path.layer]),
 		Effect.scoped,
 	)
@@ -349,47 +356,7 @@ it.effect("rejects HMR for managed forks before reloading modules", () =>
 				'throw new Error("Reload preparation must not run");',
 			)
 			const managed = yield* Graft.plugin(
-				Plugin.make({
-					name: "managed",
-					apply: () =>
-						Transition.registerDriver(
-							{
-								name: "test",
-								allocate: (_candidate, _term, allocation) =>
-									Effect.gen(function* () {
-										const exit =
-											yield* Deferred.make<
-												import("@graftland/graft").Change.Termination
-											>()
-										return {
-											acknowledgement: allocation,
-											start: Effect.void,
-											describe: Effect.succeed({ overlap: true, provides: [] }),
-											serve: Effect.void,
-											ready: Effect.succeed(Context.empty()),
-											probe: () => Effect.void,
-											stop: Effect.void,
-											terminate: Deferred.succeed(exit, {
-												unit: "test",
-												state: "Exited",
-											}).pipe(Effect.asVoid),
-											exited: Deferred.await(exit),
-											failure: Effect.never,
-										}
-									}),
-							},
-							{
-								instance: "integration",
-								initial: {
-									driver: "test",
-									identity: "initial",
-									deployment: undefined,
-								},
-								required: [],
-								facades: [],
-							},
-						),
-				}),
+				Plugin.make({ name: "unit-member", apply: () => Effect.void }),
 			)
 			yield* managed.await
 			const result = yield* hmr.reload
@@ -401,5 +368,6 @@ it.effect("rejects HMR for managed forks before reloading modules", () =>
 				modules: [],
 			})
 		}),
+		"integration",
 	),
 )

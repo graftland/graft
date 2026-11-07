@@ -71,6 +71,7 @@ test("preserves core exports, re-exports, overloads, and local Schema fields", a
 		"Event",
 		"Fork",
 		"Graft",
+		"Kernel",
 		"Manifest",
 		"Plugin",
 		"Release",
@@ -91,16 +92,18 @@ test("preserves core exports, re-exports, overloads, and local Schema fields", a
 				"get",
 				"changes",
 				"Outcome",
-				"Rejection",
-				"Candidate",
-				"ObjectKey",
+				"Conclusion",
+				"Target",
 			])
 				assert.ok(
 					change.children.some((child) => child.name === name),
 					`Change.${name}`,
 				)
 			const fields = (name, expected) => {
-				const declaration = change.children.find((child) => child.name === name)
+				const reference = change.children.find((child) => child.name === name)
+				const declaration = reference?.kindOf(ReflectionKind.Reference)
+					? reference.getTargetReflection()
+					: reference
 				assert.ok(declaration, `Change.${name}`)
 				for (const field of expected)
 					assert.ok(
@@ -111,7 +114,7 @@ test("preserves core exports, re-exports, overloads, and local Schema fields", a
 			}
 			const request = fields("Request", [
 				"instance",
-				"candidate",
+				"target",
 				"key",
 				"expected",
 				"strategy",
@@ -125,19 +128,18 @@ test("preserves core exports, re-exports, overloads, and local Schema fields", a
 			fields("Handle", ["id", "await", "cancel"])
 			fields("Status", [
 				"id",
-				"trace",
 				"sequence",
-				"members",
+				"member",
 				"remaining",
 				"leaseHolders",
 				"unconfirmedUnits",
-				"outcome",
+				"conclusion",
 			])
 			const rejected = fields("ChangeRejected", [
 				"constructor",
 				"_tag",
 				"reason",
-				"cause",
+				"conflicts",
 			])
 			assert.ok(rejected.kindOf(ReflectionKind.Class))
 		},

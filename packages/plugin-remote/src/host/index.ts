@@ -25,7 +25,6 @@ import { executionPlugin, type ExecutionOptions } from "../internal/execution"
 import { follow } from "../internal/follow"
 import type { LocalTarget, WorkerTarget } from "../internal/runner/Connection"
 import { resolveEntry } from "../internal/runner/Packages"
-import { managedPlugin } from "../internal/transition"
 import * as Policy from "../Policy"
 import * as HostAssembly from "./assembly"
 
@@ -259,32 +258,6 @@ const load = Effect.fnUntraced(function* (
 	yield* Schema.decodeEffect(contract.config)(input.config).pipe(
 		Effect.catchCause(failConfig),
 	)
-	if (input.artifact !== undefined) {
-		const deployment = input
-		const failArtifact = yield* boundary("artifact")
-		return yield* Effect.gen(function* () {
-			const path = yield* Path.Path
-			const source = yield* ConfigDirectory
-			const directory = Option.getOrElse(source, () => ".")
-			const contractModule = String.startsWith("file:")(deployment.contract)
-				? deployment.contract
-				: yield* resolveEntry(directory, deployment.contract)
-			const fork = yield* Graft.plugin(
-				managedPlugin(contract, {
-					artifact: {
-						...deployment.artifact,
-						directory: path.resolve(directory, deployment.artifact.directory),
-					},
-					contractModule,
-					target: deployment.target,
-					maxInFlight: deployment.maxInFlight,
-					requirements: { probes: deployment.probes ?? [] },
-				}),
-				deployment.config,
-			)
-			yield* follow(fork, failArtifact)
-		}).pipe(Effect.catchCause(failArtifact))
-	}
 
 	const failConnect = yield* boundary("connect")
 	const fork = yield* launch(contract, input, {

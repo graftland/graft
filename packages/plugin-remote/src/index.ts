@@ -21,10 +21,6 @@ import { CapabilityFailed } from "./internal/assembly"
 import * as Configuration from "./internal/entryConfig"
 import { publicError } from "./internal/execution"
 import { follow } from "./internal/follow"
-import { managedPlugin, type ManagedOptions } from "./internal/transition"
-
-export type { ManagedOptions } from "./internal/transition"
-export { candidate, CandidateOptions } from "./internal/candidate"
 
 export * as Artifact from "./Artifact"
 
@@ -146,38 +142,10 @@ const unmanagedPlugin = <
 	})
 export { default } from "./host/index"
 
-/** Selects an ordinary module deployment or an artifact-backed managed direct deployment. */
-export function plugin<
-	S extends Contract.ConfigSchema,
-	E extends Contract.ErrorSchema,
->(
-	contract: Contract.Contract<S, E>,
-	options: ManagedOptions,
-): ReturnType<typeof managedPlugin<S, E>>
-export function plugin<
-	S extends Contract.ConfigSchema,
-	E extends Contract.ErrorSchema,
-	const D extends ReadonlyArray<Plugin.Dependency> = readonly [],
->(
-	contract: Contract.Contract<S, E>,
-	options: Options<D>,
-): ReturnType<typeof unmanagedPlugin<S, E, D>>
-export function plugin<
-	S extends Contract.ConfigSchema,
-	E extends Contract.ErrorSchema,
-	const D extends ReadonlyArray<Plugin.Dependency> = readonly [],
->(contract: Contract.Contract<S, E>, options: Options<D> | ManagedOptions) {
-	return "artifact" in options
-		? managedPlugin(contract, options)
-		: unmanagedPlugin(contract, options)
-}
+export const plugin = unmanagedPlugin
 
 export * as Publication from "./Publication"
-
 export * as Conformance from "./Conformance"
-
 export * as Sandbox from "./Sandbox"
-
 export * as Capabilities from "./Capabilities"
-
 export * as Policy from "./Policy"

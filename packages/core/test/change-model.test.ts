@@ -206,8 +206,8 @@ it("explores repeated exit, timer, failure, cancellation and shutdown reports to
 	const stats = reachable(spawned, alphabet, 4)
 	assert.isAbove(HashSet.size(stats.states), 50)
 	for (const s of stats.states) invariant(s)
-	assert.strictEqual(HashSet.size(stats.states), 159)
-	assert.strictEqual(stats.transitions, 558)
+	assert.strictEqual(HashSet.size(stats.states), 238)
+	assert.strictEqual(stats.transitions, 648)
 })
 
 it("touches only the admitted footprint with 0, 20 and 200 unrelated instances (I3)", () => {

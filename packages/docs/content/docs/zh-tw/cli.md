@@ -301,13 +301,6 @@ Windows 以現狀提供：行程樹清理和還原未經驗證，Graft 不作保
 
 :::
 
-## 受管理的升級
-
-`graft start` 與嵌入式宿主使用相同的公開 Loader 和驅動 API，載入
-[受管理的 Remote 項目](../config-file/#受管理的整合)。由應用程式提供操作端點，使用項目 id 呼叫
-`Change.run`。CLI 沒有內建 Change 子命令。 `--watch`
-不升級受管理的單元：HMR 跳過含受管理實例的執行環境，Loader 在改變目標前拒絕受管理樹的更新。
-
 ## graft check
 
 ```sh
@@ -327,23 +320,3 @@ graft remote manifest ./release --check --provenance ./provenance.json
 
 由已啟用的 `remote/cli` 命令外掛提供。從已建置宣告產生或驗證 `graft`
 欄位，並可記錄套件來源。發布流程見[外掛清單](../ecosystem/manifest/)。
-
-## 應用程式發佈
-
-啟用 `@graftland/plugin-release/cli` 後可使用 `graft release build`、`plan`、
-`apply`、`rollback`、`history` 和 `status`。命令必須提供 `--socket`； `apply` 和
-`rollback` 還必須提供 `--expected`。CI 輸出使用
-`--json`。拒絕和不成功的切換結果傳回非零結束代碼。來源格式、撤銷和持久化啟動選擇見
-[應用程式發佈](../application-releases/)。
-
-## graft approve
-
-啟用 `@graftland/plugin-release/approve-cli` 後，使用
-`graft approve statement.json --who operator@example --socket /app/control.sock --json`。發行命令需要另外啟用
-`@graftland/plugin-release/cli`。`graft release approvals`
-回傳可檢視聲明；`graft release revoke GRANT --who operator@example`
-記錄撤銷並終止相關單元。兩個 release 命令都需要
-`--socket`。拒絕時結束碼非零。參見[信任與隔離](../trust/)。
-
-`graft add` 對所有套件停用生命週期腳本，恢復安裝也一樣。這也適用於
-`add --plugin`；啟用 CLI 擴充仍會允許其在主機執行。

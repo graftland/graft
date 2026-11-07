@@ -22,16 +22,12 @@ import {
 	Schema,
 	Scope,
 	Stream,
-	TxPubSub,
-	TxQueue,
 	TxRef,
-	TxSubscriptionRef,
 } from "effect"
 
 import { CleanupError, ForkState, type Fork, type ForkTree } from "./Fork"
 import { setState, supervise, withdraw } from "./internal/activation"
 import * as Aliases from "./internal/aliases"
-import * as ChangeTable from "./internal/changeTable"
 import { inheritContext } from "./internal/context"
 import { publicationCycle, resolutionChanged } from "./internal/dependencies"
 import * as ForkStatus from "./internal/forkState"
@@ -60,11 +56,10 @@ import { RuntimeContext } from "./internal/runtimeContext"
 import { ownedScope } from "./internal/scope"
 import * as Slots from "./internal/slots"
 import * as Snapshots from "./internal/snapshot"
-import * as Coordinator from "./internal/transition"
 import * as TrustState from "./internal/trust"
+import * as Coordinator from "./internal/unitGuard"
 import type { ErrorOf, InputOf, Plugin } from "./Plugin"
-import * as Release from "./Release"
-import type * as Transition from "./Transition"
+import * as Transition from "./Transition"
 
 /** Identifies the current runtime. Use the module's operations to access it; its state is private. */
 export class Graft extends Context.Service<Graft, unknown>()(GraftKey) {}
@@ -154,11 +149,6 @@ export const provide = Effect.fnUntraced(function* <I, S>(
 				consumers: TxRef.makeUnsafe(HashSet.empty<Generations.Token>()),
 			}
 			yield* TxRef.set(slot.provision, Option.some(provision))
-			yield* ChangeTable.bump(runtime.changes, {
-				_tag: "Slot",
-				realm: realmOf(realms, key.key),
-				key: key.key,
-			})
 			yield* TxRef.set(
 				activation.published,
 				Option.some(Array.append(published.value, provision)),
@@ -169,15 +159,6 @@ export const provide = Effect.fnUntraced(function* <I, S>(
 
 export type { LogEntry } from "./internal/runtime"
 
-/** Runtime limits, supplied when building the Graft layer. */
-export interface Options {
-	readonly maxUnits: number
-}
-export const Options = Context.Reference<Options>(
-	"@graftland/graft/Graft/Options",
-	{ defaultValue: () => ({ maxUnits: 256 }) },
-)
-
 /** How many log entries new subscribers of `logs` receive from the past. */
 const logReplay = 1000
 
@@ -185,25 +166,11 @@ const runtimeLayer = Layer.effect(
 	Graft,
 	Effect.gen(function* () {
 		const ambient = yield* Effect.context<never>()
-		const options = yield* Options
-		if (!Number.isSafeInteger(options.maxUnits) || options.maxUnits < 1)
-			return yield* Effect.die(
-				new Error("maxUnits must be a positive safe integer"),
-			)
+		const unitMember = yield* Transition.UnitMember
 		const forks = yield* Snapshots.make(HashMap.empty<number, ForkEntry>())
 		const runtime: Runtime = {
-			mutations: yield* TxRef.make(0),
 			trust: yield* TxRef.make(TrustState.empty),
-			changes: yield* ChangeTable.make,
-			capacity: yield* TxRef.make({
-				maxUnits: options.maxUnits,
-				used: 0,
-				reserved: 0,
-			}),
-			instances: yield* TxRef.make(
-				HashMap.empty<string, Coordinator.Managed>(),
-			),
-			terms: yield* TxRef.make(HashMap.empty<string, TxRef.TxRef<number>>()),
+			unitOwned: Option.isSome(unitMember),
 			ambient,
 			slots: yield* TxRef.make(HashMap.empty<ServiceKey, Slot>()),
 			forks,
@@ -238,38 +205,7 @@ const runtimeLayer = Layer.effect(
 			provisionKeys: HashSet.empty(),
 			fallback: ambient,
 		}
-		yield* Effect.addFinalizer(() =>
-			Effect.gen(function* () {
-				yield* TxRef.set(runtime.changes.open, false)
-				const records = yield* TxRef.get(runtime.changes.records)
-				for (const record of HashMap.values(records))
-					yield* TxRef.set(record.cancelled, true)
-				for (const record of HashMap.values(records))
-					yield* Effect.tx(
-						Effect.gen(function* () {
-							if (Option.isNone((yield* TxRef.get(record.status)).outcome))
-								return yield* Effect.txRetry
-						}),
-					)
-				const instances = yield* TxRef.get(runtime.instances)
-				const stopped = yield* Effect.forEach(
-					HashMap.values(instances),
-					(managed) => Effect.exit(Scope.close(managed.entry.scope, Exit.void)),
-					{ concurrency: 8 },
-				)
-				const released = yield* Effect.exit(
-					Release.close(runtime.changes.scope, Exit.void),
-				)
-				yield* withdraw(runtime, activation)
-				const cause = Array.reduce(
-					[...stopped, released],
-					Cause.empty,
-					(all: Cause.Cause<never>, exit) =>
-						Exit.isFailure(exit) ? Cause.combine(all, exit.cause) : all,
-				)
-				if (cause.reasons.length > 0) return yield* Effect.failCause(cause)
-			}),
-		)
+		yield* Effect.addFinalizer(() => withdraw(runtime, activation))
 		return { runtime, activation }
 	}),
 )
@@ -394,12 +330,6 @@ const makeFork = <I, E>(
 	)
 	return {
 		id,
-		generations: TxSubscriptionRef.changesStream(status.generations),
-		generationEvents: Stream.unwrap(
-			Effect.map(TxPubSub.subscribe(status.generationEvents), (queue) =>
-				Stream.fromEffectRepeat(TxQueue.take(queue)),
-			),
-		),
 		probes: Probes.names(status.probes),
 		probe: (name) => Probes.run(status.probes, name),
 		state,
@@ -475,6 +405,7 @@ export const plugin: <P extends Plugin>(
 							}
 							const initialSpec = yield* TxRef.get(spec)
 							const status = yield* ForkStatus.make(
+								runtime.unitOwned,
 								activation.status,
 								initialSpec,
 							)

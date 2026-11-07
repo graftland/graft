@@ -366,39 +366,3 @@ Include 会保留符号链接。每次磁盘操作先解析配置路径的真实
 [Loader API](../loader-api/#并发保存) 中的并发保存窗口相同，不构成跨文件事务。
 
 :::
-
-## 托管集成
-
-托管 Remote 条目使用 `artifact` 和 `target`，代替 `implementation` 和
-`connect`：
-
-```yaml
-- id: forecasts
-  name: "@graftland/plugin-remote"
-  config:
-    contract: "@example/forecast-contract"
-    artifact:
-      directory: ./artifacts/sha256-v1-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
-      identity:
-        version: 1
-        algorithm: sha256
-        digest: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
-        entry: dist/index.js
-    target:
-      _tag: Worker
-    probes: [health]
-    maxInFlight: 16
-    config: {}
-```
-
-将示例中的制品替换为 [Artifact.capture](../remote/artifacts/)
-返回的目录和标识。制品目录和相对契约路径以配置文件所在目录为基准。子进程使用
-`target: { _tag: Local }`。
-
-条目 id 就是托管实例名称：通过
-`Change.run({ instance: "forecasts", candidate })`
-发起升级。实例名称在整个运行时中必须唯一，包括嵌套 Loader。子注册继承所属条目的标识。
-
-Loader 在写入文件或更改已接受目标前，以 `ManagedFork`
-拒绝托管树的编辑。无法阻止外部手动改写文件；监听刷新会拒绝这些修改并保留原目标。transition 只改变正在运行的代，不会重写
-`graft.yml`。持久化部署意图与[升级结果](../transitions/) 分开记录。

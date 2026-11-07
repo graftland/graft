@@ -1,9 +1,7 @@
 /** Configuration schemas for remote entries and their built-in capabilities. */
 import { Effect, Schema } from "effect"
 
-import * as Artifact from "./Artifact"
 import * as Auth from "./internal/auth/config"
-import { CandidateOptions } from "./internal/candidate"
 import { PositiveDuration } from "./internal/config"
 
 export const Reference = Schema.Struct({
@@ -170,20 +168,7 @@ export const OrdinaryHost = Schema.Struct({
 	connect: Connect,
 	config: Schema.Json.pipe(Schema.withDecodingDefaultKey(Effect.succeed({}))),
 })
-/** A pinned direct deployment. Its instance name comes from the Loader entry id. */
-export const ManagedHost = Schema.Struct({
-	implementation: absent,
-	connect: absent,
-	contract: Schema.String,
-	artifact: Artifact.Artifact,
-	target: CandidateOptions.fields.target,
-	config: Schema.Json.pipe(Schema.withDecodingDefaultKey(Effect.succeed({}))),
-	probes: Schema.optionalKey(Schema.Array(Schema.String)),
-	maxInFlight: Schema.optionalKey(
-		Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 16 })),
-	),
-})
-export const Host = Schema.Union([ManagedHost, OrdinaryHost])
+export const Host = OrdinaryHost
 export const Runner = Schema.Struct({
 	root: Schema.String,
 	state: Schema.String,

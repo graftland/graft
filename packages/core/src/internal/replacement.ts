@@ -20,7 +20,7 @@ import type { Plugin } from "../Plugin"
 import * as Aliases from "./aliases"
 import type { ForkEntry, Runtime, Spec } from "./runtime"
 import * as Snapshots from "./snapshot"
-import { check } from "./transition"
+import { check } from "./unitGuard"
 
 /** The requested identities cannot be represented by the runtime's flat aliases. */
 export class ReplacementConflict extends Schema.TaggedError<

@@ -40,6 +40,10 @@
 			"source": "./src/Graft.ts",
 			"default": "./dist/Graft.js"
 		},
+		"./Kernel": {
+			"source": "./src/Kernel.ts",
+			"default": "./dist/Kernel.js"
+		},
 		"./Manifest": {
 			"source": "./src/Manifest.ts",
 			"default": "./dist/Manifest.js"
@@ -81,6 +85,7 @@
 			"./Event": "./dist/Event.js",
 			"./Fork": "./dist/Fork.js",
 			"./Graft": "./dist/Graft.js",
+			"./Kernel": "./dist/Kernel.js",
 			"./Manifest": "./dist/Manifest.js",
 			"./Plugin": "./dist/Plugin.js",
 			"./Release": "./dist/Release.js",

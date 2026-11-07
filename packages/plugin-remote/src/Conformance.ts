@@ -14,8 +14,8 @@ import { Rpc, RpcClient, RpcClientError, RpcGroup, RpcSchema } from "effect/rpc"
 
 import { Manifest } from "@graftland/graft"
 
+import type * as Artifact from "./Artifact"
 import type * as Contract from "./Contract"
-import type { CandidateOptions } from "./internal/candidate"
 import { layer as localLayer } from "./internal/localTransport"
 import { identities } from "./internal/operations"
 import * as Unit from "./internal/unit"
@@ -113,10 +113,17 @@ export const roundTrip = Effect.fn("Conformance.roundTrip")(
 	(effect) => checked(effect, "Portable codec round trip failed"),
 )
 
-export type DirectOptions = Pick<
-	CandidateOptions,
-	"artifact" | "contractModule" | "target" | "input"
->
+export interface DirectOptions {
+	readonly artifact: Artifact.Artifact
+	readonly contractModule: string
+	readonly input: Schema.Json
+	readonly target:
+		| { readonly _tag: "Worker"; readonly execArgv?: ReadonlyArray<string> }
+		| {
+				readonly _tag: "Local"
+				readonly command?: readonly [string, ...Array<string>]
+		  }
+}
 /** Opens an isolated direct unit; no service is published into a host graph. */
 export const direct = Effect.fn("Conformance.direct")(
 	function* (contract: Contract.RunnerContract, options: DirectOptions) {

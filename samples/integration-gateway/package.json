@@ -2,11 +2,6 @@
 	"name": "@graftland/sample-integration-gateway",
 	"private": true,
 	"type": "module",
-	"scripts": {
-		"start": "node ../../scripts/packed-gateway.mjs start",
-		"test": "node ../../scripts/packed-gateway.mjs test",
-		"build": "node ../../scripts/packed-gateway.mjs check"
-	},
 	"dependencies": {
 		"@graftland/graft": "workspace:*",
 		"@graftland/loader": "workspace:*",

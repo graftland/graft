@@ -1,7 +1,7 @@
-import { Context, Deferred, Effect, Ref, Stream } from "effect"
+import { Effect, Option, Ref, Stream } from "effect"
 import { assert, it } from "@effect/vitest"
 
-import { Change, Graft, Plugin, Transition } from "@graftland/graft"
+import { Graft, Plugin, Transition } from "@graftland/graft"
 
 import { Loader } from "../src/index"
 import { loaderService, run } from "./utils"
@@ -9,44 +9,7 @@ import { loaderService, run } from "./utils"
 it.effect(
 	"rejects managed-tree edits before calling a store or changing its target",
 	() => {
-		const managed = Plugin.make({
-			name: "managed",
-			apply: () =>
-				Transition.registerDriver(
-					{
-						name: "test",
-						overlap: () => true,
-						allocate: (_candidate, _term, allocation) =>
-							Effect.gen(function* () {
-								const exit = yield* Deferred.make<Change.Termination>()
-								return {
-									acknowledgement: allocation,
-									start: Effect.void,
-									describe: Effect.succeed({ overlap: true, provides: [] }),
-									serve: Effect.void,
-									ready: Effect.succeed(Context.empty()),
-									probe: () => Effect.void,
-									stop: Effect.void,
-									terminate: Deferred.succeed(exit, {
-										unit: "test",
-										state: "Exited",
-									}).pipe(Effect.asVoid),
-									exited: Deferred.await(exit),
-									failure: Effect.never,
-								}
-							}),
-					},
-					{
-						initial: {
-							driver: "test",
-							identity: "initial",
-							deployment: undefined,
-						},
-						required: [],
-						facades: [],
-					},
-				),
-		})
+		const managed = Plugin.make({ name: "managed", apply: () => Effect.void })
 		return run(() => ({ managed }))(() =>
 			Effect.gen(function* () {
 				const writes = yield* Ref.make(0)
@@ -66,26 +29,6 @@ it.effect(
 				)
 				const loader = yield* loaderService
 				yield* loader.ready
-				const outcome = yield* Change.run({
-					instance: "integration",
-					candidate: {
-						driver: "test",
-						identity: "next",
-						deployment: undefined,
-					},
-				})
-				assert.equal(outcome._tag, "Accepted")
-				const missing = yield* Effect.flip(
-					Change.run({
-						instance: "missing",
-						candidate: {
-							driver: "test",
-							identity: "next",
-							deployment: undefined,
-						},
-					}),
-				)
-				assert.equal(missing.reason._tag, "UnsupportedTarget")
 				const update = yield* Effect.flip(
 					loader.update("integration", { config: { changed: true } }),
 				)
@@ -101,6 +44,8 @@ it.effect(
 				assert.equal(count, 0)
 				assert.deepEqual(entries, initial)
 			}),
+		).pipe(
+			Effect.provideService(Transition.UnitMember, Option.some("integration")),
 		)
 	},
 )

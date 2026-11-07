@@ -15,7 +15,31 @@ export interface Budget {
 	readonly stop: number
 	readonly terminate: number
 }
+export interface Requirements {
+	readonly probes: ReadonlyArray<string>
+	readonly trial: number
+}
+export interface Input {
+	readonly key?: string | undefined
+	readonly instance: string
+	readonly target: Target
+	readonly strategy?: Strategy | undefined
+	readonly expected?: number | undefined
+	readonly budget?: Partial<Budget> | undefined
+	readonly requirements?: Partial<Requirements> | undefined
+}
+export interface RequestIdentity {
+	readonly instance: string
+	readonly target: Target
+	readonly strategy: Strategy | "Auto"
+	readonly expected: Option.Option<number>
+	readonly budget: Budget
+	readonly probes: ReadonlyArray<string>
+	readonly trial: number
+}
 export interface Request {
+	readonly identity?: RequestIdentity
+	readonly probes?: ReadonlyArray<string>
 	readonly instance: string
 	readonly target: Target
 	readonly strategy: Strategy
@@ -148,6 +172,7 @@ export type CommandKind =
 	| "Terminate"
 	| "ArmTimer"
 	| "Publish"
+	| "CancelTimer"
 export interface Token {
 	readonly authority: string
 	readonly change: string
@@ -172,6 +197,7 @@ export interface Command {
 	readonly target: Target
 	readonly participant: string
 	readonly timer: Option.Option<string>
+	readonly status: Option.Option<Status>
 	readonly disposition: "Pending" | "Reported" | "Obsolete"
 	readonly report: Option.Option<Report>
 }
@@ -180,6 +206,7 @@ export interface Timer {
 	readonly id: string
 	readonly change: string
 	readonly generation: number
+	readonly cause: Cause.Cause<unknown>
 	readonly purpose: TimerPurpose
 	readonly deadline: number
 	readonly active: boolean
@@ -223,6 +250,19 @@ export interface State {
 	readonly accesses: HashMap.HashMap<string, number>
 }
 export type Event =
+	| {
+			readonly _tag: "Requested"
+			readonly request: Input
+			readonly now: number
+	  }
+	| {
+			readonly _tag: "TimerEnded"
+			readonly timer: string
+			readonly generation: number
+			readonly cause: Cause.Cause<unknown>
+			readonly now: number
+	  }
+	| { readonly _tag: "Observed"; readonly change: string; readonly now: number }
 	| { readonly _tag: "Submit"; readonly request: Request; readonly now: number }
 	| {
 			readonly _tag: "Reported"

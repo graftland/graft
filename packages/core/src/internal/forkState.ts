@@ -1,13 +1,5 @@
-import {
-	Effect,
-	HashMap,
-	Option,
-	TxPubSub,
-	TxRef,
-	TxSubscriptionRef,
-} from "effect"
+import { Effect, HashMap, TxRef } from "effect"
 
-import type * as Change from "../Change"
 import { ForkState } from "../Fork"
 import * as Probes from "./probes"
 import type { ForkStatus, LocalSnapshot, Runtime, Spec } from "./runtime"
@@ -28,6 +20,7 @@ const adjustLoading = Effect.fnUntraced(function* (
 
 /** Called inside the fork registration transaction. */
 export const make = Effect.fnUntraced(function* (
+	unitOwned: boolean,
 	parent: ForkStatus | undefined,
 	spec: Spec,
 ) {
@@ -40,11 +33,7 @@ export const make = Effect.fnUntraced(function* (
 	})
 	const status: ForkStatus = {
 		parent,
-		managed: yield* TxRef.make<ForkStatus["managed"]["value"]>(Option.none()),
-		generationEvents: yield* TxPubSub.sliding<Change.GenerationEvent>(64),
-		generations: yield* TxSubscriptionRef.make<
-			ReadonlyArray<Change.Generation>
-		>([]),
+		unitOwned,
 		probes: yield* Probes.make,
 		loading: yield* TxRef.make(0),
 		snapshot,
@@ -98,7 +87,6 @@ export const dispose = Effect.fnUntraced(function* (
 		disposed: true,
 	})
 	yield* Snapshots.update(runtime.forks, HashMap.remove(id))
-	yield* TxPubSub.shutdown(status.generationEvents)
 })
 
 /** Only the subtree's own counter belongs to this waiting transaction's read set. */

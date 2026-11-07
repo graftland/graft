@@ -4,7 +4,7 @@ import { cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 
-import { prepare } from "./packed-gateway.mjs"
+import { prepare } from "./consumerFixture.mjs"
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..")
 const directory = prepare()

@@ -10,22 +10,16 @@ import {
 	type LogLevel,
 	type PubSub,
 	type Scope,
-	type TxPubSub,
 	type TxRef,
-	type TxSubscriptionRef,
 } from "effect"
 
-import type * as Change from "../Change"
 import type { ForkState } from "../Fork"
 import type { Plugin } from "../Plugin"
 import type { Aliases } from "./aliases"
-import type * as Capacity from "./capacity"
-import type * as ChangeTable from "./changeTable"
 import type { Token } from "./generations"
 import type * as Probes from "./probes"
 import type { Snapshot } from "./snapshot"
 import type { Group } from "./tasks"
-import type * as Transition from "./transition"
 import type * as Trust from "./trust"
 
 /** Length-prefixed encoding keeps realm and service identities unambiguous. */
@@ -105,11 +99,7 @@ export interface LocalSnapshot<out E = unknown> {
 export interface ForkStatus {
 	readonly snapshot: Snapshot<LocalSnapshot>
 	readonly probes: Probes.Registry
-	readonly managed: TxRef.TxRef<Option.Option<Transition.Managed>>
-	readonly generationEvents: TxPubSub.TxPubSub<Change.GenerationEvent>
-	readonly generations: TxSubscriptionRef.TxSubscriptionRef<
-		ReadonlyArray<Change.Generation>
-	>
+	readonly unitOwned: boolean
 	readonly loading: TxRef.TxRef<number>
 	readonly parent: ForkStatus | undefined
 }
@@ -161,11 +151,7 @@ export interface Handler<
 
 export interface Runtime {
 	readonly trust: TxRef.TxRef<Trust.State>
-	readonly mutations: TxRef.TxRef<number>
-	readonly changes: ChangeTable.Table
-	readonly capacity: TxRef.TxRef<Capacity.State>
-	readonly instances: TxRef.TxRef<HashMap.HashMap<string, Transition.Managed>>
-	readonly terms: TxRef.TxRef<HashMap.HashMap<string, TxRef.TxRef<number>>>
+	readonly unitOwned: boolean
 	/** Services from the environment `Graft.layer` was built in; they satisfy `inject` too. */
 	readonly ambient: Context.Context<never>
 	readonly slots: TxRef.TxRef<HashMap.HashMap<ServiceKey, Slot>>

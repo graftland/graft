@@ -4,7 +4,6 @@
  */
 import { Data, Schema, type Cause, type Effect, type Stream } from "effect"
 
-import type * as Change from "./Change"
 import type { ManagedFork } from "./Transition"
 
 export type ForkState<E = unknown> = Data.TaggedEnum<{
@@ -43,10 +42,7 @@ export class ProbeError extends Schema.TaggedError<
 }) {}
 
 export interface Fork<in Input = any, out E = any> {
-	/** Live complete generation events. No replay; slow subscribers retain at most 64 events. */
-	readonly generationEvents: Stream.Stream<Change.GenerationEvent>
-	/** Active/stuck generations and the latest 32 retired summaries, without deployment payloads. */
-	readonly generations: Stream.Stream<ReadonlyArray<Change.Generation>>
+	/** Stable embedded fork identity. */
 	readonly id: number
 	/** Names registered by the current serving attempt. */
 	readonly probes: Effect.Effect<ReadonlyArray<string>>

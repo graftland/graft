@@ -17,6 +17,7 @@ import type {
 	CommandKind,
 	Conclusion,
 	Event,
+	Input,
 	Instance,
 	MemberFact,
 	Outcome,
@@ -24,6 +25,7 @@ import type {
 	Rejection,
 	Reply,
 	Request,
+	RequestIdentity,
 	Settlement,
 	State,
 	Status,
@@ -264,6 +266,7 @@ const emit = (
 			term: Option.match(u, { onNone: () => 0, onSome: (u) => u.term }),
 			view: c.view,
 		},
+		status: kind === "Publish" ? get(s, c.id) : Option.none(),
 		disposition: "Pending",
 		report: Option.none(),
 	}
@@ -325,6 +328,7 @@ const arm = (
 				id: timerId,
 				change: c.id,
 				purpose,
+				cause: Cause.empty,
 				deadline,
 				generation: c.nextCommand,
 				active: true,
@@ -526,7 +530,7 @@ const conclude = (s: Working, c: Change, outcome: Outcome): Working => {
 		),
 		next,
 	)
-	return issue(release(transferServing(saved, next), next), c.id, "Publish")
+	return release(transferServing(saved, next), next)
 }
 const terminate = (
 	s: Working,
@@ -816,6 +820,69 @@ const commit = (s: Working, c: Change): Working => {
 	)
 }
 
+export const defaultBudget: Budget = {
+	total: 300000,
+	startup: 30000,
+	probe: 5000,
+	drain: 5000,
+	stop: 5000,
+	terminate: 5000,
+}
+const requested = (s: Working, input: Input): Working => {
+	const budget: Budget = { ...defaultBudget, ...input.budget }
+	const target = { ...input.target }
+	const identity = {
+		instance: input.instance,
+		target,
+		strategy: input.strategy ?? "Auto",
+		expected: Option.fromNullishOr(input.expected),
+		budget,
+		probes: Arr.copy(input.requirements?.probes ?? []),
+		trial: input.requirements?.trial ?? 0,
+	} satisfies RequestIdentity
+	const request: Request = {
+		instance: input.instance,
+		target,
+		identity,
+		strategy:
+			input.strategy ??
+			(target.overlap && target.placement !== "Runner" ? "Overlap" : "Restart"),
+		reads: HashMap.make([
+			input.instance,
+			input.expected ?? cell(s, input.instance).version,
+		]),
+		writes: HashSet.make(input.instance),
+		leases: HashSet.empty(),
+		participants: HashSet.empty(),
+		budget,
+		probes: identity.probes,
+		trial: identity.trial,
+		...(input.key === undefined ? {} : { key: input.key }),
+	}
+	return submit(s, request)
+}
+export const empty = (options: {
+	readonly authority: string
+	readonly maxUnits: number
+	readonly instances: ReadonlyArray<{
+		readonly id: string
+		readonly target: Target
+	}>
+}): State => {
+	const base = make({ ...options, instances: [] })
+	return Arr.reduce(options.instances, base, (s, entry) => ({
+		...s,
+		instances: HashMap.set(s.instances, entry.id, {
+			id: entry.id,
+			desired: entry.target,
+			current: Option.none(),
+			term: 0,
+			healthy: false,
+			authorized: true,
+		}),
+		cells: HashMap.set(s.cells, entry.id, emptyCell),
+	}))
+}
 const reject = (
 	s: Working,
 	reason: Rejection,
@@ -846,7 +913,10 @@ const validBudget = (budget: Budget, trial: number): boolean =>
 const submit = (s: Working, r: Request): Working => {
 	const prior = r.key === undefined ? Option.none() : HashMap.get(s.keys, r.key)
 	if (Option.isSome(prior))
-		return Equal.equals(prior.value.request, r)
+		return Equal.equals(
+			prior.value.request.identity ?? prior.value.request,
+			r.identity ?? r,
+		)
 			? { ...s, reply: { _tag: "Admitted", change: prior.value.change } }
 			: reject(s, "KeyConflict")
 	if (!s.open) return reject(s, "Closing")
@@ -1070,6 +1140,7 @@ const reportSuccess = (s: Working, c: Change, command: Command): Working => {
 		case "Terminate":
 		case "ArmTimer":
 		case "Publish":
+		case "CancelTimer":
 			return s
 	}
 }
@@ -1315,6 +1386,7 @@ const shutdownUnit = (s: Working, u: Unit): Working => {
 		target: u.target,
 		participant: "",
 		timer: Option.none(),
+		status: Option.none(),
 		disposition: "Pending",
 		report: Option.none(),
 		token: {
@@ -1355,8 +1427,43 @@ const shutdown = (s: Working): Working => {
 	)
 	return HashMap.reduce(cancelled.units, cancelled, shutdownUnit)
 }
+const timerEnded = (
+	s: Working,
+	event: Extract<Event, { readonly _tag: "TimerEnded" }>,
+): Working =>
+	Option.match(HashMap.get(s.timers, event.timer), {
+		onNone: () => s,
+		onSome: (t) => {
+			if (t.generation !== event.generation) return s
+			const recorded = {
+				...s,
+				timers: HashMap.set(s.timers, t.id, {
+					...t,
+					active: false,
+					cause: Cause.combine(t.cause, event.cause),
+				}),
+			}
+			if (!t.active || event.cause.reasons.length === 0) return recorded
+			return withChange(recorded, t.change, (s, c) => {
+				const failed = fail(s, c, event.cause)
+				return t.purpose === "Evidence"
+					? withChange(failed, c.id, (s, c) =>
+							classify(s, c) === "Unresolved"
+								? conclude(s, c, "Stuck")
+								: progressSettlement(s, c),
+						)
+					: failed
+			})
+		},
+	})
 const apply = (s: Working, event: Event): Working => {
 	switch (event._tag) {
+		case "TimerEnded":
+			return timerEnded(s, event)
+		case "Requested":
+			return requested(s, event.request)
+		case "Observed":
+			return withChange(s, event.change, save)
 		case "Submit":
 			return submit(s, event.request)
 		case "Reported":
@@ -1383,6 +1490,9 @@ const apply = (s: Working, event: Event): Working => {
 }
 const eventOwners = (s: State, event: Event): HashSet.HashSet<string> => {
 	switch (event._tag) {
+		case "Observed":
+			return HashSet.make(event.change)
+		case "Requested":
 		case "Submit":
 			return HashSet.empty()
 		case "Reported":
@@ -1397,6 +1507,7 @@ const eventOwners = (s: State, event: Event): HashSet.HashSet<string> => {
 					Option.map(HashMap.get(s.units, event.unit), (u) => u.owner),
 				),
 			)
+		case "TimerEnded":
 		case "TimerFired":
 			return HashSet.fromIterable(
 				Option.toArray(
@@ -1468,6 +1579,26 @@ export const reduce = (state: State, event: Event): Transition => {
 				: s
 		}),
 	)
-	const { emitted: commands, reply, changed: _changed, ...next } = revised
+	const cancelled = HashSet.reduce(revised.changed, revised, (s, id) =>
+		withChange(s, id, (s, c) =>
+			HashSet.reduce(c.timerIds, s, (s, timerId) => {
+				const before = HashMap.get(state.timers, timerId)
+				const after = HashMap.get(s.timers, timerId)
+				return Option.exists(before, (t) => t.active) &&
+					Option.exists(after, (t) => !t.active)
+					? issue(s, c.id, "CancelTimer", "", "", Option.some(timerId))
+					: s
+			}),
+		),
+	)
+	const published = HashSet.reduce(cancelled.changed, cancelled, (s, id) =>
+		withChange(s, id, (s, c) => {
+			const previous = HashMap.get(state.changes, id)
+			return Option.isNone(previous) || c.sequence > previous.value.sequence
+				? issue(s, id, "Publish")
+				: s
+		}),
+	)
+	const { emitted: commands, reply, changed: _changed, ...next } = published
 	return { state: next, commands, reply }
 }

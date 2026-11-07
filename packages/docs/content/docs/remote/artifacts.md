@@ -40,9 +40,8 @@ same directory; a corrupted existing copy is rejected instead of overwritten.
 Verification occurs when its Effect runs. A string passed to `Remote.plugin`
 remains an ordinary module location; it does not request capture or future
 verification. Run verification again before a later launch. Passing an
-`artifact` to
-[a managed Remote plugin](../../transitions/#start-a-managed-remote-plugin)
-enables verification before every launch, including recovery.
+`artifact` to [a managed Remote plugin](../../transitions/) enables verification
+before every launch, including recovery.
 
 ## Declare overlap support
 

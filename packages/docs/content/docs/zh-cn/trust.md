@@ -1,149 +1,26 @@
 ---
-title: 信任与隔离
-description: 通过运维策略批准不可变集成，并隔离不可信代码。
+title: 信任策略
+description: 声明制品信任与能力授权。
 ---
 
-**信任策略**由运维人员制定，包清单不能自行声明信任级别。发布插件的可选 `trust`
-路径指定 JSON 策略文件，相对于应用配置文件解析，管理应用中的受管条目。
+**信任策略**将制品身份与允许的能力关联。批准属于精确声明；制品字节改变时，声明也改变。
 
-- 受管制品必须获得精确匹配的批准，才能通过 facade 接纳调用。
-- 不可信条目必须运行在沙箱子进程中；Worker 不是安全边界。
-- 主机凭据只由主机能力处理器使用。
+## 安装策略
 
-## 分配条目
+在使用策略的嵌入式所有者中安装，并保持其作用域存活。策略数据不会导入插件，也不建立内核执行边界。
 
-使用包名和捕获的
-[Artifact 摘要](../remote/artifacts/)。将示例摘要替换为实际值。第一方包与第三方包使用相同的分配和批准检查。
+```ts
+import { Effect } from "effect"
 
-```json title="trust.json"
-{
-	"version": "1",
-	"entries": [
-		{
-			"entry": "forecasts",
-			"artifact": {
-				"package": "@example/forecasts",
-				"digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-			},
-			"tier": "untrusted",
-			"contractEntry": "dist/index.js",
-			"grants": [
-				{
-					"_tag": "Http",
-					"id": "weather",
-					"origin": "https://weather.example",
-					"credential": "WEATHER_KEY"
-				},
-				{ "_tag": "Files", "id": "data", "directory": "/srv/forecast-data" }
-			]
-		}
-	]
-}
+import * as Policy from "@graftland/plugin-remote/Policy"
+
+declare const policy: Policy.Policy
+export const install = Effect.gen(function* () {
+	const authority = yield* Policy.install(policy)
+	return yield* authority.statements
+})
 ```
 
-| 字段                  | 含义                                                                                 |
-| --------------------- | ------------------------------------------------------------------------------------ |
-| `version`             | 运维策略版本；变更会使原有批准失效。                                                 |
-| `entry` 和 `artifact` | 条目 id、包名和目录摘要。未知制品拒绝运行。                                          |
-| `tier`                | `own`、`trusted` 或 `untrusted`。都需要批准，只有 `untrusted` 强制使用操作系统隔离。 |
-| `contractEntry`       | 不可信代码的契约导出，必须打包在制品内。                                             |
-| `grants`              | 具名主机能力；变更需要重新批准。文件系统根目录必须是绝对路径。                       |
+## 执行边界
 
-在使用受管条目或投影前安装策略。策略在一次运行期间不可变；修改后重启。列出每个计划使用的制品身份，包括升级候选。主机代码、CLI 扩展、启动器和主机契约模块属于可信应用代码，不在插件隔离范围内。不要在这些位置导入不可信包。安装策略后，普通 Remote 和 runner 部署会被拒绝。
-
-`@graftland/plugin-remote/Policy` 负责级别、授权和撤销规则。 `Policy.install`
-返回有作用域归属的策略服务。在创建受管条目的应用外使用
-`Effect.provideService(Policy.Service, authority)`，并保持安装作用域存活。发布插件会向子条目提供这个上下文。消费者声明
-`inject: [Policy.Service]`；`Policy.service`
-读取注入的上下文，缺少服务时返回可恢复的 `PolicyError`。普通插件也可以通过
-`Graft.provide`
-发布它。受管驱动要求稳定的环境服务，因为替换在线图提供者会绕过协调器。安装准入权威后，缺少对应策略服务的执行会被拒绝。核心的
-`Trust.register`、`Trust.check` 和 `Trust.publish`
-为所有策略插件提供原子准入和不透明值比较，不设独立的服务目录。策略持有已解码运维数据的副本，并按结构比较。投影插件验证自己的带标签批准数据；这些数据描述外部视图，不是契约模式或身份。每次分配的尝试都有独立的绑定租约，包括失败或从未启动的尝试。所有所有者退出后，服务键可重新使用。
-
-## 批准声明
-
-以 `cli: true` 启用两个命令插件：`@graftland/plugin-release/cli` 和
-`@graftland/plugin-release/approve-cli`。从 `approvals` 回复中选取声明，保存为
-`statement.json`，审阅后批准该文件。控制套接字仅限其所有者访问；`who`
-是运维人员填写的审计标识，不是独立的身份认证系统。
-
-```sh
-graft release approvals --socket /app/control.sock --json
-graft approve statement.json --who operator@example --socket /app/control.sock --json
-graft release revoke weather --who operator@example --socket /app/control.sock --json
-```
-
-| 批准范围   | 比较方式                                                                                                          |
-| ---------- | ----------------------------------------------------------------------------------------------------------------- |
-| 制品       | 包名与捕获目录摘要，包括目录中实际包含的依赖。                                                                    |
-| 暴露的视图 | 精确比较投影标签、逻辑视图名、服务/操作绑定和数据。MCP 包括名称、标题、描述、四项提示和输出处理；空白也参与比较。 |
-| 授权       | 精确比较能力 id、目标地址、文件系统根目录和凭据引用名。                                                           |
-| 策略       | 精确比较版本和条目分配。                                                                                          |
-
-日志先记录批准者、时间和完整声明，再启用调用。过期声明返回
-`Unapproved`。发布描述变更时，先更新批准声明，再通知 MCP 客户端。`tools/list_changed`
-不是批准；缓存旧列表的客户端也会在接纳调用时收到
-`Unapproved`。代码字节获得批准不表示行为是确定的，也不会固定已授权外部服务的行为。
-
-已发布的呈现事实独立于视图的挂载状态。撤下或重新挂载未变的视图，不会改变批准声明，也不会阻止无关的主机消费者。
-
-每条事实由投影标签、稳定的逻辑视图名及服务/操作标识。
-`Projection.offer("forecast-tools", bindings)`
-的名称由投影作者或运维人员指定；不同服务器视图使用不同名称。挂载 UUID 不是逻辑身份。在同一 Graft 运行时内，每个视图只允许一个在线所有者；重复声明返回
-`ProjectionConflict`。
-
-更新只替换该视图的完整事实集。撤下及重新挂载后保留最新数据，修订不会使声明增长。恢复已批准的数据时，只要声明的其他部分仍匹配且没有撤销阻止，就恢复准入。更新一个视图不会替换同一操作的另一个视图。
-
-发布插件持有的策略先将修订写入发布审计日志，再改变准入或暴露元数据。日志重放恢复最新事实，包括未经批准的变更，不会把历史修订重新加入声明。审计写入失败会拒绝发布。嵌入式主机可提供
-`Policy.Audit` 来保存持久历史。 嵌入式恢复需把最新发布快照传给
-`Policy.install`；仅有批准记录不能描述当前视图。
-
-撤销授权或 `env:NAME`
-引用时，先阻止新调用，再为每个相关单元等待最多五秒，确认终止及独立观察到的退出，最多并行回收四个单元。`Policy.termination`
-为撤销、后注册的所有者和策略关闭统一定义这些限额。启动器准备阶段直接传播纯取消，不记录错误；混合清理原因会完整记录。失败会说明退出尚未确认，不会重新开放调用。撤销记录在重启后保留，回滚也检查授权引用。恢复需要记录在案的
-`--override-revocations`，以及带有该显式覆盖的匹配批准；两者都不删除撤销记录。重启后的单元可凭已记录的覆盖进行初始化。启动会恢复最新审计的呈现事实；发布不同的元数据会再次阻止调用。后续发布沿用撤销记录不会再次撤销覆盖；新的显式撤销会。
-
-## 运行不可信代码
-
-发布插件默认选择 Linux bubblewrap 启动器，可信主机也可以提供
-`Sandbox.Current`。嵌入式主机可构建 `Sandbox.linux`，通过该引用传入
-`Sandbox.Launcher`。自定义启动器属于可信代码，必须提供等效隔离。缺少启动器、不支持的平台或命名空间失败都不会退回普通进程执行。
-
-| Linux 边界 | 范围                                                                                                   |
-| ---------- | ------------------------------------------------------------------------------------------------------ |
-| 命名空间   | 强制使用 user、mount、PID、IPC、UTS 和 network 命名空间；移除 capabilities，禁止再创建 user 命名空间。 |
-| 可见文件   | 只读制品、打包的可信子进程入口与 Node 运行库；不挂载主机数据目录。                                     |
-| 环境       | 清空；受管 Worker 和普通子进程也不继承主机环境。                                                       |
-| 网络       | 无外部网络接口；使用 HTTP 代理能力。                                                                   |
-| 限额       | Node 堆 128 MiB、文件描述符 256 个、单文件 16 MiB、临时文件系统 16 MiB；不提供硬性总内存或 CPU 配额。  |
-
-Linux 需要 `bwrap`、`prlimit`、`ldd`
-和可用的非特权 user 命名空间。项目 CI 环境提供这些命令。设施不可用时，真实操作系统测试注明原因后跳过；批准和模拟启动器测试在所有平台运行。macOS 等不支持的平台拒绝不可信代码执行。Node 的
-`--permission` 和限定读取路径仅用于纵深防御：
-[Node 明确不将其视为安全边界](https://nodejs.org/api/permissions.html)。
-
-将实现、契约导出和运行依赖打包为制品内自包含的 JavaScript。外部运行依赖不会被捕获或固定，也不会挂载到沙箱。首次构建不可信发布时，使用
-`build(..., { file, references, revocations, metadataOnly: true })`。受策略管理的发布构建和计划读取已存储的发布元数据，不在主机导入不可信实现，重复构建同一发布也一样。复用已有发布只验证不可变字节和已存储的元数据。运行时就绪检查仍比较单元自己的声明。作者侧发布与一致性工具只能用于可信代码，或放到另设的隔离环境中运行。
-
-## 代理能力
-
-在 Remote 契约的 `inject` 中声明 `Capabilities.service`，在实现插件中注入
-`Capabilities.Broker`。受管 Remote 仍不支持其他主机服务注入。在发布的主机兼容性元数据中包含代理服务及其包来源。代理每次请求都重新检查批准。新集成初始化时不要调用代理；注册服务并暴露工具元数据后才能进行首次批准。需要能力的探针要求已有匹配批准。
-
-| 能力                    | 规则                                                                                           |
-| ----------------------- | ---------------------------------------------------------------------------------------------- |
-| `http({ grant, url })`  | 仅 GET；精确匹配已授权 origin，禁止 URL 凭据和重定向。主机从具名环境引用添加 `Authorization`。 |
-| `read({ grant, path })` | 只读根目录内的 UTF-8 文件；规范化路径不能逃出根目录。                                          |
-| 限额                    | 每次请求五秒；HTTP 响应和文件大小最多一 MiB。                                                  |
-| 拒绝原因                | `Unapproved`、`Revoked`、`DestinationDenied`、`FileDenied`、`ResponseLimit` 或 `Unavailable`。 |
-
-选择可信的凭据目标，也要信任其响应。单元不会收到凭据配置或继承的主机环境值。受策略管理的发布输入拒绝解析
-`!env`/`$env`；凭据引用名应放在授权中。不要把秘密字面值写入输入或包文件。
-
-## 安装与限制
-
-`graft add`
-对所有包禁用依赖生命周期脚本，包括不可信包；恢复安装也保持禁用。安装脚本执行时还没有运行时沙箱。需要构建脚本的包应先在独立可信构建环境中构建，再捕获。CLI 扩展在主机执行，必须单独信任。
-
-该边界针对恶意插件包读取未授权文件或秘密、绕过出口授权、使用过期描述调用，以及撤销后继续运行。不包含内核或沙箱逃逸、侧信道、恶意主机或运维人员、Graft/Effect 供应链失陷、Windows，以及超出上述限额的拒绝服务防护。
+Worker 放置提供故障边界。不可信代码需要受限子进程和运维提供的沙箱启动器。缺少隔离时拒绝执行。原生退出证明执行已结束，不代表终结器成功。
