@@ -23,7 +23,7 @@ import {
 import { TestClock } from "effect/testing"
 import { assert, it } from "@effect/vitest"
 
-import { Graft, Plugin, Transition, Trust } from "../src/index"
+import { Change, Graft, Plugin, Transition, Trust } from "../src/index"
 import { RuntimeContext } from "../src/internal/runtimeContext"
 import * as Snapshots from "../src/internal/snapshot.ts"
 import { run } from "./utils"
@@ -95,6 +95,7 @@ const setup = Effect.fnUntraced(function* (
 	const allocations = yield* Ref.make(0)
 	const driver: Transition.Driver = {
 		name: "test",
+		overlap: () => true,
 		allocate: (artifact, id) =>
 			Effect.gen(function* () {
 				yield* Ref.update(allocations, (n) => n + 1)
@@ -208,10 +209,14 @@ const setup = Effect.fnUntraced(function* (
 		control,
 		allocations,
 		request: (overrides?: Partial<Transition.Policy>) =>
-			Graft.transition({
-				target: fork.id,
+			Change.run({
+				instance: "integration",
 				candidate: candidate("new"),
-				policy: overrides,
+				budget: { ...policy, ...overrides },
+				requirements: {
+					trial: overrides?.trial ?? policy.trial,
+					probes: overrides?.probes ?? policy.probes,
+				},
 			}),
 	}
 })
@@ -256,13 +261,8 @@ it.effect("admits one transition and never queues a second request", () =>
 		)
 		const first = yield* Effect.forkScoped(h.request())
 		yield* Deferred.await(entered)
-		const busy = yield* h.request()
-		assert.deepEqual(busy, {
-			_tag: "Aborted",
-			reason: "Busy",
-			phase: "Admission",
-			evidence: [],
-		})
+		const busy = yield* Effect.flip(h.request())
+		assert.equal(busy.reason._tag, "Busy")
 		const observed4 = yield* Ref.get(h.allocations)
 		assert.equal(observed4, 2)
 		yield* Deferred.succeed(gate, undefined)
@@ -388,9 +388,8 @@ it.effect(
 			yield* TestClock.adjust(100)
 			const outcome = yield* Fiber.join(running)
 			assert.equal(outcome._tag, "Stuck")
-			const later = yield* h.request()
-			assert.equal(later._tag, "Aborted")
-			if (later._tag === "Aborted") assert.equal(later.reason, "Stuck")
+			const later = yield* Effect.flip(h.request())
+			assert.equal(later.reason._tag, "Busy")
 			const observed16 = yield* Ref.get(h.allocations)
 			assert.equal(observed16, 2)
 			const next = yield* h.control(2)
@@ -458,16 +457,16 @@ it.effect(
 	"returns explicit unsupported and invalid-policy outcomes without allocating",
 	() =>
 		Effect.gen(function* () {
-			const unsupported = yield* Graft.transition({
-				target: 100,
-				candidate: candidate("new"),
-			})
-			assert.equal(unsupported._tag, "Aborted")
+			const unsupported = yield* Effect.flip(
+				Change.run({
+					instance: "missing",
+					candidate: candidate("new"),
+				}),
+			)
+			assert.equal(unsupported.reason._tag, "UnsupportedTarget")
 			const h = yield* setup()
-			const invalid = yield* h.request({ drain: Infinity })
-			assert.equal(invalid._tag, "Aborted")
-			if (invalid._tag === "Aborted")
-				assert.equal(invalid.reason, "InvalidPolicy")
+			const invalid = yield* Effect.flip(h.request({ drain: Infinity }))
+			assert.equal(invalid.reason._tag, "InvalidBudget")
 			const observed22 = yield* Ref.get(h.allocations)
 			assert.equal(observed22, 1)
 		}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
@@ -525,9 +524,8 @@ it.effect("keeps the coordinator busy across the entire trial window", () =>
 		const h = yield* setup()
 		const running = yield* Effect.forkScoped(h.request({ trial: 50 }))
 		yield* waitFor(h, 2, "Serving")
-		const busy = yield* h.request()
-		assert.equal(busy._tag, "Aborted")
-		if (busy._tag === "Aborted") assert.equal(busy.reason, "Busy")
+		const busy = yield* Effect.flip(h.request())
+		assert.equal(busy.reason._tag, "Busy")
 		yield* TestClock.adjust(50)
 		const accepted = yield* Fiber.join(running)
 		assert.equal(accepted._tag, "Accepted")
@@ -845,15 +843,10 @@ for (const field of [
 	it.effect(`rejects an infinite ${field} Duration before allocation`, () =>
 		Effect.gen(function* () {
 			const h = yield* setup()
-			const result = yield* h.request({ [field]: Duration.infinity })
-			assert.deepEqual(
-				result,
-				Transition.Outcome.Aborted({
-					phase: "Admission",
-					reason: "InvalidPolicy",
-					evidence: [],
-				}),
+			const result = yield* Effect.flip(
+				h.request({ [field]: Duration.infinity }),
 			)
+			assert.equal(result.reason._tag, "InvalidBudget")
 			const allocations = yield* Ref.get(h.allocations)
 			assert.equal(allocations, 1)
 		}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
@@ -875,9 +868,8 @@ it.effect("accepts Duration inputs and constructs tagged outcomes", () =>
 		assert.isTrue(
 			Equal.equals(
 				result,
-				Transition.Outcome.Accepted({
-					phase: result.phase,
-					evidence: result.evidence,
+				Change.Outcome.Accepted({
+					...result,
 				}),
 			),
 		)
@@ -886,15 +878,8 @@ it.effect("accepts Duration inputs and constructs tagged outcomes", () =>
 it.effect("rejects a total that cannot reserve cleanup and recovery", () =>
 	Effect.gen(function* () {
 		const h = yield* setup()
-		const result = yield* h.request({ total: 1400 })
-		assert.deepEqual(
-			result,
-			Transition.Outcome.Aborted({
-				phase: "Admission",
-				reason: "InvalidPolicy",
-				evidence: [],
-			}),
-		)
+		const result = yield* Effect.flip(h.request({ total: 1400 }))
+		assert.equal(result.reason._tag, "InvalidBudget")
 	}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
 )
 it.effect(
@@ -935,31 +920,17 @@ it.effect(
 		}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
 )
 it.effect(
-	"reserves recovery when trial consumes the entire preparation allowance",
+	"rejects a trial that leaves no allowance for cleanup and the recovery trial",
 	() =>
 		Effect.gen(function* () {
-			const h = yield* setup((id) =>
-				id === 3
-					? {
-							start: Effect.sleep(80),
-							ready: Effect.sleep(80),
-							probe: Effect.sleep(80),
-						}
-					: {},
-			)
-			const running = yield* Effect.forkScoped(
+			const h = yield* setup()
+			const rejection = yield* Effect.flip(
 				h.request({ total: 1450, trial: "1 second" }),
 			)
-			yield* waitFor(h, 2, "Serving")
-			yield* TestClock.adjust(350)
-			const result = yield* Fiber.join(running)
-			assert.equal(result._tag, "Recovered")
-			if (result._tag === "Recovered") assert.equal(result.reason, "TimedOut")
-			const value = yield* h.value.read
-			assert.equal(value, "old")
-			yield* waitFor(h, 3, "Serving")
+			assert.equal(rejection.reason._tag, "InvalidBudget")
 		}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
 )
+
 it.effect(
 	"rejects excess calls without consuming admission and releases capacity after cancellation",
 	() =>
@@ -980,15 +951,8 @@ it.effect(
 it.effect("rejects a NaN trial rather than normalizing it to zero", () =>
 	Effect.gen(function* () {
 		const h = yield* setup()
-		const result = yield* h.request({ trial: Number.NaN })
-		assert.deepEqual(
-			result,
-			Transition.Outcome.Aborted({
-				phase: "Admission",
-				reason: "InvalidPolicy",
-				evidence: [],
-			}),
-		)
+		const result = yield* Effect.flip(h.request({ trial: Number.NaN }))
+		assert.equal(result.reason._tag, "InvalidBudget")
 	}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
 )
 
@@ -997,8 +961,8 @@ it.effect(
 	() =>
 		Effect.gen(function* () {
 			const h = yield* setup()
-			const result = yield* Graft.transition({
-				target: "integration",
+			const result = yield* Change.run({
+				instance: "integration",
 				candidate: candidate("named"),
 			})
 			assert.equal(result._tag, "Accepted")
@@ -1072,7 +1036,7 @@ it.effect(
 			const old = yield* h.control(1)
 			const disposing = yield* Effect.forkScoped(h.fork.dispose)
 			yield* Deferred.await(old.terminating)
-			const request = yield* Effect.forkScoped(h.request())
+			const request = yield* Effect.forkScoped(Effect.flip(h.request()))
 			yield* Effect.yieldNow
 			yield* Deferred.succeed(old.exited, { unit: "old", state: "Exited" })
 			yield* Fiber.join(disposing)
@@ -1083,17 +1047,12 @@ it.effect(
 			const outcome = yield* Fiber.join(answer)
 			assert.isTrue(Option.isSome(outcome))
 			if (Option.isSome(outcome)) {
-				assert.equal(outcome.value._tag, "Aborted")
-				if (outcome.value._tag === "Aborted")
-					assert.equal(outcome.value.reason, "Closing")
+				assert.equal(outcome.value.reason._tag, "Closing")
 			}
-			const next = yield* Graft.transition({
-				target: "missing",
-				candidate: candidate("new"),
-			})
-			assert.equal(next._tag, "Aborted")
-			if (next._tag === "Aborted")
-				assert.equal(next.reason, "UnsupportedTarget")
+			const next = yield* Effect.flip(
+				Change.run({ instance: "missing", candidate: candidate("new") }),
+			)
+			assert.equal(next.reason._tag, "UnsupportedTarget")
 		}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
 )
 
@@ -1115,8 +1074,9 @@ it.effect(
 			yield* Deferred.await(entered)
 			yield* h.fork.dispose
 			const outcome = yield* Fiber.join(running)
-			assert.equal(outcome._tag, "Aborted")
-			if (outcome._tag === "Aborted") assert.equal(outcome.reason, "Closing")
+			assert.equal(outcome._tag, "RecoveryFailed")
+			if (outcome._tag === "RecoveryFailed")
+				assert.equal(outcome.reason, "Closing")
 			assert.equal(outcome.phase, "Starting")
 			assert.isTrue(
 				Array.some(
@@ -1168,8 +1128,8 @@ it.effect(
 		Effect.gen(function* () {
 			const h = yield* setup()
 			for (let index = 0; index < 40; index++) {
-				const outcome = yield* Graft.transition({
-					target: h.fork.id,
+				const outcome = yield* Change.run({
+					instance: "integration",
 					candidate: {
 						...candidate("next-" + index),
 						deployment: { payload: "retired input " + index },
@@ -1259,7 +1219,7 @@ it.effect(
 				assert.include(Cause.pretty(disposed.cause), "Host cleanup 2")
 			}
 			const outcome = yield* Fiber.join(pending)
-			assert.equal(outcome._tag, "Aborted")
+			assert.equal(outcome._tag, "RecoveryFailed")
 			for (const attempt of [1, 2]) {
 				assert.isTrue(
 					Array.some(
@@ -1298,14 +1258,14 @@ it.effect(
 			yield* Effect.yieldNow
 			const payload = { contract: "external", input: { value: "new" } }
 			const next = { ...candidate("new"), deployment: payload }
-			const outcome = yield* Graft.transition({
-				target: h.fork.id,
+			const outcome = yield* Change.run({
+				instance: "integration",
 				candidate: next,
 			})
 			assert.equal(outcome._tag, "Accepted")
 			yield* Deferred.await(listening)
 			const observed = yield* Fiber.join(events)
-			assert.equal(observed[0]?.candidate, next)
+			assert.deepEqual(observed[0]?.candidate, next)
 			assert.deepEqual(
 				Array.map(observed, (item) => item.state),
 				["Starting", "Serving", "Draining"],
@@ -1332,16 +1292,17 @@ it.effect(
 			const closing = yield* Effect.forkScoped(
 				Effect.tx(
 					Effect.gen(function* () {
-						if (!(yield* TxRef.get(runtime.transitionBusy)))
-							return yield* Effect.txRetry
+						const changes = yield* TxRef.get(runtime.changes.records)
+						if (HashMap.size(changes) === 0) return yield* Effect.txRetry
 					}),
 				).pipe(Effect.andThen(Scope.close(entry.scope, Exit.void))),
 				{ startImmediately: true },
 			)
 			const outcome = yield* h.request()
 			yield* Fiber.join(closing)
-			assert.equal(outcome._tag, "Aborted")
-			if (outcome._tag === "Aborted") assert.equal(outcome.reason, "Closing")
+			assert.equal(outcome._tag, "RecoveryFailed")
+			if (outcome._tag === "RecoveryFailed")
+				assert.equal(outcome.reason, "Closing")
 			assert.equal(outcome.phase, "Admission")
 			const allocated = yield* Ref.get(h.allocations)
 			assert.equal(allocated, 1)
@@ -1521,7 +1482,7 @@ it.effect(
 			assert.isUndefined(disposing.pollUnsafe())
 			yield* Deferred.succeed(release, undefined)
 			const outcome = yield* Fiber.join(transitioning)
-			assert.equal(outcome._tag, "Aborted")
+			assert.equal(outcome._tag, "RecoveryFailed")
 			const disposed = yield* Fiber.join(disposing)
 			assert.isTrue(Exit.isFailure(disposed))
 			if (Exit.isFailure(disposed)) {

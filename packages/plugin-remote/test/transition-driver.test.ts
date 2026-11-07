@@ -20,7 +20,7 @@ import { TestClock } from "effect/testing"
 import { NodeServices } from "@effect/platform-node"
 import { assert, it } from "@effect/vitest"
 
-import { Graft, Plugin, Transition } from "@graftland/graft"
+import { Change, Graft, Plugin, Transition } from "@graftland/graft"
 
 import { ProcessExited, TransportError } from "../src/Errors"
 import * as Remote from "../src/index"
@@ -150,7 +150,7 @@ it.effect(
 				}),
 			)
 			yield* managed.await
-			const request = Graft.transition({ target: managed.id, candidate })
+			const request = Change.run({ instance: "integration", candidate })
 			const running = yield* Effect.forkScoped(request)
 			// Wait for allocation (including artifact verification) before advancing virtual time.
 			yield* managed.generations.pipe(
@@ -171,14 +171,10 @@ it.effect(
 			const starts = yield* Ref.get(count)
 			assert.equal(starts, 1)
 			yield* Deferred.succeed(exited, status)
-			const later = yield* request
-			assert.deepEqual(
-				later,
-				Transition.Outcome.Aborted({
-					phase: "Admission",
-					reason: "Stuck",
-					evidence: [],
-				}),
+			const later = yield* Change.get(result.change)
+			assert.equal(
+				Option.getOrThrow(later).outcome.pipe(Option.getOrThrow)._tag,
+				"Stuck",
 			)
 		}).pipe(
 			Effect.scoped,

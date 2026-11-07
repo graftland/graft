@@ -18,7 +18,7 @@ import {
 	String,
 } from "effect"
 
-import { Graft, Plugin, type Transition } from "@graftland/graft"
+import { Change, Graft, Plugin, type Transition } from "@graftland/graft"
 import { Include, Loader, ModuleResolver } from "@graftland/loader"
 import type { ProjectionError } from "@graftland/plugin-mcp-server/Projection"
 import * as Remote from "@graftland/plugin-remote"
@@ -40,8 +40,8 @@ export const policy = {
 
 export type TransitionWrapper = (
 	release: Release,
-	action: Effect.Effect<Transition.Outcome, never, Graft.Graft>,
-) => Effect.Effect<Transition.Outcome, ProjectionError, Graft.Graft>
+	action: Effect.Effect<Change.Outcome, never, Graft.Graft>,
+) => Effect.Effect<Change.Outcome, ProjectionError, Graft.Graft>
 
 export const start = Effect.fnUntraced(function* (
 	directory: string,
@@ -202,8 +202,8 @@ export const start = Effect.fnUntraced(function* (
 				run(
 					wrapTransition(
 						release.value,
-						Graft.transition({
-							target: "forecasts",
+						Change.run({
+							instance: "forecasts",
 							candidate: candidate(release.value),
 							policy: {
 								...policy,

@@ -43,6 +43,7 @@ import { ForkState } from "../Fork"
 import { Graft, ServiceConflict } from "../Graft"
 import { isOptional, type Update } from "../Plugin"
 import * as Release from "../Release"
+import * as ChangeTable from "./changeTable"
 import { publicationCycle, resolutionChanged } from "./dependencies"
 import { setState } from "./forkState"
 import * as Generations from "./generations"
@@ -256,6 +257,11 @@ export const withdraw = Effect.fnUntraced(function* (
 				const current = yield* TxRef.get(provision.slot.provision)
 				if (Option.exists(current, (current) => current === provision)) {
 					yield* TxRef.set(provision.slot.provision, Option.none())
+					yield* ChangeTable.bump(runtime.changes, {
+						_tag: "Slot",
+						realm: provision.realm,
+						key: provision.service,
+					})
 				}
 				yield* Slots.release(runtime, provision.slot)
 			}

@@ -1,6 +1,6 @@
 import { Duration, Effect, Schema } from "effect"
 
-import { Graft, Plugin, Transition } from "@graftland/graft"
+import { Change, Graft, Plugin, Transition } from "@graftland/graft"
 import * as Remote from "@graftland/plugin-remote"
 
 export const managedPlugin = (
@@ -14,8 +14,8 @@ export const managedPlugin = (
 export const transition = (
 	fork: number,
 	deployment: Remote.CandidateOptions,
-): Effect.Effect<Transition.Outcome, never, Graft.Graft> =>
-	Graft.transition({ target: fork, candidate: Remote.candidate(deployment) })
+): Effect.Effect<Change.Outcome, never, Graft.Graft> =>
+	Change.run({ instance: fork, candidate: Remote.candidate(deployment) })
 
 export const directPlugin = (artifact: Remote.Artifact.Artifact) =>
 	Remote.plugin(
@@ -29,7 +29,7 @@ export const directPlugin = (artifact: Remote.Artifact.Artifact) =>
 			policy: { total: "5 minutes", drain: Duration.seconds(1) },
 		},
 	)
-export const busy = Transition.Outcome.Aborted({
+export const busy = Change.Outcome.Aborted({
 	phase: "Admission",
 	reason: "Busy",
 	evidence: [],

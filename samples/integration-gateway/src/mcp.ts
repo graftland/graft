@@ -1,6 +1,6 @@
 import { Deferred, Effect, Stdio } from "effect"
 
-import { Graft, Plugin } from "@graftland/graft"
+import { Change, Graft, Plugin } from "@graftland/graft"
 import listener from "@graftland/plugin-http"
 import * as Http from "@graftland/plugin-http/Http"
 import router from "@graftland/plugin-http/router"
@@ -80,8 +80,8 @@ export const expose = Effect.fnUntraced(function* (
 		controller,
 		upgrade: (title = "City forecast") =>
 			controller.updateAfter(
-				Graft.transition({
-					target: "forecasts",
+				Change.run({
+					instance: "forecasts",
 					candidate: app.candidate("v2"),
 					policy,
 				}),

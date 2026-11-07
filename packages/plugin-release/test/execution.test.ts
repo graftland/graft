@@ -1,7 +1,7 @@
 import { Array, Cause, Effect, Ref } from "effect"
 import { assert, it } from "@effect/vitest"
 
-import { Transition } from "@graftland/graft"
+import { Change } from "@graftland/graft"
 
 import { execute } from "../src/internal/execution"
 
@@ -11,17 +11,23 @@ it.effect(
 		Effect.gen(function* () {
 			const calls = yield* Ref.make<ReadonlyArray<string>>([])
 			const cause = Cause.die("The third entry failed")
-			const failed = Transition.Outcome.Aborted({
+			const failed = Change.Outcome.Aborted({
+				change: Change.Id.make("fixture"),
+				members: [],
 				phase: "Probing",
 				reason: "Failed",
 				evidence: [{ attempt: 3, phase: "Probing", cause }],
 			})
-			const recovery = Transition.Outcome.RecoveryFailed({
+			const recovery = Change.Outcome.RecoveryFailed({
+				change: Change.Id.make("fixture"),
+				members: [],
 				phase: "Recovery",
 				reason: "Failed",
 				evidence: [],
 			})
-			const accepted = Transition.Outcome.Accepted({
+			const accepted = Change.Outcome.Accepted({
+				change: Change.Id.make("fixture"),
+				members: [],
 				phase: "Complete",
 				evidence: [],
 			})
@@ -72,7 +78,12 @@ it.effect(
 				(_entry, compensation) => {
 					assert.isFalse(compensation)
 					return Effect.succeed(
-						Transition.Outcome.Accepted({ phase: "Complete", evidence: [] }),
+						Change.Outcome.Accepted({
+							change: Change.Id.make("fixture"),
+							members: [],
+							phase: "Complete",
+							evidence: [],
+						}),
 					)
 				},
 			)

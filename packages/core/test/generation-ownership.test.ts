@@ -38,6 +38,7 @@ it.effect(
 					holders: TxRef.makeUnsafe(1),
 				}
 				const provision: Provision = {
+					realm: "",
 					key: slot.key,
 					service: slot.key,
 					value: undefined,

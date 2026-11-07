@@ -1,0 +1,214 @@
+import {
+	Array,
+	Effect,
+	Equal,
+	HashMap,
+	HashSet,
+	Option,
+	Result,
+	Scope,
+	TxPubSub,
+	TxRef,
+} from "effect"
+
+import * as Change from "../Change"
+import type { Normalized } from "./changeRequest"
+
+export interface Cell {
+	readonly version: number
+	readonly writer: Option.Option<Change.Id>
+	readonly readers: HashSet.HashSet<Change.Id>
+}
+export interface Condition {
+	readonly object: Change.ObjectKey
+	readonly cell: TxRef.TxRef<Cell>
+	readonly version: number
+	readonly write: boolean
+}
+export interface Record {
+	readonly started: bigint
+	readonly request: Normalized
+	readonly status: TxRef.TxRef<Change.Status>
+	readonly cancelled: TxRef.TxRef<boolean>
+	readonly conditions: TxRef.TxRef<ReadonlyArray<Condition>>
+	readonly handle: Change.Handle
+}
+export interface Table {
+	readonly scope: Scope.Closeable
+	readonly open: TxRef.TxRef<boolean>
+	readonly next: TxRef.TxRef<number>
+	readonly objects: TxRef.TxRef<
+		HashMap.HashMap<Change.ObjectKey, TxRef.TxRef<Cell>>
+	>
+	readonly records: TxRef.TxRef<HashMap.HashMap<Change.Id, Record>>
+	readonly keys: TxRef.TxRef<HashMap.HashMap<string, Record>>
+	readonly settled: TxRef.TxRef<ReadonlyArray<Change.Id>>
+	readonly events: TxPubSub.TxPubSub<Change.Status>
+}
+export const make = Effect.gen(function* () {
+	return {
+		scope: yield* Scope.make(),
+		open: yield* TxRef.make(true),
+		next: yield* TxRef.make(1),
+		objects: yield* TxRef.make(
+			HashMap.empty<Change.ObjectKey, TxRef.TxRef<Cell>>(),
+		),
+		records: yield* TxRef.make(HashMap.empty<Change.Id, Record>()),
+		keys: yield* TxRef.make(HashMap.empty<string, Record>()),
+		settled: yield* TxRef.make<ReadonlyArray<Change.Id>>([]),
+		events: yield* TxPubSub.sliding<Change.Status>(256),
+	} satisfies Table
+})
+
+/** Object cells are tombstones for the runtime lifetime, so recreation cannot hide ABA. */
+export const object = Effect.fnUntraced(function* (
+	table: Table,
+	key: Change.ObjectKey,
+) {
+	const objects = yield* TxRef.get(table.objects)
+	const found = HashMap.get(objects, key)
+	if (Option.isSome(found)) return found.value
+	const cell = TxRef.makeUnsafe<Cell>({
+		version: 0,
+		writer: Option.none(),
+		readers: HashSet.empty(),
+	})
+	yield* TxRef.set(table.objects, HashMap.set(objects, key, cell))
+	return cell
+})
+export const bump = Effect.fnUntraced(function* (
+	table: Table,
+	key: Change.ObjectKey,
+) {
+	const cell = yield* object(table, key)
+	const current = yield* TxRef.get(cell)
+	yield* TxRef.set(cell, { ...current, version: current.version + 1 })
+	return current.version + 1
+})
+export const duplicate = Effect.fnUntraced(function* (
+	table: Table,
+	key: string | undefined,
+	request: Normalized,
+) {
+	if (key === undefined) return Option.none<Record>()
+	const keys = yield* TxRef.get(table.keys)
+	const found = HashMap.get(keys, key)
+	if (Option.isSome(found) && !Equal.equals(found.value.request, request))
+		return yield* Change.ChangeRejected.make({
+			reason: { _tag: "KeyConflict", key },
+		})
+	return found
+})
+
+export const reserve = Effect.fnUntraced(function* (
+	table: Table,
+	id: Change.Id,
+	objects: ReadonlyArray<{
+		readonly object: Change.ObjectKey
+		readonly write: boolean
+	}>,
+) {
+	const conditions = yield* Effect.forEach(objects, (item) =>
+		Effect.gen(function* () {
+			const cell = yield* object(table, item.object)
+			const current = yield* TxRef.get(cell)
+			return { ...item, cell, version: current.version, current }
+		}),
+	)
+	const conflicts = Array.filterMap(conditions, (c) => {
+		const holders = Option.match(c.current.writer, {
+			onNone: () => (c.write ? Array.fromIterable(c.current.readers) : []),
+			onSome: (id) => [id],
+		})
+		return holders.length === 0
+			? Result.fail(undefined)
+			: Result.succeed({ object: c.object, holders })
+	})
+	if (conflicts.length > 0)
+		return yield* Change.ChangeRejected.make({
+			reason: { _tag: "Busy", conflicts },
+		})
+	for (const c of conditions)
+		yield* TxRef.set(
+			c.cell,
+			c.write
+				? { ...c.current, writer: Option.some(id) }
+				: { ...c.current, readers: HashSet.add(c.current.readers, id) },
+		)
+	return conditions
+})
+
+export const valid = Effect.fnUntraced(function* (record: Record) {
+	const conditions = yield* TxRef.get(record.conditions)
+	for (const c of conditions) {
+		const current = yield* TxRef.get(c.cell)
+		if (
+			current.version !== c.version ||
+			!(c.write
+				? Option.contains(current.writer, record.handle.id)
+				: HashSet.has(current.readers, record.handle.id))
+		)
+			return false
+	}
+	return true
+})
+
+/** Route commits modify only the instance cell; compatible facade bindings stay published. */
+export const commit = Effect.fnUntraced(function* (record: Record) {
+	if (!(yield* valid(record))) return false
+	const conditions = yield* TxRef.get(record.conditions)
+	const updated = yield* Effect.forEach(conditions, (c) =>
+		Effect.gen(function* () {
+			if (c.object._tag !== "Instance") return c
+			const current = yield* TxRef.get(c.cell)
+			yield* TxRef.set(c.cell, { ...current, version: current.version + 1 })
+			return { ...c, version: current.version + 1 }
+		}),
+	)
+	yield* TxRef.set(record.conditions, updated)
+	return true
+})
+export const release = Effect.fnUntraced(function* (record: Record) {
+	const conditions = yield* TxRef.get(record.conditions)
+	for (const c of conditions)
+		yield* TxRef.update(c.cell, (state) => ({
+			...state,
+			writer: Option.contains(state.writer, record.handle.id)
+				? Option.none()
+				: state.writer,
+			readers: HashSet.remove(state.readers, record.handle.id),
+		}))
+})
+export const update = Effect.fnUntraced(function* (
+	table: Table,
+	record: Record,
+	change: (status: Change.Status) => Change.Status,
+) {
+	const current = yield* TxRef.get(record.status)
+	const next = { ...change(current), sequence: current.sequence + 1 }
+	yield* TxRef.set(record.status, next)
+	yield* TxPubSub.publish(table.events, next)
+})
+export const finish = Effect.fnUntraced(function* (
+	table: Table,
+	record: Record,
+	outcome: Change.Outcome,
+) {
+	yield* update(table, record, (status) => ({
+		...status,
+		phase: outcome.phase,
+		members: outcome.members,
+		outcome: Option.some(outcome),
+	}))
+	if (outcome._tag === "Stuck") return
+	yield* release(record)
+	const previous = yield* TxRef.get(table.settled)
+	const history = Array.append(previous, record.handle.id)
+	const evicted = Array.take(
+		history,
+		Math.max(0, history.length - Change.historyLimit),
+	)
+	yield* TxRef.set(table.settled, Array.takeRight(history, Change.historyLimit))
+	for (const id of evicted)
+		yield* TxRef.update(table.records, HashMap.remove(id))
+})

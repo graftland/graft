@@ -1,6 +1,22 @@
 /** Identifiable runtime changes, admission rejections, and observable member facts. */
-import { Data, Schema, type Cause, type Duration, type Effect } from "effect"
+import {
+	Clock,
+	Data,
+	Effect,
+	HashMap,
+	Option,
+	Schema,
+	Stream,
+	TxPubSub,
+	TxQueue,
+	TxRef,
+	type Cause,
+	type Duration,
+} from "effect"
 
+import type { Graft } from "./Graft"
+import * as Coordinator from "./internal/changeCoordinator"
+import { RuntimeContext } from "./internal/runtimeContext"
 import type * as T from "./Transition"
 
 export type {
@@ -162,3 +178,37 @@ export interface Status {
 	readonly outcome: import("effect").Option.Option<Outcome>
 }
 export const historyLimit = 128
+
+/** Admits immediately; the runtime owns execution independently of the caller. */
+export const submit: (
+	request: Request,
+) => Effect.Effect<Handle, ChangeRejected, Graft> = Coordinator.submit
+/** Runs an admitted Change to its immutable outcome. Cancelling the wait leaves it running. */
+export const run = (
+	request: Request,
+): Effect.Effect<Outcome, ChangeRejected, Graft> =>
+	submit(request).pipe(Effect.flatMap((handle) => handle.await))
+/** Unknown and evicted Change ids are absent. */
+export const get = Effect.fnUntraced(function* (
+	id: Id,
+): Effect.fn.Return<Option.Option<Status>, never, Graft> {
+	const { runtime } = yield* RuntimeContext
+	const records = yield* TxRef.get(runtime.changes.records)
+	const found = HashMap.get(records, id)
+	if (Option.isNone(found)) return Option.none()
+	const status = yield* TxRef.get(found.value.status)
+	const elapsed =
+		Number((yield* Clock.monotonicTimeNanos) - found.value.started) / 1_000_000
+	return Option.some({
+		...status,
+		remaining: Math.max(0, found.value.request.budget.total - elapsed),
+	})
+})
+/** Bounded sliding notifications; use get to reconcile missed sequence numbers. */
+export const changes: Stream.Stream<Status, never, Graft> = Stream.unwrap(
+	Effect.gen(function* () {
+		const { runtime } = yield* RuntimeContext
+		const queue = yield* TxPubSub.subscribe(runtime.changes.events)
+		return Stream.fromEffectRepeat(TxQueue.take(queue))
+	}),
+)

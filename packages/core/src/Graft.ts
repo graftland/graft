@@ -31,6 +31,7 @@ import {
 import { CleanupError, ForkState, type Fork, type ForkTree } from "./Fork"
 import { setState, supervise, withdraw } from "./internal/activation"
 import * as Aliases from "./internal/aliases"
+import * as ChangeTable from "./internal/changeTable"
 import { inheritContext } from "./internal/context"
 import { publicationCycle, resolutionChanged } from "./internal/dependencies"
 import * as ForkStatus from "./internal/forkState"
@@ -62,6 +63,7 @@ import * as Snapshots from "./internal/snapshot"
 import * as Coordinator from "./internal/transition"
 import * as TrustState from "./internal/trust"
 import type { ErrorOf, InputOf, Plugin } from "./Plugin"
+import * as Release from "./Release"
 import type * as Transition from "./Transition"
 
 /** Identifies the current runtime. Use the module's operations to access it; its state is private. */
@@ -141,6 +143,7 @@ export const provide = Effect.fnUntraced(function* <I, S>(
 			}
 			const slot = yield* Slots.retain(runtime, qualified)
 			const provision: Provision = {
+				realm: realmOf(realms, key.key),
 				key: qualified,
 				service: key.key,
 				value,
@@ -151,6 +154,11 @@ export const provide = Effect.fnUntraced(function* <I, S>(
 				consumers: TxRef.makeUnsafe(HashSet.empty<Generations.Token>()),
 			}
 			yield* TxRef.set(slot.provision, Option.some(provision))
+			yield* ChangeTable.bump(runtime.changes, {
+				_tag: "Slot",
+				realm: realmOf(realms, key.key),
+				key: key.key,
+			})
 			yield* TxRef.set(
 				activation.published,
 				Option.some(Array.append(published.value, provision)),
@@ -172,8 +180,10 @@ const runtimeLayer = Layer.effect(
 		const runtime: Runtime = {
 			mutations: yield* TxRef.make(0),
 			trust: yield* TxRef.make(TrustState.empty),
-			transitionBusy: yield* TxRef.make(false),
-			transitionStuck: yield* TxRef.make(false),
+			changes: yield* ChangeTable.make,
+			instances: yield* TxRef.make(
+				HashMap.empty<string, Coordinator.Managed>(),
+			),
 			ambient,
 			slots: yield* TxRef.make(HashMap.empty<ServiceKey, Slot>()),
 			forks,
@@ -208,7 +218,26 @@ const runtimeLayer = Layer.effect(
 			provisionKeys: HashSet.empty(),
 			fallback: ambient,
 		}
-		yield* Effect.addFinalizer(() => withdraw(runtime, activation))
+		yield* Effect.addFinalizer(() =>
+			Effect.gen(function* () {
+				yield* TxRef.set(runtime.changes.open, false)
+				const records = yield* TxRef.get(runtime.changes.records)
+				for (const record of HashMap.values(records))
+					yield* TxRef.set(record.cancelled, true)
+				for (const record of HashMap.values(records))
+					yield* Effect.tx(
+						Effect.gen(function* () {
+							if (Option.isNone((yield* TxRef.get(record.status)).outcome))
+								return yield* Effect.txRetry
+						}),
+					)
+				const released = yield* Effect.exit(
+					Release.close(runtime.changes.scope, Exit.void),
+				)
+				yield* withdraw(runtime, activation)
+				return yield* released
+			}),
+		)
 		return { runtime, activation }
 	}),
 )
@@ -684,9 +713,3 @@ export const forks: Stream.Stream<
 export const logs: Stream.Stream<LogEntry, never, Graft> = Stream.unwrap(
 	Effect.map(RuntimeContext, ({ runtime }) => Stream.fromPubSub(runtime.logs)),
 )
-
-/** Runs one coordinator-owned transition. Unsupported targets return Aborted. */
-export const transition: (
-	request: Transition.Request,
-) => Effect.Effect<Transition.Outcome, never, Graft> = (request) =>
-	Coordinator.transition(request)

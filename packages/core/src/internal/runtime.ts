@@ -44,6 +44,7 @@ export interface GraphNode {
 
 /** A service value published into one realm by one activation. */
 export interface Provision {
+	readonly realm: string
 	readonly key: ServiceKey
 	readonly service: string
 	readonly value: unknown
@@ -155,8 +156,10 @@ export interface Handler<
 export interface Runtime {
 	readonly trust: TxRef.TxRef<import("./trust").State>
 	readonly mutations: TxRef.TxRef<number>
-	readonly transitionBusy: TxRef.TxRef<boolean>
-	readonly transitionStuck: TxRef.TxRef<boolean>
+	readonly changes: import("./changeTable").Table
+	readonly instances: TxRef.TxRef<
+		HashMap.HashMap<string, import("./transition").Managed>
+	>
 	/** Services from the environment `Graft.layer` was built in; they satisfy `inject` too. */
 	readonly ambient: Context.Context<never>
 	readonly slots: TxRef.TxRef<HashMap.HashMap<ServiceKey, Slot>>

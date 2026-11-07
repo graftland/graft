@@ -1,7 +1,7 @@
 import { Context, Deferred, Effect, Ref, Stream } from "effect"
 import { assert, it } from "@effect/vitest"
 
-import { Graft, Plugin, Transition } from "@graftland/graft"
+import { Change, Graft, Plugin, Transition } from "@graftland/graft"
 
 import { Loader } from "../src/index"
 import { loaderService, run } from "./utils"
@@ -15,6 +15,7 @@ it.effect(
 				Transition.registerDriver(
 					{
 						name: "test",
+						overlap: () => true,
 						allocate: () =>
 							Effect.gen(function* () {
 								const exit = yield* Deferred.make<Transition.Termination>()
@@ -64,8 +65,8 @@ it.effect(
 				)
 				const loader = yield* loaderService
 				yield* loader.ready
-				const outcome = yield* Graft.transition({
-					target: "integration",
+				const outcome = yield* Change.run({
+					instance: "integration",
 					candidate: {
 						driver: "test",
 						identity: "next",
@@ -73,15 +74,17 @@ it.effect(
 					},
 				})
 				assert.equal(outcome._tag, "Accepted")
-				const missing = yield* Graft.transition({
-					target: "missing",
-					candidate: {
-						driver: "test",
-						identity: "next",
-						deployment: undefined,
-					},
-				})
-				assert.equal(missing._tag, "Aborted")
+				const missing = yield* Effect.flip(
+					Change.run({
+						instance: "missing",
+						candidate: {
+							driver: "test",
+							identity: "next",
+							deployment: undefined,
+						},
+					}),
+				)
+				assert.equal(missing.reason._tag, "UnsupportedTarget")
 				const update = yield* Effect.flip(
 					loader.update("integration", { config: { changed: true } }),
 				)

@@ -39,6 +39,7 @@ export const reserves = (request: Normalized) => {
 /** Candidates are immutable, detached driver values; transient allocation data is excluded. */
 export const normalize = Effect.fnUntraced(function* (
 	request: Change.Request,
+	validateBudget: boolean = true,
 ): Effect.fn.Return<Normalized, Change.ChangeRejected> {
 	const b = request.budget
 	const defaults = Change.defaultBudget
@@ -68,21 +69,25 @@ export const normalize = Effect.fnUntraced(function* (
 			),
 		},
 	}
-	if (
-		!Array.every(
-			Record.values(normalized.budget),
-			(n) => Number.isFinite(n) && n > 0,
-		) ||
-		!Number.isFinite(normalized.requirements.trial) ||
-		normalized.requirements.trial < 0 ||
-		normalized.budget.total <= reserves(normalized).minimum
-	)
-		return yield* Change.ChangeRejected.make({
-			reason: {
-				_tag: "InvalidBudget",
-				message:
-					"The total must cover trial, cleanup, and recovery, including the recovery trial",
-			},
-		})
+	if (validateBudget) yield* validate(normalized)
 	return normalized
 })
+
+export const validate = (
+	request: Normalized,
+): Effect.Effect<void, Change.ChangeRejected> =>
+	Array.every(
+		Record.values(request.budget),
+		(n) => Number.isFinite(n) && n > 0,
+	) &&
+	Number.isFinite(request.requirements.trial) &&
+	request.requirements.trial >= 0 &&
+	request.budget.total > reserves(request).minimum
+		? Effect.void
+		: Change.ChangeRejected.make({
+				reason: {
+					_tag: "InvalidBudget",
+					message:
+						"The total must cover trial, cleanup, and recovery, including the recovery trial",
+				},
+			})

@@ -1,7 +1,7 @@
 import { Effect, String } from "effect"
 import { assert, it } from "@effect/vitest"
 
-import { Graft, Plugin } from "@graftland/graft"
+import { Change, Graft, Plugin } from "@graftland/graft"
 
 import * as Remote from "../src/index"
 
@@ -30,13 +30,10 @@ it.effect(
 				Plugin.make({ name: "ordinary", apply: () => Effect.void }),
 			)
 			yield* fork.await
-			const result = yield* Graft.transition({ target: fork.id, candidate })
-			assert.deepEqual(result, {
-				_tag: "Aborted",
-				reason: "UnsupportedTarget",
-				phase: "Admission",
-				evidence: [],
-			})
+			const result = yield* Effect.flip(
+				Change.run({ instance: "unmanaged", candidate }),
+			)
+			assert.equal(result.reason._tag, "UnsupportedTarget")
 		}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
 )
 

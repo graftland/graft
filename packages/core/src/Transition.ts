@@ -185,6 +185,8 @@ export interface Unit {
 /** Allocation owns resources in the attempt scope, even if startup never runs. External execution starts only in Unit.start. */
 export interface Driver {
 	readonly name: string
+	/** Verified from the immutable deployment before allocation or execution. */
+	readonly overlap?: ((candidate: Candidate) => boolean) | undefined
 	readonly allocate: (
 		candidate: Candidate,
 		attempt: number,

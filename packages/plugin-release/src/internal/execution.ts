@@ -1,6 +1,6 @@
 import { Array, Data, Effect } from "effect"
 
-import type { Transition } from "@graftland/graft"
+import type { Change } from "@graftland/graft"
 
 import type { Applied } from "../Model"
 
@@ -23,7 +23,7 @@ export const execute = <A, E, R>(
 	transition: (
 		item: A,
 		compensation: boolean,
-	) => Effect.Effect<Transition.Outcome, E, R>,
+	) => Effect.Effect<Change.Outcome, E, R>,
 ) =>
 	Effect.reduce(
 		work,

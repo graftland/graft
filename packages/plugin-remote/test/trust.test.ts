@@ -20,7 +20,7 @@ import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import { NodeHttpServer, NodeServices } from "@effect/platform-node"
 import { assert, it } from "@effect/vitest"
 
-import { Graft, Plugin } from "@graftland/graft"
+import { Change, Graft, Plugin } from "@graftland/graft"
 
 import * as Remote from "../src/index"
 import * as Policy from "../src/Policy"
@@ -352,8 +352,8 @@ it.live("retires each attempt binding across repeated direct transitions", () =>
 		const h = yield* setup(fake)
 		yield* h.fork.await
 		for (let revision = 0; revision < 4; revision++) {
-			const outcome = yield* Graft.transition({
-				target: "untrusted",
+			const outcome = yield* Change.run({
+				instance: "untrusted",
 				candidate: Remote.candidate({
 					artifact: h.artifact,
 					contractModule: new URL(

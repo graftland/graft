@@ -15,7 +15,7 @@ import {
 	Stream,
 } from "effect"
 
-import { Graft, Manifest, Transition, Trust } from "@graftland/graft"
+import { Change, Graft, Manifest, Transition, Trust } from "@graftland/graft"
 import { ModuleResolver } from "@graftland/loader"
 import * as Remote from "@graftland/plugin-remote"
 import * as Policy from "@graftland/plugin-remote/Policy"
@@ -145,7 +145,7 @@ export const make = Effect.fnUntraced(function* (options: Options) {
 		kind: import("../Model").Event["kind"],
 		target: string,
 		entry?: string,
-		outcome?: Transition.Outcome,
+		outcome?: Change.Outcome,
 	) =>
 		Ref.get(state).pipe(
 			Effect.flatMap((journal) =>
@@ -525,12 +525,12 @@ export const make = Effect.fnUntraced(function* (options: Options) {
 			(item) => item.target.id,
 			Effect.fnUntraced(function* (item, compensation) {
 				const entry = compensation ? item.old : item.target
-				const outcome = yield* Graft.transition({
-					target: entry.id,
+				const outcome = yield* Change.run({
+					instance: entry.id,
 					candidate: compensation ? item.before : item.after,
-					policy: {
-						trial: "2 seconds",
-						...options.policy,
+					budget: options.policy,
+					requirements: {
+						trial: options.policy?.trial ?? "2 seconds",
 						probes: entry.probes,
 					},
 				})

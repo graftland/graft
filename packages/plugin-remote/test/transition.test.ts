@@ -17,7 +17,7 @@ import { SecureRandom } from "effect/crypto"
 import { NodeServices } from "@effect/platform-node"
 import { assert, it } from "@effect/vitest"
 
-import { Graft, Plugin, type Transition } from "@graftland/graft"
+import { Change, Graft, Plugin, type Transition } from "@graftland/graft"
 
 import { ProcessExited } from "../src/Errors"
 import * as Remote from "../src/index"
@@ -93,10 +93,14 @@ const setup = Effect.fnUntraced(function* (
 		input: Remote.CandidateOptions["input"],
 		override?: Partial<Transition.Policy>,
 	) =>
-		Graft.transition({
-			target: fork.id,
+		Change.run({
+			instance: "integration",
 			candidate: Remote.candidate({ ...options, input }),
-			policy: override,
+			budget: { ...policy, ...override },
+			requirements: {
+				trial: override?.trial ?? policy.trial,
+				probes: override?.probes ?? policy.probes,
+			},
 		})
 	const serving = (attempt: number) =>
 		fork.generations.pipe(
@@ -363,8 +367,8 @@ for (const target of [
 					entry: "transition-plugin.js",
 					store: h.source + "-broken",
 				})
-				const result = yield* Graft.transition({
-					target: h.fork.id,
+				const result = yield* Change.run({
+					instance: "integration",
 					candidate: Remote.candidate({
 						...h.options,
 						artifact: broken,
@@ -397,8 +401,8 @@ for (const target of [
 						entry: "candidate.js",
 						store: h.source + "-candidate",
 					})
-					const result = yield* Graft.transition({
-						target: h.fork.id,
+					const result = yield* Change.run({
+						instance: "integration",
 						candidate: Remote.candidate({
 							...h.options,
 							artifact,
@@ -440,8 +444,8 @@ for (const target of [
 					artifact.directory + "/candidate.js",
 					"tampered",
 				)
-				const result = yield* Graft.transition({
-					target: h.fork.id,
+				const result = yield* Change.run({
+					instance: "integration",
 					candidate: Remote.candidate({
 						...h.options,
 						artifact,
@@ -459,8 +463,8 @@ for (const target of [
 		() =>
 			Effect.gen(function* () {
 				const h = yield* setup(target)
-				const result = yield* Graft.transition({
-					target: h.fork.id,
+				const result = yield* Change.run({
+					instance: "integration",
 					candidate: Remote.candidate({
 						...h.options,
 						target: {

@@ -1,7 +1,7 @@
 import { Effect, Exit, FileSystem, Schema } from "effect"
 
 import { Application } from "@graftland/cli/Application"
-import { Graft, Plugin } from "@graftland/graft"
+import { Change, Graft, Plugin } from "@graftland/graft"
 import * as Remote from "@graftland/plugin-remote"
 
 import { Forecast } from "@example/forecast-contract"
@@ -31,8 +31,8 @@ export default Plugin.make({
 		const forecast = yield* Forecast
 		const application = yield* Application
 		const before = yield* forecast.get("London")
-		const outcome = yield* Graft.transition({
-			target: "forecasts",
+		const outcome = yield* Change.run({
+			instance: "forecasts",
 			candidate: Remote.candidate(deployment),
 			policy,
 		})

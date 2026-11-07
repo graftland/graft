@@ -93,6 +93,7 @@ it.effect(
 					provisions: Array.map(
 						Array.filter(nodes, () => random(4) === 0),
 						(node): Provision => ({
+							realm: "",
 							key: slots[0]!.key,
 							service: "dependency",
 							value: undefined,
@@ -181,6 +182,7 @@ it.effect(
 					holders: TxRef.makeUnsafe(1),
 				}
 				const lease: Provision = {
+					realm: "",
 					key: slot.key,
 					service: "lease",
 					value: undefined,

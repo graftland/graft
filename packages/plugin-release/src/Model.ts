@@ -1,6 +1,10 @@
 import { Array, Context, Effect, Schema } from "effect"
 
-import { Manifest, type Transition } from "@graftland/graft"
+import {
+	Manifest,
+	Change as RuntimeChange,
+	type Transition,
+} from "@graftland/graft"
 import { Artifact, Publication } from "@graftland/plugin-remote"
 import * as RemoteConfig from "@graftland/plugin-remote/Config"
 import * as Policy from "@graftland/plugin-remote/Policy"
@@ -100,7 +104,7 @@ export const OutcomeSummary = Schema.Struct({
 	),
 })
 export type OutcomeSummary = typeof OutcomeSummary.Type
-export const summarize = (outcome: Transition.Outcome): OutcomeSummary => ({
+export const summarize = (outcome: RuntimeChange.Outcome): OutcomeSummary => ({
 	_tag: outcome._tag,
 	phase: outcome.phase,
 	...(outcome._tag === "Accepted" ? {} : { reason: outcome.reason }),
@@ -163,7 +167,7 @@ export interface Applied {
 	readonly outcomes: ReadonlyArray<{
 		readonly entry: string
 		readonly compensation: boolean
-		readonly outcome: Transition.Outcome
+		readonly outcome: RuntimeChange.Outcome
 	}>
 }
 export const Apply = Schema.Struct({
