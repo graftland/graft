@@ -1543,7 +1543,6 @@ it.effect(
 				missing: "MissingApproval",
 			})
 			yield* Trust.register({
-				services: Context.empty(),
 				compare: () => TxRef.get(comparison),
 				publish: () => Effect.void,
 			})
@@ -1589,7 +1588,6 @@ it.effect(
 		Effect.gen(function* () {
 			yield* setup()
 			const error = yield* Trust.register({
-				services: Context.empty(),
 				compare: () =>
 					Effect.succeed({
 						current: null,

@@ -1,22 +1,18 @@
-import { Context, Effect, Exit, Option, Scope, TxRef } from "effect"
+import { Effect, Exit, Option, Scope, TxRef } from "effect"
 import { assert, it } from "@effect/vitest"
 
 import { Trust } from "../src/index"
 import { run } from "./utils"
 
-class Reviewer extends Context.Service<Reviewer, { readonly name: string }>()(
-	"@graftland/graft/test/trust.test/Reviewer",
-) {}
 it.effect(
-	"uses an ordinary registered policy service and compares opaque immutable values",
+	"uses a registered policy authority and compares opaque immutable values",
 	() =>
 		Effect.gen(function* () {
 			const input = { protocol: "mail", verbs: ["read"] }
-			const approved = Trust.immutable(input)
+			const approved = structuredClone(input)
 			const current = yield* TxRef.make<import("effect").Schema.Json>(approved)
 			const owner = yield* Scope.make()
 			yield* Trust.register({
-				services: Context.make(Reviewer, { name: "Operator" }),
 				compare: () =>
 					TxRef.get(current).pipe(
 						Effect.map((value) => ({
@@ -25,12 +21,14 @@ it.effect(
 							missing: "NotReviewed",
 						})),
 					),
-				publish: (values) => TxRef.set(current, Trust.immutable(values)),
+				publish: (values) => TxRef.set(current, structuredClone(values)),
 			}).pipe(Scope.provide(owner))
 			input.verbs[0] = "write"
 			assert.deepEqual(approved, { protocol: "mail", verbs: ["read"] })
-			assert.isTrue(Object.isFrozen(approved.verbs))
-			assert.equal((yield* Trust.service(Reviewer)).name, "Operator")
+			assert.equal(
+				(yield* Trust.check("entry").pipe(Effect.flip)).reason,
+				"UnregisteredAttempt",
+			)
 			yield* Trust.check("entry", "attempt")
 			yield* Trust.publish([
 				{
@@ -56,7 +54,6 @@ it.effect("rejects policy installation after ungoverned publication", () =>
 	Effect.gen(function* () {
 		yield* Trust.publish([])
 		const result = yield* Trust.register({
-			services: Context.empty(),
 			compare: () =>
 				Effect.succeed({
 					current: null,

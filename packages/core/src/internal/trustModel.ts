@@ -1,4 +1,4 @@
-import { Array, Context, Effect, Option, Schema } from "effect"
+import { Effect, Option, Schema } from "effect"
 
 /** Opaque external presentation data. The owning projection validates its payload. */
 export const Projection = Schema.Struct({
@@ -34,7 +34,6 @@ export interface Comparison {
 }
 /** Transactional policy decisions must perform no I/O and use only transactional state. */
 export interface Authority {
-	readonly services: Context.Context<never>
 	readonly compare: (
 		entry: string,
 		candidate: string,
@@ -42,18 +41,4 @@ export interface Authority {
 	readonly publish: (
 		values: ReadonlyArray<Projection>,
 	) => Effect.Effect<void, RegistrationError>
-}
-/** Copy and freeze approval data at the policy boundary; this does not inspect schemas. */
-export const immutable = <A extends Schema.Json>(value: A): A => {
-	const copy = structuredClone(value)
-	const freeze = (item: unknown): void => {
-		if (item !== null && typeof item === "object") {
-			Array.forEach(Reflect.ownKeys(item), (key) =>
-				freeze(Reflect.get(item, key)),
-			)
-			Object.freeze(item)
-		}
-	}
-	freeze(copy)
-	return copy
 }

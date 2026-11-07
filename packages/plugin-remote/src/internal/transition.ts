@@ -48,6 +48,7 @@ export const driver = Effect.fnUntraced(function* <
 		yield* Effect.context<Effect.Services<ReturnType<typeof Unit.open<S, E>>>>()
 	const ambient = yield* Effect.context<never>()
 	const runtime = Context.getOption(ambient, Graft.Graft)
+	const authority = Context.getOption(ambient, Policy.Service)
 	const selection = yield* Sandbox.Current
 	const launcher = Option.fromUndefinedOr(selection)
 	return {
@@ -69,12 +70,12 @@ export const driver = Effect.fnUntraced(function* <
 						if (instance === undefined) return undefined
 						if (Option.isNone(runtime))
 							return yield* Effect.die("Managed Remote requires Graft")
-						if (
-							!(yield* Policy.enabled.pipe(
+						if (Option.isNone(authority)) {
+							yield* Policy.check(instance).pipe(
 								Effect.provideService(Graft.Graft, runtime.value),
-							))
-						)
+							)
 							return undefined
+						}
 						const fs = Context.get(environment, FileSystem.FileSystem)
 						const path = Context.get(environment, Path.Path)
 						const json = yield* fs.readFileString(
@@ -85,7 +86,7 @@ export const driver = Effect.fnUntraced(function* <
 								Schema.Struct({ name: Schema.NonEmptyString }),
 							),
 						)(json)
-						return yield* Policy.bind(
+						return yield* authority.value.bind(
 							instance,
 							value.identity,
 							{
@@ -93,7 +94,7 @@ export const driver = Effect.fnUntraced(function* <
 								digest: options.artifact.identity.digest,
 							},
 							Array.map(contract.provides, (service) => service.key.key),
-						).pipe(Effect.provideService(Graft.Graft, runtime.value))
+						)
 					})
 					const assignment = yield* binding
 
@@ -248,28 +249,27 @@ export const driver = Effect.fnUntraced(function* <
 																				}
 																			: state,
 																	)
-																	if (assignment !== undefined)
-																		yield* Policy.onRevoke(
-																			assignment.entry,
-																			value.identity,
-																			current.terminate.pipe(
-																				Effect.andThen(current.exited),
-																				Effect.asVoid,
-																				Effect.catchCause((cause) =>
-																					Policy.PolicyError.make({
-																						message:
-																							"Revoked execution exit is unconfirmed",
-																						cause,
-																					}),
+																	if (
+																		assignment !== undefined &&
+																		Option.isSome(authority)
+																	)
+																		yield* authority.value
+																			.onRevoke(
+																				assignment.entry,
+																				value.identity,
+																				current.terminate.pipe(
+																					Effect.andThen(current.exited),
+																					Effect.asVoid,
+																					Effect.catchCause((cause) =>
+																						Policy.PolicyError.make({
+																							message:
+																								"Revoked execution exit is unconfirmed",
+																							cause,
+																						}),
+																					),
 																				),
-																			),
-																		).pipe(
-																			Scope.provide(scope),
-																			Effect.provideService(
-																				Graft.Graft,
-																				Option.getOrThrow(runtime),
-																			),
-																		)
+																			)
+																			.pipe(Scope.provide(scope))
 																}).pipe(Effect.orDie),
 														}).pipe((effect) =>
 															broker === undefined
@@ -399,6 +399,7 @@ export const managedPlugin = <
 		name: contract.name,
 		config: Schema.toEncoded(contract.config),
 		inject: [
+			Plugin.optional(Policy.Service),
 			FileSystem.FileSystem,
 			Path.Path,
 			SecureRandom.SecureRandom,

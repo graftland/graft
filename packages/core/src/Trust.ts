@@ -1,5 +1,5 @@
 /** Atomic admission and a public boundary for operator policy plugins. */
-import { Context, Effect, type Scope } from "effect"
+import { Effect, type Scope } from "effect"
 
 import type * as Graft from "./Graft"
 import * as Internal from "./internal/trust"
@@ -19,20 +19,14 @@ export const register: (
 	RegistrationError,
 	Graft.Graft | Scope.Scope
 > = (authority) => Internal.register(authority)
-/** Retrieves services owned by the registered policy plugin. */
-export const service: <I, A>(
-	key: Context.Key<I, A>,
-) => Effect.Effect<A, RegistrationError, Graft.Graft> = (key) =>
-	Internal.service(key)
 /** Publishes stable projection facts before a view exposes them. View withdrawal does not erase facts. */
 export const publish: (
 	values: ReadonlyArray<Projection>,
 ) => Effect.Effect<void, RegistrationError, Graft.Graft> = (values) =>
 	Internal.publish(values)
+/** Checks an attempt, or an unregistered caller when no candidate is supplied. Registered authorities reject unregistered callers. */
 export const check: (
 	entry: string,
-	candidate: string,
+	candidate?: string,
 ) => Effect.Effect<void, Unapproved, Graft.Graft> = (entry, candidate) =>
 	Internal.check(entry, candidate)
-export const enabled: Effect.Effect<boolean, never, Graft.Graft> =
-	Effect.suspend(() => Internal.enabled)

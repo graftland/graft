@@ -1,4 +1,4 @@
-import { Context, Effect, Option, Schema, TxRef } from "effect"
+import { Effect, Option, Schema, TxRef } from "effect"
 
 import type { Runtime } from "./runtime"
 import { RuntimeContext } from "./runtimeContext"
@@ -15,7 +15,11 @@ export const empty: State = {
 	used: false,
 }
 const same = Schema.toEquivalence(Schema.Json)
-export const admission = (runtime: Runtime, entry: string, candidate: string) =>
+export const admission = (
+	runtime: Runtime,
+	entry: string,
+	candidate?: string,
+) =>
 	Effect.gen(function* () {
 		const state = yield* TxRef.get(runtime.trust)
 		if (state.closed)
@@ -24,6 +28,8 @@ export const admission = (runtime: Runtime, entry: string, candidate: string) =>
 			yield* TxRef.set(runtime.trust, { ...state, used: true })
 			return
 		}
+		if (candidate === undefined)
+			return yield* T.Unapproved.make({ entry, reason: "UnregisteredAttempt" })
 		const comparison = yield* state.authority.value.compare(entry, candidate)
 		if (Option.isNone(comparison.approved))
 			return yield* T.Unapproved.make({ entry, reason: comparison.missing })
@@ -32,7 +38,7 @@ export const admission = (runtime: Runtime, entry: string, candidate: string) =>
 	})
 export const check = Effect.fnUntraced(function* (
 	entry: string,
-	candidate: string,
+	candidate?: string,
 ) {
 	const { runtime } = yield* RuntimeContext
 	yield* admission(runtime, entry, candidate).pipe(Effect.tx)
@@ -66,22 +72,6 @@ export const register = Effect.fnUntraced(function* (authority: T.Authority) {
 	)
 	return { close }
 })
-export const service = Effect.fnUntraced(function* <I, A>(
-	key: Context.Key<I, A>,
-) {
-	const { runtime } = yield* RuntimeContext
-	const state = yield* TxRef.get(runtime.trust)
-	if (Option.isNone(state.authority))
-		return yield* T.RegistrationError.make({
-			message: "No admission authority is installed",
-		})
-	const value = Context.getOption(state.authority.value.services, key)
-	if (Option.isNone(value))
-		return yield* T.RegistrationError.make({
-			message: `Admission authority does not provide ${key.key}`,
-		})
-	return value.value
-})
 export const publish = Effect.fnUntraced(function* (
 	values: ReadonlyArray<T.Projection>,
 ) {
@@ -98,8 +88,4 @@ export const publish = Effect.fnUntraced(function* (
 			yield* TxRef.set(runtime.trust, { ...state, used: true })
 		}),
 	)
-})
-export const enabled = Effect.gen(function* () {
-	const { runtime } = yield* RuntimeContext
-	return Option.isSome((yield* TxRef.get(runtime.trust)).authority)
 })

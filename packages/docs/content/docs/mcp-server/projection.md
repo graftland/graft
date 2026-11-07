@@ -153,3 +153,7 @@ The projection validates its MCP fields and publishes them with the `mcp/tools`
 tag for approval. Withdrawing a contributor removes its live tools but preserves
 these approval facts. Remounting identical metadata needs no new approval;
 publishing different metadata blocks admission before exposing the change.
+
+Distinct views and earlier metadata revisions remain separate approval facts,
+even for the same service operation. Republishing an unchanged view cannot erase
+another view or restore approval for changed metadata.

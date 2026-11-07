@@ -892,11 +892,11 @@ it.effect(
 					package: "@example/forecast",
 					digest: String.repeat(64)("a"),
 				}
-				yield* Policy.install({
+				const authority = yield* Policy.install({
 					version: "1",
 					entries: [{ entry: "forecast", artifact, tier: "own", grants: [] }],
 				})
-				yield* Policy.bind("forecast", "current", artifact, [Local.key])
+				yield* authority.bind("forecast", "current", artifact, [Local.key])
 				const count = yield* Ref.make(0)
 				const graft = yield* Graft.Graft
 				const h = yield* start(({ city }) =>
@@ -907,9 +907,9 @@ it.effect(
 					),
 				)
 				const approve = Effect.gen(function* () {
-					const expected = yield* Policy.statement("forecast", artifact)
-					const record = yield* Policy.review({ expected, who: "operator" })
-					yield* Policy.approve(record)
+					const expected = yield* authority.statement("forecast", artifact)
+					const record = yield* authority.review({ expected, who: "operator" })
+					yield* authority.approve(record)
 				})
 				const tools = yield* h.client.listTools()
 				assert.equal(tools.tools[0]?.description, metadata.description)
@@ -952,23 +952,23 @@ it.effect(
 					package: "@example/forecast",
 					digest: String.repeat(64)("a"),
 				}
-				yield* Policy.install({
+				const authority = yield* Policy.install({
 					version: "1",
 					entries: [{ entry: "forecast", artifact, tier: "own", grants: [] }],
 				})
-				yield* Policy.bind("forecast", "current", artifact, [Local.key])
+				yield* authority.bind("forecast", "current", artifact, [Local.key])
 				const h = yield* start()
-				const before = yield* Policy.statement("forecast", artifact)
-				const approval = yield* Policy.review({
+				const before = yield* authority.statement("forecast", artifact)
+				const approval = yield* authority.review({
 					expected: before,
 					who: "Operator",
 				})
-				yield* Policy.approve(approval)
+				yield* authority.approve(approval)
 				yield* h.contributor.dispose
 				yield* Queue.take(h.client.notifications)
 				assert.deepEqual((yield* h.client.listTools()).tools, [])
 				yield* Policy.check("forecast", "current")
-				const afterWithdrawal = yield* Policy.statement("forecast", artifact)
+				const afterWithdrawal = yield* authority.statement("forecast", artifact)
 				assert.deepEqual(afterWithdrawal, before)
 				const ready = yield* Deferred.make<Projection.Controller<Local>>()
 				const remounted = yield* Graft.plugin(
@@ -986,7 +986,7 @@ it.effect(
 				yield* remounted.await
 				yield* Queue.take(h.client.notifications)
 				yield* Policy.check("forecast", "current")
-				const afterRemount = yield* Policy.statement("forecast", artifact)
+				const afterRemount = yield* authority.statement("forecast", artifact)
 				assert.deepEqual(afterRemount, before)
 				assert.equal(
 					(yield* h.client.listTools()).tools[0]?.description,
@@ -999,6 +999,103 @@ it.effect(
 					(yield* Policy.check("forecast", "current").pipe(Effect.flip)).reason,
 					"ChangedStatement",
 				)
+			}),
+		),
+)
+
+it.effect(
+	"retains approval facts for two mounted views of one operation when only one changes",
+	() =>
+		run(
+			Effect.gen(function* () {
+				const artifact = {
+					package: "@example/forecast",
+					digest: String.repeat(64)("a"),
+				}
+				const authority = yield* Policy.install({
+					version: "1",
+					entries: [{ entry: "forecast", artifact, tier: "own", grants: [] }],
+				})
+				yield* authority.bind("forecast", "current", artifact, [Local.key])
+				const graft = yield* Graft.Graft
+				const calls = yield* Ref.make(0)
+				const h = yield* start(({ city }) =>
+					Policy.check("forecast", "current").pipe(
+						Effect.provideService(Graft.Graft, graft),
+						Effect.andThen(Ref.update(calls, (n) => n + 1)),
+						Effect.as(city),
+					),
+				)
+				const second = (description: string, readOnlyHint: boolean) =>
+					Projection.operation(
+						Local,
+						rpc.annotate(Projection.Annotation, {
+							...metadata,
+							name: "other_forecast",
+							description,
+							readOnlyHint,
+						}),
+						(service, input) => service.read(input),
+					)
+				const ready = yield* Deferred.make<Projection.Controller<Local>>()
+				const contributor = yield* Graft.plugin(
+					Plugin.make({
+						name: "second-view",
+						inject: [Local],
+						apply: () =>
+							Projection.offer([second("Other forecast", true)]).pipe(
+								Effect.flatMap((controller) =>
+									Deferred.succeed(ready, controller),
+								),
+								Effect.asVoid,
+							),
+					}),
+				)
+				yield* contributor.await
+				yield* Queue.take(h.client.notifications)
+				const controller = yield* Deferred.await(ready)
+				const expected = yield* authority.statement("forecast", artifact)
+				assert.equal(expected.projections.length, 2)
+				yield* authority
+					.review({ expected, who: "Operator" })
+					.pipe(Effect.flatMap(authority.approve))
+				yield* Policy.check("forecast", "current")
+				yield* controller.update([second("Changed other forecast", false)])
+				yield* Queue.take(h.client.notifications)
+				yield* h.controller.update([binding()])
+				yield* Queue.take(h.client.notifications)
+				const listed = yield* h.client.listTools()
+				assert.equal(listed.tools.length, 2)
+				assert.equal(
+					Array.findFirst(
+						listed.tools,
+						(tool) => tool.name === "other_forecast",
+					).pipe(Option.getOrThrow).description,
+					"Changed other forecast",
+				)
+				const facts = yield* authority.statement("forecast", artifact)
+				assert.equal(facts.projections.length, 3)
+				assert.equal(
+					(yield* Policy.check("forecast", "current").pipe(Effect.flip)).reason,
+					"ChangedStatement",
+				)
+				for (const name of ["forecast", "other_forecast"]) {
+					const denied = yield* h.client.callTool({
+						name,
+						arguments: { city: "London" },
+					})
+					assert.isTrue(denied.isError)
+				}
+				const count = yield* Ref.get(calls)
+				assert.equal(count, 0)
+				yield* contributor.dispose
+				yield* Queue.take(h.client.notifications)
+				const withdrawn = yield* authority.statement("forecast", artifact)
+				assert.deepEqual(withdrawn, facts)
+				yield* authority
+					.review({ expected: facts, who: "Operator" })
+					.pipe(Effect.flatMap(authority.approve))
+				yield* Policy.check("forecast", "current")
 			}),
 		),
 )

@@ -69,11 +69,11 @@ it("imports the public trust entry independently of the package barrel", () => {
 		[
 			"--input-type=module",
 			"--eval",
-			'import { register, Projection } from "@graftland/graft/Trust"; console.log(typeof register, typeof Projection)',
+			'import * as Trust from "@graftland/graft/Trust"; console.log(typeof Trust.register, typeof Trust.Projection, "service" in Trust, "immutable" in Trust, "enabled" in Trust)',
 		],
 		{ cwd: join(root, "packages/core"), encoding: "utf8" },
 	)
-	assert.equal(output.trim(), "function function")
+	assert.equal(output.trim(), "function function false false false")
 })
 
 it("imports the Remote policy service through its independent public entry", () => {

@@ -209,7 +209,7 @@ it.effect(
 				entry: "plugin.js",
 				store,
 			})
-			yield* Policy.install({
+			const authority = yield* Policy.install({
 				version: "1",
 				entries: [
 					{
@@ -229,7 +229,24 @@ it.effect(
 			const launches = yield* Ref.make(0)
 			const start = () =>
 				Ref.update(launches, (n) => n + 1).pipe(Effect.andThen(Effect.never))
+			const missingPolicy = yield* driver(contract, "allocated").pipe(
+				Effect.provideService(WorkerTransport, { start }),
+				Effect.provideService(LocalTransport, { start }),
+			)
+			const denied = yield* missingPolicy
+				.allocate(
+					Remote.candidate({
+						artifact,
+						contractModule: "unused",
+						target: { _tag: "Worker" },
+						input: { value: "old" },
+					}),
+					0,
+				)
+				.pipe(Effect.scoped, Effect.flip)
+			assert.include(Cause.pretty(denied.cause), "UnregisteredAttempt")
 			const remote = yield* driver(contract, "allocated").pipe(
+				Effect.provideService(Policy.Service, authority),
 				Effect.provideService(WorkerTransport, { start }),
 				Effect.provideService(LocalTransport, { start }),
 			)
@@ -244,7 +261,7 @@ it.effect(
 					1,
 				)
 				.pipe(Scope.provide(owner))
-			const allocatedBindings = yield* Policy.bindings
+			const allocatedBindings = yield* authority.bindings
 			assert.equal(allocatedBindings, 1)
 			const pending = yield* Effect.forkScoped(
 				unit.terminate.pipe(
@@ -262,7 +279,7 @@ it.effect(
 			const count = yield* Ref.get(launches)
 			assert.equal(count, 0)
 			yield* Scope.close(owner, Exit.void)
-			const retiredBindings = yield* Policy.bindings
+			const retiredBindings = yield* authority.bindings
 			assert.equal(retiredBindings, 0)
 		}).pipe(
 			Effect.scoped,

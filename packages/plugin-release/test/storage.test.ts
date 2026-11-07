@@ -1,5 +1,6 @@
 import {
 	Array,
+	Cause,
 	ConfigProvider,
 	Effect,
 	FileSystem,
@@ -421,17 +422,17 @@ it.effect(
 				host,
 				trust: file,
 			}).pipe(Effect.provideService(ModuleResolver.ModuleResolver, h.resolver))
-			yield* Policy.bind("test", "candidate", artifact, ["test"])
-			const expected = yield* Policy.statement("test", artifact)
+			const expected = (yield* service.approvals)[0]!
 			const approval = yield* service.approve({
 				expected,
 				who: "operator@example",
 			})
 			assert.equal(approval.who, "operator@example")
-			yield* Policy.check("test", "candidate")
 			yield* service.revoke(["data"], "operator@example")
-			const error = yield* Policy.check("test", "candidate").pipe(Effect.flip)
-			assert.equal(error.reason, "Revoked")
+			const error = yield* service
+				.approve({ expected, who: "operator@example" })
+				.pipe(Effect.flip)
+			assert.include(Cause.pretty(error.cause!), "Revoked")
 			const journal = yield* read(h.path.join(h.store, "journal.json"), Journal)
 			const replay = yield* validate(h.store, journal)
 			assert.deepEqual(replay.approvals, [])
@@ -442,7 +443,6 @@ it.effect(
 				overrideRevocations: true,
 			})
 			assert.isTrue(override.overrideRevocations)
-			yield* Policy.check("test", "candidate")
 			const source = h.path.join(h.store, "carried-forward.yml")
 			yield* h.fs.writeFileString(source, "[]")
 			const target = yield* build(h.store, {
@@ -451,7 +451,6 @@ it.effect(
 				revocations: ["data"],
 			})
 			yield* service.apply({ expected: h.id, target })
-			yield* Policy.check("test", "candidate")
 			const updated = yield* read(h.path.join(h.store, "journal.json"), Journal)
 			const accepted = yield* validate(h.store, updated)
 			assert.equal(accepted.approvals.length, 1)

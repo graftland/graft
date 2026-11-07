@@ -44,11 +44,14 @@ it.live(
 					{ _tag: "Http", id: "weather", origin, credential: "WEATHER_KEY" },
 				],
 			}
-			yield* Policy.install({ version: "1", entries: [assignment] })
-			yield* Policy.bind("client", "candidate", artifact, [])
-			const expected = yield* Policy.statement("client", artifact)
-			const approval = yield* Policy.review({ expected, who: "operator" })
-			yield* Policy.approve(approval)
+			const authority = yield* Policy.install({
+				version: "1",
+				entries: [assignment],
+			})
+			yield* authority.bind("client", "candidate", artifact, [])
+			const expected = yield* authority.statement("client", artifact)
+			const approval = yield* authority.review({ expected, who: "operator" })
+			yield* authority.approve(approval)
 			const broker = yield* Capabilities.make("client", "candidate", assignment)
 			const request = (url: string) =>
 				broker
@@ -71,7 +74,7 @@ it.live(
 			assert.equal(foreign._tag, "CapabilityDenied")
 			if (foreign._tag === "CapabilityDenied")
 				assert.equal(foreign.reason, "DestinationDenied")
-			yield* Policy.revoke(["env:WEATHER_KEY"])
+			yield* authority.revoke(["env:WEATHER_KEY"])
 			const revoked = yield* request(origin + "/forecast").pipe(Effect.flip)
 			assert.equal(revoked._tag, "CapabilityDenied")
 			if (revoked._tag === "CapabilityDenied")

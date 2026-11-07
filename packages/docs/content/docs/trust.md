@@ -62,14 +62,23 @@ the host's contract modules are trusted application code, outside plugin
 confinement. Do not import an untrusted package into those roles. Ordinary
 Remote and runner deployments are rejected while policy is installed.
 
-`@graftland/plugin-remote/Policy` owns tier, grant and revocation rules. Its
-public `Policy.Service` registers through core's `Trust.register`, which other
-policy plugins can use too. Core performs atomic admission and compares opaque
-immutable values. Projection plugins validate their own tagged approval
-payloads; these payloads describe external views, not contract schemas or
-identities. Each allocated attempt owns a separate binding lease, including
-attempts that fail or never start. A service key is reusable after all its
-owners retire.
+`@graftland/plugin-remote/Policy` owns tier, grant and revocation rules.
+`Policy.install` returns the scoped policy service. Supply it with
+`Effect.provideService(Policy.Service, authority)` around the application that
+creates managed entries; keep its installation scope alive. The release plugin
+supplies this context to its children. Consumers declare
+`inject: [Policy.Service]`; `Policy.service` reads the injected context and
+fails with a recoverable `PolicyError` if absent. Ordinary plugins may also
+publish it with `Graft.provide`. Managed drivers require stable ambient
+services: replacing a live graph provider would bypass their coordinator. An
+installed admission authority rejects execution without its policy service.
+Core's `Trust.register`, `Trust.check` and `Trust.publish` provide atomic
+admission and opaque comparison for any policy plugin; there is no separate
+service directory. Policy owns copies of decoded operator data and compares them
+structurally. Projection plugins validate their own tagged approval payloads;
+these describe external views, not contract schemas or identities. Each
+allocated attempt owns a separate binding lease, including attempts that fail or
+never start. A service key is reusable after all its owners retire.
 
 ## Approve a statement
 
@@ -100,6 +109,12 @@ changes the approval statement before notifying MCP clients.
 `tools/list_changed` never approves a tool: clients with cached lists also
 receive `Unapproved` at admission. Approved code bytes do not guarantee
 deterministic behavior or freeze the behavior of an allowed external service.
+
+Every distinct published payload remains in the statement, including earlier
+revisions. Two views of one service operation retain separate facts:
+republishing one cannot erase the other's name, description or hints. Only
+exactly identical facts are deduplicated. Approval covers the full accumulated
+statement.
 
 Revoking a grant or `env:NAME` reference blocks admission first, then waits up
 to five seconds for each affected unit's termination and independently observed

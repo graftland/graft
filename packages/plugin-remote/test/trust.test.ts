@@ -64,7 +64,7 @@ const setup = Effect.fnUntraced(function* (
 		package: "@example/untrusted",
 		digest: artifact.identity.digest,
 	}
-	yield* Policy.install({
+	const authority = yield* Policy.install({
 		version: "1",
 		entries: [
 			{
@@ -102,8 +102,11 @@ const setup = Effect.fnUntraced(function* (
 			},
 		}),
 		{},
-	).pipe(Effect.provideService(Remote.Sandbox.Current, launcher))
-	return { fork, root, identity, artifact, target }
+	).pipe(
+		Effect.provideService(Remote.Sandbox.Current, launcher),
+		Effect.provideService(Policy.Service, authority),
+	)
+	return { fork, root, identity, artifact, target, authority }
 })
 const client = Effect.gen(function* () {
 	const found = yield* Deferred.make<Attack["Service"]>()
@@ -120,11 +123,11 @@ const client = Effect.gen(function* () {
 	yield* consumer.await
 	return yield* Deferred.await(found)
 })
-const approve = (identity: Policy.Identity) =>
+const approve = (identity: Policy.Identity, authority: Policy.Operations) =>
 	Effect.gen(function* () {
-		const expected = yield* Policy.statement("untrusted", identity)
-		const approval = yield* Policy.review({ expected, who: "test operator" })
-		yield* Policy.approve(approval)
+		const expected = yield* authority.statement("untrusted", identity)
+		const approval = yield* authority.review({ expected, who: "test operator" })
+		yield* authority.approve(approval)
 	})
 const reason = (error: unknown) => {
 	assert.isTrue(
@@ -151,7 +154,7 @@ it.live(
 				.run({ action: "read", value: "allowed.txt" })
 				.pipe(Effect.flip)
 			assert.equal(reason(unapproved), "MissingApproval")
-			yield* approve(h.identity)
+			yield* approve(h.identity, h.authority)
 			const allowed = yield* api.run({
 				action: "read",
 				value: "allowed.txt",
@@ -188,10 +191,10 @@ it.live(
 				.run({ action: "read", value: "allowed.txt" })
 				.pipe(Effect.flip)
 			assert.equal(reason(changed), "ChangedStatement")
-			yield* approve(h.identity)
+			yield* approve(h.identity, h.authority)
 			const pidText = yield* api.run({ action: "pid", value: "" })
 			const pid = Number(pidText)
-			yield* Policy.revoke(["data"])
+			yield* h.authority.revoke(["data"])
 			const revoked = yield* api
 				.run({ action: "read", value: "allowed.txt" })
 				.pipe(Effect.flip)
@@ -303,7 +306,7 @@ it.live.skipIf(process.platform !== "linux")(
 			const h = yield* setup(launcher)
 			yield* h.fork.await
 			const api = yield* client
-			yield* approve(h.identity)
+			yield* approve(h.identity, h.authority)
 			const ungrantedFile = yield* api.run({
 				action: "file",
 				value: h.root + "/secret.txt",
@@ -346,11 +349,11 @@ it.live("retires each attempt binding across repeated direct transitions", () =>
 				}),
 			})
 			assert.equal(outcome._tag, "Accepted")
-			const observed1 = yield* Policy.bindings
+			const observed1 = yield* h.authority.bindings
 			assert.equal(observed1, 1)
 		}
 		yield* h.fork.dispose
-		const observed2 = yield* Policy.bindings
+		const observed2 = yield* h.authority.bindings
 		assert.equal(observed2, 0)
 	}).pipe(Effect.scoped, Effect.provide(runtime)),
 )

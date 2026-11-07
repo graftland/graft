@@ -16,10 +16,14 @@ checks the selected generation and approval in the same transaction that counts
 the call. MCP publication invalidates the statement before exposing changed
 metadata, including for clients with cached lists. Stable publication facts
 survive view withdrawal and unchanged remounting; replay restores approved facts
-before views mount. Per-attempt binding leases begin at allocation and close on
-failed allocation or confirmed retirement. Overlapping attempts have separate
-leases; service keys become reusable when all previous owners retire. No schema
-hashing or contract-document representation is introduced.
+before views mount. Facts are identified by the entire projection tag,
+service/operation binding and exact payload. Retain all distinct published views
+and metadata revisions, deduplicating only structurally equal facts;
+republishing one view cannot remove another view's approval requirements.
+Per-attempt binding leases begin at allocation and close on failed allocation or
+confirmed retirement. Overlapping attempts have separate leases; service keys
+become reusable when all previous owners retire. No schema hashing or
+contract-document representation is introduced.
 
 ## Isolation and capabilities
 
@@ -62,8 +66,20 @@ any protection.
 1. Keep only atomic admission and opaque immutable comparison in core's public
    `Trust` boundary. Remote's public `Policy.Service` interprets assignments,
    grants, revocations and journal approvals through the same registration API
-   available to other plugins. MCP validates and publishes its own tagged
-   payloads; core knows neither MCP fields nor Remote tiers and capabilities.
+   available to other plugins. `Policy.install` returns the scoped service; the
+   release owner supplies it through ordinary `Effect.provideService` when
+   creating managed children. Consumers declare `Policy.Service`, including the
+   Remote driver. Stable ambient context preserves the managed driver's existing
+   prohibition on live graph dependencies and automatic restart; dynamic
+   provider replacement would bypass the coordinator. Ordinary plugins can also
+   publish the returned service with `Graft.provide`. `Policy.service` is a
+   context accessor with a typed `PolicyError` for missing service. Core has no
+   service locator, service directory or data-copy helper: its operations are
+   register/check/publish. Checking an unregistered caller while an authority
+   exists rejects it, so missing injected policy cannot bypass governed startup.
+   Policy copies decoded operator values at ingress and egress and uses Schema
+   structural equality. MCP validates and publishes its own tagged payloads;
+   core knows neither MCP fields nor Remote tiers and capabilities.
 2. Wire Remote child placement, a public launcher, Linux confinement and the
    credential broker. Keep unsupported placements explicit.
 3. Integrate durable approvals and revocations with Releases and its local CLI

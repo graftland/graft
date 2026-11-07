@@ -208,15 +208,19 @@ export const launch = Effect.fnUntraced(function* <
 	options: ExecutionOptions,
 	authOverride?: typeof Assembly.Invocation.Type,
 ) {
-	if (yield* Policy.enabled)
-		return yield* RemoteError.make({
-			cause: Cause.fail(
-				Policy.PolicyError.make({
-					message:
-						"Operator policy requires captured managed direct entries; ordinary and runner deployments are unavailable",
-				}),
-			),
-		})
+	yield* Policy.check(contract.name).pipe(
+		Effect.mapError((error) =>
+			RemoteError.make({
+				cause: Cause.fail(
+					Policy.PolicyError.make({
+						message:
+							"Operator policy requires captured managed direct entries; ordinary and runner deployments are unavailable",
+						cause: Cause.fail(error),
+					}),
+				),
+			}),
+		),
+	)
 	const annotations = yield* References.CurrentLogAnnotations
 	const connect = input.connect
 	const scope = yield* children

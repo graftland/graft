@@ -68,12 +68,14 @@ export const make = Effect.fnUntraced(function* (options: Options) {
 			? undefined
 			: yield* read(options.trust, Policy.Policy)
 	const initialRelease = yield* load(store, initial, governed)
-	if (policy !== undefined)
-		yield* Policy.install(
-			policy,
-			recovered?.approvals ?? [],
-			saved?.status.revocations ?? initialRelease.revocations,
-		)
+	const authority =
+		policy === undefined
+			? undefined
+			: yield* Policy.install(
+					policy,
+					recovered?.approvals ?? [],
+					saved?.status.revocations ?? initialRelease.revocations,
+				)
 	const state = yield* Ref.make<Journal>(
 		saved ?? {
 			version: 1,
@@ -352,6 +354,10 @@ export const make = Effect.fnUntraced(function* (options: Options) {
 				}),
 				input,
 			).pipe(
+				(effect) =>
+					authority === undefined
+						? effect
+						: Effect.provideService(effect, Policy.Service, authority),
 				Effect.provideService(
 					Transition.CurrentInstance,
 					Option.some(entry.id),
@@ -512,8 +518,8 @@ export const make = Effect.fnUntraced(function* (options: Options) {
 				},
 			],
 		})
-		if (progress._tag !== "Rejected")
-			yield* Policy.revoke(
+		if (progress._tag !== "Rejected" && authority !== undefined)
+			yield* authority.revoke(
 				Array.filter(
 					status.revocations,
 					(ref) => !Array.contains(journal.status.revocations, ref),
@@ -563,10 +569,14 @@ export const make = Effect.fnUntraced(function* (options: Options) {
 			).pipe(Effect.flatMap((fiber) => restore(Fiber.join(fiber)))),
 		)
 	return Releases.of({
-		approvals: Policy.statements.pipe(Effect.provideContext(environment)),
+		approvals: authority?.statements ?? Effect.succeed([]),
 		approve: (request) =>
 			Effect.gen(function* () {
-				const approval = yield* Policy.review(request)
+				if (authority === undefined)
+					return yield* Policy.PolicyError.make({
+						message: "No operator policy is installed",
+					})
+				const approval = yield* authority.review(request)
 				const journal = yield* Ref.get(state)
 				yield* persist({
 					...journal,
@@ -580,7 +590,7 @@ export const make = Effect.fnUntraced(function* (options: Options) {
 						},
 					],
 				})
-				yield* Policy.approve(approval)
+				yield* authority.approve(approval)
 				return approval
 			}).pipe(owned, protect),
 		revoke: (references, who) =>
@@ -609,7 +619,7 @@ export const make = Effect.fnUntraced(function* (options: Options) {
 						},
 					],
 				})
-				yield* Policy.revoke(references)
+				if (authority !== undefined) yield* authority.revoke(references)
 			}).pipe(owned, protect),
 		build: (request) =>
 			protect(

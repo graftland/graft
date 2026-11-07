@@ -61,21 +61,13 @@ const sameIdentity = (a: T.Identity, b: T.Identity) =>
 	a.package === b.package && a.digest === b.digest
 const same = Schema.toEquivalence(T.Statement)
 const sameAssignment = Schema.toEquivalence(T.Assignment)
-const snapshot = Trust.immutable
+// Operator data is copied on ingress and egress; comparison uses schema structural equality.
+const snapshot = <A extends Schema.Json>(value: A): A => structuredClone(value)
+const sameProjection = Schema.toEquivalence(Trust.Projection)
 const mergeProjections = (
 	previous: ReadonlyArray<Trust.Projection>,
 	values: ReadonlyArray<Trust.Projection>,
-) =>
-	Array.reduce(values, previous, (items, next) => [
-		...Array.filter(
-			items,
-			(item) =>
-				item.projection !== next.projection ||
-				item.service !== next.service ||
-				item.operation !== next.operation,
-		),
-		next,
-	])
+) => Array.dedupeWith([...previous, ...values], sameProjection)
 const current = (
 	state: State,
 	entry: string,
@@ -179,6 +171,7 @@ const terminateAll = Effect.fnUntraced(function* (
 			cause,
 		})
 })
+/** Installs the authority for this scope and returns its service for ordinary context provision. */
 export const install = Effect.fnUntraced(function* (
 	policy: T.Policy,
 	approvals: ReadonlyArray<T.Approval> = [],
@@ -236,7 +229,6 @@ export const install = Effect.fnUntraced(function* (
 		),
 	})
 	const { close } = yield* Trust.register({
-		services: Context.make(Service, methods),
 		compare: (entry, candidate) => provide(comparison(entry, candidate)),
 		publish: (values) => provide(publish(values)),
 	}).pipe(
@@ -254,6 +246,7 @@ export const install = Effect.fnUntraced(function* (
 			yield* terminateAll(owners)
 		}).pipe(Effect.orDie),
 	)
+	return methods
 }, Effect.uninterruptible)
 export const bind = Effect.fnUntraced(function* (
 	entry: string,
