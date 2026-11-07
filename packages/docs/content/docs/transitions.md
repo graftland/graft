@@ -49,6 +49,9 @@ checks, even after a version change or history eviction. Changing the instance,
 candidate, expected version, strategy, budgets or requirements under that key
 produces `KeyConflict`. Keys remain in memory for the runtime lifetime.
 
+Concurrent retries return that handle independently of redundant metadata
+cleanup; late cleanup failures are logged with their full cause.
+
 ## Admission
 
 Rejections are `ChangeRejected` errors with no Change id. Nothing queues behind
