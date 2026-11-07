@@ -1,28 +1,28 @@
 // Adds the commit select next to the theme select and, on a commit that is not
-// the latest, a notice above the page. Every deployed build loads this file
+// the default release, a notice above the page. Every deployed build loads this file
 // from the versions deployment, so a change here reaches every commit at once.
 ;(() => {
 	const strings = {
 		en: {
 			label: "Docs version",
-			latest: "latest",
+			latest: "default",
 			unknown: "This build",
 			notice: (name) => `You are reading the docs as of ${name}.`,
-			go: "Go to the latest docs",
+			go: "Go to the docs of the latest release",
 		},
 		"zh-CN": {
 			label: "文档版本",
-			latest: "最新",
+			latest: "默认",
 			unknown: "当前构建",
 			notice: (name) => `你正在阅读 ${name} 时的文档。`,
-			go: "前往最新文档",
+			go: "前往最新发布版本的文档",
 		},
 		"zh-TW": {
 			label: "文件版本",
-			latest: "最新",
+			latest: "預設",
 			unknown: "目前建置",
 			notice: (name) => `你正在閱讀 ${name} 時的文件。`,
-			go: "前往最新文件",
+			go: "前往最新發佈版本的文件",
 		},
 	}
 	const t = strings[document.documentElement.lang] ?? strings.en

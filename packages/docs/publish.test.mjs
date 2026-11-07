@@ -5,8 +5,10 @@ import {
 	commitBranch,
 	commitUrl,
 	injectScript,
+	latestRelease,
 	parseVersions,
 	planCommits,
+	productionWorker,
 	readVersions,
 	redirectPage,
 	updateVersions,
@@ -129,4 +131,47 @@ test("redirects the old address to the same path on the new site", () => {
 	const html = redirectPage(new URL("https://graftland.github.io/graft/"), site)
 	assert.match(html, /const base = "\/graft\/"/)
 	assert.match(html, /url=https:\/\/docs\.example\//)
+})
+
+test("makes the newest deployed stable release the default", () => {
+	const tags = new Map([
+		[a, ["v0.9.0"]],
+		[b, ["v0.10.0"]],
+		[c, ["v1.0.0-beta.0"]],
+	])
+	assert.equal(latestRelease(tags, new Set([a, b, c])), b)
+	assert.equal(latestRelease(tags, new Set([a, c])), a)
+	assert.equal(latestRelease(tags, new Set([c])), "")
+})
+
+test("serves production from the release's deployment", async () => {
+	const source = productionWorker("aaaaaaaaaaaa.graft-docs.pages.dev")
+	const module = await import(
+		`data:text/javascript,${encodeURIComponent(source)}`
+	)
+	const seen = []
+	const original = globalThis.fetch
+	globalThis.fetch = async (request) => {
+		seen.push(request.url)
+		return new Response(null, {
+			status: 308,
+			headers: {
+				location: "https://aaaaaaaaaaaa.graft-docs.pages.dev/plugins/",
+			},
+		})
+	}
+	try {
+		const response = await module.onRequest({
+			request: new Request("https://docs.example/plugins?x=1"),
+		})
+		assert.deepEqual(seen, [
+			"https://aaaaaaaaaaaa.graft-docs.pages.dev/plugins?x=1",
+		])
+		assert.equal(
+			response.headers.get("location"),
+			"https://docs.example/plugins/",
+		)
+	} finally {
+		globalThis.fetch = original
+	}
 })

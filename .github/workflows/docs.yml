@@ -21,7 +21,8 @@ permissions:
   contents: read
 
 env:
-  # The production site. Every commit also keeps its own deployment at
+  # The production site, which serves the newest stable release. Every commit
+  # on main and every tag also keeps its own deployment at
   # https://<first 12 characters of the hash>.<pages host>/, and
   # https://versions.<pages host>/ serves the commit list and the select.
   DOCS_URL: https://graft-docs-ekb.pages.dev/
@@ -40,7 +41,6 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       commits: ${{ steps.plan.outputs.commits }}
-      production: ${{ steps.plan.outputs.production }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -119,15 +119,9 @@ jobs:
         with:
           name: deployed-${{ matrix.commit }}
           path: deployed
-      # The list job publishes the pushed commit to production from this build.
-      - if: matrix.commit == needs.plan.outputs.production
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: production-site
-          path: commit-site/packages/docs/dist
 
   list:
-    name: Update the commit list and production
+    name: Update the commit list and the default release
     needs: [plan, build]
     # Runs after a partial backfill too, and for a tag that needs no build.
     if: always() && needs.plan.result == 'success'
@@ -151,16 +145,9 @@ jobs:
           pattern: deployed-*
           path: deployed
           merge-multiple: true
-      - if: needs.plan.outputs.production != ''
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
-        continue-on-error: true
-        with:
-          name: production-site
-          path: production
       - name: Publish the list
-        run: node packages/docs/publish.mjs list deployed production
+        run: node packages/docs/publish.mjs list deployed
         env:
-          DOCS_PRODUCTION: ${{ needs.plan.outputs.production }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 

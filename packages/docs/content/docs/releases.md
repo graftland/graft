@@ -215,27 +215,30 @@ and deploys it to Cloudflare Pages at
 [graft-docs-ekb.pages.dev](https://graft-docs-ekb.pages.dev/). Every commit on
 `main` and every release tag keeps the docs as they were at that commit.
 
-| Address                                                        | Shows                                              |
-| -------------------------------------------------------------- | -------------------------------------------------- |
-| `https://graft-docs-ekb.pages.dev/`                            | The newest commit on `main`.                       |
-| `https://<first 12 hash characters>.graft-docs-ekb.pages.dev/` | That commit, forever.                              |
-| `https://versions.graft-docs-ekb.pages.dev/versions.json`      | Every deployed commit, its date, subject and tags. |
-| `https://graftland.github.io/graft/<path>`                     | Redirects to `<path>` on production.               |
+| Address                                                        | Shows                                                                            |
+| -------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| `https://graft-docs-ekb.pages.dev/`                            | The **default release**: the newest stable tag, such as `v1.2.3`, that has docs. |
+| `https://<first 12 hash characters>.graft-docs-ekb.pages.dev/` | That commit, forever.                                                            |
+| `https://versions.graft-docs-ekb.pages.dev/versions.json`      | Every deployed commit, its date, subject and tags.                               |
+| `https://graftland.github.io/graft/<path>`                     | Redirects to `<path>` on the default release.                                    |
 
 ### What a run does
 
-| Started by                         | Builds                                                                                   | Then                                               |
-| ---------------------------------- | ---------------------------------------------------------------------------------------- | -------------------------------------------------- |
-| A push to `main`                   | The pushed commit.                                                                       | Adds it to the list and makes it production.       |
-| A tag like `v1.2.3`                | The tagged commit, only if it has no docs yet.                                           | Labels the commit with the tag in the list.        |
-| Actions tab, **backfill** selected | Every commit on `main` since the docs site existed, and every tag, that has no docs yet. | Adds them to the list; production does not change. |
-| Actions tab, **rebuild** filled in | The named commits, even if they have docs.                                               | Replaces their deployments and updates the list.   |
+| Started by                         | Builds                                                                                   | Then                                                                    |
+| ---------------------------------- | ---------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| A push to `main`                   | The pushed commit.                                                                       | Adds it to the list.                                                    |
+| A tag like `v1.2.3`                | The tagged commit, only if it has no docs yet.                                           | Labels the commit with the tag. A newer stable tag becomes the default. |
+| Actions tab, **backfill** selected | Every commit on `main` since the docs site existed, and every tag, that has no docs yet. | Adds them to the list.                                                  |
+| Actions tab, **rebuild** filled in | The named commits, even if they have docs.                                               | Replaces their deployments and updates the list.                        |
 
 - **Once per commit.** A commit is built once, with its own lockfile and
-  toolchain, and its upload is never replaced. Production is the same upload
-  sent again; Cloudflare skips the files it already has.
-- **Order.** Runs update the list one at a time. Production moves only to a
-  descendant of the commit it shows, so a late run never moves it back.
+  toolchain, and its upload is never replaced. The production address serves the
+  default release's own deployment, so changing the default uploads no build.
+- **Default.** Prereleases such as `v1.2.3-beta.0` never become the default, as
+  on npm. Commits on `main` after the last release are listed but are not the
+  default.
+- **Order.** Runs update the list one at a time. The default is always the
+  highest stable version that has docs, so a late run never moves it back.
 - **Failures.** A commit that no longer builds is left out; the others still
   deploy. If the live list cannot be read, the run stops rather than start a new
   one.
@@ -247,10 +250,11 @@ Every deployed page loads the select from the versions address, so builds made
 before the select existed get it too.
 
 - **Select.** Next to the theme select. It lists every deployed commit, newest
-  first, by its tag or short hash, and opens the same page in the chosen one. A
-  page that did not exist yet shows that version's 404 page.
-- **Notice.** A page of a commit that is not production says so at the top, with
-  a link to the same page in the latest docs.
+  first, by its tag or short hash, and marks the default release. It opens the
+  same page in the chosen version; a page that did not exist yet shows that
+  version's 404 page.
+- **Notice.** A page of any other commit says so at the top, with a link to the
+  same page in the default release.
 
 ### Set up
 

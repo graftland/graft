@@ -116,6 +116,52 @@ export function updateVersions({ live, added, details, site, production }) {
 	}
 }
 
+/**
+ * The commit of the newest stable release among the deployed ones, or "" if
+ * none is deployed. Prereleases never become the default, as on npm.
+ */
+export function latestRelease(tags, deployed) {
+	let best
+	for (const [commit, names] of tags) {
+		if (!deployed.has(commit)) continue
+		for (const name of names) {
+			const match = /^v(\d+)\.(\d+)\.(\d+)$/.exec(name)
+			if (!match) continue
+			const version = match.slice(1).map(Number)
+			const order = best
+				? version[0] - best.version[0] ||
+					version[1] - best.version[1] ||
+					version[2] - best.version[2]
+				: 1
+			if (order > 0) best = { commit, version }
+		}
+	}
+	return best?.commit ?? ""
+}
+
+/**
+ * The production site: a Pages Function that serves every request from the
+ * release commit's own deployment, so moving production uploads no build.
+ */
+export const productionWorker = (target) => `// Serves the docs from ${target}.
+const target = ${JSON.stringify(target)}
+
+export const onRequest = async ({ request }) => {
+	const url = new URL(request.url)
+	const host = url.host
+	url.host = target
+	const response = await fetch(new Request(url, request))
+	const location = response.headers.get("location")
+	if (!location) return response
+	const next = new URL(location, url)
+	if (next.host !== target) return response
+	next.host = host
+	const headers = new Headers(response.headers)
+	headers.set("location", next.href)
+	return new Response(response.body, { status: response.status, headers })
+}
+`
+
 const script = (host) =>
 	`<script src="${new URL("select.js", versionsUrl(host)).href}" defer></script>`
 
@@ -168,15 +214,6 @@ const git = (...args) => execFileSync("git", args, { encoding: "utf8" }).trim()
 
 const lines = (text) => text.split("\n").filter(Boolean)
 
-const isAncestor = (older, newer) => {
-	try {
-		execFileSync("git", ["merge-base", "--is-ancestor", older, newer])
-		return true
-	} catch {
-		return false
-	}
-}
-
 /** Release tags by the commit they point to, newest version first. */
 function tagsByCommit() {
 	const tags = new Map()
@@ -196,7 +233,7 @@ function tagsByCommit() {
 	return tags
 }
 
-function deploy(directory, branch, commit) {
+function deploy(directory, branch, commit, cwd) {
 	const args = [
 		"--yes",
 		wrangler,
@@ -210,7 +247,7 @@ function deploy(directory, branch, commit) {
 		"--commit-dirty=true",
 	]
 	console.log(`$ npx ${args.join(" ")}`)
-	execFileSync("npx", args, { stdio: "inherit" })
+	execFileSync("npx", args, { stdio: "inherit", cwd })
 }
 
 function output(name, value) {
@@ -259,7 +296,6 @@ async function plan() {
 	if (remaining)
 		console.log(`${remaining} more commits remain; run the backfill again.`)
 	output("commits", JSON.stringify(commits))
-	output("production", mode === "main" ? pushed : "")
 }
 
 /** Add the select to a build and deploy it as its commit's own deployment. */
@@ -275,29 +311,44 @@ function commit(directory, hash) {
 	deploy(directory, commitBranch(hash), hash)
 }
 
+/** Upload the production site that serves one commit's deployment. */
+function deployProduction(commit, host, site) {
+	const directory = mkdtempSync(join(tmpdir(), "graft-production-"))
+	mkdirSync(join(directory, "functions"))
+	mkdirSync(join(directory, "static"))
+	writeFileSync(
+		join(directory, "functions", "[[path]].js"),
+		productionWorker(new URL(commitUrl(commit, host, site)).host),
+	)
+	writeFileSync(
+		join(directory, "static", "_routes.json"),
+		JSON.stringify({ version: 1, include: ["/*"], exclude: [] }),
+	)
+	// Wrangler reads the functions from the directory it runs in.
+	deploy("static", "main", commit, directory)
+}
+
 /**
- * Publish the list with every deployed commit, and move production to the
- * pushed commit if it is newer than the one there.
+ * Publish the list with every deployed commit, and point production at the
+ * newest stable release when that changes.
  */
-async function list(deployedDirectory, productionDirectory) {
+async function list(deployedDirectory) {
 	const host = required("DOCS_PAGES_HOST")
 	const site = new URL(required("DOCS_URL"))
-	const candidate = process.env["DOCS_PRODUCTION"] ?? ""
 	const live = await readVersions(host, site)
 	// Each successful build leaves an empty file named after its commit.
 	const added = existsSync(deployedDirectory)
 		? readdirSync(deployedDirectory)
 		: []
-	let production = live.production
-	if (
-		candidate &&
-		added.includes(candidate) &&
-		(!production || isAncestor(production, candidate))
-	) {
-		deploy(productionDirectory, "main", candidate)
-		production = candidate
-	}
 	const tags = tagsByCommit()
+	const deployed = new Set([
+		...live.versions.map(({ commit }) => commit),
+		...added,
+	])
+	const release = latestRelease(tags, deployed)
+	const production = release || live.production
+	if (release && release !== live.production)
+		deployProduction(release, host, site)
 	const versions = updateVersions({
 		live,
 		added,
@@ -337,13 +388,13 @@ if (resolve(process.argv[1] ?? "") === fileURLToPath(import.meta.url)) {
 	const commands = {
 		plan: () => plan(),
 		commit: () => commit(args[0], args[1]),
-		list: () => list(args[0], args[1]),
+		list: () => list(args[0]),
 		redirect: () => redirect(args[0]),
 	}
 	if (Object.hasOwn(commands, command)) await commands[command]()
 	else {
 		console.error(
-			"Usage: node publish.mjs plan | commit <dist> <hash> | list <deployed> <production dist> | redirect <directory>",
+			"Usage: node publish.mjs plan | commit <dist> <hash> | list <deployed> | redirect <directory>",
 		)
 		process.exitCode = 2
 	}
