@@ -32,7 +32,10 @@ import { layer as workerLayer } from "./workerTransport"
 export interface ManagedOptions extends Omit<CandidateOptions, "input"> {
 	/** Required outside Loader; must match the entry id when Loader supplies one. */
 	readonly instance?: string | undefined
-	readonly policy?: Partial<Change.Budget & Change.Requirements> | undefined
+	readonly budget?: Partial<Change.Budget> | undefined
+	readonly requirements?: Partial<Change.Requirements> | undefined
+	readonly resolve?: Transition.Registration["resolve"]
+	readonly queue?: Transition.Registration["queue"]
 	/** Must be between 1 and the direct transport capacity (16). Defaults to 16. */
 	readonly maxInFlight?: number | undefined
 }
@@ -51,52 +54,69 @@ export const driver = Effect.fnUntraced(function* <
 	const authority = Context.getOption(ambient, Policy.Service)
 	const selection = yield* Sandbox.Current
 	const launcher = Option.fromUndefinedOr(selection)
+	const inspect = Effect.fnUntraced(function* (value: Change.Candidate) {
+		const options = yield* Schema.decodeUnknownEffect(CandidateOptions)(
+			value.deployment,
+		)
+		if (candidate(options).identity !== value.identity)
+			return yield* Effect.die(
+				new Error("Candidate identity does not match its deployment"),
+			)
+		const metadata = yield* Artifact.metadata(options.artifact).pipe(
+			Effect.provideContext(environment),
+		)
+		return { options, metadata }
+	})
+	const bind = Effect.fnUntraced(function* (
+		value: Change.Candidate,
+		options: CandidateOptions,
+		metadata: Artifact.Metadata,
+	) {
+		if (instance === undefined) return undefined
+		if (Option.isNone(runtime))
+			return yield* Effect.die("Managed Remote requires Graft")
+		if (Option.isNone(authority)) {
+			yield* Policy.check(instance).pipe(
+				Effect.provideService(Graft.Graft, runtime.value),
+			)
+			return undefined
+		}
+		if (metadata.package === undefined)
+			return yield* Effect.die(
+				new Error("Governed artifacts require a package name"),
+			)
+		return yield* authority.value.bind(
+			instance,
+			value.identity,
+			{ package: metadata.package, digest: options.artifact.identity.digest },
+			Array.map(contract.provides, (service) => service.key.key),
+		)
+	})
 	return {
 		name: driverName,
+		footprint: (value) => {
+			const deployment = value.deployment
+			return Schema.is(CandidateOptions)(deployment)
+				? Option.some({
+						artifact: deployment.artifact.identity,
+						contractModule: deployment.contractModule,
+						target: deployment.target,
+					})
+				: Option.none()
+		},
+		prepare: (value) =>
+			failure(
+				Effect.gen(function* () {
+					const { options, metadata } = yield* inspect(value)
+					yield* bind(value, options, metadata)
+					return { overlap: metadata.overlap }
+				}),
+			),
 		allocate: (value, attempt, allocation) =>
 			failure(
 				Effect.gen(function* () {
-					const options = yield* Schema.decodeUnknownEffect(CandidateOptions)(
-						value.deployment,
-					)
-					if (candidate(options).identity !== value.identity)
-						return yield* Effect.die(
-							new Error("Candidate identity does not match its deployment"),
-						)
-					yield* Artifact.verify(options.artifact).pipe(
-						Effect.provideContext(environment),
-					)
-					const binding = Effect.gen(function* () {
-						if (instance === undefined) return undefined
-						if (Option.isNone(runtime))
-							return yield* Effect.die("Managed Remote requires Graft")
-						if (Option.isNone(authority)) {
-							yield* Policy.check(instance).pipe(
-								Effect.provideService(Graft.Graft, runtime.value),
-							)
-							return undefined
-						}
-						const fs = Context.get(environment, FileSystem.FileSystem)
-						const path = Context.get(environment, Path.Path)
-						const json = yield* fs.readFileString(
-							path.join(options.artifact.directory, "package.json"),
-						)
-						const pkg = yield* Schema.decodeEffect(
-							Schema.fromJsonString(
-								Schema.Struct({ name: Schema.NonEmptyString }),
-							),
-						)(json)
-						return yield* authority.value.bind(
-							instance,
-							value.identity,
-							{
-								package: pkg.name,
-								digest: options.artifact.identity.digest,
-							},
-							Array.map(contract.provides, (service) => service.key.key),
-						)
-					})
-					const assignment = yield* binding
+					const { options, metadata } = yield* inspect(value)
+					const assignment = yield* bind(value, options, metadata)
 
 					const sandbox: Effect.Effect<
 						Sandbox.Launch | undefined,
@@ -398,7 +418,7 @@ export const managedPlugin = <
 ) =>
 	Plugin.make({
 		name: contract.name,
-		config: Schema.toEncoded(contract.config),
+		config: Schema.Json,
 		inject: [
 			Plugin.optional(Policy.Service),
 			FileSystem.FileSystem,
@@ -448,8 +468,10 @@ export const managedPlugin = <
 					),
 					facades: Array.map(contract.provides, (service) => service.facade),
 					maxInFlight,
-					budget: options.policy,
-					requirements: options.policy,
+					budget: options.budget,
+					requirements: options.requirements,
+					resolve: options.resolve,
+					queue: options.queue,
 				})
 			}),
 	})

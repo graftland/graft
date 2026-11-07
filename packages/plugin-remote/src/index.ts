@@ -24,7 +24,7 @@ import { follow } from "./internal/follow"
 import { managedPlugin, type ManagedOptions } from "./internal/transition"
 
 export type { ManagedOptions } from "./internal/transition"
-export { candidate, type CandidateOptions } from "./internal/candidate"
+export { candidate, CandidateOptions } from "./internal/candidate"
 
 export * as Artifact from "./Artifact"
 

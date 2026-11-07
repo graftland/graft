@@ -43,7 +43,10 @@ it.effect(
 			})
 			const source = root + "/source"
 			yield* fs.makeDirectory(source)
-			yield* fs.writeFileString(source + "/package.json", '{"type":"module"}')
+			yield* fs.writeFileString(
+				source + "/package.json",
+				'{"type":"module","graft":{"overlap":true}}',
+			)
 			yield* fs.writeFileString(
 				source + "/plugin.js",
 				"export default undefined",
@@ -129,6 +132,7 @@ it.effect(
 							yield* Transition.registerDriver(
 								{
 									name: remote.name,
+									prepare: remote.prepare,
 									allocate: (candidate, attempt, allocation) =>
 										attempt === 1
 											? Effect.succeed(initial(allocation))
@@ -153,7 +157,18 @@ it.effect(
 				}),
 			)
 			yield* managed.await
-			const request = Change.run({ instance: "integration", candidate })
+			const request = Change.run({
+				instance: "integration",
+				candidate,
+				budget: {
+					total: 10000,
+					startup: 100,
+					probe: 100,
+					drain: 100,
+					stop: 100,
+					terminate: 100,
+				},
+			})
 			const running = yield* Effect.forkScoped(request)
 			// Wait for allocation (including artifact verification) before advancing virtual time.
 			yield* managed.generations.pipe(
@@ -262,6 +277,12 @@ it.effect(
 					{ change: Option.none(), generation: 1, routeVersion: 0, term: 1 },
 				)
 				.pipe(Scope.provide(owner))
+			assert.deepStrictEqual(unit.acknowledgement, {
+				change: Option.none(),
+				generation: 1,
+				routeVersion: 0,
+				term: 1,
+			})
 			const allocatedBindings = yield* authority.bindings
 			assert.equal(allocatedBindings, 1)
 			const pending = yield* Effect.forkScoped(

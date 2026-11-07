@@ -157,12 +157,12 @@ export const validate = Effect.fnUntraced(function* (
 						event.target !== pending.intent.target ||
 						event.entry === undefined ||
 						event.entry !== pending.remaining[0] ||
-						event.outcome === undefined
+						(event.outcome === undefined) === (event.rejection === undefined)
 					)
 						return yield* corrupt(
 							"outcome does not belong to the pending entry",
 						)
-					const accepted = event.outcome._tag === "Accepted"
+					const accepted = event.outcome?._tag === "Accepted"
 					return {
 						...state,
 						pending: {
@@ -175,8 +175,8 @@ export const validate = Effect.fnUntraced(function* (
 								? undefined
 								: Array.reverse(pending.accepted),
 							degraded:
-								event.outcome._tag === "RecoveryFailed" ||
-								event.outcome._tag === "Stuck",
+								event.outcome?._tag === "RecoveryFailed" ||
+								event.outcome?._tag === "Stuck",
 						},
 					}
 				}
@@ -187,7 +187,7 @@ export const validate = Effect.fnUntraced(function* (
 						event.entry === undefined ||
 						event.entry !== pending.compensation[0] ||
 						event.target !== state.status.current ||
-						event.outcome === undefined
+						(event.outcome === undefined) === (event.rejection === undefined)
 					)
 						return yield* corrupt(
 							"compensation does not match accepted entry order",
@@ -197,7 +197,7 @@ export const validate = Effect.fnUntraced(function* (
 						pending: {
 							...pending,
 							compensation: Array.drop(pending.compensation, 1),
-							degraded: pending.degraded || event.outcome._tag !== "Accepted",
+							degraded: pending.degraded || event.outcome?._tag !== "Accepted",
 						},
 					}
 				case "Rejected":

@@ -7,7 +7,7 @@ description:
 
 An **application release** is a content-addressed directory owned by
 `@graftland/plugin-release`. Its `Releases` service updates named managed Worker
-and child-process integrations through [execution transitions](../transitions/).
+and child-process integrations through [Changes](../transitions/).
 
 - The current release id advances only when every changed entry is `Accepted`.
 - Configuration is decoded during planning; probes and trial run during apply.
@@ -28,8 +28,9 @@ out of package files and literal configuration: the builder cannot identify
 arbitrary secret literals. Use `!env NAME` or `{ "$env": "NAME" }`; the release
 stores the name and resolves its value only in memory. Environment references
 automatically enter the reference inventory as `env:NAME`. Other capability and
-credential references must be listed explicitly. A rollback resolves references
-again; it does not restore old secret values.
+credential references must be listed explicitly. Every allocation resolves
+references again, including startup, recovery and compensation. The retained
+desired deployment contains references rather than resolved credentials.
 
 ## Build a release
 
@@ -63,10 +64,10 @@ identity and directory-digest provenance remain unchanged.
 Use the exported `build` effect to bootstrap the first release, then install
 `plugin({ store, initial, host, socket })` in the host. `host` supplies the
 actual Node, Effect and Graft versions, service provenance and placement
-capabilities. The default Loader entry accepts the same settings except
-`policy`; embedding hosts can pass a transition policy to `plugin`. Trial
-defaults to two seconds; other budgets use core defaults. The plugin owns its
-integrations, so do not load those entries a second time through Loader.
+capabilities. The default Loader entry accepts the same settings except `budget`
+and `requirements`; embedding hosts can pass them to `plugin`. Trial defaults to
+two seconds; other budgets use core defaults. The plugin owns its integrations,
+so do not load those entries a second time through Loader.
 
 ## Plan and apply
 
@@ -86,10 +87,15 @@ graft release status --socket /app/control.sock --json
 | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `plan`              | Verifies bytes, checks service bindings, provenance and runtime requirements, and decodes configuration. Lists code, config, added and removed changes.                                           |
 | `apply`             | Checks the expected current id under the release lock. A config-only change transitions the same artifact with new input.                                                                         |
-| Failure             | `Aborted` or `Recovered` retains the previous id. Earlier accepted entries are compensated in reverse order using fresh transitions.                                                              |
+| Failure             | `Aborted` or `Recovered` retains the previous id. A `ChangeRejected` error also stops forward dispatch. Earlier accepted entries are compensated in reverse order using fresh Changes.            |
 | Failed compensation | Marks the deployment `Degraded`; further apply requests fail until restart. `RecoveryFailed` and `Stuck` are never reported as successful rollback.                                               |
 | Boundaries          | Live additions, removals, contract/placement changes and unmanaged edits are rejected. A new membership needs a separately bootstrapped store and application restart.                            |
 | Concurrency         | One process owns a store. Admitted applies belong to the plugin scope, not the requesting connection. Use Releases exclusively for its entries; observed outside transitions invalidate the plan. |
+
+Compensation carries the actual instance version produced by the accepted
+Change. A later Change makes that precondition stale; compensation reports the
+conflict and does not overwrite the newer version. Observations distinguish
+admitted Change ids from rejections, which have no id.
 
 Multi-entry changes are sequential, not atomically visible as a group. The last
 accepted id remains visible alongside `Applying` or `Degraded`. Exit code zero

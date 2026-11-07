@@ -1,23 +1,13 @@
-import {
-	Array,
-	Cause,
-	Clock,
-	Context,
-	Effect,
-	Equal,
-	Exit,
-	HashMap,
-	Option,
-	TxRef,
-} from "effect"
+import { Array, Cause, Effect, Equal, Exit, Option, TxRef } from "effect"
 
 import * as Change from "../Change"
 import * as Capacity from "./capacity"
+import * as Admission from "./changeAdmission"
 import { emergency, execute } from "./changeExecution"
-import { normalize, validate } from "./changeRequest"
+import { prepare } from "./changePreparation"
+import { normalize } from "./changeRequest"
 import * as ChangeTable from "./changeTable"
 import * as Generations from "./generations"
-import { realmOf, Realms } from "./runtime"
 import { RuntimeContext } from "./runtimeContext"
 import {
 	engine,
@@ -217,12 +207,41 @@ const lateSettlement = Effect.fnUntraced(function* (
 			),
 		{ concurrency: 8 },
 	)
-	if (Array.every(results, (complete) => complete))
+	if (!Array.every(results, (complete) => complete)) return
+	yield* record.preparation.close
+	const preparationExit = yield* record.preparation.await
+	yield* Effect.tx(
+		ChangeTable.update(managed.runtime.changes, record, (status) => ({
+			...status,
+			preparation: {
+				cleanup: Exit.isSuccess(preparationExit)
+					? "Completed"
+					: Cause.hasInterruptsOnly(preparationExit.cause)
+						? "Unknown"
+						: "Failed",
+				cause: Exit.isFailure(preparationExit)
+					? preparationExit.cause
+					: Cause.empty,
+			},
+		})),
+	)
+	if (Exit.isFailure(preparationExit)) {
 		yield* Effect.tx(
-			ChangeTable.release(record).pipe(
-				Effect.andThen(ChangeTable.archive(managed.runtime.changes, record)),
-			),
+			ChangeTable.update(managed.runtime.changes, record, (status) => ({
+				...status,
+				evidence: [
+					...status.evidence,
+					{ phase: "Terminating", cause: preparationExit.cause },
+				],
+			})),
 		)
+		if (Cause.hasInterruptsOnly(preparationExit.cause)) return
+	}
+	yield* Effect.tx(
+		ChangeTable.release(record).pipe(
+			Effect.andThen(ChangeTable.archive(managed.runtime.changes, record)),
+		),
+	)
 })
 const work = Effect.fnUntraced(function* (
 	managed: Managed,
@@ -231,8 +250,59 @@ const work = Effect.fnUntraced(function* (
 	record: ChangeTable.Record,
 ) {
 	yield* TxRef.set(run.budget.reserved, safetyReserve(policy))
-	const outcome = yield* execute(managed, policy, run).pipe(
+	const executed = yield* execute(managed, policy, run).pipe(
 		Effect.catchCause((cause) => emergency(managed, policy, run, cause)),
+	)
+	const preparationCleanup =
+		executed._tag === "Stuck"
+			? Option.none<Exit.Exit<void>>()
+			: yield* record.preparation.close.pipe(
+					Effect.andThen(
+						Effect.timeoutOption(record.preparation.await, policy.terminate),
+					),
+				)
+	const outcome =
+		executed._tag === "Stuck" ||
+		(Option.isSome(preparationCleanup) &&
+			Exit.isSuccess(preparationCleanup.value))
+			? executed
+			: ExecutionOutcome.Stuck({
+					phase: executed.phase,
+					reason: "UnresolvedCleanup",
+					evidence: [
+						...executed.evidence,
+						{
+							phase: "Terminating",
+							cause:
+								Option.isSome(preparationCleanup) &&
+								Exit.isFailure(preparationCleanup.value)
+									? preparationCleanup.value.cause
+									: Cause.die(
+											new Error(
+												"Candidate metadata cleanup remains unresolved",
+											),
+										),
+						},
+					],
+				})
+	yield* Effect.tx(
+		ChangeTable.update(managed.runtime.changes, record, (status) => ({
+			...status,
+			preparation: {
+				cleanup: Option.isNone(preparationCleanup)
+					? "Pending"
+					: Exit.isSuccess(preparationCleanup.value)
+						? "Completed"
+						: Cause.hasInterruptsOnly(preparationCleanup.value.cause)
+							? "Unknown"
+							: "Failed",
+				cause:
+					Option.isSome(preparationCleanup) &&
+					Exit.isFailure(preparationCleanup.value)
+						? preparationCleanup.value.cause
+						: Cause.empty,
+			},
+		})),
 	)
 	const published = yield* publicOutcome(managed, record, outcome)
 	yield* Effect.tx(
@@ -258,242 +328,45 @@ export const submit = Effect.fnUntraced(function* (
 ): Effect.fn.Return<Change.Handle, Change.ChangeRejected, RuntimeContext> {
 	const { runtime } = yield* RuntimeContext
 	const normalized = yield* normalize(request, false)
+	const preliminary = yield* Admission.preflight(runtime, request, normalized)
+	if (preliminary._tag === "Duplicate") return preliminary.handle
+	const preparation = yield* prepare(
+		runtime,
+		preliminary.managed,
+		normalized.candidate,
+		normalized.budget.startup,
+	)
 	return yield* Effect.uninterruptible(
 		Effect.gen(function* () {
-			const run: Run = {
-				reply: yield* TxRef.make(Option.none<ExecutionOutcome>()),
-				previous: Option.none(),
-				previousDesired: normalized.candidate,
-				candidate: yield* TxRef.make(
-					Option.none<import("./transition").Attempt>(),
-				),
-				cancel: yield* TxRef.make(false),
-				record: undefined,
-				evidence: yield* TxRef.make<ReadonlyArray<Change.Evidence>>([]),
-				progress: yield* TxRef.make<{ attempt: number; phase: Change.Phase }>({
-					attempt: 0,
-					phase: "Admission",
-				}),
-				budget: {
-					started: yield* Clock.monotonicTimeNanos,
-					reserved: yield* TxRef.make(0),
-				},
-			}
-			const admitted = yield* Effect.tx(
-				Effect.gen(function* () {
-					const table = runtime.changes
-					const duplicate = yield* ChangeTable.duplicate(
-						table,
-						request.key,
-						normalized,
-					)
-					if (Option.isSome(duplicate))
-						return {
-							_tag: "Duplicate",
-							handle: duplicate.value.handle,
-						} as const
-					yield* validate(normalized)
-					if (!(yield* TxRef.get(table.open)))
-						return yield* Change.ChangeRejected.make({
-							reason: { _tag: "Closing" },
-						})
-					const instances = yield* TxRef.get(runtime.instances)
-					const found = HashMap.get(instances, normalized.instance)
-					if (
-						Option.isNone(found) ||
-						normalized.candidate.driver !== found.value.driver.name
-					)
-						return yield* Change.ChangeRejected.make({
-							reason: {
-								_tag: "UnsupportedTarget",
-								instance: normalized.instance,
-							},
-						})
-					const managed = found.value
-					const lifecycle = yield* TxRef.get(managed.lifecycle)
-					if (lifecycle._tag === "Closing" || lifecycle._tag === "Closed")
-						return yield* Change.ChangeRejected.make({
-							reason: { _tag: "Closing" },
-						})
-					const instanceObject: Change.ObjectKey = {
-						_tag: "Instance",
-						instance: managed.instance,
-					}
-					const instanceCell = yield* ChangeTable.object(table, instanceObject)
-					const held = yield* TxRef.get(instanceCell)
-					if (Option.isSome(held.writer))
-						return yield* Change.ChangeRejected.make({
-							reason: {
-								_tag: "Busy",
-								conflicts: [
-									{ object: instanceObject, holders: [held.writer.value] },
-								],
-							},
-						})
-					const current = yield* TxRef.get(managed.route)
-					if (lifecycle._tag !== "Open")
-						return yield* Change.ChangeRejected.make({
-							reason: {
-								_tag: "UnsupportedTarget",
-								instance: normalized.instance,
-							},
-						})
-					const strategy =
-						normalized.strategy ??
-						(Option.isSome(current) &&
-						managed.driver.overlap?.(normalized.candidate) === true
-							? "Overlap"
-							: "Restart")
-					if (
-						strategy === "Overlap" &&
-						managed.driver.overlap?.(normalized.candidate) !== true
-					)
-						return yield* Change.ChangeRejected.make({
-							reason: {
-								_tag: "Unsupported",
-								message: "This driver has no verified overlap declaration",
-							},
-						})
-					const key: Change.ObjectKey = {
-						_tag: "Instance",
-						instance: managed.instance,
-					}
-					const cell = yield* ChangeTable.object(table, key)
-					const version = (yield* TxRef.get(cell)).version
-					if (
-						normalized.expected !== undefined &&
-						normalized.expected !== version
-					)
-						return yield* Change.ChangeRejected.make({
-							reason: {
-								_tag: "Stale",
-								object: key,
-								expected: normalized.expected,
-								actual: version,
-							},
-						})
-					const sequence = yield* TxRef.get(table.next)
-					const id = Change.Id.make(`change-${sequence}`)
-					const realms = Context.get(managed.context, Realms)
-					const conditions = yield* ChangeTable.reserve(table, id, [
-						{ object: key, write: true },
-						...Array.map(managed.facades, (facade) => ({
-							object: {
-								_tag: "Slot",
-								realm: realmOf(realms, facade.key),
-								key: facade.key,
-							} satisfies Change.ObjectKey,
-							write: true,
-						})),
-					])
-					const members: ReadonlyArray<Change.Member> = [
-						{
-							instance: managed.instance,
-							selection: "Requested",
-							starting: {
-								version,
-								health: Option.isSome(current) ? "Serving" : "Unavailable",
-							},
-							desired: {
-								candidate: normalized.candidate,
-								version: version + 1,
-							},
-							execution: Change.Execution.NotStarted(),
-							compensation: "NotNeeded",
-							actual: {
-								version,
-								generation: Option.map(current, (attempt) => attempt.id).pipe(
-									Option.getOrUndefined,
-								),
-								health: Option.isSome(current) ? "Serving" : "Unavailable",
-								matchesTarget: false,
-							},
-							recoverability: {
-								possible: true,
-								reason:
-									"Recovery requires fresh resolution and current authorization",
-							},
-						},
-					]
-					const status = yield* TxRef.make<Change.Status>({
-						id,
-						key: request.key,
-						source: "Application",
-						sequence: 0,
-						instance: managed.instance,
-						strategy,
-						phase: "Admission",
-						remaining: normalized.budget.total,
-						members,
-						leaseHolders: [],
-						unconfirmedUnits: Option.isSome(current) ? [current.value.id] : [],
-						evidence: [],
-						settlement: [],
-						outcome: Option.none(),
-					})
-					const handle: Change.Handle = {
-						id,
-						await: Effect.tx(
-							TxRef.get(status).pipe(
-								Effect.flatMap((s) =>
-									Option.match(s.outcome, {
-										onNone: () => Effect.txRetry,
-										onSome: Effect.succeed,
-									}),
-								),
-							),
-						),
-						cancel: TxRef.set(run.cancel, true),
-					}
-					const capacity = yield* Capacity.reserve(
-						runtime.capacity,
-						strategy === "Overlap" && Option.isSome(current) ? 2 : 1,
-						Option.isSome(current) ? 1 : 0,
-					)
-					if (Option.isSome(current))
-						yield* TxRef.set(current.value.capacity, Option.some(capacity))
-					const record: ChangeTable.Record = {
-						capacity,
-						oldChanged: yield* TxRef.make(Option.isNone(current)),
-						started: run.budget.started,
-						request: normalized,
-						status,
-						cancelled: run.cancel,
-						conditions:
-							yield* TxRef.make<ReadonlyArray<ChangeTable.Condition>>(
-								conditions,
-							),
-						handle,
-					}
-					yield* TxRef.set(table.next, sequence + 1)
-					yield* TxRef.update(table.records, HashMap.set(id, record))
-					if (request.key !== undefined)
-						yield* TxRef.update(table.keys, HashMap.set(request.key, record))
-					const active: Run = {
-						...run,
-						record,
-						previous: current,
-						previousDesired: yield* TxRef.get(managed.desired),
-					}
-					yield* TxRef.set(managed.lifecycle, {
-						_tag: "Open",
-						active: Option.some(active),
-					})
-					yield* ChangeTable.update(table, record, (s) => s)
-					return {
-						_tag: "Admitted",
-						record,
-						managed,
-						run: active,
-						attempt: Option.map(current, (attempt) => attempt.id).pipe(
-							Option.getOrElse(() => 0),
-						),
-					} as const
-				}),
+			const run = yield* Admission.makeRun(normalized)
+			const admission = yield* Effect.exit(
+				Admission.admit(runtime, request, normalized, run, preparation),
 			)
-			if (admitted._tag === "Duplicate") return admitted.handle
+			if (Exit.isFailure(admission)) {
+				yield* preparation.close
+				const cleanup = yield* Effect.timeoutOption(
+					preparation.await,
+					normalized.budget.terminate,
+				)
+				return yield* Effect.failCause(
+					Cause.combine(
+						admission.cause,
+						Option.isSome(cleanup) && Exit.isFailure(cleanup.value)
+							? cleanup.value.cause
+							: Cause.empty,
+					),
+				)
+			}
+			const admitted = admission.value
+			if (admitted._tag === "Duplicate") {
+				yield* preparation.close
+				const cleanup = yield* preparation.await
+				if (Exit.isFailure(cleanup))
+					return yield* Effect.failCause(cleanup.cause)
+				return admitted.handle
+			}
 			yield* TxRef.set<{
-				readonly attempt: number
+				readonly attempt: number | undefined
 				readonly phase: Change.Phase
 			}>(run.progress, {
 				attempt: admitted.attempt,

@@ -25,6 +25,7 @@ import {
 	Id,
 	ReleaseError,
 	summarize,
+	summarizeRejection,
 	type Releases,
 } from "./Model"
 
@@ -76,15 +77,28 @@ const body = (message: IncomingMessage) =>
 		})
 	})
 const applied = (value: import("./Model").Applied): Reply => ({
-	ok: Array.every(value.outcomes, (item) => item.outcome._tag === "Accepted"),
+	ok: Array.every(
+		value.outcomes,
+		(item) => item._tag === "Admitted" && item.outcome._tag === "Accepted",
+	),
 	value: {
 		status: value.status,
-		outcomes: Array.map(value.outcomes, (item) => ({
-			entry: item.entry,
-			compensation: item.compensation,
-			outcome: summarize(item.outcome),
-			phase: item.outcome.phase,
-		})),
+		outcomes: Array.map(value.outcomes, (item) =>
+			item._tag === "Admitted"
+				? {
+						_tag: item._tag,
+						entry: item.entry,
+						compensation: item.compensation,
+						outcome: summarize(item.outcome),
+						phase: item.outcome.phase,
+					}
+				: {
+						_tag: item._tag,
+						entry: item.entry,
+						compensation: item.compensation,
+						rejection: summarizeRejection(item.rejection),
+					},
+		),
 	},
 })
 export const dispatch = Effect.fnUntraced(function* (

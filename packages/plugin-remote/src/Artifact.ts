@@ -28,6 +28,12 @@ export const Artifact = Schema.Struct({
 	directory: Schema.NonEmptyString,
 })
 export type Artifact = typeof Artifact.Type
+/** Verified package declarations available without executing its implementation. */
+export const Metadata = Schema.Struct({
+	package: Schema.optionalKey(Schema.NonEmptyString),
+	overlap: Schema.Boolean,
+})
+export type Metadata = typeof Metadata.Type
 export interface CaptureOptions {
 	readonly directory: string
 	readonly entry: string
@@ -150,6 +156,43 @@ export const verify = Effect.fnUntraced(
 	},
 	Effect.catchTag("PlatformError", filesystemError),
 )
+
+/** Verifies the package bytes before reading the static overlap declaration. */
+export const metadata = Effect.fnUntraced(function* (
+	artifact: Artifact,
+): Effect.fn.Return<
+	Metadata,
+	ArtifactError,
+	FileSystem.FileSystem | Path.Path
+> {
+	yield* verify(artifact)
+	const fs = yield* FileSystem.FileSystem
+	const path = yield* Path.Path
+	const json = yield* fs
+		.readFileString(path.join(artifact.directory, "package.json"))
+		.pipe(Effect.mapError(filesystemError))
+	const declaration = yield* Schema.decodeEffect(
+		Schema.fromJsonString(
+			Schema.Struct({
+				name: Schema.optionalKey(Schema.NonEmptyString),
+				graft: Schema.optionalKey(
+					Schema.Struct({ overlap: Schema.optionalKey(Schema.Boolean) }),
+				),
+			}),
+		),
+	)(json).pipe(
+		Effect.mapError((error) =>
+			ArtifactError.make({
+				detail: "Invalid artifact package metadata",
+				cause: Cause.fail(error),
+			}),
+		),
+	)
+	return {
+		...(declaration.name === undefined ? {} : { package: declaration.name }),
+		overlap: declaration.graft?.overlap === true,
+	}
+})
 
 /** Copies a built package into an atomic content-addressed directory. All work is effectful. */
 export const capture = Effect.fnUntraced(

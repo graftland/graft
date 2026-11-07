@@ -5,6 +5,7 @@ import {
 	Effect,
 	Fiber,
 	HashMap,
+	HashSet,
 	MutableRef,
 	Option,
 	Stream,
@@ -13,7 +14,7 @@ import {
 import { TestClock } from "effect/testing"
 import { assert, it } from "@effect/vitest"
 
-import { Change, Graft, Plugin, Transition } from "../src/index.ts"
+import { Change, Graft, Plugin, Transition, Trust } from "../src/index.ts"
 import * as ChangeTable from "../src/internal/changeTable.ts"
 import { RuntimeContext } from "../src/internal/runtimeContext.ts"
 import { run } from "./utils.ts"
@@ -111,12 +112,14 @@ const register = Effect.fnUntraced(function* (
 	instance: string,
 	stuck: boolean = false,
 	prepared: Effect.Effect<void> = Effect.void,
+	prepare: Transition.Driver["prepare"] = undefined,
 ) {
 	const ready = yield* Deferred.make<void>()
 	const oldExit = yield* Deferred.make<Change.Termination>()
 	const stopping = yield* Deferred.make<void>()
 	const driver: Transition.Driver = {
 		name: "fixture",
+		prepare,
 		overlap: () => true,
 		allocate: (_candidate, term, allocation) =>
 			Effect.gen(function* () {
@@ -307,6 +310,167 @@ it.effect(
 					Change.submit({ ...request, expected: 2 }),
 				)
 				assert.strictEqual(conflict.reason._tag, "KeyConflict")
+			}),
+		),
+)
+
+it.effect(
+	"prepares verified metadata before selecting Overlap and deduplicates before preparation",
+	() =>
+		run(
+			Effect.gen(function* () {
+				const preparations = yield* TxRef.make(0)
+				yield* register("a", false, Effect.void, () =>
+					TxRef.update(preparations, (n) => n + 1).pipe(
+						Effect.as({ overlap: false }),
+					),
+				)
+				const unsupported = yield* Effect.flip(
+					Change.submit({
+						instance: "a",
+						candidate: candidate("next"),
+						strategy: "Overlap",
+						budget,
+					}),
+				)
+				assert.strictEqual(unsupported.reason._tag, "Unsupported")
+				const request: Change.Request = {
+					key: "prepared",
+					instance: "a",
+					candidate: candidate("next"),
+					budget,
+				}
+				const handle = yield* Change.submit(request)
+				const result = yield* handle.await
+				assert.strictEqual(result._tag, "Accepted")
+				const duplicate = yield* Change.submit(request)
+				assert.strictEqual(duplicate.id, handle.id)
+				const count = yield* TxRef.get(preparations)
+				assert.strictEqual(count, 2)
+			}),
+		),
+)
+
+it.effect(
+	"detects authorization ABA before cutover without invalidating an unrelated Change",
+	() =>
+		run(
+			Effect.gen(function* () {
+				const revision = yield* TxRef.make(0)
+				yield* Trust.register({
+					compare: (entry) =>
+						TxRef.get(revision).pipe(
+							Effect.map((revision) => ({
+								revision: entry === "a" ? revision : 0,
+								current: "approved",
+								approved: Option.some("approved"),
+								missing: "Missing",
+							})),
+						),
+					publish: () => Effect.void,
+				})
+				const entered = yield* Deferred.make<void>()
+				const gate = yield* Deferred.make<void>()
+				yield* register(
+					"a",
+					false,
+					Deferred.succeed(entered, undefined).pipe(
+						Effect.andThen(Deferred.await(gate)),
+					),
+				)
+				yield* register("b")
+				const a = yield* Change.submit({
+					instance: "a",
+					candidate: candidate("next"),
+					strategy: "Overlap",
+					budget,
+				})
+				yield* Deferred.await(entered)
+				yield* Effect.tx(TxRef.update(revision, (n) => n + 2))
+				const b = yield* Change.run({
+					instance: "b",
+					candidate: candidate("next"),
+					strategy: "Overlap",
+					budget,
+				})
+				assert.strictEqual(b._tag, "Accepted")
+				yield* Deferred.succeed(gate, undefined)
+				const aborted = yield* a.await
+				assert.strictEqual(aborted._tag, "Aborted")
+				if (aborted._tag === "Aborted")
+					assert.strictEqual(aborted.reason, "Stale")
+			}),
+		),
+)
+
+it.effect(
+	"retains metadata cleanup ownership after its deadline and releases only after its original completion",
+	() =>
+		run(
+			Effect.gen(function* () {
+				const entered = yield* Deferred.make<void>()
+				const release = yield* Deferred.make<void>()
+				yield* register("a", false, Effect.void, () =>
+					Effect.addFinalizer(() =>
+						Deferred.succeed(entered, undefined).pipe(
+							Effect.andThen(Deferred.await(release)),
+						),
+					).pipe(Effect.as({ overlap: true })),
+				)
+				yield* register("b")
+				const handle = yield* Change.submit({
+					instance: "a",
+					candidate: candidate("next"),
+					budget,
+				})
+				yield* Deferred.await(entered)
+				yield* TestClock.adjust(100)
+				const outcome = yield* handle.await
+				assert.strictEqual(outcome._tag, "Stuck")
+				const rejected = yield* Effect.flip(
+					Change.submit({
+						instance: "a",
+						candidate: candidate("other"),
+						budget,
+					}),
+				)
+				assert.strictEqual(rejected.reason._tag, "Busy")
+				const b = yield* Change.run({
+					instance: "b",
+					candidate: candidate("next"),
+					budget,
+				})
+				assert.strictEqual(b._tag, "Accepted")
+				const settled = yield* Change.changes.pipe(
+					Stream.filter(
+						(status) =>
+							status.id === handle.id &&
+							status.preparation?.cleanup === "Completed",
+					),
+					Stream.runHead,
+					Effect.forkScoped({ startImmediately: true }),
+				)
+				yield* Deferred.succeed(release, undefined)
+				yield* Fiber.join(settled)
+				const repeated = yield* handle.await
+				assert.deepStrictEqual(repeated, outcome)
+				const { runtime } = yield* RuntimeContext
+				const pending = yield* TxRef.get(runtime.changes.preparations)
+				assert.strictEqual(HashSet.size(pending), 0)
+			}),
+		),
+)
+
+it.effect(
+	"never re-grants a term when an instance name is registered again",
+	() =>
+		run(
+			Effect.gen(function* () {
+				const first = yield* register("a")
+				yield* first.fork.dispose
+				const second = yield* register("a")
+				const generations = yield* second.fork.generations.pipe(Stream.runHead)
+				assert.strictEqual(Option.getOrThrow(generations)[0]?.attempt, 2)
 			}),
 		),
 )

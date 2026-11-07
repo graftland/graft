@@ -278,7 +278,7 @@ const load = Effect.fnUntraced(function* (
 					contractModule,
 					target: deployment.target,
 					maxInFlight: deployment.maxInFlight,
-					policy: { probes: deployment.probes ?? [] },
+					requirements: { probes: deployment.probes ?? [] },
 				}),
 				deployment.config,
 			)

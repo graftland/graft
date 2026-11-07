@@ -175,3 +175,38 @@ it.live(
 			assert.deepEqual(remaining, [])
 		}).pipe(Effect.scoped, Effect.provide(runtime)),
 )
+
+it.live("verifies overlap metadata without importing the implementation", () =>
+	Effect.gen(function* () {
+		const { fs, directory, options } = yield* setup
+		yield* fs.writeFileString(
+			directory + "/package.json",
+			'{"name":"@example/verified-overlap","type":"module","graft":{"overlap":true}}',
+		)
+		yield* fs.writeFileString(
+			directory + "/index.js",
+			'throw new Error("Preparation must not import this module")',
+		)
+		const artifact = yield* Artifact.capture(options)
+		const metadata = yield* Artifact.metadata(artifact)
+		assert.deepStrictEqual(metadata, {
+			package: "@example/verified-overlap",
+			overlap: true,
+		})
+		yield* fs.writeFileString(
+			artifact.directory + "/package.json",
+			'{"graft":{"overlap":false}}',
+		)
+		const tampered = yield* Effect.flip(Artifact.metadata(artifact))
+		assert.equal(tampered.detail, "Artifact digest mismatch")
+	}).pipe(Effect.scoped, Effect.provide(runtime)),
+)
+
+it.live("defaults an absent overlap declaration to Restart", () =>
+	Effect.gen(function* () {
+		const { options } = yield* setup
+		const artifact = yield* Artifact.capture(options)
+		const metadata = yield* Artifact.metadata(artifact)
+		assert.isFalse(metadata.overlap)
+	}).pipe(Effect.scoped, Effect.provide(runtime)),
+)

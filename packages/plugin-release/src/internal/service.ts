@@ -8,7 +8,6 @@ import {
 	FileSystem,
 	Option,
 	Path,
-	Record,
 	Ref,
 	Schema,
 	Semaphore,
@@ -25,11 +24,17 @@ import {
 	ReleaseError,
 	Releases,
 	summarize,
+	summarizeRejection,
 	type Apply,
 	type Diagnostic,
 	type Entry,
+	type Observation,
 	type Options,
 } from "../Model"
+import {
+	hasEnvironmentReference,
+	resolve as resolveCandidate,
+} from "./candidates"
 import { changes } from "./changes"
 import { execute as executeEntries } from "./execution"
 import { validate } from "./journal"
@@ -145,7 +150,7 @@ export const make = Effect.fnUntraced(function* (options: Options) {
 		kind: import("../Model").Event["kind"],
 		target: string,
 		entry?: string,
-		outcome?: Change.Outcome,
+		observation?: Observation,
 	) =>
 		Ref.get(state).pipe(
 			Effect.flatMap((journal) =>
@@ -158,17 +163,31 @@ export const make = Effect.fnUntraced(function* (options: Options) {
 							current: journal.status.current,
 							target,
 							...(entry === undefined ? {} : { entry }),
-							...(outcome === undefined ? {} : { outcome: summarize(outcome) }),
+							...(observation?._tag === "Admitted"
+								? { outcome: summarize(observation.outcome) }
+								: {}),
+							...(observation?._tag === "Rejected"
+								? { rejection: summarizeRejection(observation.rejection) }
+								: {}),
 						},
 					],
 				})),
 			),
 		)
-	const contract = Effect.fnUntraced(function* (entry: Entry) {
+	const contract = Effect.fnUntraced(function* (entry: {
+		readonly id: string
+		readonly contract: string
+	}) {
 		const observationScope = yield* Effect.scope
-		const module = yield* resolver.importModule(entry.contract, {
-			observationScope,
-		})
+		const module = yield* resolver
+			.importModule(entry.contract, {
+				observationScope,
+			})
+			.pipe(
+				Effect.mapError((cause) =>
+					importReleaseError(entry.id, Cause.fail(cause)),
+				),
+			)
 		const found = Remote.Contract.fromModule(module)
 		if (Option.isNone(found))
 			return yield* failure("Contract", "No contract exported for " + entry.id)
@@ -188,18 +207,37 @@ export const make = Effect.fnUntraced(function* (options: Options) {
 		)
 		return { declaration, input }
 	})
-	const candidate = Effect.fnUntraced(function* (id: string, entry: Entry) {
-		const { input } = yield* prepared(entry)
-		return Remote.candidate({
+	const candidate = (id: string, entry: Entry) =>
+		Remote.candidate({
 			artifact: {
 				...entry.artifact,
 				directory: path.join(store, id, entry.artifact.directory),
 			},
 			contractModule: entry.contract,
 			target: entry.target,
-			input,
+			input: entry.input,
 		})
-	}, Effect.scoped)
+	const resolve = (desired: Change.Candidate) =>
+		resolveCandidate(
+			desired,
+			governed,
+			Effect.fnUntraced(function* (deployment, input) {
+				const declaration = yield* contract({
+					id: desired.identity,
+					contract: deployment.contractModule,
+				})
+				yield* Schema.decodeEffect(declaration.config)(input).pipe(
+					Effect.mapError((cause) => importError(desired.identity, cause)),
+				)
+			}),
+		).pipe(
+			Effect.scoped,
+			Effect.provideContext(environment),
+			Effect.mapError((cause) =>
+				Transition.DriverError.make({ cause: Cause.fail(cause) }),
+			),
+		)
+
 	const inspect = Effect.fnUntraced(function* (target: string) {
 		const journal = yield* Ref.get(state)
 		const current = yield* load(store, journal.status.current, governed)
@@ -386,7 +424,7 @@ export const make = Effect.fnUntraced(function* (options: Options) {
 	const forks = yield* Effect.forEach(
 		initialRelease.entries,
 		Effect.fnUntraced(function* (entry) {
-			const { declaration, input } = yield* prepared(entry)
+			const { declaration } = yield* prepared(entry)
 			const fork = yield* Graft.plugin(
 				Remote.plugin(declaration, {
 					instance: entry.id,
@@ -396,13 +434,15 @@ export const make = Effect.fnUntraced(function* (options: Options) {
 					},
 					contractModule: entry.contract,
 					target: entry.target,
-					policy: {
+					budget: options.budget,
+					requirements: {
 						trial: "2 seconds",
-						...options.policy,
+						...options.requirements,
 						probes: entry.probes,
 					},
+					resolve,
 				}),
-				input,
+				entry.input,
 			).pipe(
 				(effect) =>
 					authority === undefined
@@ -485,7 +525,7 @@ export const make = Effect.fnUntraced(function* (options: Options) {
 			return { status: journal.status, outcomes: [] }
 		const previous = yield* load(store, journal.status.current, governed)
 		const next = yield* load(store, request.target, governed)
-		// Prepare all in-memory recovery inputs before admitting any transition.
+		// Keep desired inputs unresolved; each allocation obtains current references.
 		const work = yield* Effect.forEach(
 			planned.changes,
 			Effect.fnUntraced(function* (change) {
@@ -501,8 +541,8 @@ export const make = Effect.fnUntraced(function* (options: Options) {
 				return {
 					old,
 					target,
-					before: yield* candidate(journal.status.current, old),
-					after: yield* candidate(request.target, target),
+					before: candidate(journal.status.current, old),
+					after: candidate(request.target, target),
 				}
 			}),
 		)
@@ -523,25 +563,26 @@ export const make = Effect.fnUntraced(function* (options: Options) {
 		const progress = yield* executeEntries(
 			work,
 			(item) => item.target.id,
-			Effect.fnUntraced(function* (item, compensation) {
+			(item, compensation, expected) => {
 				const entry = compensation ? item.old : item.target
-				const outcome = yield* Change.run({
+				return Change.run({
 					instance: entry.id,
 					candidate: compensation ? item.before : item.after,
-					budget: options.policy,
+					expected,
+					budget: options.budget,
 					requirements: {
-						trial: options.policy?.trial ?? "2 seconds",
+						trial: options.requirements?.trial ?? "2 seconds",
 						probes: entry.probes,
 					},
 				})
-				yield* event(
-					compensation ? "Compensation" : "Outcome",
-					compensation ? journal.status.current : request.target,
-					entry.id,
-					outcome,
-				)
-				return outcome
-			}),
+			},
+			(observation) =>
+				event(
+					observation.compensation ? "Compensation" : "Outcome",
+					observation.compensation ? journal.status.current : request.target,
+					observation.entry,
+					observation,
+				).pipe(protect),
 		)
 		const finished = yield* Ref.get(state)
 		const status: import("../Model").Status =
@@ -739,13 +780,3 @@ const planError = (diagnostics: ReadonlyArray<Diagnostic>) =>
 				Cause.combine(cause, diagnostic.cause ?? Cause.empty),
 		),
 	})
-
-const isJsonArray = (value: Schema.Json): value is Schema.JsonArray =>
-	Array.isArray(value)
-const hasEnvironmentReference = (value: Schema.Json): boolean =>
-	isJsonArray(value)
-		? Array.some(value, hasEnvironmentReference)
-		: value !== null && typeof value === "object"
-			? "$env" in value ||
-				Array.some(Record.values(value), hasEnvironmentReference)
-			: false

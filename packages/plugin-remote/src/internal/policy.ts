@@ -5,6 +5,8 @@ import {
 	Context,
 	Effect,
 	Exit,
+	HashMap,
+	HashSet,
 	Option,
 	Order,
 	Schema,
@@ -33,31 +35,92 @@ interface Reclaimer {
 export interface State {
 	readonly policy: Option.Option<T.Policy>
 	readonly closed: boolean
-	readonly bindings: ReadonlyArray<Binding>
+	readonly revisions: HashMap.HashMap<string, number>
+	readonly bindings: HashMap.HashMap<string, ReadonlyArray<Binding>>
+	readonly bindingCount: number
+	readonly serviceOwners: HashMap.HashMap<
+		string,
+		{ readonly entry: string; readonly count: number }
+	>
+	readonly assignments: HashMap.HashMap<string, ReadonlyArray<T.Assignment>>
+	readonly projectionsByService: HashMap.HashMap<
+		string,
+		ReadonlyArray<Trust.Projection>
+	>
 	readonly projections: ReadonlyArray<Trust.Projection>
-	readonly declarations: ReadonlyArray<{
-		readonly entry: string
-		readonly identity: T.Identity
-		readonly services: ReadonlyArray<string>
-	}>
-	readonly approvals: ReadonlyArray<T.Approval>
-	readonly revocations: ReadonlyArray<string>
-	readonly reclaimers: ReadonlyArray<Reclaimer>
+	readonly declarations: HashMap.HashMap<
+		string,
+		ReadonlyArray<{
+			readonly entry: string
+			readonly identity: T.Identity
+			readonly services: ReadonlyArray<string>
+		}>
+	>
+	readonly approvals: HashMap.HashMap<string, ReadonlyArray<T.Approval>>
+	readonly revocations: HashSet.HashSet<string>
+	readonly reclaimers: HashMap.HashMap<string, ReadonlyArray<Reclaimer>>
 }
 export const empty: State = {
 	policy: Option.none(),
 	closed: false,
-	bindings: [],
+	revisions: HashMap.empty(),
+	bindings: HashMap.empty(),
+	bindingCount: 0,
+	serviceOwners: HashMap.empty(),
+	assignments: HashMap.empty(),
+	projectionsByService: HashMap.empty(),
 	projections: [],
-	declarations: [],
-	approvals: [],
-	revocations: [],
-	reclaimers: [],
+	declarations: HashMap.empty(),
+	approvals: HashMap.empty(),
+	revocations: HashSet.empty(),
+	reclaimers: HashMap.empty(),
 }
-class Store extends Context.Service<Store, TxRef.TxRef<State>>()(
+export class Store extends Context.Service<Store, TxRef.TxRef<State>>()(
 	"@graftland/plugin-remote/internal/policy/Store",
 ) {}
 
+/** Entry tombstones survive binding removal and distinguish authorization ABA. */
+const revise = (state: State, entries: ReadonlyArray<string>): State => ({
+	...state,
+	revisions: Array.reduce(
+		Array.dedupe(entries),
+		state.revisions,
+		(versions, entry) =>
+			HashMap.set(
+				versions,
+				entry,
+				Option.getOrElse(HashMap.get(versions, entry), () => 0) + 1,
+			),
+	),
+})
+const entries = <A>(
+	index: HashMap.HashMap<string, ReadonlyArray<A>>,
+	key: string,
+) => Option.getOrElse(HashMap.get(index, key), () => [])
+const group = <A>(values: ReadonlyArray<A>, key: (value: A) => string) =>
+	Array.reduce(
+		values,
+		HashMap.empty<string, ReadonlyArray<A>>(),
+		(all, value) =>
+			HashMap.set(all, key(value), [...entries(all, key(value)), value]),
+	)
+export const initial = (
+	policy: T.Policy,
+	approvals: ReadonlyArray<T.Approval> = [],
+	revocations: ReadonlyArray<string> = [],
+	projections: ReadonlyArray<Trust.Projection> = [],
+): State => ({
+	...empty,
+	policy: Option.some(snapshot(policy)),
+	assignments: group(snapshot(policy.entries), (item) => item.entry),
+	approvals: group(
+		snapshot(approvals),
+		(item) => item.statement.assignment.entry,
+	),
+	revocations: HashSet.fromIterable(revocations),
+	projections: snapshot(projections),
+	projectionsByService: group(snapshot(projections), (item) => item.service),
+})
 const sameIdentity = (a: T.Identity, b: T.Identity) =>
 	a.package === b.package && a.digest === b.digest
 const same = Schema.toEquivalence(T.Statement)
@@ -84,26 +147,23 @@ const current = (
 ): Option.Option<T.Statement> => {
 	if (Option.isNone(state.policy)) return Option.none()
 	const assignment = Array.findFirst(
-		state.policy.value.entries,
-		(item) => item.entry === entry && sameIdentity(item.artifact, identity),
+		entries(state.assignments, entry),
+		(item) => sameIdentity(item.artifact, identity),
 	)
 	if (Option.isNone(assignment)) return Option.none()
-	const keys = Array.flatMap(
-		Array.filter(
-			state.declarations,
-			(binding) =>
-				binding.entry === entry && sameIdentity(binding.identity, identity),
-		),
-		(binding: State["declarations"][number]) => binding.services,
+	const declaration = Array.findFirst(
+		entries(state.declarations, entry),
+		(binding) => sameIdentity(binding.identity, identity),
 	)
+	const keys = Option.isSome(declaration) ? declaration.value.services : []
 	const projections = Array.sortBy(
 		Order.mapInput(Order.String, (item: Trust.Projection) => item.projection),
 		Order.mapInput(Order.String, (item: Trust.Projection) => item.view),
 		Order.mapInput(Order.String, (item: Trust.Projection) => item.service),
 		Order.mapInput(Order.String, (item: Trust.Projection) => item.operation),
 	)(
-		Array.filter(state.projections, (item) =>
-			Array.contains(keys, item.service),
+		Array.flatMap(Array.dedupe(keys), (key) =>
+			entries(state.projectionsByService, key),
 		),
 	)
 	return Option.some(
@@ -122,11 +182,11 @@ const references = (statement: T.Statement) =>
 	)
 const revoked = (state: State, statement: T.Statement) =>
 	Array.some(references(statement), (reference) =>
-		Array.contains(state.revocations, reference),
+		HashSet.has(state.revocations, reference),
 	)
 const rejected = (entry: string, reason: T.Unapproved["reason"]) =>
 	T.Unapproved.make({ entry, reason })
-const comparison = Effect.fnUntraced(function* (
+export const comparison = Effect.fnUntraced(function* (
 	entry: string,
 	candidate: string,
 ) {
@@ -134,13 +194,13 @@ const comparison = Effect.fnUntraced(function* (
 	const state = yield* TxRef.get(stateRef)
 	if (state.closed) return yield* rejected(entry, "Closed")
 	const binding = Array.findFirst(
-		state.bindings,
+		entries(state.bindings, entry),
 		(item) => item.entry === entry && item.candidate === candidate,
 	)
 	if (Option.isNone(binding)) return yield* rejected(entry, "UnknownArtifact")
 	const selected = current(state, entry, binding.value.identity)
 	if (Option.isNone(selected)) return yield* rejected(entry, "UnknownArtifact")
-	const matching = Array.findLast(state.approvals, (record) =>
+	const matching = Array.findLast(entries(state.approvals, entry), (record) =>
 		same(record.statement, selected.value),
 	)
 	if (
@@ -150,11 +210,12 @@ const comparison = Effect.fnUntraced(function* (
 		return yield* rejected(entry, "Revoked")
 	const previous = Option.orElse(matching, () =>
 		Array.findLast(
-			state.approvals,
+			entries(state.approvals, entry),
 			(record) => record.statement.assignment.entry === entry,
 		),
 	)
 	return {
+		revision: Option.getOrElse(HashMap.get(state.revisions, entry), () => 0),
 		current: selected.value,
 		approved: Option.map(previous, (record) => record.statement),
 		missing: "MissingApproval",
@@ -213,15 +274,14 @@ export const install = Effect.fnUntraced(function* (
 			message: "Policy assignments and grant ids must be unique",
 		})
 
-	const stateRef = yield* TxRef.make<State>({
-		...empty,
-		policy: Option.some(snapshot(decoded)),
-		approvals: snapshot(approvals),
-		revocations: snapshot(revocations),
-		projections: snapshot(
+	const stateRef = yield* TxRef.make<State>(
+		initial(
+			decoded,
+			approvals,
+			revocations,
 			Array.reduce(publications, Array.empty<Trust.Projection>(), replaceView),
 		),
-	})
+	)
 	const provide = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
 		effect.pipe(Effect.provideService(Store, stateRef))
 	const methods = Service.of({
@@ -233,7 +293,7 @@ export const install = Effect.fnUntraced(function* (
 		onRevoke: (...args) => provide(onRevoke(...args)),
 		statements: provide(statements),
 		bindings: TxRef.get(stateRef).pipe(
-			Effect.map((state) => state.bindings.length),
+			Effect.map((state) => state.bindingCount),
 		),
 	})
 	const audit = yield* Effect.serviceOption(Audit)
@@ -252,7 +312,11 @@ export const install = Effect.fnUntraced(function* (
 			yield* close
 			const owners = yield* TxRef.modify(
 				stateRef,
-				(state) => [state.reclaimers, { ...state, closed: true }] as const,
+				(state) =>
+					[
+						Array.flatten(Array.fromIterable(HashMap.values(state.reclaimers))),
+						{ ...state, closed: true },
+					] as const,
 			)
 			yield* terminateAll(owners)
 		}).pipe(Effect.orDie),
@@ -277,13 +341,11 @@ export const bind = Effect.fnUntraced(function* (
 					return yield* rejected(entry, "UnknownArtifact")
 				if (
 					Option.isSome(state.policy) &&
-					Array.some(
-						state.bindings,
-						(binding) =>
-							binding.entry !== entry &&
-							Array.some(services, (key) =>
-								Array.contains(binding.services, key),
-							),
+					Array.some(services, (key) =>
+						Option.exists(
+							HashMap.get(state.serviceOwners, key),
+							(owner) => owner.entry !== entry,
+						),
 					)
 				)
 					return yield* T.PolicyError.make({
@@ -296,12 +358,41 @@ export const bind = Effect.fnUntraced(function* (
 					identity: snapshot(identity),
 					services: snapshot(services),
 				}
+				const previous = Array.findFirst(
+					entries(state.declarations, entry),
+					(item) =>
+						item.entry === entry && sameIdentity(item.identity, identity),
+				)
+				const next =
+					Option.isSome(previous) &&
+					Schema.toEquivalence(Schema.Array(Schema.String))(
+						previous.value.services,
+						services,
+					)
+						? state
+						: revise(state, [entry])
 				yield* TxRef.set(stateRef, {
-					...state,
-					bindings: [...state.bindings, binding],
-					declarations: [
+					...next,
+					bindings: HashMap.set(state.bindings, entry, [
+						...entries(state.bindings, entry),
+						binding,
+					]),
+					bindingCount: state.bindingCount + 1,
+					serviceOwners: Array.reduce(
+						services,
+						state.serviceOwners,
+						(owners, key) =>
+							HashMap.set(owners, key, {
+								entry,
+								count: Option.match(HashMap.get(owners, key), {
+									onNone: () => 1,
+									onSome: (owner) => owner.count + 1,
+								}),
+							}),
+					),
+					declarations: HashMap.set(state.declarations, entry, [
 						...Array.filter(
-							state.declarations,
+							entries(state.declarations, entry),
 							(item) =>
 								item.entry !== entry || !sameIdentity(item.identity, identity),
 						),
@@ -310,7 +401,7 @@ export const bind = Effect.fnUntraced(function* (
 							identity: snapshot(identity),
 							services: snapshot(services),
 						},
-					],
+					]),
 				})
 				return Option.isSome(assignment)
 					? assignment.value.assignment
@@ -320,7 +411,30 @@ export const bind = Effect.fnUntraced(function* (
 		() =>
 			TxRef.update(stateRef, (state) => ({
 				...state,
-				bindings: Array.filter(state.bindings, (item) => item.token !== token),
+				bindings: HashMap.set(
+					state.bindings,
+					entry,
+					Array.filter(
+						entries(state.bindings, entry),
+						(item) => item.token !== token,
+					),
+				),
+				bindingCount: state.bindingCount - 1,
+				serviceOwners: Array.reduce(
+					services,
+					state.serviceOwners,
+					(owners, key) =>
+						Option.match(HashMap.get(owners, key), {
+							onNone: () => owners,
+							onSome: (owner) =>
+								owner.count <= 1
+									? HashMap.remove(owners, key)
+									: HashMap.set(owners, key, {
+											...owner,
+											count: owner.count - 1,
+										}),
+						}),
+				),
 			})),
 	)
 })
@@ -335,7 +449,7 @@ export const statement = Effect.fnUntraced(function* (
 		onSome: Effect.succeed,
 	})
 })
-const publish = Effect.fnUntraced(function* (
+export const publish = Effect.fnUntraced(function* (
 	publication: Trust.Publication,
 	audit: Option.Option<Audit["Service"]>,
 ) {
@@ -391,10 +505,36 @@ const publish = Effect.fnUntraced(function* (
 				yield* restore(audit.value.ready)
 				yield* audit.value.record(snapshot({ before, after }))
 			}
-			yield* TxRef.update(stateRef, (current) => ({
-				...current,
-				projections: replaceView(current.projections, after),
-			}))
+			yield* Effect.tx(
+				TxRef.update(stateRef, (current) => {
+					const services = Array.dedupe(
+						Array.map(
+							[...before.values, ...after.values],
+							(item) => item.service,
+						),
+					)
+					const entries = Array.map(
+						Array.filter(
+							Array.flatten(
+								Array.fromIterable(HashMap.values(current.declarations)),
+							),
+							(item) =>
+								Array.some(item.services, (key) =>
+									Array.contains(services, key),
+								),
+						),
+						(item) => item.entry,
+					)
+					return {
+						...revise(current, entries),
+						projections: replaceView(current.projections, after),
+						projectionsByService: group(
+							replaceView(current.projections, after),
+							(item) => item.service,
+						),
+					}
+				}),
+			)
 		}),
 	)
 })
@@ -433,14 +573,18 @@ export const approve = Effect.fnUntraced(function* (record: T.Approval) {
 					"ChangedStatement",
 				)
 			yield* TxRef.set(stateRef, {
-				...state,
-				approvals: [
-					...Array.filter(
-						state.approvals,
-						(item) => !same(item.statement, record.statement),
-					),
-					snapshot(record),
-				],
+				...revise(state, [record.statement.assignment.entry]),
+				approvals: HashMap.set(
+					state.approvals,
+					record.statement.assignment.entry,
+					[
+						...Array.filter(
+							entries(state.approvals, record.statement.assignment.entry),
+							(item) => !same(item.statement, record.statement),
+						),
+						snapshot(record),
+					],
+				),
 			})
 		}),
 	)
@@ -455,20 +599,27 @@ export const onRevoke = Effect.fnUntraced(function* (
 	yield* Effect.acquireRelease(
 		TxRef.update(stateRef, (state) => ({
 			...state,
-			reclaimers: [...state.reclaimers, reclaimer],
+			reclaimers: HashMap.set(state.reclaimers, entry, [
+				...entries(state.reclaimers, entry),
+				reclaimer,
+			]),
 		})),
 		() =>
 			TxRef.update(stateRef, (state) => ({
 				...state,
-				reclaimers: Array.filter(
+				reclaimers: HashMap.set(
 					state.reclaimers,
-					(item) => item !== reclaimer,
+					entry,
+					Array.filter(
+						entries(state.reclaimers, entry),
+						(item) => item !== reclaimer,
+					),
 				),
 			})),
 	)
 	const state = yield* TxRef.get(stateRef)
 	const binding = Array.findFirst(
-		state.bindings,
+		entries(state.bindings, entry),
 		(item) => item.entry === entry && item.candidate === candidate,
 	)
 	if (state.closed) return yield* terminateAll([reclaimer])
@@ -478,7 +629,7 @@ export const onRevoke = Effect.fnUntraced(function* (
 			Option.isSome(selected) &&
 			revoked(state, selected.value) &&
 			!Array.some(
-				state.approvals,
+				entries(state.approvals, entry),
 				(record) =>
 					record.overrideRevocations &&
 					record.statement.policyVersion === selected.value.policyVersion &&
@@ -498,34 +649,65 @@ export const revoke = Effect.fnUntraced(function* (
 	const reclaimers = yield* Effect.tx(
 		Effect.gen(function* () {
 			const state = yield* TxRef.get(stateRef)
-			const next = {
-				...state,
-				revocations: Array.dedupe([...state.revocations, ...refs]),
-				approvals: Array.filter(
-					state.approvals,
-					(record) =>
-						!Array.some(references(record.statement), (ref) =>
-							Array.contains(refs, ref),
+			const affected = Array.dedupe(
+				Option.match(state.policy, {
+					onNone: () => [],
+					onSome: (policy) =>
+						Array.map(
+							Array.filter(policy.entries, (assignment) =>
+								Array.some(
+									references({
+										assignment,
+										policyVersion: policy.version,
+										projections: [],
+									}),
+									(ref) => Array.contains(refs, ref),
+								),
+							),
+							(assignment) => assignment.entry,
 						),
+				}),
+			)
+			const next = {
+				...revise(state, affected),
+				revocations: HashSet.union(
+					state.revocations,
+					HashSet.fromIterable(refs),
+				),
+				approvals: Array.reduce(affected, state.approvals, (all, entry) =>
+					HashMap.set(
+						all,
+						entry,
+						Array.filter(
+							entries(all, entry),
+							(record) =>
+								!Array.some(references(record.statement), (ref) =>
+									Array.contains(refs, ref),
+								),
+						),
+					),
 				),
 			}
 			yield* TxRef.set(stateRef, next)
-			return Array.filter(next.reclaimers, (item) => {
-				const binding = Array.findFirst(
-					next.bindings,
-					(binding) =>
-						binding.entry === item.entry &&
-						binding.candidate === item.candidate,
-				)
-				if (Option.isNone(binding)) return false
-				const selected = current(next, item.entry, binding.value.identity)
-				return (
-					Option.isSome(selected) &&
-					Array.some(references(selected.value), (ref) =>
-						Array.contains(refs, ref),
+			return Array.filter(
+				Array.flatMap(affected, (entry) => entries(next.reclaimers, entry)),
+				(item) => {
+					const binding = Array.findFirst(
+						entries(next.bindings, item.entry),
+						(binding) =>
+							binding.entry === item.entry &&
+							binding.candidate === item.candidate,
 					)
-				)
-			})
+					if (Option.isNone(binding)) return false
+					const selected = current(next, item.entry, binding.value.identity)
+					return (
+						Option.isSome(selected) &&
+						Array.some(references(selected.value), (ref) =>
+							Array.contains(refs, ref),
+						)
+					)
+				},
+			)
 		}),
 	)
 	yield* terminateAll(reclaimers)

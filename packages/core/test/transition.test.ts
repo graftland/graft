@@ -1506,6 +1506,7 @@ it.effect(
 			const comparison = yield* TxRef.make<Trust.Comparison>({
 				current: { revision: 1 },
 				approved: Option.some({ revision: 1 }),
+				revision: 0,
 				missing: "MissingApproval",
 			})
 			yield* Trust.register({
@@ -1558,6 +1559,7 @@ it.effect(
 					Effect.succeed({
 						current: null,
 						approved: Option.some(null),
+						revision: 0,
 						missing: "MissingApproval",
 					}),
 				publish: () => Effect.void,

@@ -63,9 +63,16 @@ const waitInvalidation = Effect.fnUntraced(function* (
 	record: ChangeTable.Record,
 	run: Run,
 ) {
-	if (yield* ChangeTable.valid(record)) return yield* Effect.txRetry
+	const invalidation = yield* ChangeTable.invalidation(record)
+	if (Option.isNone(invalidation)) return yield* Effect.txRetry
 	const progress = yield* TxRef.get(run.progress)
-	return yield* Effect.fail(failed({ reason: "Stale", phase: progress.phase }))
+	return yield* Effect.fail(
+		failed({
+			reason: "Stale",
+			phase: progress.phase,
+			cause: invalidation.value,
+		}),
+	)
 }, Effect.tx)
 
 /** Strategies compose the same owned primitives; only their order differs. */
@@ -125,12 +132,14 @@ export const execute = Effect.fnUntraced(function* (
 		return attempt
 	})
 	const trial = (attempt: Attempt) =>
-		coordinator.step(
-			attempt.id,
-			"Trial",
-			Effect.asVoid(Effect.timeoutOption(attempt.failure, policy.trial)),
-			Math.max(1, policy.trial + 1),
-		)
+		policy.trial === 0
+			? Effect.void
+			: coordinator.step(
+					attempt.id,
+					"Trial",
+					Effect.asVoid(Effect.timeoutOption(attempt.failure, policy.trial)),
+					Number.POSITIVE_INFINITY,
+				)
 	const retireOld = Effect.fnUntraced(function* () {
 		if (Option.isNone(previous)) return
 		const result = yield* coordinator.retire(previous.value)
@@ -329,7 +338,19 @@ export const emergency = Effect.fnUntraced(function* (
 	const coordinator = engine(managed, policy, run.evidence, run.budget)
 	const attempts = yield* TxRef.get(managed.attempts)
 	const results = yield* Effect.forEach(attempts, (attempt) =>
-		coordinator.terminate(attempt).pipe(Effect.exit),
+		coordinator.terminate(attempt).pipe(
+			Effect.tapCause((cause) =>
+				TxRef.update(
+					run.evidence,
+					Array.append({
+						attempt: attempt.id,
+						phase: "Terminating",
+						cause,
+					} satisfies Change.Evidence),
+				),
+			),
+			Effect.exit,
+		),
 	)
 	const evidence = yield* TxRef.get(run.evidence)
 	const unconfirmed = Array.some(

@@ -1,4 +1,4 @@
-import { Array, Context, Effect, Schema } from "effect"
+import { Array, Context, Data, Effect, Schema } from "effect"
 
 import { Manifest, Change as RuntimeChange } from "@graftland/graft"
 import { Artifact, Publication } from "@graftland/plugin-remote"
@@ -76,6 +76,7 @@ export const Status = Schema.Struct({
 export type Status = typeof Status.Type
 /** Safe durable summary: never serializes arbitrary causes or resolved configuration. */
 export const OutcomeSummary = Schema.Struct({
+	change: RuntimeChange.Id,
 	_tag: Schema.Literals([
 		"Accepted",
 		"Aborted",
@@ -87,7 +88,7 @@ export const OutcomeSummary = Schema.Struct({
 	reason: Schema.optionalKey(Schema.String),
 	evidence: Schema.Array(
 		Schema.Struct({
-			attempt: Schema.Int,
+			attempt: Schema.optionalKey(Schema.Int),
 			phase: Schema.String,
 			hasCause: Schema.Boolean,
 			termination: Schema.optionalKey(
@@ -101,11 +102,12 @@ export const OutcomeSummary = Schema.Struct({
 })
 export type OutcomeSummary = typeof OutcomeSummary.Type
 export const summarize = (outcome: RuntimeChange.Outcome): OutcomeSummary => ({
+	change: outcome.change,
 	_tag: outcome._tag,
 	phase: outcome.phase,
 	...(outcome._tag === "Accepted" ? {} : { reason: outcome.reason }),
 	evidence: Array.map(outcome.evidence, (evidence) => ({
-		attempt: evidence.attempt,
+		...(evidence.attempt === undefined ? {} : { attempt: evidence.attempt }),
 		phase: evidence.phase,
 		hasCause: evidence.cause !== undefined,
 		...(evidence.termination === undefined
@@ -118,6 +120,14 @@ export const summarize = (outcome: RuntimeChange.Outcome): OutcomeSummary => ({
 				}),
 	})),
 })
+export const RejectionSummary = Schema.Struct({
+	reason: RuntimeChange.Rejection,
+})
+export type RejectionSummary = typeof RejectionSummary.Type
+export const summarizeRejection = (
+	rejection: RuntimeChange.ChangeRejected,
+): RejectionSummary => ({ reason: rejection.reason })
+
 export const Event = Schema.Struct({
 	approval: Schema.optionalKey(Policy.Approval),
 	projection: Schema.optionalKey(Policy.ProjectionChange),
@@ -140,6 +150,7 @@ export const Event = Schema.Struct({
 	target: Id,
 	entry: Schema.optionalKey(Schema.String),
 	outcome: Schema.optionalKey(OutcomeSummary),
+	rejection: Schema.optionalKey(RejectionSummary),
 	overrideRevocations: Schema.optionalKey(Schema.Boolean),
 	entries: Schema.optionalKey(Schema.Array(Schema.String)),
 })
@@ -158,13 +169,22 @@ export class ReleaseError extends Schema.TaggedError<
 	message: Schema.String,
 	cause: Schema.optionalKey(Schema.Cause(Schema.Unknown, Schema.Unknown)),
 }) {}
-export interface Applied {
-	readonly status: Status
-	readonly outcomes: ReadonlyArray<{
+export type Observation = Data.TaggedEnum<{
+	Admitted: {
 		readonly entry: string
 		readonly compensation: boolean
 		readonly outcome: RuntimeChange.Outcome
-	}>
+	}
+	Rejected: {
+		readonly entry: string
+		readonly compensation: boolean
+		readonly rejection: RuntimeChange.ChangeRejected
+	}
+}>
+export const Observation = Data.taggedEnum<Observation>()
+export interface Applied {
+	readonly status: Status
+	readonly outcomes: ReadonlyArray<Observation>
 }
 export const Apply = Schema.Struct({
 	target: Id,
@@ -178,7 +198,8 @@ export interface Options {
 	readonly initial: string
 	readonly host: Manifest.Host
 	readonly socket?: string
-	readonly policy?: Partial<RuntimeChange.Budget & RuntimeChange.Requirements>
+	readonly budget?: Partial<RuntimeChange.Budget>
+	readonly requirements?: Partial<RuntimeChange.Requirements>
 }
 export const Config = Schema.Struct({
 	trust: Schema.optionalKey(Schema.NonEmptyString),

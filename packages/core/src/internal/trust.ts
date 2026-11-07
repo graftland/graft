@@ -32,6 +32,60 @@ export const empty: State = {
 	owners: [],
 }
 const same = Schema.toEquivalence(Schema.Json)
+export interface Condition {
+	readonly authority: Option.Option<T.Authority>
+	readonly entry: string
+	readonly candidate: string
+	readonly revision: number
+}
+export const snapshot = Effect.fnUntraced(function* (
+	runtime: Runtime,
+	entry: string,
+	candidate: string,
+) {
+	yield* admission(runtime, entry, candidate)
+	const state = yield* TxRef.get(runtime.trust)
+	const revision = Option.isNone(state.authority)
+		? 0
+		: (yield* state.authority.value.compare(entry, candidate)).revision
+	return {
+		authority: state.authority,
+		entry,
+		candidate,
+		revision,
+	} satisfies Condition
+})
+export const verify = Effect.fnUntraced(function* (
+	runtime: Runtime,
+	condition: Condition,
+) {
+	const state = yield* TxRef.get(runtime.trust)
+	if (state.closed)
+		return yield* T.Unapproved.make({
+			entry: condition.entry,
+			reason: "Closed",
+		})
+	if (
+		!Option.makeEquivalence((a: T.Authority, b: T.Authority) => a === b)(
+			state.authority,
+			condition.authority,
+		)
+	)
+		return yield* T.Unapproved.make({
+			entry: condition.entry,
+			reason: "AuthorityChanged",
+		})
+	if (Option.isNone(state.authority)) return
+	const comparison = yield* state.authority.value.compare(
+		condition.entry,
+		condition.candidate,
+	)
+	if (comparison.revision !== condition.revision)
+		return yield* T.Unapproved.make({
+			entry: condition.entry,
+			reason: `Authorization version changed from ${condition.revision} to ${comparison.revision}`,
+		})
+})
 export const admission = (
 	runtime: Runtime,
 	entry: string,

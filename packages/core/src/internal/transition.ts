@@ -70,6 +70,7 @@ interface HostLease extends Capacity.Credit {
 	readonly id: number
 	readonly scope: Scope.Closeable
 	readonly hostRelease: Ref.Ref<HostRelease>
+	readonly terminated: TxRef.TxRef<Option.Option<Change.Termination>>
 }
 export interface Attempt extends HostLease {
 	readonly allocation: T.Allocation
@@ -79,7 +80,6 @@ export interface Attempt extends HostLease {
 	readonly failure: Effect.Effect<never, T.DriverError>
 	readonly calls: TxRef.TxRef<number>
 	readonly services: TxRef.TxRef<Context.Context<never>>
-	readonly terminated: TxRef.TxRef<Option.Option<Change.Termination>>
 }
 export interface Managed {
 	readonly runtime: Runtime
@@ -115,7 +115,7 @@ export interface Run {
 	readonly record: ChangeTable.Record | undefined
 	readonly evidence: TxRef.TxRef<ReadonlyArray<Change.Evidence>>
 	readonly progress: TxRef.TxRef<{
-		readonly attempt: number
+		readonly attempt: number | undefined
 		readonly phase: Change.Phase
 	}>
 	readonly budget: Budget
@@ -278,6 +278,7 @@ export interface Failed {
 	readonly _tag: "TransitionStepFailed"
 	readonly reason: Change.Reason
 	readonly phase: Change.Phase
+	readonly cause?: Cause.Cause<unknown>
 }
 export const failed = (value: Omit<Failed, "_tag">): Failed => ({
 	_tag: "TransitionStepFailed",
@@ -308,6 +309,53 @@ export const engine = (
 					)
 			}),
 		)
+	const observeSettlement = Effect.fnUntraced(function* (lease: HostLease) {
+		if (change === undefined) return
+		const termination = yield* TxRef.get(lease.terminated)
+		const host = yield* Ref.get(lease.hostRelease)
+		const fact: Change.Settlement = {
+			generation: lease.id,
+			execution: Option.match(termination, {
+				onNone: () => "Unconfirmed",
+				onSome: (value) => value.state,
+			}),
+			cleanup:
+				host._tag !== "Completed"
+					? "Pending"
+					: Exit.isSuccess(host.exit)
+						? "Completed"
+						: Cause.hasInterruptsOnly(host.exit.cause)
+							? "Unknown"
+							: "Failed",
+			cause: Cause.combine(
+				Option.flatMap(termination, (value) =>
+					Option.fromUndefinedOr(value.cause),
+				).pipe(Option.getOrElse(() => Cause.empty)),
+				host._tag === "Completed" && Exit.isFailure(host.exit)
+					? host.exit.cause
+					: Cause.empty,
+			),
+		}
+		yield* Effect.tx(
+			ChangeTable.update(managed.runtime.changes, change, (status) => ({
+				...status,
+				settlement: [
+					...Array.filter(
+						status.settlement,
+						(previous) => previous.generation !== lease.id,
+					),
+					fact,
+				],
+				unconfirmedUnits: Option.isSome(termination)
+					? Array.filter(
+							status.unconfirmedUnits,
+							(generation) => generation !== lease.id,
+						)
+					: status.unconfirmedUnits,
+			})),
+		)
+	})
+
 	const step = <A, E>(
 		attempt: number,
 		phase: Change.Phase,
@@ -482,6 +530,7 @@ export const engine = (
 						}),
 					),
 					hostRelease: yield* Ref.make<HostRelease>({ _tag: "Pending" }),
+					terminated: yield* TxRef.make(Option.none<Change.Termination>()),
 				}
 				yield* TxRef.update(managed.leases, Array.append(lease))
 				const allocated = yield* Effect.exit(
@@ -516,11 +565,16 @@ export const engine = (
 										)
 										if (
 											candidate.driver !== desired.driver ||
-											candidate.identity !== desired.identity
+											candidate.identity !== desired.identity ||
+											(managed.driver.footprint !== undefined &&
+												!Equal.equals(
+													managed.driver.footprint(desired),
+													managed.driver.footprint(candidate),
+												))
 										)
 											return yield* T.DriverError.make({
 												cause: Cause.fail(
-													"Resolved input changed the admitted driver or identity",
+													"Resolved input changed the admitted resource footprint",
 												),
 											})
 										const unit = yield* Effect.suspend(() =>
@@ -555,9 +609,6 @@ export const engine = (
 								),
 								calls: yield* TxRef.make(0),
 								services: yield* TxRef.make(Context.empty()),
-								terminated: yield* TxRef.make<
-									Option.Option<Change.Termination>
-								>(Option.none()),
 							}
 							yield* TxRef.update(managed.attempts, Array.append(attempt))
 							yield* generation(managed, attempt, "Starting")
@@ -567,6 +618,13 @@ export const engine = (
 					),
 				)
 				if (Exit.isSuccess(allocated)) return allocated.value
+				yield* TxRef.set(
+					lease.terminated,
+					Option.some({
+						unit: `${managed.instance}-${id}`,
+						state: "NotStarted",
+					}),
+				)
 				const host = yield* awaitHostRelease(lease)
 				yield* Effect.tx(
 					Generations.settle(managed.entry.node, lease.generation).pipe(
@@ -768,6 +826,7 @@ export const engine = (
 	const awaitHostRelease = Effect.fnUntraced(function* (attempt: HostLease) {
 		const state = yield* beginHostRelease(attempt)
 		if (state._tag === "Completed") {
+			yield* observeSettlement(attempt)
 			if (Exit.isFailure(state.exit))
 				yield* record({
 					attempt: attempt.id,
@@ -786,6 +845,7 @@ export const engine = (
 		)
 		// The deadline is evidence about this wait, not the finalizer's eventual exit.
 		const observed = yield* Ref.get(attempt.hostRelease)
+		yield* observeSettlement(attempt)
 		if (observed._tag === "Completed" && Exit.isFailure(observed.exit))
 			yield* record({
 				attempt: attempt.id,
@@ -818,6 +878,7 @@ export const engine = (
 				yield* TxRef.set(attempt.terminated, Option.some(termination))
 				yield* Generations.settle(managed.entry.node, attempt.generation)
 				yield* Capacity.end(managed.runtime.capacity, attempt)
+				yield* observeSettlement(attempt)
 			}),
 		)
 	const observeExit = Effect.fnUntraced(
@@ -939,14 +1000,20 @@ export const engine = (
 					return yield* Effect.interrupt
 				if (change !== undefined && !(yield* ChangeTable.commit(change)))
 					return yield* Effect.fail(
-						failed({ reason: "Failed", phase: "Cutover" }),
+						failed({ reason: "Stale", phase: "Cutover" }),
 					)
 				yield* Trust.admission(
 					managed.runtime,
 					managed.instance,
 					attempt.desired.identity,
 				).pipe(
-					Effect.mapError(() => failed({ reason: "Failed", phase: "Cutover" })),
+					Effect.mapError((error) =>
+						failed({
+							reason: "Failed",
+							phase: "Cutover",
+							cause: Cause.fail(error),
+						}),
+					),
 				)
 				if (change !== undefined) yield* TxRef.set(change.oldChanged, true)
 				yield* TxRef.set(managed.desired, attempt.desired)
@@ -1040,7 +1107,16 @@ export const register = Effect.fnUntraced(function* (
 				route: yield* TxRef.make<Option.Option<Attempt>>(Option.none()),
 				attempts: yield* TxRef.make<ReadonlyArray<Attempt>>([]),
 				leases: yield* TxRef.make<ReadonlyArray<HostLease>>([]),
-				next: yield* TxRef.make(1),
+				next: yield* Effect.tx(
+					Effect.gen(function* () {
+						const terms = yield* TxRef.get(runtime.terms)
+						const existing = HashMap.get(terms, instance)
+						if (Option.isSome(existing)) return existing.value
+						const next = TxRef.makeUnsafe(1)
+						yield* TxRef.set(runtime.terms, HashMap.set(terms, instance, next))
+						return next
+					}),
+				),
 				context: yield* Effect.context<never>(),
 				entry,
 			}

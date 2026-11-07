@@ -49,7 +49,8 @@ export interface Termination {
 }
 
 export interface Evidence {
-	readonly attempt: number
+	/** Absent for metadata preparation, before an execution generation exists. */
+	readonly attempt?: number | undefined
 	readonly phase: Phase
 	readonly cause?: Cause.Cause<unknown>
 	readonly termination?: Termination
@@ -139,6 +140,7 @@ export class ChangeRejected extends Schema.TaggedError<
 	{ readonly brand: unique symbol }
 >()("ChangeRejected", {
 	reason: Rejection,
+	cause: Schema.optionalKey(Schema.Cause(Schema.Unknown, Schema.Unknown)),
 }) {}
 
 export type Health = "Serving" | "Unavailable" | "Stopped" | "Unknown"
@@ -221,6 +223,12 @@ export interface Status {
 	readonly leaseHolders: ReadonlyArray<number>
 	readonly unconfirmedUnits: ReadonlyArray<number>
 	readonly settlement: ReadonlyArray<Settlement>
+	readonly preparation?:
+		| {
+				readonly cleanup: Settlement["cleanup"]
+				readonly cause: Cause.Cause<unknown>
+		  }
+		| undefined
 	readonly evidence: ReadonlyArray<Evidence>
 	readonly outcome: import("effect").Option.Option<Outcome>
 }

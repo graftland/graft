@@ -46,6 +46,9 @@ const setup = Effect.fnUntraced(function* (
 	failCandidate: boolean = false,
 	cleanup: Effect.Effect<void> = Effect.void,
 	call: Effect.Effect<void> = Effect.void,
+	resolve: (desired: Change.Candidate) => Change.Candidate = (desired) =>
+		desired,
+	wrongAcknowledgement: boolean = false,
 ) {
 	const oldExit = yield* Deferred.make<Change.Termination>()
 	const stopping = yield* Deferred.make<void>()
@@ -53,13 +56,17 @@ const setup = Effect.fnUntraced(function* (
 	const resolved = yield* Ref.make<ReadonlyArray<string>>([])
 	const driver: Transition.Driver = {
 		name: "restart",
+		footprint: (target) => target.deployment,
 		allocate: (target, term, allocation) =>
 			Effect.gen(function* () {
 				if (term === 1) yield* Effect.addFinalizer(() => cleanup)
 				const exited =
 					term === 1 ? oldExit : yield* Deferred.make<Change.Termination>()
 				return {
-					acknowledgement: allocation,
+					acknowledgement:
+						wrongAcknowledgement && term === 2
+							? { ...allocation, generation: allocation.generation - 1 }
+							: allocation,
 					start: Ref.update(starts, Array.append(term)).pipe(
 						Effect.andThen(
 							term === 2 && failCandidate
@@ -103,7 +110,7 @@ const setup = Effect.fnUntraced(function* (
 					requirements: {},
 					resolve: (desired) =>
 						Ref.update(resolved, Array.append(desired.identity)).pipe(
-							Effect.as(desired),
+							Effect.as(resolve(desired)),
 						),
 					queue: { maxWaiters: 1, maxWait: 50 },
 					required: [],
@@ -383,6 +390,58 @@ it.effect(
 					budget,
 				})
 				assert.strictEqual(restored._tag, "Accepted")
+			}),
+		),
+)
+
+it.effect(
+	"fences an acknowledgement from a different generation before startup and never reuses its term",
+	() =>
+		run(
+			Effect.gen(function* () {
+				const h = yield* setup(
+					false,
+					Effect.void,
+					Effect.void,
+					(desired) => desired,
+					true,
+				)
+				const handle = yield* Change.submit({
+					instance: "a",
+					candidate: candidate("next"),
+					budget,
+				})
+				yield* Deferred.await(h.stopping)
+				yield* Deferred.succeed(h.oldExit, { unit: "unit-1", state: "Exited" })
+				const outcome = yield* handle.await
+				assert.strictEqual(outcome._tag, "Recovered")
+				const starts = yield* Ref.get(h.starts)
+				assert.deepStrictEqual(starts, [1, 3])
+			}),
+		),
+)
+
+it.effect(
+	"rejects a resolved resource footprint change before allocating the candidate",
+	() =>
+		run(
+			Effect.gen(function* () {
+				const h = yield* setup(false, Effect.void, Effect.void, (desired) =>
+					desired.identity === "next"
+						? { ...desired, deployment: "different-placement" }
+						: desired,
+				)
+				const handle = yield* Change.submit({
+					instance: "a",
+					candidate: candidate("next"),
+					budget,
+				})
+				yield* Deferred.await(h.stopping)
+				yield* Deferred.succeed(h.oldExit, { unit: "unit-1", state: "Exited" })
+				const outcome = yield* handle.await
+				assert.strictEqual(outcome._tag, "Recovered")
+				const starts = yield* Ref.get(h.starts)
+				assert.deepStrictEqual(starts, [1, 3])
 			}),
 		),
 )

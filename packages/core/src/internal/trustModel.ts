@@ -57,6 +57,8 @@ export class RegistrationError extends Schema.TaggedError<
 }) {}
 /** Immutable operator values, never a contract definition. */
 export interface Comparison {
+	/** Monotonic authorization version for this entry, including removal and recreation. */
+	readonly revision: number
 	readonly current: Schema.Json
 	readonly approved: Option.Option<Schema.Json>
 	readonly missing: string

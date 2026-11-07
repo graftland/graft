@@ -161,6 +161,7 @@ export interface Runtime {
 	readonly instances: TxRef.TxRef<
 		HashMap.HashMap<string, import("./transition").Managed>
 	>
+	readonly terms: TxRef.TxRef<HashMap.HashMap<string, TxRef.TxRef<number>>>
 	/** Services from the environment `Graft.layer` was built in; they satisfy `inject` too. */
 	readonly ambient: Context.Context<never>
 	readonly slots: TxRef.TxRef<HashMap.HashMap<ServiceKey, Slot>>

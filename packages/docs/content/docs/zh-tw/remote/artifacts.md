@@ -39,6 +39,18 @@ export const capture = Effect.gen(function* () {
 向[受管理 Remote 外掛](../../transitions/#啟動受管理-remote-外掛)傳入 `artifact`
 後，驅動會在每次啟動前驗證工件，復原時也會驗證。
 
+## 宣告重疊支援
+
+在擷取套件的 `package.json` 中宣告：
+
+```json
+{ "graft": { "overlap": true } }
+```
+
+`Artifact.metadata`
+驗證擷取內容後讀取該宣告，不匯入實作。受管理 Remote 在 Change 准入前使用它。宣告缺少或為 false 時選擇 Restart；明確指定的 Overlap 會在候選執行前被拒絕。執行中的實作仍須在描述合約時宣告
+`overlap: true`。
+
 ## 支援的目錄
 
 | 要求     | 規則                                                                                                                         |

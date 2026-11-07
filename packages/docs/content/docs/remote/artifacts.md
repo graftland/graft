@@ -44,6 +44,20 @@ verification. Run verification again before a later launch. Passing an
 [a managed Remote plugin](../../transitions/#start-a-managed-remote-plugin)
 enables verification before every launch, including recovery.
 
+## Declare overlap support
+
+Put the declaration in the captured package's `package.json`:
+
+```json
+{ "graft": { "overlap": true } }
+```
+
+`Artifact.metadata` verifies the captured bytes and reads this declaration
+without importing the implementation. Managed Remote uses it before admitting a
+Change. An absent or false declaration selects Restart; explicit Overlap is
+rejected before candidate execution. The implementation must also declare
+`overlap: true` when its running contract is described.
+
 ## Supported directories
 
 | Requirement  | Rule                                                                                                                                                                                                                   |

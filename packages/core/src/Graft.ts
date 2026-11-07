@@ -203,6 +203,7 @@ const runtimeLayer = Layer.effect(
 			instances: yield* TxRef.make(
 				HashMap.empty<string, Coordinator.Managed>(),
 			),
+			terms: yield* TxRef.make(HashMap.empty<string, TxRef.TxRef<number>>()),
 			ambient,
 			slots: yield* TxRef.make(HashMap.empty<ServiceKey, Slot>()),
 			forks,

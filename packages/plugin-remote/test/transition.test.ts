@@ -17,7 +17,7 @@ import { SecureRandom } from "effect/crypto"
 import { NodeServices } from "@effect/platform-node"
 import { assert, it } from "@effect/vitest"
 
-import { Change, Graft, Plugin } from "@graftland/graft"
+import { Change, Graft, Plugin, Transition } from "@graftland/graft"
 
 import { ProcessExited } from "../src/Errors"
 import * as Remote from "../src/index"
@@ -35,13 +35,25 @@ const policy = {
 	drain: "200 millis",
 	stop: "200 millis",
 	terminate: "2 seconds",
-	total: "30 seconds",
+	total: "60 seconds",
 	probes: ["health"],
 } satisfies Change.Budget & Change.Requirements
+const diagnostic = (outcome: Change.Outcome) =>
+	`${outcome._tag} ${outcome.phase} ${"reason" in outcome ? outcome.reason : ""}\n` +
+	Array.join(
+		Array.map(
+			outcome.evidence,
+			(item) =>
+				`${item.attempt} ${item.phase} ${item.termination?.state ?? ""} ${item.cause === undefined ? "" : Cause.pretty(item.cause)}`,
+		),
+		"\n",
+	)
 const setup = Effect.fnUntraced(function* (
 	target: Remote.CandidateOptions["target"],
 	input: typeof contract.config.Type = { value: "old" },
 	maxInFlight = 16,
+	resolve?: Transition.Registration["resolve"],
+	overlap: boolean = true,
 ) {
 	const fs = yield* FileSystem.FileSystem
 	const root = yield* fs.makeTempDirectoryScoped({
@@ -53,7 +65,12 @@ const setup = Effect.fnUntraced(function* (
 		new URL("../.cache/integration", import.meta.url).pathname,
 		source,
 	)
-	yield* fs.writeFileString(source + "/package.json", '{"type":"module"}')
+	yield* fs.writeFileString(
+		source + "/package.json",
+		overlap
+			? '{"type":"module","graft":{"overlap":true}}'
+			: '{"type":"module"}',
+	)
 	const artifact = yield* Remote.Artifact.capture({
 		directory: source,
 		entry: "transition-plugin.js",
@@ -68,8 +85,10 @@ const setup = Effect.fnUntraced(function* (
 		artifact,
 		contractModule,
 		target,
-		policy,
+		budget: policy,
+		requirements: { trial: policy.trial, probes: policy.probes },
 		maxInFlight,
+		resolve,
 	}
 	const fork = yield* Graft.plugin(Remote.plugin(contract, options), input)
 	yield* fork.await
@@ -126,7 +145,7 @@ for (const target of [
 				const constructed = h.service.read
 				assert.equal((yield* constructed).value, "old")
 				const result = yield* h.request({ value: "new" })
-				assert.equal(result._tag, "Accepted")
+				assert.equal(result._tag, "Accepted", diagnostic(result))
 				const exit = Array.findFirst(
 					result.evidence,
 					(item) => item.attempt === 1 && item.termination !== undefined,
@@ -194,7 +213,7 @@ for (const target of [
 					}),
 				)
 				const result = yield* h.request({ value: "new" })
-				assert.equal(result._tag, "Accepted")
+				assert.equal(result._tag, "Accepted", diagnostic(result))
 				assert.isTrue(
 					Array.some(
 						result.evidence,
@@ -226,7 +245,7 @@ for (const target of [
 				yield* h.serving(2)
 				assert.equal((yield* h.service.read).value, "new")
 				const result = yield* Fiber.join(transition)
-				assert.equal(result._tag, "Accepted")
+				assert.equal(result._tag, "Accepted", diagnostic(result))
 				assert.isTrue(
 					Array.some(
 						result.evidence,
@@ -305,7 +324,7 @@ for (const target of [
 				const h = yield* setup(target)
 				const input = { value: "pinned" }
 				const accepted = yield* h.request(input)
-				assert.equal(accepted._tag, "Accepted")
+				assert.equal(accepted._tag, "Accepted", diagnostic(accepted))
 				input.value = "mutated"
 				const running = yield* Effect.forkScoped(
 					h.request({ value: "trial" }, { trial: "5 seconds" }),
@@ -336,7 +355,7 @@ for (const target of [
 				const result = yield* Fiber.join(running)
 				assert.equal(result._tag, "RecoveryFailed")
 				const unavailable = yield* Effect.flip(h.service.read)
-				assert.equal(unavailable.reason.message, "Unavailable")
+				assert.equal(unavailable.reason.message, "AdmissionRejected")
 				assert.isTrue(
 					Array.some(
 						result.evidence,
@@ -416,7 +435,7 @@ for (const target of [
 							result.reason,
 							mismatch === "operations"
 								? "IncompatibleContract"
-								: "OverlapRequired",
+								: "IncompatibleContract",
 						)
 					}
 					assert.isFalse(
@@ -444,15 +463,16 @@ for (const target of [
 					artifact.directory + "/candidate.js",
 					"tampered",
 				)
-				const result = yield* Change.run({
+				const result = yield* Change.submit({
 					instance: "integration",
 					candidate: Remote.candidate({
 						...h.options,
 						artifact,
 						input: { value: "new" },
 					}),
-				})
-				assert.equal(result._tag, "Aborted")
+				}).pipe(Effect.flip)
+				assert.equal(result._tag, "ChangeRejected")
+				assert.equal(result.reason._tag, "Unsupported")
 				const all = yield* h.fork.generations.pipe(Stream.runHead)
 				assert.equal(Option.getOrThrow(all).length, 1)
 				assert.equal((yield* h.service.read).value, "old")
@@ -486,3 +506,120 @@ for (const target of [
 			}).pipe(Effect.scoped, Effect.provide(runtime)),
 	)
 }
+
+for (const target of [
+	{ _tag: "Worker", execArgv: [] },
+	{ _tag: "Local" },
+] as const) {
+	it.live(
+		`${target._tag} rejects explicit Overlap without verified metadata before candidate execution`,
+		() =>
+			Effect.gen(function* () {
+				const h = yield* setup(target, { value: "old" }, 16, undefined, false)
+				const rejected = yield* Effect.flip(
+					Change.submit({
+						instance: "integration",
+						candidate: Remote.candidate({
+							...h.options,
+							input: { value: "next" },
+						}),
+						strategy: "Overlap",
+					}),
+				)
+				assert.equal(rejected.reason._tag, "Unsupported")
+				const generations = yield* h.fork.generations.pipe(Stream.runHead)
+				assert.equal(Option.getOrThrow(generations).length, 1)
+				assert.equal((yield* h.service.read).value, "old")
+			}).pipe(Effect.scoped, Effect.provide(runtime)),
+	)
+	it.live(
+		`${target._tag} resolves rotated credentials from the previous desired input during recovery`,
+		() =>
+			Effect.gen(function* () {
+				const credential = yield* Ref.make("initial credential")
+				const resolutions = yield* Ref.make<ReadonlyArray<string>>([])
+				const resolve: NonNullable<Transition.Registration["resolve"]> = (
+					desired,
+				) =>
+					Effect.gen(function* () {
+						const options = yield* Schema.decodeUnknownEffect(
+							Remote.CandidateOptions,
+						)(desired.deployment).pipe(
+							Effect.mapError((error) =>
+								Transition.DriverError.make({ cause: Cause.fail(error) }),
+							),
+						)
+						const input = yield* Schema.decodeUnknownEffect(contract.config)(
+							options.input,
+						).pipe(
+							Effect.mapError((error) =>
+								Transition.DriverError.make({ cause: Cause.fail(error) }),
+							),
+						)
+						const value =
+							input.value === "$credential"
+								? yield* Ref.get(credential)
+								: input.value
+						yield* Ref.update(resolutions, Array.append(value))
+						return Remote.candidate({ ...options, input: { ...input, value } })
+					})
+				const h = yield* setup(target, { value: "$credential" }, 16, resolve)
+				assert.equal((yield* h.service.read).value, "initial credential")
+				const pending = yield* h
+					.request({ value: "trial" }, { trial: "100 millis" })
+					.pipe(Effect.forkScoped)
+				yield* h.serving(2)
+				yield* Ref.set(credential, "rotated credential")
+				yield* Effect.exit(h.service.crash)
+				const result = yield* Fiber.join(pending)
+				assert.equal(result._tag, "Recovered")
+				assert.equal((yield* h.service.read).value, "rotated credential")
+				const observed = yield* Ref.get(resolutions)
+				assert.deepStrictEqual(observed, [
+					"initial credential",
+					"trial",
+					"rotated credential",
+				])
+			}).pipe(Effect.scoped, Effect.provide(runtime)),
+	)
+}
+
+it.live(
+	"rejects a resolver that changes the verified placement footprint before allocation",
+	() =>
+		Effect.gen(function* () {
+			const resolve: NonNullable<Transition.Registration["resolve"]> = (
+				desired,
+			) =>
+				Effect.gen(function* () {
+					const options = yield* Schema.decodeUnknownEffect(
+						Remote.CandidateOptions,
+					)(desired.deployment)
+					const input = yield* Schema.decodeUnknownEffect(contract.config)(
+						options.input,
+					).pipe(
+						Effect.mapError((error) =>
+							Transition.DriverError.make({ cause: Cause.fail(error) }),
+						),
+					)
+					return input.value === "change-placement"
+						? Remote.candidate({ ...options, target: { _tag: "Local" } })
+						: desired
+				}).pipe(
+					Effect.mapError((error) =>
+						Transition.DriverError.make({ cause: Cause.fail(error) }),
+					),
+				)
+			const h = yield* setup(
+				{ _tag: "Worker", execArgv: [] },
+				{ value: "old" },
+				16,
+				resolve,
+			)
+			const result = yield* h.request({ value: "change-placement" })
+			assert.equal(result._tag, "Aborted")
+			assert.equal((yield* h.service.read).value, "old")
+			const generations = yield* h.fork.generations.pipe(Stream.runHead)
+			assert.equal(Option.getOrThrow(generations).length, 1)
+		}).pipe(Effect.scoped, Effect.provide(runtime)),
+)

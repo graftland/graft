@@ -1,7 +1,9 @@
 import {
 	Array,
+	Cause,
 	Effect,
 	Equal,
+	Exit,
 	HashMap,
 	HashSet,
 	Option,
@@ -13,7 +15,10 @@ import {
 
 import * as Change from "../Change"
 import * as Capacity from "./capacity"
+import type { Preparation } from "./changePreparation"
 import type { Normalized } from "./changeRequest"
+import type { Runtime } from "./runtime"
+import * as Trust from "./trust"
 
 export interface Cell {
 	readonly version: number
@@ -27,6 +32,9 @@ export interface Condition {
 	readonly write: boolean
 }
 export interface Record {
+	readonly runtime: Runtime
+	readonly authorization: Trust.Condition
+	readonly preparation: Preparation
 	readonly capacity: Capacity.Claim
 	readonly oldChanged: TxRef.TxRef<boolean>
 	readonly started: bigint
@@ -38,6 +46,7 @@ export interface Record {
 }
 export interface Table {
 	readonly scope: Scope.Closeable
+	readonly preparations: TxRef.TxRef<HashSet.HashSet<Effect.Effect<void>>>
 	readonly open: TxRef.TxRef<boolean>
 	readonly next: TxRef.TxRef<number>
 	readonly objects: TxRef.TxRef<
@@ -49,8 +58,27 @@ export interface Table {
 	readonly events: TxPubSub.TxPubSub<Change.Status>
 }
 export const make = Effect.gen(function* () {
+	const scope = yield* Scope.make()
+	const preparations = yield* TxRef.make(HashSet.empty<Effect.Effect<void>>())
+	yield* Scope.addFinalizer(
+		scope,
+		Effect.gen(function* () {
+			const pending = yield* TxRef.get(preparations)
+			const exits = yield* Effect.forEach(pending, Effect.exit, {
+				concurrency: 8,
+			})
+			const cause = Array.reduce(
+				exits,
+				Cause.empty,
+				(all: Cause.Cause<never>, exit) =>
+					Exit.isFailure(exit) ? Cause.combine(all, exit.cause) : all,
+			)
+			if (cause.reasons.length > 0) return yield* Effect.failCause(cause)
+		}),
+	)
 	return {
-		scope: yield* Scope.make(),
+		scope,
+		preparations,
 		open: yield* TxRef.make(true),
 		next: yield* TxRef.make(1),
 		objects: yield* TxRef.make(
@@ -141,7 +169,12 @@ export const reserve = Effect.fnUntraced(function* (
 	return conditions
 })
 
-export const valid = Effect.fnUntraced(function* (record: Record) {
+export const invalidation = Effect.fnUntraced(function* (record: Record) {
+	const authorization = yield* Effect.result(
+		Trust.verify(record.runtime, record.authorization),
+	)
+	if (authorization._tag === "Failure")
+		return Option.some(Cause.fail(authorization.failure))
 	const conditions = yield* TxRef.get(record.conditions)
 	for (const c of conditions) {
 		const current = yield* TxRef.get(c.cell)
@@ -151,10 +184,19 @@ export const valid = Effect.fnUntraced(function* (record: Record) {
 				? Option.contains(current.writer, record.handle.id)
 				: HashSet.has(current.readers, record.handle.id))
 		)
-			return false
+			return Option.some(
+				Cause.fail({
+					object: c.object,
+					expected: c.version,
+					actual: current.version,
+					reason: "Change premise no longer holds",
+				}),
+			)
 	}
-	return true
+	return Option.none<Cause.Cause<unknown>>()
 })
+export const valid = (record: Record) =>
+	invalidation(record).pipe(Effect.map(Option.isNone))
 
 /** Route commits modify only the instance cell; compatible facade bindings stay published. */
 export const commit = Effect.fnUntraced(function* (record: Record) {
@@ -202,6 +244,7 @@ export const finish = Effect.fnUntraced(function* (
 		...status,
 		phase: outcome.phase,
 		members: outcome.members,
+		evidence: outcome.evidence,
 		outcome: Option.some(outcome),
 	}))
 	if (outcome._tag === "Stuck") return

@@ -18,6 +18,7 @@ it.effect(
 						Effect.map((value) => ({
 							current: value,
 							approved: Option.some(approved),
+							revision: 0,
 							missing: "NotReviewed",
 						})),
 					),
@@ -65,6 +66,7 @@ it.effect("rejects policy installation after ungoverned publication", () =>
 				Effect.succeed({
 					current: null,
 					approved: Option.some(null),
+					revision: 0,
 					missing: "Unapproved",
 				}),
 			publish: () => Effect.void,
@@ -83,6 +85,7 @@ it.effect(
 					Effect.succeed({
 						current: null,
 						approved: Option.some(null),
+						revision: 0,
 						missing: "Missing",
 					}),
 				publish: () =>
@@ -119,6 +122,7 @@ it.effect(
 					Effect.succeed({
 						current: null,
 						approved: Option.some(null),
+						revision: 0,
 						missing: "Missing",
 					}),
 				publish: (publication) =>

@@ -13,7 +13,7 @@ import {
 import { NodeServices } from "@effect/platform-node"
 import { assert, it } from "@effect/vitest"
 
-import { Graft, Trust } from "@graftland/graft"
+import { Change, Graft, Trust } from "@graftland/graft"
 import { ModuleResolver } from "@graftland/loader"
 import { Artifact } from "@graftland/plugin-remote"
 import * as Policy from "@graftland/plugin-remote/Policy"
@@ -656,4 +656,73 @@ it.effect(
 				2,
 			)
 		}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
+)
+
+it.effect(
+	"replays admission rejection separately from admitted outcomes and failed compensation",
+	() =>
+		Effect.gen(function* () {
+			const h = yield* setup()
+			const target = String.repeat(64)("a")
+			const accepted = {
+				change: Change.Id.make("change-a"),
+				_tag: "Accepted" as const,
+				phase: "Complete",
+				evidence: [],
+			}
+			const journal: Journal = {
+				version: 1,
+				status: {
+					current: h.id,
+					previous: null,
+					state: "Degraded",
+					revocations: [],
+				},
+				events: [
+					{ kind: "Bootstrap", current: h.id, target: h.id },
+					{ kind: "Intent", current: h.id, target, entries: ["a", "b"] },
+					{
+						kind: "Outcome",
+						current: h.id,
+						target,
+						entry: "a",
+						outcome: accepted,
+					},
+					{
+						kind: "Outcome",
+						current: h.id,
+						target,
+						entry: "b",
+						rejection: { reason: { _tag: "Closing" } },
+					},
+					{
+						kind: "Compensation",
+						current: h.id,
+						target: h.id,
+						entry: "a",
+						rejection: {
+							reason: {
+								_tag: "Stale",
+								object: { _tag: "Instance", instance: "a" },
+								expected: 2,
+								actual: 3,
+							},
+						},
+					},
+					{ kind: "Rejected", current: h.id, target },
+				],
+			}
+			const replay = yield* validate(h.store, journal)
+			assert.strictEqual(replay.status.state, "Degraded")
+			const both: Journal = {
+				...journal,
+				events: Array.map(journal.events, (event) =>
+					event.entry === "b" ? { ...event, outcome: accepted } : event,
+				),
+			}
+			const invalid = yield* Effect.flip(validate(h.store, both))
+			assert.strictEqual(invalid._tag, "ReleaseError")
+			if (invalid._tag === "ReleaseError")
+				assert.strictEqual(invalid.code, "Journal")
+		}).pipe(Effect.scoped, Effect.provide(runtime)),
 )

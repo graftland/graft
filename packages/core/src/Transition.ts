@@ -79,9 +79,21 @@ export interface Unit {
 	readonly failure: Effect.Effect<never, DriverError>
 }
 
-/** Allocation owns resources in the attempt scope, even if startup never runs. External execution starts only in Unit.start. */
+/** Verified deployment facts available before execution. */
+export interface Prepared {
+	readonly overlap: boolean
+}
+/** Allocation owns resources in the attempt scope. Execution starts only in Unit.start. */
 export interface Driver {
 	readonly name: string
+	/** Immutable resource selection; deferred credentials must not change this footprint. */
+	readonly footprint?: ((candidate: Change.Candidate) => unknown) | undefined
+	/** Verifies metadata without executing the plugin or acquiring exclusive execution resources. */
+	readonly prepare?:
+		| ((
+				candidate: Change.Candidate,
+		  ) => Effect.Effect<Prepared, DriverError, Scope.Scope>)
+		| undefined
 	/** Verified from the immutable deployment before allocation or execution. */
 	readonly overlap?: ((candidate: Change.Candidate) => boolean) | undefined
 	readonly allocate: (

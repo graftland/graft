@@ -124,6 +124,11 @@ allocation receives a fresh monotonic term and a Change, generation and route
 version token; the unit echoes the token in its acknowledgement. An acknowledged
 stop, disconnected transport or closed scope never replaces exit evidence.
 
+`Transition.Driver.prepare` verifies deployment metadata before admission
+without executing the plugin. Authorization versions are checked again at route
+commit; removal and recreation cannot hide a stale premise. Metadata cleanup
+keeps its original completion record and may also leave a Change Stuck.
+
 ## Remote drain
 
 RPC results and client cancellation do not establish remote request-scope

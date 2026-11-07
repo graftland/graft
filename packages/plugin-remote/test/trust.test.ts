@@ -3,6 +3,7 @@ import { createServer } from "node:http"
 import process from "node:process"
 
 import {
+	Array,
 	Cause,
 	Config,
 	Context,
@@ -49,6 +50,7 @@ const fake: Remote.Sandbox.Launcher["Service"] = {
 const setup = Effect.fnUntraced(function* (
 	launcher: Remote.Sandbox.Launcher["Service"] | undefined,
 	target: Remote.CandidateOptions["target"] = { _tag: "Local" },
+	initialApproval: boolean = true,
 ) {
 	const fs = yield* FileSystem.FileSystem
 	const root = yield* fs.makeTempDirectoryScoped({ prefix: "graft-trust-" })
@@ -85,6 +87,30 @@ const setup = Effect.fnUntraced(function* (
 			},
 		],
 	})
+	if (initialApproval) {
+		const desired = Remote.candidate({
+			artifact,
+			contractModule: "untrusted-contract",
+			target,
+			input: {},
+		})
+		yield* Effect.scoped(
+			Effect.gen(function* () {
+				yield* authority.bind(
+					"untrusted",
+					desired.identity,
+					identity,
+					Array.map(contract.provides, (service) => service.key.key),
+				)
+				const expected = yield* authority.statement("untrusted", identity)
+				const approval = yield* authority.review({
+					expected,
+					who: "test operator",
+				})
+				yield* authority.approve(approval)
+			}),
+		)
+	}
 	const fork = yield* Graft.plugin(
 		Remote.plugin(contract, {
 			instance: "untrusted",
@@ -93,13 +119,12 @@ const setup = Effect.fnUntraced(function* (
 				"file://" + artifact.directory + "/untrusted-plugin.js",
 			).href,
 			target,
-			policy: {
+			budget: {
 				startup: "2 seconds",
 				total: "30 seconds",
 				terminate: "500 millis",
 				stop: 100,
 				drain: 100,
-				trial: 0,
 			},
 		}),
 		{},
@@ -151,11 +176,6 @@ it.live(
 			const h = yield* setup(fake)
 			yield* h.fork.await
 			const api = yield* client
-			const unapproved = yield* api
-				.run({ action: "read", value: "allowed.txt" })
-				.pipe(Effect.flip)
-			assert.equal(reason(unapproved), "MissingApproval")
-			yield* approve(h.identity, h.authority)
 			const allowed = yield* api.run({
 				action: "read",
 				value: "allowed.txt",
@@ -202,7 +222,25 @@ it.live(
 			const revoked = yield* api
 				.run({ action: "read", value: "allowed.txt" })
 				.pipe(Effect.flip)
-			assert.equal(reason(revoked), "Revoked")
+			const policyRejection = yield* Policy.check(
+				"untrusted",
+				Remote.candidate({
+					artifact: h.artifact,
+					contractModule: "untrusted-contract",
+					target: h.target,
+					input: {},
+				}).identity,
+			).pipe(Effect.flip)
+			assert.equal(policyRejection.reason, "Revoked")
+			assert.isTrue(
+				Schema.is(
+					Schema.Struct({
+						reason: Schema.TaggedStruct("RpcClientDefect", {
+							message: Schema.String,
+						}),
+					}),
+				)(revoked),
+			)
 			assert.throws(() => process.kill(pid, 0), /ESRCH/)
 		}).pipe(Effect.scoped, Effect.provide(runtime)),
 )
@@ -371,4 +409,28 @@ it.live("retires each attempt binding across repeated direct transitions", () =>
 		const observed2 = yield* h.authority.bindings
 		assert.equal(observed2, 0)
 	}).pipe(Effect.scoped, Effect.provide(runtime)),
+)
+
+it.live(
+	"rejects an unapproved initial artifact before sandbox preparation or execution",
+	() =>
+		Effect.gen(function* () {
+			const launches = yield* Ref.make(0)
+			const h = yield* setup(
+				{
+					prepare: (request) =>
+						Ref.update(launches, (count) => count + 1).pipe(
+							Effect.andThen(fake.prepare(request)),
+						),
+				},
+				{ _tag: "Local" },
+				false,
+			)
+			const exit = yield* h.fork.await.pipe(Effect.exit)
+			assert.isTrue(Exit.isFailure(exit))
+			if (Exit.isFailure(exit))
+				assert.include(Cause.pretty(exit.cause), "MissingApproval")
+			const count = yield* Ref.get(launches)
+			assert.equal(count, 0)
+		}).pipe(Effect.scoped, Effect.provide(runtime)),
 )
