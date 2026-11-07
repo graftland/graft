@@ -169,6 +169,15 @@ export const provide = Effect.fnUntraced(function* <I, S>(
 
 export type { LogEntry } from "./internal/runtime"
 
+/** Runtime limits, supplied when building the Graft layer. */
+export interface Options {
+	readonly maxUnits: number
+}
+export const Options = Context.Reference<Options>(
+	"@graftland/graft/Graft/Options",
+	{ defaultValue: () => ({ maxUnits: 256 }) },
+)
+
 /** How many log entries new subscribers of `logs` receive from the past. */
 const logReplay = 1000
 
@@ -176,11 +185,21 @@ const runtimeLayer = Layer.effect(
 	Graft,
 	Effect.gen(function* () {
 		const ambient = yield* Effect.context<never>()
+		const options = yield* Options
+		if (!Number.isSafeInteger(options.maxUnits) || options.maxUnits < 1)
+			return yield* Effect.die(
+				new Error("maxUnits must be a positive safe integer"),
+			)
 		const forks = yield* Snapshots.make(HashMap.empty<number, ForkEntry>())
 		const runtime: Runtime = {
 			mutations: yield* TxRef.make(0),
 			trust: yield* TxRef.make(TrustState.empty),
 			changes: yield* ChangeTable.make,
+			capacity: yield* TxRef.make({
+				maxUnits: options.maxUnits,
+				used: 0,
+				reserved: 0,
+			}),
 			instances: yield* TxRef.make(
 				HashMap.empty<string, Coordinator.Managed>(),
 			),
@@ -231,11 +250,23 @@ const runtimeLayer = Layer.effect(
 								return yield* Effect.txRetry
 						}),
 					)
+				const instances = yield* TxRef.get(runtime.instances)
+				const stopped = yield* Effect.forEach(
+					HashMap.values(instances),
+					(managed) => Effect.exit(Scope.close(managed.entry.scope, Exit.void)),
+					{ concurrency: 8 },
+				)
 				const released = yield* Effect.exit(
 					Release.close(runtime.changes.scope, Exit.void),
 				)
 				yield* withdraw(runtime, activation)
-				return yield* released
+				const cause = Array.reduce(
+					[...stopped, released],
+					Cause.empty,
+					(all: Cause.Cause<never>, exit) =>
+						Exit.isFailure(exit) ? Cause.combine(all, exit.cause) : all,
+				)
+				if (cause.reasons.length > 0) return yield* Effect.failCause(cause)
 			}),
 		)
 		return { runtime, activation }

@@ -90,8 +90,23 @@ forward and recovery trial consume the total.
 
 Overlap requires a driver-verified declaration before allocation. The candidate
 starts before the old generation retires. Drivers without a verified declaration
-reject explicit Overlap. Restart and paused facade queues are not yet available
-in this implementation step.
+reject explicit Overlap. Restart pauses new facade calls, drains and stops the
+old generation, waits for exit and required host cleanup, then starts the
+candidate. Queued calls choose their generation only when the new route opens.
+
+`Registration.queue` defaults to 256 waiters and a five-second wait. Overflow,
+expiry, closing and failed recovery reject calls before choosing a generation.
+Cancellation and expiry remove a waiter exactly once.
+
+Cancellation before the old generation may have changed can leave it serving
+with `Aborted`. After that boundary, recovery resolves the previous desired
+target again and completes its probes and full trial. Unconfirmed exit or host
+cleanup can produce `Stuck`; late settlement never resumes that Change.
+
+`Graft.Options.maxUnits` defaults to 256. Initial registrations, reserved
+allocations, serving units, draining units and units without exit evidence count
+toward the limit. Restart can reuse capacity after confirmed old-unit exit;
+recovery capacity stays reserved from other Changes.
 
 ## Start a managed Remote plugin
 
@@ -103,8 +118,11 @@ an explicit instance name. See [artifacts](../remote/artifacts/).
 
 `Transition.registerDriver` publishes stable facades once. A generation owns its
 execution, resolution and leases. Driver allocation must not start execution;
-execution begins in `Unit.start`. An acknowledged stop, disconnected transport
-or closed scope never replaces exit evidence.
+execution begins in `Unit.start`. `Registration.resolve` receives the unresolved
+desired candidate before every allocation, including startup and recovery. Each
+allocation receives a fresh monotonic term and a Change, generation and route
+version token; the unit echoes the token in its acknowledgement. An acknowledged
+stop, disconnected transport or closed scope never replaces exit evidence.
 
 ## Remote drain
 

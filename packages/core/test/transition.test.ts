@@ -40,7 +40,7 @@ class Value extends Context.Service<
 		>
 	}
 >()("@graftland/graft/test/transition.test/Value") {}
-const candidate = (identity: string): Transition.Candidate => ({
+const candidate = (identity: string): Change.Candidate => ({
 	driver: "test",
 	identity,
 	deployment: undefined,
@@ -48,7 +48,7 @@ const candidate = (identity: string): Transition.Candidate => ({
 const problem = Transition.DriverError.make({
 	cause: Cause.combine(Cause.fail("broken"), Cause.die("defect")),
 })
-const policy: Transition.Policy = {
+const policy: Change.Budget & Change.Requirements = {
 	total: 10_000,
 	startup: 100,
 	probe: 100,
@@ -60,7 +60,7 @@ const policy: Transition.Policy = {
 }
 interface Control {
 	readonly id: number
-	readonly exited: Deferred.Deferred<Transition.Termination>
+	readonly exited: Deferred.Deferred<Change.Termination>
 	readonly failed: Deferred.Deferred<never, Transition.DriverError>
 	readonly entered: Deferred.Deferred<void>
 	readonly read: Deferred.Deferred<string>
@@ -96,14 +96,14 @@ const setup = Effect.fnUntraced(function* (
 	const driver: Transition.Driver = {
 		name: "test",
 		overlap: () => true,
-		allocate: (artifact, id) =>
+		allocate: (artifact, id, allocation) =>
 			Effect.gen(function* () {
 				yield* Ref.update(allocations, (n) => n + 1)
 				const options = script(id)
 				yield* options.allocate ?? Effect.void
 				const control: Control = {
 					id,
-					exited: yield* Deferred.make<Transition.Termination>(),
+					exited: yield* Deferred.make<Change.Termination>(),
 					failed: yield* Deferred.make<never, Transition.DriverError>(),
 					entered: yield* Deferred.make<void>(),
 					read: yield* Deferred.make<string>(),
@@ -112,6 +112,7 @@ const setup = Effect.fnUntraced(function* (
 				}
 				yield* Ref.update(controls, Array.append(control))
 				return {
+					acknowledgement: allocation,
 					start: options.start ?? Effect.void,
 					describe:
 						options.describe ??
@@ -167,7 +168,8 @@ const setup = Effect.fnUntraced(function* (
 				instance: "integration",
 				initial: candidate("old"),
 				required: [{ name: "read", version: 1 }],
-				policy,
+				budget: policy,
+				requirements: policy,
 				maxInFlight,
 				facades: [
 					Transition.facade(Value, (invoke) => ({
@@ -208,7 +210,7 @@ const setup = Effect.fnUntraced(function* (
 		controls,
 		control,
 		allocations,
-		request: (overrides?: Partial<Transition.Policy>) =>
+		request: (overrides?: Partial<Change.Budget & Change.Requirements>) =>
 			Change.run({
 				instance: "integration",
 				candidate: candidate("new"),
@@ -346,6 +348,10 @@ for (const recoveryFails of [false, true]) {
 				)
 				const next = yield* h.control(2)
 				yield* Deferred.fail(next.failed, problem)
+				if (!recoveryFails) {
+					yield* waitFor(h, 3, "Serving")
+					yield* TestClock.adjust(50)
+				}
 				const outcome = yield* Fiber.join(running)
 				assert.equal(
 					outcome._tag,
@@ -357,7 +363,7 @@ for (const recoveryFails of [false, true]) {
 				assert.equal(observed13, 3)
 				if (recoveryFails) {
 					const unavailable = yield* Effect.flip(h.value.read)
-					assert.equal(unavailable._tag, "Unavailable")
+					assert.equal(unavailable._tag, "AdmissionRejected")
 				} else {
 					const restored = yield* h.value.read
 					assert.equal(restored, "old")
@@ -475,7 +481,7 @@ it.effect(
 const waitFor = (
 	h: Effect.Success<ReturnType<typeof setup>>,
 	attempt: number,
-	state: Transition.Generation["state"],
+	state: Change.Generation["state"],
 ) =>
 	h.fork.generations.pipe(
 		Stream.filter((all) =>
@@ -687,7 +693,7 @@ it.effect("terminates the current unit when the owning fork is disposed", () =>
 		const exited = yield* Deferred.isDone(current.exited)
 		assert.isTrue(exited)
 		const unavailable = yield* Effect.flip(h.value.read)
-		assert.equal(unavailable._tag, "Unavailable")
+		assert.equal(unavailable._tag, "AdmissionRejected")
 	}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
 )
 
@@ -763,7 +769,7 @@ it.effect(
 			const outcome = yield* Fiber.join(running)
 			assert.equal(outcome._tag, "Stuck")
 			const unavailable = yield* Effect.flip(h.value.read)
-			assert.equal(unavailable._tag, "Unavailable")
+			assert.equal(unavailable._tag, "AdmissionRejected")
 			yield* Deferred.succeed(old.exited, { unit: "unit-1", state: "Exited" })
 		}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
 )
@@ -1167,8 +1173,8 @@ it.effect(
 					: {},
 			)
 			const outcome = yield* h.request()
-			assert.equal(outcome._tag, "RecoveryFailed")
-			if (outcome._tag === "RecoveryFailed")
+			assert.equal(outcome._tag, "Aborted")
+			if (outcome._tag === "Aborted")
 				assert.equal(outcome.reason, "CoordinatorDefect")
 			assert.equal(outcome.phase, "Describing")
 			assert.isTrue(
@@ -1185,7 +1191,7 @@ it.effect(
 			assert.equal(
 				Array.filter(outcome.evidence, (item) => item.termination !== undefined)
 					.length,
-				2,
+				1,
 			)
 			yield* h.fork.dispose
 			const other = yield* setup()
@@ -1344,7 +1350,9 @@ it.effect(
 			const managed = Option.getOrThrow(registered)
 			const running = yield* Effect.forkScoped(h.request())
 			const previous = yield* h.control(1)
-			yield* Deferred.await(previous.terminating)
+			yield* waitFor(h, 2, "Starting")
+			const next = yield* h.control(2)
+			yield* Deferred.await(next.terminating)
 			const disposing = yield* Effect.forkScoped(h.fork.dispose)
 			yield* Effect.tx(
 				Effect.gen(function* () {
@@ -1353,7 +1361,6 @@ it.effect(
 				}),
 			)
 			yield* Deferred.succeed(previous.exited, { unit: "old", state: "Exited" })
-			const next = yield* h.control(2)
 			yield* Deferred.succeed(next.exited, {
 				unit: "candidate",
 				state: "Exited",
@@ -1409,11 +1416,9 @@ it.effect(
 				const entry = Option.getOrThrow(HashMap.get(forks, h.fork.id))
 				const registered = yield* TxRef.get(entry.status.managed)
 				const managed = Option.getOrThrow(registered)
-				const attempts = yield* Ref.get(managed.attempts)
+				const attempts = yield* TxRef.get(managed.attempts)
 				const previous = Option.getOrThrow(Array.head(attempts))
-				MutableRef.set(inspect, () =>
-					Option.isSome(Ref.getUnsafe(previous.terminated)),
-				)
+				MutableRef.set(inspect, () => Option.isSome(previous.terminated.value))
 				const transitioning = yield* Effect.forkScoped(h.request())
 				yield* Deferred.await(boundary)
 				const disposed = yield* Effect.exit(h.fork.dispose)
@@ -1607,9 +1612,9 @@ it.effect("bounds failed-allocation cleanup without abandoning its owner", () =>
 		yield* Deferred.await(closing)
 		yield* TestClock.adjust(policy.terminate)
 		const outcome = yield* Fiber.join(pending)
-		assert.equal(outcome._tag, "Aborted")
+		assert.equal(outcome._tag, "Stuck")
 		yield* Deferred.succeed(release, undefined)
 		const disposal = yield* state.fork.dispose.pipe(Effect.exit)
-		assert.isTrue(Exit.isFailure(disposal))
+		assert.isTrue(Exit.isSuccess(disposal))
 	}).pipe(run),
 )

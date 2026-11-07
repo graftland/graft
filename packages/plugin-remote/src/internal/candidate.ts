@@ -1,6 +1,6 @@
 import { Array, Record, Schema } from "effect"
 
-import type { Transition } from "@graftland/graft"
+import type { Change } from "@graftland/graft"
 
 import * as Artifact from "../Artifact"
 
@@ -30,7 +30,7 @@ const snapshot = (value: Schema.Json): Schema.Json =>
 			? Object.freeze(Record.map(value, snapshot))
 			: value
 
-export const candidate = (options: CandidateOptions): Transition.Candidate => {
+export const candidate = (options: CandidateOptions): Change.Candidate => {
 	const deployment: CandidateOptions = Object.freeze({
 		artifact: Object.freeze({
 			...options.artifact,

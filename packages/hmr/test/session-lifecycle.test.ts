@@ -355,13 +355,14 @@ it.effect("rejects HMR for managed forks before reloading modules", () =>
 						Transition.registerDriver(
 							{
 								name: "test",
-								allocate: () =>
+								allocate: (_candidate, _term, allocation) =>
 									Effect.gen(function* () {
 										const exit =
 											yield* Deferred.make<
-												import("@graftland/graft").Transition.Termination
+												import("@graftland/graft").Change.Termination
 											>()
 										return {
+											acknowledgement: allocation,
 											start: Effect.void,
 											describe: Effect.succeed({ overlap: true, provides: [] }),
 											serve: Effect.void,

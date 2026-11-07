@@ -8,52 +8,30 @@ import {
 	Exit,
 	HashMap,
 	Option,
-	Ref,
 	TxRef,
 } from "effect"
 
 import * as Change from "../Change"
-import * as T from "../Transition"
-import { normalize, validate, type Normalized } from "./changeRequest"
+import * as Capacity from "./capacity"
+import { emergency, execute } from "./changeExecution"
+import { normalize, validate } from "./changeRequest"
 import * as ChangeTable from "./changeTable"
 import * as Generations from "./generations"
 import { realmOf, Realms } from "./runtime"
 import { RuntimeContext } from "./runtimeContext"
 import {
-	confirmed,
 	engine,
-	execute,
+	ExecutionOutcome,
 	safetyReserve,
 	type Managed,
 	type Run,
 } from "./transition"
 import type { Deadlines } from "./transitionBudgets"
 
-const waitCancelled = (record: ChangeTable.Record) =>
-	Effect.tx(
-		TxRef.get(record.cancelled).pipe(
-			Effect.flatMap((cancelled) =>
-				cancelled ? Effect.interrupt : Effect.txRetry,
-			),
-		),
-	)
-const publicReason = (reason: T.Reason): Change.Reason => {
-	switch (reason) {
-		case "Closing":
-		case "CoordinatorDefect":
-		case "IncompatibleContract":
-		case "Failed":
-		case "TimedOut":
-		case "UnconfirmedTermination":
-			return reason
-		default:
-			return "Failed"
-	}
-}
 const facts = Effect.fnUntraced(function* (
 	managed: Managed,
 	record: ChangeTable.Record,
-	outcome: T.Outcome,
+	outcome: ExecutionOutcome,
 ) {
 	const status = yield* TxRef.get(record.status)
 	const route = yield* TxRef.get(managed.route)
@@ -78,7 +56,7 @@ const facts = Effect.fnUntraced(function* (
 			),
 			health: Option.isSome(route) ? "Serving" : "Unavailable",
 			matchesTarget: Option.exists(route, (attempt) =>
-				Equal.equals(attempt.candidate, record.request.candidate),
+				Equal.equals(attempt.desired, record.request.candidate),
 			),
 		},
 		recoverability: {
@@ -93,7 +71,7 @@ const facts = Effect.fnUntraced(function* (
 const publicOutcome = Effect.fnUntraced(function* (
 	managed: Managed,
 	record: ChangeTable.Record,
-	outcome: T.Outcome,
+	outcome: ExecutionOutcome,
 ): Effect.fn.Return<Change.Outcome> {
 	const result: Change.Result = {
 		change: record.handle.id,
@@ -107,22 +85,22 @@ const publicOutcome = Effect.fnUntraced(function* (
 		case "Aborted":
 			return Change.Outcome.Aborted({
 				...result,
-				reason: publicReason(outcome.reason),
+				reason: outcome.reason,
 			})
 		case "Recovered":
 			return Change.Outcome.Recovered({
 				...result,
-				reason: publicReason(outcome.reason),
+				reason: outcome.reason,
 			})
 		case "RecoveryFailed":
 			return Change.Outcome.RecoveryFailed({
 				...result,
-				reason: publicReason(outcome.reason),
+				reason: outcome.reason,
 			})
 		case "Stuck":
 			return Change.Outcome.Stuck({
 				...result,
-				reason: "UnconfirmedTermination",
+				reason: outcome.reason,
 			})
 	}
 })
@@ -168,49 +146,69 @@ const lateSettlement = Effect.fnUntraced(function* (
 	policy: Deadlines,
 	run: Run,
 ) {
-	const attempts = yield* Ref.get(managed.attempts)
+	const attempts = yield* TxRef.get(managed.attempts)
+	const route = yield* TxRef.get(managed.route)
+	const ownedLeases = yield* TxRef.get(managed.leases)
+	const leases = Array.filter(
+		ownedLeases,
+		(lease) => !Option.exists(route, (serving) => serving.id === lease.id),
+	)
 	const coordinator = engine(managed, policy, run.evidence)
 	const results = yield* Effect.forEach(
-		attempts,
-		(attempt) =>
+		leases,
+		(lease) =>
 			Effect.gen(function* () {
-				yield* attempt.unit.terminate.pipe(
-					Effect.catchCause((cause) =>
-						lateFact(managed, record, {
-							generation: attempt.id,
-							execution: "Unconfirmed",
-							cleanup: "Unknown",
-							cause,
-						}),
-					),
-					Effect.forkIn(managed.runtime.changes.scope),
+				const attempt = Array.findFirst(
+					attempts,
+					(attempt) => attempt.id === lease.id,
 				)
-				const termination = yield* attempt.unit.exited
-				yield* Ref.set(attempt.terminated, Option.some(termination))
+				let execution: Change.Settlement["execution"] = "NotStarted"
+				let exitCause: Cause.Cause<unknown> = Cause.empty
+				if (Option.isSome(attempt)) {
+					const known = yield* TxRef.get(attempt.value.terminated)
+					if (Option.isNone(known))
+						yield* Effect.suspend(() => attempt.value.unit.terminate).pipe(
+							Effect.catchCause((cause) =>
+								lateFact(managed, record, {
+									generation: lease.id,
+									execution: "Unconfirmed",
+									cleanup: "Unknown",
+									cause,
+								}),
+							),
+							Effect.forkIn(managed.runtime.changes.scope),
+						)
+					const termination = Option.isSome(known)
+						? known.value
+						: yield* Effect.suspend(() => attempt.value.unit.exited)
+					yield* TxRef.set(attempt.value.terminated, Option.some(termination))
+					execution = termination.state
+					exitCause = termination.cause ?? Cause.empty
+				}
 				yield* Effect.tx(
-					Generations.settle(managed.entry.node, attempt.generation),
+					Generations.settle(managed.entry.node, lease.generation).pipe(
+						Effect.andThen(Capacity.end(managed.runtime.capacity, lease)),
+					),
 				)
-				const host = yield* coordinator.releaseHost(attempt)
+				const host = yield* coordinator.releaseHost(lease)
 				yield* lateFact(managed, record, {
-					generation: attempt.id,
-					execution: termination.state,
+					generation: lease.id,
+					execution,
 					cleanup: Exit.isSuccess(host)
 						? "Completed"
 						: Cause.hasInterruptsOnly(host.cause)
 							? "Unknown"
 							: "Failed",
-					cause: Exit.isFailure(host)
-						? host.cause
-						: (termination.cause ?? Cause.empty),
+					cause: Cause.combine(
+						exitCause,
+						Exit.isFailure(host) ? host.cause : Cause.empty,
+					),
 				})
-				return (
-					Exit.isSuccess(host) ||
-					(Exit.isFailure(host) && !Cause.hasInterruptsOnly(host.cause))
-				)
+				return Exit.isSuccess(host) || !Cause.hasInterruptsOnly(host.cause)
 			}).pipe(
 				Effect.catchCause((cause) =>
 					lateFact(managed, record, {
-						generation: attempt.id,
+						generation: lease.id,
 						execution: "Unconfirmed",
 						cleanup: "Unknown",
 						cause,
@@ -220,60 +218,22 @@ const lateSettlement = Effect.fnUntraced(function* (
 		{ concurrency: 8 },
 	)
 	if (Array.every(results, (complete) => complete))
-		yield* Effect.tx(ChangeTable.release(record))
+		yield* Effect.tx(
+			ChangeTable.release(record).pipe(
+				Effect.andThen(ChangeTable.archive(managed.runtime.changes, record)),
+			),
+		)
 })
 const work = Effect.fnUntraced(function* (
 	managed: Managed,
-	request: Normalized,
 	policy: Deadlines,
 	run: Run,
 	record: ChangeTable.Record,
 ) {
-	yield* Ref.set(run.budget.reserved, safetyReserve(policy))
-	const result = yield* Effect.exit(
-		Effect.interruptible(
-			Effect.raceFirst(
-				execute(
-					managed,
-					{ target: managed.instance, candidate: request.candidate },
-					policy,
-					run,
-				),
-				waitCancelled(record),
-			),
-		),
+	yield* TxRef.set(run.budget.reserved, safetyReserve(policy))
+	const outcome = yield* execute(managed, policy, run).pipe(
+		Effect.catchCause((cause) => emergency(managed, policy, run, cause)),
 	)
-	let outcome: T.Outcome
-	if (Exit.isSuccess(result)) outcome = result.value
-	else {
-		const location = yield* Ref.get(run.progress)
-		yield* Ref.update(
-			run.evidence,
-			Array.append({ ...location, cause: result.cause }),
-		)
-		yield* TxRef.set(managed.route, Option.none())
-		yield* Ref.set(run.budget.reserved, 0)
-		const coordinator = engine(managed, policy, run.evidence, run.budget)
-		const attempts = yield* Ref.get(managed.attempts)
-		const settlements = yield* Effect.forEach(attempts, coordinator.terminate)
-		const evidence = yield* Ref.get(run.evidence)
-		outcome = Array.some(settlements, (s) => !confirmed(s))
-			? T.Outcome.Stuck({
-					reason: "UnconfirmedTermination",
-					phase: location.phase,
-					evidence,
-				})
-			: T.Outcome.RecoveryFailed({
-					reason:
-						Cause.hasInterruptsOnly(result.cause) &&
-						((yield* TxRef.get(managed.lifecycle))._tag === "Closing" ||
-							!(yield* TxRef.get(managed.runtime.changes.open)))
-							? "Closing"
-							: "CoordinatorDefect",
-					phase: location.phase,
-					evidence,
-				})
-	}
 	const published = yield* publicOutcome(managed, record, outcome)
 	yield* Effect.tx(
 		Effect.gen(function* () {
@@ -301,17 +261,22 @@ export const submit = Effect.fnUntraced(function* (
 	return yield* Effect.uninterruptible(
 		Effect.gen(function* () {
 			const run: Run = {
-				reply: yield* TxRef.make(Option.none<T.Outcome>()),
+				reply: yield* TxRef.make(Option.none<ExecutionOutcome>()),
+				previous: Option.none(),
+				previousDesired: normalized.candidate,
+				candidate: yield* TxRef.make(
+					Option.none<import("./transition").Attempt>(),
+				),
 				cancel: yield* TxRef.make(false),
 				record: undefined,
-				evidence: yield* Ref.make<ReadonlyArray<T.Evidence>>([]),
-				progress: yield* Ref.make<{ attempt: number; phase: T.Phase }>({
+				evidence: yield* TxRef.make<ReadonlyArray<Change.Evidence>>([]),
+				progress: yield* TxRef.make<{ attempt: number; phase: Change.Phase }>({
 					attempt: 0,
 					phase: "Admission",
 				}),
 				budget: {
 					started: yield* Clock.monotonicTimeNanos,
-					reserved: yield* Ref.make(0),
+					reserved: yield* TxRef.make(0),
 				},
 			}
 			const admitted = yield* Effect.tx(
@@ -366,7 +331,7 @@ export const submit = Effect.fnUntraced(function* (
 							},
 						})
 					const current = yield* TxRef.get(managed.route)
-					if (lifecycle._tag !== "Open" || Option.isNone(current))
+					if (lifecycle._tag !== "Open")
 						return yield* Change.ChangeRejected.make({
 							reason: {
 								_tag: "UnsupportedTarget",
@@ -375,11 +340,12 @@ export const submit = Effect.fnUntraced(function* (
 						})
 					const strategy =
 						normalized.strategy ??
-						(managed.driver.overlap?.(normalized.candidate) === true
+						(Option.isSome(current) &&
+						managed.driver.overlap?.(normalized.candidate) === true
 							? "Overlap"
 							: "Restart")
 					if (
-						strategy !== "Overlap" ||
+						strategy === "Overlap" &&
 						managed.driver.overlap?.(normalized.candidate) !== true
 					)
 						return yield* Change.ChangeRejected.make({
@@ -424,7 +390,10 @@ export const submit = Effect.fnUntraced(function* (
 						{
 							instance: managed.instance,
 							selection: "Requested",
-							starting: { version, health: "Serving" },
+							starting: {
+								version,
+								health: Option.isSome(current) ? "Serving" : "Unavailable",
+							},
 							desired: {
 								candidate: normalized.candidate,
 								version: version + 1,
@@ -433,8 +402,10 @@ export const submit = Effect.fnUntraced(function* (
 							compensation: "NotNeeded",
 							actual: {
 								version,
-								generation: current.value.id,
-								health: "Serving",
+								generation: Option.map(current, (attempt) => attempt.id).pipe(
+									Option.getOrUndefined,
+								),
+								health: Option.isSome(current) ? "Serving" : "Unavailable",
 								matchesTarget: false,
 							},
 							recoverability: {
@@ -455,7 +426,8 @@ export const submit = Effect.fnUntraced(function* (
 						remaining: normalized.budget.total,
 						members,
 						leaseHolders: [],
-						unconfirmedUnits: [current.value.id],
+						unconfirmedUnits: Option.isSome(current) ? [current.value.id] : [],
+						evidence: [],
 						settlement: [],
 						outcome: Option.none(),
 					})
@@ -473,7 +445,16 @@ export const submit = Effect.fnUntraced(function* (
 						),
 						cancel: TxRef.set(run.cancel, true),
 					}
+					const capacity = yield* Capacity.reserve(
+						runtime.capacity,
+						strategy === "Overlap" && Option.isSome(current) ? 2 : 1,
+						Option.isSome(current) ? 1 : 0,
+					)
+					if (Option.isSome(current))
+						yield* TxRef.set(current.value.capacity, Option.some(capacity))
 					const record: ChangeTable.Record = {
+						capacity,
+						oldChanged: yield* TxRef.make(Option.isNone(current)),
 						started: run.budget.started,
 						request: normalized,
 						status,
@@ -488,7 +469,12 @@ export const submit = Effect.fnUntraced(function* (
 					yield* TxRef.update(table.records, HashMap.set(id, record))
 					if (request.key !== undefined)
 						yield* TxRef.update(table.keys, HashMap.set(request.key, record))
-					const active: Run = { ...run, record }
+					const active: Run = {
+						...run,
+						record,
+						previous: current,
+						previousDesired: yield* TxRef.get(managed.desired),
+					}
 					yield* TxRef.set(managed.lifecycle, {
 						_tag: "Open",
 						active: Option.some(active),
@@ -499,29 +485,25 @@ export const submit = Effect.fnUntraced(function* (
 						record,
 						managed,
 						run: active,
-						attempt: current.value.id,
+						attempt: Option.map(current, (attempt) => attempt.id).pipe(
+							Option.getOrElse(() => 0),
+						),
 					} as const
 				}),
 			)
 			if (admitted._tag === "Duplicate") return admitted.handle
-			yield* Ref.set<{ readonly attempt: number; readonly phase: T.Phase }>(
-				run.progress,
-				{
-					attempt: admitted.attempt,
-					phase: "Admission",
-				},
-			)
+			yield* TxRef.set<{
+				readonly attempt: number
+				readonly phase: Change.Phase
+			}>(run.progress, {
+				attempt: admitted.attempt,
+				phase: "Admission",
+			})
 			const policy: Deadlines = {
 				...normalized.budget,
 				...normalized.requirements,
 			}
-			yield* work(
-				admitted.managed,
-				normalized,
-				policy,
-				admitted.run,
-				admitted.record,
-			).pipe(
+			yield* work(admitted.managed, policy, admitted.run, admitted.record).pipe(
 				Effect.provideContext(admitted.managed.context),
 				Effect.forkIn(runtime.changes.scope, { uninterruptible: true }),
 			)

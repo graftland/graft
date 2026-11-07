@@ -1,136 +1,17 @@
 /** Single-fork, stateless transitions and execution-driver extension points. */
-import {
-	Context,
-	Data,
-	Effect,
-	Option,
-	Schema,
-	type Cause,
-	type Duration,
-	type Scope,
-} from "effect"
+import { Context, Effect, Option, Schema, type Scope } from "effect"
 
+import type * as Change from "./Change"
 import * as Graft from "./Graft"
 import * as Coordinator from "./internal/transition"
 import type { OperationIdentity } from "./Plugin"
 import type { Unapproved } from "./Trust"
-
-/** An immutable implementation identity and driver-owned immutable deployment snapshot. Custom drivers must detach and validate caller-owned input before registration or admission. */
-export interface Candidate {
-	readonly driver: string
-	readonly identity: string
-	readonly deployment: unknown
-}
-
-export type Phase =
-	| "Admission"
-	| "Starting"
-	| "Describing"
-	| "Serving"
-	| "Readiness"
-	| "Probing"
-	| "Cutover"
-	| "Trial"
-	| "Draining"
-	| "Stopping"
-	| "Terminating"
-	| "Recovery"
-	| "Complete"
-
-/** Every lifecycle deadline is finite. The total includes cleanup and recovery. */
-export interface Policy {
-	readonly total: Duration.Input
-	readonly startup: Duration.Input
-	readonly probe: Duration.Input
-	readonly trial: Duration.Input
-	readonly drain: Duration.Input
-	readonly stop: Duration.Input
-	readonly terminate: Duration.Input
-	readonly probes: ReadonlyArray<string>
-}
-
-export const defaultPolicy: Policy = {
-	total: "5 minutes",
-	startup: 30_000,
-	probe: 5_000,
-	trial: 0,
-	drain: 5_000,
-	stop: 5_000,
-	terminate: 5_000,
-	probes: [],
-}
 
 /** Loader binds this reference to its entry id. Embedded registrations name themselves. */
 export const CurrentInstance = Context.Reference<Option.Option<string>>(
 	"@graftland/graft/Transition/CurrentInstance",
 	{ defaultValue: Option.none },
 )
-
-export interface Request {
-	/** Managed instance name (Loader entry id), or the owning fork id. */
-	readonly target: string | number
-	readonly candidate: Candidate
-	readonly policy?: Partial<Policy> | undefined
-}
-
-export interface Termination {
-	readonly unit: string
-	/** NotStarted proves startup was prevented or settled without creating an execution. */
-	readonly state: "Exited" | "NotStarted"
-	/** The observed exit status, including an abnormal exit. */
-	readonly cause?: Cause.Cause<unknown>
-}
-
-export interface Evidence {
-	readonly attempt: number
-	readonly phase: Phase
-	readonly cause?: Cause.Cause<unknown>
-	readonly termination?: Termination
-}
-
-export type Reason =
-	| "Busy"
-	| "Closing"
-	| "CoordinatorDefect"
-	| "UnsupportedTarget"
-	| "InvalidPolicy"
-	| "IncompatibleContract"
-	| "OverlapRequired"
-	| "Failed"
-	| "TimedOut"
-	| "UnconfirmedTermination"
-	| "Stuck"
-
-export interface Result {
-	readonly phase: Phase
-	readonly evidence: ReadonlyArray<Evidence>
-}
-export type Outcome = Data.TaggedEnum<{
-	Accepted: Result
-	Aborted: Result & { readonly reason: Reason }
-	Recovered: Result & { readonly reason: Reason }
-	RecoveryFailed: Result & { readonly reason: Reason }
-	Stuck: Result & { readonly reason: "UnconfirmedTermination" }
-}>
-export const Outcome = Data.taggedEnum<Outcome>()
-
-/** Retain at most this many retired summaries per fork. */
-export const generationHistoryLimit = 32
-export interface CandidateIdentity {
-	readonly driver: string
-	readonly identity: string
-}
-export interface Generation {
-	readonly generation: number
-	readonly attempt: number
-	readonly candidate: CandidateIdentity
-	readonly state: "Starting" | "Serving" | "Draining" | "Terminated" | "Stuck"
-}
-
-/** Live event with the complete candidate; consumers own any historical archive. */
-export interface GenerationEvent extends Generation {
-	readonly candidate: Candidate
-}
 
 export class DriverError extends Schema.TaggedError<
 	DriverError,
@@ -146,14 +27,21 @@ export class Unavailable extends Schema.TaggedError<
 	fork: Schema.Finite,
 }) {}
 
-/** The attempt is at its admitted-call limit; this call was not admitted. */
+/** A call can be rejected before a generation is selected. */
+export const CallRejection = Schema.TaggedUnion({
+	Limit: { attempt: Schema.Finite, limit: Schema.Finite },
+	QueueOverflow: { limit: Schema.Finite },
+	QueueExpired: {},
+	Closing: {},
+	RecoveryFailed: {},
+})
+export type CallRejection = typeof CallRejection.Type
 export class AdmissionRejected extends Schema.TaggedError<
 	AdmissionRejected,
 	{ readonly brand: unique symbol }
 >()("AdmissionRejected", {
 	fork: Schema.Finite,
-	attempt: Schema.Finite,
-	limit: Schema.Finite,
+	reason: CallRejection,
 }) {}
 
 /** A bypass would replace a coordinator-owned fork or one of its ancestors. */
@@ -169,8 +57,17 @@ export interface Description {
 	readonly provides: ReadonlyArray<OperationIdentity>
 }
 
+/** Correlation fixed before allocation and echoed by the unit's lifecycle observations. */
+export interface Allocation {
+	readonly change: Option.Option<Change.Id>
+	readonly generation: number
+	readonly routeVersion: number
+	readonly term: number
+}
+
 /** Lifecycle primitives only. Exiting is independent of transport or scope closure. */
 export interface Unit {
+	readonly acknowledgement: Allocation
 	readonly start: Effect.Effect<void, DriverError, Scope.Scope>
 	readonly describe: Effect.Effect<Description, DriverError>
 	readonly serve: Effect.Effect<void, DriverError>
@@ -178,7 +75,7 @@ export interface Unit {
 	readonly probe: (name: string) => Effect.Effect<void, DriverError>
 	readonly stop: Effect.Effect<void, DriverError>
 	readonly terminate: Effect.Effect<void, DriverError>
-	readonly exited: Effect.Effect<Termination, DriverError>
+	readonly exited: Effect.Effect<Change.Termination, DriverError>
 	readonly failure: Effect.Effect<never, DriverError>
 }
 
@@ -186,10 +83,11 @@ export interface Unit {
 export interface Driver {
 	readonly name: string
 	/** Verified from the immutable deployment before allocation or execution. */
-	readonly overlap?: ((candidate: Candidate) => boolean) | undefined
+	readonly overlap?: ((candidate: Change.Candidate) => boolean) | undefined
 	readonly allocate: (
-		candidate: Candidate,
+		candidate: Change.Candidate,
 		attempt: number,
+		allocation: Allocation,
 	) => Effect.Effect<Unit, DriverError, Scope.Scope>
 }
 
@@ -238,10 +136,23 @@ export interface Registration {
 	readonly instance?: string | undefined
 	/** Positive per-attempt admission limit. Defaults to 256. */
 	readonly maxInFlight?: number | undefined
-	readonly initial: Candidate
+	readonly initial: Change.Candidate
 	readonly required: ReadonlyArray<OperationIdentity>
 	readonly facades: ReadonlyArray<Facade>
-	readonly policy?: Partial<Policy> | undefined
+	readonly budget?: Partial<Change.Budget> | undefined
+	readonly requirements?: Partial<Change.Requirements> | undefined
+	/** Re-resolves desired input before every allocation, including recovery. */
+	readonly resolve?:
+		| ((
+				desired: Change.Candidate,
+		  ) => Effect.Effect<Change.Candidate, DriverError>)
+		| undefined
+	readonly queue?:
+		| {
+				readonly maxWaiters?: number
+				readonly maxWait?: import("effect").Duration.Input
+		  }
+		| undefined
 }
 
 /** Registers a driver for the current fork, owned by the fork's scope, and starts its first attempt. */

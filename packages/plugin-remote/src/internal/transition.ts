@@ -16,7 +16,7 @@ import {
 import { SecureRandom } from "effect/crypto"
 import { ChildProcessSpawner } from "effect/process"
 
-import { Graft, Plugin, Transition } from "@graftland/graft"
+import { Change, Graft, Plugin, Transition } from "@graftland/graft"
 
 import * as Artifact from "../Artifact"
 import * as Capabilities from "../Capabilities"
@@ -32,7 +32,7 @@ import { layer as workerLayer } from "./workerTransport"
 export interface ManagedOptions extends Omit<CandidateOptions, "input"> {
 	/** Required outside Loader; must match the entry id when Loader supplies one. */
 	readonly instance?: string | undefined
-	readonly policy?: Partial<Transition.Policy> | undefined
+	readonly policy?: Partial<Change.Budget & Change.Requirements> | undefined
 	/** Must be between 1 and the direct transport capacity (16). Defaults to 16. */
 	readonly maxInFlight?: number | undefined
 }
@@ -53,7 +53,7 @@ export const driver = Effect.fnUntraced(function* <
 	const launcher = Option.fromUndefinedOr(selection)
 	return {
 		name: driverName,
-		allocate: (value, attempt) =>
+		allocate: (value, attempt, allocation) =>
 			failure(
 				Effect.gen(function* () {
 					const options = yield* Schema.decodeUnknownEffect(CandidateOptions)(
@@ -158,14 +158,14 @@ export const driver = Effect.fnUntraced(function* <
 					const observed = settled.pipe(
 						Effect.flatMap((state) => {
 							if (state._tag === "NotStarted")
-								return Effect.succeed<Transition.Termination>({
+								return Effect.succeed<Change.Termination>({
 									unit,
 									state: "NotStarted",
 									cause: state.cause,
 								})
 							if (Option.isSome(state.execution))
 								return state.execution.value.exited.pipe(
-									Effect.map((status): Transition.Termination => ({
+									Effect.map((status): Change.Termination => ({
 										unit,
 										state: "Exited",
 										cause: Cause.fail(status),
@@ -174,7 +174,7 @@ export const driver = Effect.fnUntraced(function* <
 							// Losing the transport after spawn is not proof that the execution exited.
 							return state.spawned
 								? Effect.never
-								: Effect.succeed<Transition.Termination>({
+								: Effect.succeed<Change.Termination>({
 										unit,
 										state: "NotStarted",
 										cause: state.cause,
@@ -186,6 +186,7 @@ export const driver = Effect.fnUntraced(function* <
 						f: (handle: Handle) => Effect.Effect<A, E2, R>,
 					) => failure(Deferred.await(handle).pipe(Effect.flatMap(f)))
 					return {
+						acknowledgement: allocation,
 						start: Effect.uninterruptibleMask((restore) =>
 							Effect.gen(function* () {
 								yield* Effect.tx(
@@ -447,7 +448,8 @@ export const managedPlugin = <
 					),
 					facades: Array.map(contract.provides, (service) => service.facade),
 					maxInFlight,
-					policy: options.policy,
+					budget: options.policy,
+					requirements: options.policy,
 				})
 			}),
 	})

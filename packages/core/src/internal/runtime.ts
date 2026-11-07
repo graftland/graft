@@ -99,10 +99,10 @@ export interface ForkStatus {
 	readonly probes: import("./probes").Registry
 	readonly managed: TxRef.TxRef<Option.Option<import("./transition").Managed>>
 	readonly generationEvents: TxPubSub.TxPubSub<
-		import("../Transition").GenerationEvent
+		import("../Change").GenerationEvent
 	>
 	readonly generations: TxSubscriptionRef.TxSubscriptionRef<
-		ReadonlyArray<import("../Transition").Generation>
+		ReadonlyArray<import("../Change").Generation>
 	>
 	readonly loading: TxRef.TxRef<number>
 	readonly parent: ForkStatus | undefined
@@ -157,6 +157,7 @@ export interface Runtime {
 	readonly trust: TxRef.TxRef<import("./trust").State>
 	readonly mutations: TxRef.TxRef<number>
 	readonly changes: import("./changeTable").Table
+	readonly capacity: TxRef.TxRef<import("./capacity").State>
 	readonly instances: TxRef.TxRef<
 		HashMap.HashMap<string, import("./transition").Managed>
 	>

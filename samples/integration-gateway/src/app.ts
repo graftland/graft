@@ -36,7 +36,7 @@ export const policy = {
 	stop: "200 millis",
 	terminate: "2 seconds",
 	probes: ["health"],
-} satisfies Transition.Policy
+} satisfies Change.Budget & Change.Requirements
 
 export type TransitionWrapper = (
 	release: Release,

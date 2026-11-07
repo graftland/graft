@@ -17,7 +17,7 @@ import { SecureRandom } from "effect/crypto"
 import { NodeServices } from "@effect/platform-node"
 import { assert, it } from "@effect/vitest"
 
-import { Change, Graft, Plugin, type Transition } from "@graftland/graft"
+import { Change, Graft, Plugin } from "@graftland/graft"
 
 import { ProcessExited } from "../src/Errors"
 import * as Remote from "../src/index"
@@ -37,7 +37,7 @@ const policy = {
 	terminate: "2 seconds",
 	total: "30 seconds",
 	probes: ["health"],
-} satisfies Transition.Policy
+} satisfies Change.Budget & Change.Requirements
 const setup = Effect.fnUntraced(function* (
 	target: Remote.CandidateOptions["target"],
 	input: typeof contract.config.Type = { value: "old" },
@@ -91,7 +91,7 @@ const setup = Effect.fnUntraced(function* (
 	const service = yield* Deferred.await(found)
 	const request = (
 		input: Remote.CandidateOptions["input"],
-		override?: Partial<Transition.Policy>,
+		override?: Partial<Change.Budget & Change.Requirements>,
 	) =>
 		Change.run({
 			instance: "integration",

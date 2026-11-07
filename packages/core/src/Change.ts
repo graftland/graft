@@ -17,15 +17,61 @@ import {
 import type { Graft } from "./Graft"
 import * as Coordinator from "./internal/changeCoordinator"
 import { RuntimeContext } from "./internal/runtimeContext"
-import type * as T from "./Transition"
 
-export type {
-	Candidate,
-	CandidateIdentity,
-	Evidence,
-	Phase,
-	Termination,
-} from "./Transition"
+/** An immutable implementation identity and driver-owned immutable deployment snapshot. Custom drivers must detach and validate caller-owned input before registration or admission. */
+export interface Candidate {
+	readonly driver: string
+	readonly identity: string
+	readonly deployment: unknown
+}
+
+export type Phase =
+	| "Admission"
+	| "Starting"
+	| "Describing"
+	| "Serving"
+	| "Readiness"
+	| "Probing"
+	| "Cutover"
+	| "Trial"
+	| "Draining"
+	| "Stopping"
+	| "Terminating"
+	| "Recovery"
+	| "Complete"
+
+export interface Termination {
+	readonly unit: string
+	/** NotStarted proves startup was prevented or settled without creating an execution. */
+	readonly state: "Exited" | "NotStarted"
+	/** The observed exit status, including an abnormal exit. */
+	readonly cause?: Cause.Cause<unknown>
+}
+
+export interface Evidence {
+	readonly attempt: number
+	readonly phase: Phase
+	readonly cause?: Cause.Cause<unknown>
+	readonly termination?: Termination
+}
+
+/** Retain at most this many retired summaries per fork. */
+export const generationHistoryLimit = 32
+export interface CandidateIdentity {
+	readonly driver: string
+	readonly identity: string
+}
+export interface Generation {
+	readonly generation: number
+	readonly attempt: number
+	readonly candidate: CandidateIdentity
+	readonly state: "Starting" | "Serving" | "Draining" | "Terminated" | "Stuck"
+}
+
+/** Live event with the complete candidate; consumers own any historical archive. */
+export interface GenerationEvent extends Generation {
+	readonly candidate: Candidate
+}
 
 export const Id = Schema.String.pipe(Schema.brand("@graftland/graft/Change/Id"))
 export type Id = typeof Id.Type
@@ -57,7 +103,7 @@ export const defaultRequirements: Requirements = { probes: [], trial: 0 }
 export interface Request {
 	readonly key?: string | undefined
 	readonly instance: string
-	readonly candidate: T.Candidate
+	readonly candidate: Candidate
 	readonly strategy?: Strategy | undefined
 	readonly expected?: number | undefined
 	readonly budget?: Partial<Budget> | undefined
@@ -97,7 +143,7 @@ export class ChangeRejected extends Schema.TaggedError<
 
 export type Health = "Serving" | "Unavailable" | "Stopped" | "Unknown"
 export interface Desired {
-	readonly candidate: T.Candidate
+	readonly candidate: Candidate
 	readonly version: number
 }
 export interface Actual {
@@ -108,8 +154,8 @@ export interface Actual {
 }
 export type Execution = Data.TaggedEnum<{
 	NotStarted: {}
-	Running: { readonly phase: T.Phase }
-	Completed: { readonly phase: T.Phase; readonly outcome: Outcome["_tag"] }
+	Running: { readonly phase: Phase }
+	Completed: { readonly phase: Phase; readonly outcome: Outcome["_tag"] }
 }>
 export const Execution = Data.taggedEnum<Execution>()
 export interface Member {
@@ -137,8 +183,8 @@ export type Reason =
 	| "UnresolvedCleanup"
 export interface Result {
 	readonly change: Id
-	readonly phase: T.Phase
-	readonly evidence: ReadonlyArray<T.Evidence>
+	readonly phase: Phase
+	readonly evidence: ReadonlyArray<Evidence>
 	readonly members: ReadonlyArray<Member>
 }
 export type Outcome = Data.TaggedEnum<{
@@ -169,12 +215,13 @@ export interface Status {
 	readonly sequence: number
 	readonly instance: string
 	readonly strategy: Strategy
-	readonly phase: T.Phase
+	readonly phase: Phase
 	readonly remaining: number
 	readonly members: ReadonlyArray<Member>
 	readonly leaseHolders: ReadonlyArray<number>
 	readonly unconfirmedUnits: ReadonlyArray<number>
 	readonly settlement: ReadonlyArray<Settlement>
+	readonly evidence: ReadonlyArray<Evidence>
 	readonly outcome: import("effect").Option.Option<Outcome>
 }
 export const historyLimit = 128

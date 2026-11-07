@@ -1,6 +1,8 @@
 import { Array, Record } from "effect"
 
-import type { Policy } from "../Transition"
+import type { Budget, Requirements } from "../Change"
+
+type Policy = Budget & Requirements
 
 export type Deadlines = {
 	readonly [K in keyof Policy]: K extends "probes" ? Policy[K] : number
@@ -19,7 +21,8 @@ export const derive = (policy: Deadlines) => {
 	}
 	const termination = { exit: policy.terminate, hostRelease: policy.terminate }
 	const cleanup = sum(termination)
-	const recovery = sum(startup) + policy.probes.length * policy.probe + cleanup
+	const recovery =
+		sum(startup) + policy.probes.length * policy.probe + policy.trial + cleanup
 	const safety = sum({
 		recovery,
 		drainPrevious: policy.drain,

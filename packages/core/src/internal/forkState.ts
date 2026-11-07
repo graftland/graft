@@ -41,9 +41,9 @@ export const make = Effect.fnUntraced(function* (
 		parent,
 		managed: yield* TxRef.make<ForkStatus["managed"]["value"]>(Option.none()),
 		generationEvents:
-			yield* TxPubSub.sliding<import("../Transition").GenerationEvent>(64),
+			yield* TxPubSub.sliding<import("../Change").GenerationEvent>(64),
 		generations: yield* TxSubscriptionRef.make<
-			ReadonlyArray<import("../Transition").Generation>
+			ReadonlyArray<import("../Change").Generation>
 		>([]),
 		probes: yield* Probes.make,
 		loading: yield* TxRef.make(0),

@@ -62,7 +62,7 @@ it.effect(
 			const lost = yield* Deferred.make<void>()
 			const terminated = yield* Deferred.make<void>()
 			const exited = yield* Deferred.make<ProcessExited>()
-			const previousExited = yield* Deferred.make<Transition.Termination>()
+			const previousExited = yield* Deferred.make<Change.Termination>()
 			const count = yield* Ref.make(0)
 			const status = ProcessExited.make({
 				pid: Option.none(),
@@ -97,7 +97,10 @@ it.effect(
 						}
 					}),
 			}
-			const initial: Transition.Unit = {
+			const initial = (
+				acknowledgement: Transition.Allocation,
+			): Transition.Unit => ({
+				acknowledgement,
 				start: Effect.void,
 				describe: Effect.succeed({ overlap: true, provides: [] }),
 				serve: Effect.void,
@@ -110,7 +113,7 @@ it.effect(
 				}).pipe(Effect.asVoid),
 				exited: Deferred.await(previousExited),
 				failure: Effect.never,
-			}
+			})
 			const managed = yield* Graft.plugin(
 				Plugin.make({
 					name: "controlled-remote-driver",
@@ -126,17 +129,17 @@ it.effect(
 							yield* Transition.registerDriver(
 								{
 									name: remote.name,
-									allocate: (candidate, attempt) =>
+									allocate: (candidate, attempt, allocation) =>
 										attempt === 1
-											? Effect.succeed(initial)
-											: remote.allocate(candidate, attempt),
+											? Effect.succeed(initial(allocation))
+											: remote.allocate(candidate, attempt, allocation),
 								},
 								{
 									instance: "integration",
 									initial: candidate,
 									required: [],
 									facades: [],
-									policy: {
+									budget: {
 										total: 10_000,
 										startup: 100,
 										probe: 100,
@@ -238,6 +241,7 @@ it.effect(
 						input: { value: "old" },
 					}),
 					0,
+					{ change: Option.none(), generation: 0, routeVersion: 0, term: 0 },
 				)
 				.pipe(Effect.scoped, Effect.flip)
 			assert.include(Cause.pretty(denied.cause), "UnregisteredAttempt")
@@ -255,6 +259,7 @@ it.effect(
 						input: { value: "old" },
 					}),
 					1,
+					{ change: Option.none(), generation: 1, routeVersion: 0, term: 1 },
 				)
 				.pipe(Scope.provide(owner))
 			const allocatedBindings = yield* authority.bindings
@@ -345,6 +350,7 @@ for (const placement of ["Worker", "Local"] as const) {
 						input: { value: "old" },
 					}),
 					1,
+					{ change: Option.none(), generation: 1, routeVersion: 0, term: 1 },
 				)
 				const starting = yield* Effect.forkScoped(Effect.exit(unit.start))
 				yield* Deferred.await(spawned)

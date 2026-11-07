@@ -12,6 +12,7 @@ import {
 } from "effect"
 
 import * as Change from "../Change"
+import * as Capacity from "./capacity"
 import type { Normalized } from "./changeRequest"
 
 export interface Cell {
@@ -26,6 +27,8 @@ export interface Condition {
 	readonly write: boolean
 }
 export interface Record {
+	readonly capacity: Capacity.Claim
+	readonly oldChanged: TxRef.TxRef<boolean>
 	readonly started: bigint
 	readonly request: Normalized
 	readonly status: TxRef.TxRef<Change.Status>
@@ -169,6 +172,7 @@ export const commit = Effect.fnUntraced(function* (record: Record) {
 	return true
 })
 export const release = Effect.fnUntraced(function* (record: Record) {
+	yield* Capacity.release(record.capacity)
 	const conditions = yield* TxRef.get(record.conditions)
 	for (const c of conditions)
 		yield* TxRef.update(c.cell, (state) => ({
@@ -202,6 +206,14 @@ export const finish = Effect.fnUntraced(function* (
 	}))
 	if (outcome._tag === "Stuck") return
 	yield* release(record)
+	yield* archive(table, record)
+})
+export const archive = Effect.fnUntraced(function* (
+	table: Table,
+	record: Record,
+) {
+	const existing = yield* TxRef.get(table.settled)
+	if (Array.contains(existing, record.handle.id)) return
 	const previous = yield* TxRef.get(table.settled)
 	const history = Array.append(previous, record.handle.id)
 	const evicted = Array.take(

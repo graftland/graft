@@ -16,10 +16,11 @@ it.effect(
 					{
 						name: "test",
 						overlap: () => true,
-						allocate: () =>
+						allocate: (_candidate, _term, allocation) =>
 							Effect.gen(function* () {
-								const exit = yield* Deferred.make<Transition.Termination>()
+								const exit = yield* Deferred.make<Change.Termination>()
 								return {
+									acknowledgement: allocation,
 									start: Effect.void,
 									describe: Effect.succeed({ overlap: true, provides: [] }),
 									serve: Effect.void,

@@ -1,10 +1,6 @@
 import { Array, Context, Effect, Schema } from "effect"
 
-import {
-	Manifest,
-	Change as RuntimeChange,
-	type Transition,
-} from "@graftland/graft"
+import { Manifest, Change as RuntimeChange } from "@graftland/graft"
 import { Artifact, Publication } from "@graftland/plugin-remote"
 import * as RemoteConfig from "@graftland/plugin-remote/Config"
 import * as Policy from "@graftland/plugin-remote/Policy"
@@ -182,7 +178,7 @@ export interface Options {
 	readonly initial: string
 	readonly host: Manifest.Host
 	readonly socket?: string
-	readonly policy?: Partial<Transition.Policy>
+	readonly policy?: Partial<RuntimeChange.Budget & RuntimeChange.Requirements>
 }
 export const Config = Schema.Struct({
 	trust: Schema.optionalKey(Schema.NonEmptyString),

@@ -118,11 +118,12 @@ const register = Effect.fnUntraced(function* (
 	const driver: Transition.Driver = {
 		name: "fixture",
 		overlap: () => true,
-		allocate: (_candidate, term) =>
+		allocate: (_candidate, term, allocation) =>
 			Effect.gen(function* () {
 				const exited =
 					term === 1 ? oldExit : yield* Deferred.make<Change.Termination>()
 				return {
+					acknowledgement: allocation,
 					start: Effect.void,
 					describe: Effect.succeed({ overlap: true, provides: [] }),
 					serve: Effect.void,
@@ -153,7 +154,8 @@ const register = Effect.fnUntraced(function* (
 					initial: candidate("old"),
 					required: [],
 					facades: [],
-					policy: { ...budget, trial: 0, probes: [] },
+					budget,
+					requirements: { trial: 0, probes: [] },
 				}),
 		}),
 	)
