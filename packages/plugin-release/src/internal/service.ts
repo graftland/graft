@@ -12,6 +12,7 @@ import {
 	Schema,
 	Semaphore,
 	Stream,
+	type Scope,
 } from "effect"
 
 import { Change, Graft, Manifest, Transition, Trust } from "@graftland/graft"
@@ -28,8 +29,10 @@ import {
 	type Apply,
 	type Diagnostic,
 	type Entry,
+	type Event,
 	type Observation,
 	type Options,
+	type Status,
 } from "../Model"
 import {
 	hasEnvironmentReference,
@@ -55,9 +58,7 @@ export const make = Effect.fnUntraced(function* (options: Options) {
 	const resolver = yield* ModuleResolver.ModuleResolver
 	const scope = yield* Effect.scope
 	const environment = yield* Effect.context<
-		| Effect.Services<ReturnType<typeof build>>
-		| Graft.Graft
-		| import("effect").Scope.Scope
+		Effect.Services<ReturnType<typeof build>> | Graft.Graft | Scope.Scope
 	>()
 	const store = path.resolve(options.store)
 	yield* fs.makeDirectory(store, { recursive: true })
@@ -147,7 +148,7 @@ export const make = Effect.fnUntraced(function* (options: Options) {
 					}),
 				)
 	const event = (
-		kind: import("../Model").Event["kind"],
+		kind: Event["kind"],
 		target: string,
 		entry?: string,
 		observation?: Observation,
@@ -585,7 +586,7 @@ export const make = Effect.fnUntraced(function* (options: Options) {
 				).pipe(protect),
 		)
 		const finished = yield* Ref.get(state)
-		const status: import("../Model").Status =
+		const status: Status =
 			progress._tag === "Rejected"
 				? { ...journal.status, state: progress.degraded ? "Degraded" : "Ready" }
 				: {
@@ -625,10 +626,7 @@ export const make = Effect.fnUntraced(function* (options: Options) {
 		effect: Effect.Effect<
 			A,
 			E,
-			| Graft.Graft
-			| FileSystem.FileSystem
-			| Path.Path
-			| import("effect").Scope.Scope
+			Graft.Graft | FileSystem.FileSystem | Path.Path | Scope.Scope
 		>,
 	) =>
 		Effect.uninterruptibleMask((restore) =>

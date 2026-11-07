@@ -26,6 +26,7 @@ import {
 	ReleaseError,
 	summarize,
 	summarizeRejection,
+	type Applied,
 	type Releases,
 } from "./Model"
 
@@ -76,7 +77,7 @@ const body = (message: IncomingMessage) =>
 			if (!message.complete) message.destroy()
 		})
 	})
-const applied = (value: import("./Model").Applied): Reply => ({
+const applied = (value: Applied): Reply => ({
 	ok: Array.every(
 		value.outcomes,
 		(item) => item._tag === "Admitted" && item.outcome._tag === "Accepted",

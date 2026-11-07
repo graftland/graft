@@ -4,6 +4,9 @@
  */
 import { Data, Schema, type Cause, type Effect, type Stream } from "effect"
 
+import type * as Change from "./Change"
+import type { ManagedFork } from "./Transition"
+
 export type ForkState<E = unknown> = Data.TaggedEnum<{
 	/** Decoding configuration or running `apply`. */
 	Loading: {}
@@ -41,28 +44,21 @@ export class ProbeError extends Schema.TaggedError<
 
 export interface Fork<in Input = any, out E = any> {
 	/** Live complete generation events. No replay; slow subscribers retain at most 64 events. */
-	readonly generationEvents: Stream.Stream<import("./Change").GenerationEvent>
+	readonly generationEvents: Stream.Stream<Change.GenerationEvent>
 	/** Active/stuck generations and the latest 32 retired summaries, without deployment payloads. */
-	readonly generations: Stream.Stream<
-		ReadonlyArray<import("./Change").Generation>
-	>
+	readonly generations: Stream.Stream<ReadonlyArray<Change.Generation>>
 	readonly id: number
 	/** Names registered by the current serving attempt. */
 	readonly probes: Effect.Effect<ReadonlyArray<string>>
 	/** Runs a registered check in its own scope without restarting the fork on failure. */
 	readonly probe: (name: string) => Effect.Effect<void, ProbeError>
 	/** The current state followed by every change, ending with `Disposed`. */
-	readonly state: Stream.Stream<
-		ForkState<E | Schema.SchemaError | import("./Transition").ManagedFork>
-	>
+	readonly state: Stream.Stream<ForkState<E | Schema.SchemaError | ManagedFork>>
 	/**
 	 * Waits until the fork settles. Fails with the plugin's cause if it ends
 	 * up `Failed`; a `Pending` fork counts as settled.
 	 */
-	readonly await: Effect.Effect<
-		void,
-		E | Schema.SchemaError | import("./Transition").ManagedFork
-	>
+	readonly await: Effect.Effect<void, E | Schema.SchemaError | ManagedFork>
 	/**
 	 * Waits until this fork and its descendants have no Loading states.
 	 * Pending and Failed count as settled; failures are observed through state or await.
@@ -74,11 +70,9 @@ export interface Fork<in Input = any, out E = any> {
 	 * Completes when handled or superseded, including when this input was never applied.
 	 * Does not wait for a restart to finish; use await or state to observe settlement.
 	 */
-	readonly update: (
-		input: Input,
-	) => Effect.Effect<void, import("./Transition").ManagedFork>
+	readonly update: (input: Input) => Effect.Effect<void, ManagedFork>
 	/** Restarts the plugin even if nothing changed. */
-	readonly restart: Effect.Effect<void, import("./Transition").ManagedFork>
+	readonly restart: Effect.Effect<void, ManagedFork>
 	/** Unloads the plugin and descendants; callers share the complete cleanup result, including failures. */
 	readonly dispose: Effect.Effect<void, CleanupError>
 }

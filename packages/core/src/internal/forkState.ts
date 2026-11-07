@@ -7,6 +7,7 @@ import {
 	TxSubscriptionRef,
 } from "effect"
 
+import type * as Change from "../Change"
 import { ForkState } from "../Fork"
 import * as Probes from "./probes"
 import type { ForkStatus, LocalSnapshot, Runtime, Spec } from "./runtime"
@@ -40,10 +41,9 @@ export const make = Effect.fnUntraced(function* (
 	const status: ForkStatus = {
 		parent,
 		managed: yield* TxRef.make<ForkStatus["managed"]["value"]>(Option.none()),
-		generationEvents:
-			yield* TxPubSub.sliding<import("../Change").GenerationEvent>(64),
+		generationEvents: yield* TxPubSub.sliding<Change.GenerationEvent>(64),
 		generations: yield* TxSubscriptionRef.make<
-			ReadonlyArray<import("../Change").Generation>
+			ReadonlyArray<Change.Generation>
 		>([]),
 		probes: yield* Probes.make,
 		loading: yield* TxRef.make(0),

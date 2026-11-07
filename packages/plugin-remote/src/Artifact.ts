@@ -12,6 +12,7 @@ import {
 	Schema,
 	Stream,
 	String,
+	type PlatformError,
 } from "effect"
 
 import { Manifest } from "@graftland/graft"
@@ -58,10 +59,7 @@ const hashDirectory = Effect.fnUntraced(function* (
 	const hash = yield* Effect.sync(() => createHash("sha256").update(prefix))
 	const visit = Effect.fnUntraced(function* (
 		relative: string,
-	): Effect.fn.Return<
-		void,
-		ArtifactError | import("effect").PlatformError.PlatformError
-	> {
+	): Effect.fn.Return<void, ArtifactError | PlatformError.PlatformError> {
 		const filename = path.join(directory, relative)
 		const info = yield* fs.lstat(filename)
 		if (info.type !== "File" && info.type !== "Directory")
@@ -132,7 +130,7 @@ const inspect = Effect.fnUntraced(function* (
 	return Identity.make({ version: 1, algorithm: "sha256", entry, digest })
 })
 
-const filesystemError = (cause: import("effect").PlatformError.PlatformError) =>
+const filesystemError = (cause: PlatformError.PlatformError) =>
 	ArtifactError.make({
 		detail: "Reading or writing the artifact failed",
 		cause: Cause.fail(cause),

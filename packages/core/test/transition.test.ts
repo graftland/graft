@@ -37,7 +37,7 @@ class Value extends Context.Service<
 			| Transition.DriverError
 			| Transition.Unavailable
 			| Transition.AdmissionRejected
-			| import("../src/Trust").Unapproved
+			| Trust.Unapproved
 		>
 	}
 >()("@graftland/graft/test/transition.test/Value") {}
@@ -73,11 +73,7 @@ interface Script {
 	readonly serve?: Effect.Effect<void, Transition.DriverError>
 	readonly missingServices?: boolean
 	readonly exitAtReadiness?: boolean
-	readonly start?: Effect.Effect<
-		void,
-		Transition.DriverError,
-		import("effect").Scope.Scope
-	>
+	readonly start?: Effect.Effect<void, Transition.DriverError, Scope.Scope>
 	readonly describe?: Effect.Effect<
 		Transition.Description,
 		Transition.DriverError
