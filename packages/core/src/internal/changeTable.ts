@@ -19,6 +19,8 @@ import * as Capacity from "./capacity"
 import type { Preparation } from "./changePreparation"
 import type { Normalized } from "./changeRequest"
 import type { Runtime } from "./runtime"
+import type { Classification } from "./terminalSettlement"
+import type { HostLease } from "./transition"
 import * as Trust from "./trust"
 
 export interface Cell {
@@ -33,6 +35,7 @@ export interface Condition {
 	readonly write: boolean
 }
 export interface Record {
+	readonly obligations: TxRef.TxRef<ReadonlyArray<HostLease>>
 	readonly runtime: Runtime
 	readonly authorization: TxRef.TxRef<Trust.Condition>
 	readonly preparation: Preparation
@@ -238,7 +241,7 @@ export const commit = Effect.fnUntraced(function* (record: Record) {
 	yield* TxRef.set(record.conditions, updated)
 	return true
 })
-export const release = Effect.fnUntraced(function* (record: Record) {
+const release = Effect.fnUntraced(function* (record: Record) {
 	yield* Capacity.release(record.capacity)
 	const conditions = yield* TxRef.get(record.conditions)
 	for (const c of conditions)
@@ -264,6 +267,7 @@ export const finish = Effect.fnUntraced(function* (
 	table: Table,
 	record: Record,
 	outcome: Change.Outcome,
+	settlement: Classification,
 ) {
 	yield* update(table, record, (status) => ({
 		...status,
@@ -272,14 +276,9 @@ export const finish = Effect.fnUntraced(function* (
 		evidence: outcome.evidence,
 		outcome: Option.some(outcome),
 	}))
-	if (outcome._tag === "Stuck") return
-	yield* release(record)
-	yield* archive(table, record)
+	return yield* retire(table, record, settlement)
 })
-export const archive = Effect.fnUntraced(function* (
-	table: Table,
-	record: Record,
-) {
+const archive = Effect.fnUntraced(function* (table: Table, record: Record) {
 	const existing = yield* TxRef.get(table.settled)
 	if (Array.contains(existing, record.handle.id)) return
 	const previous = yield* TxRef.get(table.settled)
@@ -291,4 +290,16 @@ export const archive = Effect.fnUntraced(function* (
 	yield* TxRef.set(table.settled, Array.takeRight(history, Change.historyLimit))
 	for (const id of evicted)
 		yield* TxRef.update(table.records, HashMap.remove(id))
+})
+
+/** All reservation release and history admission use the same authoritative obligation classification. */
+export const retire = Effect.fnUntraced(function* (
+	table: Table,
+	record: Record,
+	settlement: Classification,
+) {
+	if (settlement._tag === "Unresolved") return false
+	yield* release(record)
+	yield* archive(table, record)
+	return true
 })

@@ -1,49 +1,13 @@
-import {
-	Array,
-	Cause,
-	Effect,
-	Equal,
-	Exit,
-	HashMap,
-	Option,
-	Ref,
-	TxRef,
-} from "effect"
+import { Array, Cause, Effect, Equal, HashMap, Option, TxRef } from "effect"
 
 import type * as Change from "../Change"
 import * as ChangeTable from "./changeTable"
+import * as Terminal from "./terminalSettlement"
 import type { Attempt, HostLease, Managed } from "./transition"
 
-/** Original ownership evidence determines current facts, independently of the recorded outcome. */
-export const read = Effect.fnUntraced(function* (
-	lease: HostLease,
-): Effect.fn.Return<Change.Settlement> {
-	const termination = yield* TxRef.get(lease.terminated)
-	const host = yield* Ref.get(lease.hostRelease.state)
-	return {
-		generation: lease.id,
-		execution: Option.match(termination, {
-			onNone: () => "Unconfirmed",
-			onSome: (value) => value.state,
-		}),
-		cleanup:
-			host._tag !== "Completed"
-				? "Pending"
-				: Exit.isSuccess(host.exit)
-					? "Completed"
-					: Cause.hasInterruptsOnly(host.exit.cause)
-						? "Unknown"
-						: "Failed",
-		cause: Cause.combine(
-			Option.flatMap(termination, (value) =>
-				Option.fromUndefinedOr(value.cause),
-			).pipe(Option.getOrElse(() => Cause.empty)),
-			host._tag === "Completed" && Exit.isFailure(host.exit)
-				? host.exit.cause
-				: Cause.empty,
-		),
-	}
-})
+/** Every observer uses the terminal classifier's original ownership evidence. */
+export const read = (lease: HostLease) =>
+	Terminal.read(lease).pipe(Effect.map((obligation) => obligation.fact))
 /** Look up one logical instance and fence its route by the installed registration and exact attempt. */
 const currentRoute = Effect.fnUntraced(function* (
 	record: ChangeTable.Record,

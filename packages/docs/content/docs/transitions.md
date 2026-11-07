@@ -87,6 +87,11 @@ reports actual availability. A Stuck conclusion never changes; late evidence
 updates settlement facts. Reservations remain local to the affected objects
 until settlement or safe fencing.
 
+Terminal settlement includes every retired forward, previous and recovery
+generation and metadata cleanup. Missing exit or cleanup evidence keeps the
+Change Stuck and its reservations held. Completed cleanup failures retain their
+full causes and enter failure or recovery handling.
+
 ## Budgets and calls
 
 `budget` limits total time and each startup, probe, drain, stop and termination

@@ -6,6 +6,7 @@ import {
 	Fiber,
 	HashSet,
 	Option,
+	Ref,
 	Scope,
 	TxRef,
 } from "effect"
@@ -19,6 +20,7 @@ import type { Runtime } from "./runtime"
 import type { Managed } from "./transition"
 
 export interface Preparation {
+	readonly state: Effect.Effect<AsyncClose.State>
 	readonly value: Prepared
 	readonly close: Effect.Effect<void>
 	readonly await: Effect.Effect<Exit.Exit<void>>
@@ -59,6 +61,7 @@ export const prepare = Effect.fnUntraced(function* <A, E, R>(
 		Effect.gen(function* () {
 			if (managed.driver.prepare === undefined)
 				return yield* use({
+					state: Effect.succeed({ _tag: "Completed", exit: Exit.void }),
 					value: { overlap: managed.driver.overlap?.(candidate) === true },
 					close: Effect.void,
 					await: Effect.succeed(Exit.void),
@@ -125,6 +128,7 @@ export const prepare = Effect.fnUntraced(function* <A, E, R>(
 				)
 				if (Exit.isSuccess(result))
 					return yield* use({
+						state: Ref.get(owner.state),
 						value: result.value,
 						close: owner.start,
 						await: owner.await,

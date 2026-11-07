@@ -70,6 +70,8 @@ interface Allocated {
 export interface HostLease extends Capacity.Credit {
 	readonly allocation: T.Allocation
 	readonly executor: OwnedExecution.Execution<Allocated, T.DriverError>
+	readonly allocated: TxRef.TxRef<Option.Option<Attempt>>
+	readonly retiring: TxRef.TxRef<boolean>
 	readonly generation: Generations.Token
 	readonly id: number
 	readonly scope: Scope.Closeable
@@ -138,22 +140,6 @@ const releaseRegistration = Effect.fnUntraced(function* (managed: Managed) {
 		)
 	}
 })
-
-/** Pending allocation ownership is independent of an Attempt or a coordinator race result. */
-export const unconfirmedAllocations = Effect.fnUntraced(function* (
-	managed: Managed,
-) {
-	const leases = yield* TxRef.get(managed.leases)
-	const attempts = yield* TxRef.get(managed.attempts)
-	const pending = yield* Effect.forEach(
-		Array.filter(
-			leases,
-			(lease) => !Array.some(attempts, (attempt) => attempt.id === lease.id),
-		),
-		(lease) => TxRef.get(lease.terminated),
-	)
-	return Array.some(pending, Option.isNone)
-}, Effect.tx)
 
 /** Allocation is non-executing, but its own executor must end before NotStarted is evidence. */
 export const finishAllocation = Effect.fnUntraced(function* (
@@ -339,37 +325,28 @@ export const engine = (
 					)
 			}),
 		)
-	const observeSettlement = Effect.fnUntraced(function* (lease: HostLease) {
+	const activeChange = Effect.fnUntraced(function* () {
+		if (change !== undefined) return Option.some(change)
 		const lifecycle = yield* TxRef.get(managed.lifecycle)
-		const active =
-			lifecycle._tag === "Open" || lifecycle._tag === "Closing"
-				? lifecycle.active
-				: Option.none<Run>()
-		const target =
-			change ??
-			Option.getOrUndefined(
-				Option.flatMap(active, (run) => Option.fromUndefinedOr(run.record)),
-			)
-		if (target === undefined) return
-		const fact = yield* Settlement.read(lease)
-		yield* Settlement.observe(managed, target, [fact])
+		return lifecycle._tag === "Open" || lifecycle._tag === "Closing"
+			? Option.flatMap(lifecycle.active, (run) =>
+					Option.fromUndefinedOr(run.record),
+				)
+			: Option.none<ChangeTable.Record>()
 	})
-
+	const observeSettlement = Effect.fnUntraced(function* (lease: HostLease) {
+		const target = yield* activeChange()
+		if (Option.isNone(target)) return
+		const fact = yield* Settlement.read(lease)
+		yield* Settlement.observe(managed, target.value, [fact])
+	})
 	const setRoute = Effect.fnUntraced(function* (
 		route: Option.Option<Attempt>,
 	): Effect.fn.Return<void> {
 		yield* TxRef.set(managed.route, route)
-		const lifecycle = yield* TxRef.get(managed.lifecycle)
-		const active =
-			lifecycle._tag === "Open" || lifecycle._tag === "Closing"
-				? lifecycle.active
-				: Option.none<Run>()
-		const target =
-			change ??
-			Option.getOrUndefined(
-				Option.flatMap(active, (run) => Option.fromUndefinedOr(run.record)),
-			)
-		if (target !== undefined) yield* Settlement.observe(managed, target, [])
+		const target = yield* activeChange()
+		if (Option.isSome(target))
+			yield* Settlement.observe(managed, target.value, [])
 	}, Effect.tx)
 
 	const runOperation = Effect.fnUntraced(function* <A, E>(
@@ -511,6 +488,8 @@ export const engine = (
 			...allocation,
 			id,
 			scope,
+			allocated: yield* TxRef.make(Option.none<Attempt>()),
+			retiring: yield* TxRef.make(false),
 			charged:
 				change === undefined
 					? managed.initialCredit.charged
@@ -527,6 +506,8 @@ export const engine = (
 			terminated: yield* TxRef.make(Option.none<Change.Termination>()),
 		}
 		yield* TxRef.update(managed.leases, Array.append(lease))
+		if (change !== undefined)
+			yield* TxRef.update(change.obligations, Array.append(lease))
 
 		return lease
 	})
@@ -629,6 +610,7 @@ export const engine = (
 			calls: yield* TxRef.make(0),
 			services: yield* TxRef.make(Context.empty()),
 		}
+		yield* TxRef.set(lease.allocated, Option.some(attempt))
 		yield* TxRef.update(managed.attempts, Array.append(attempt))
 		yield* generation(managed, attempt, "Starting")
 		yield* observeExit(attempt).pipe(Effect.forkIn(managed.scope))
@@ -928,6 +910,7 @@ export const engine = (
 			),
 	)
 	const terminate = Effect.fnUntraced(function* (attempt: Attempt) {
+		yield* TxRef.set(attempt.retiring, true)
 		const known = yield* TxRef.get(attempt.terminated)
 		if (Option.isSome(known)) {
 			yield* recordExit(attempt, known.value)
@@ -996,6 +979,7 @@ export const engine = (
 				policy.drain,
 			),
 		)
+		yield* TxRef.set(attempt.retiring, true)
 		if (change !== undefined) yield* TxRef.set(change.oldChanged, true)
 		yield* Effect.result(
 			step(

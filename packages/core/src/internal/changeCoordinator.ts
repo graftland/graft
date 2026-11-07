@@ -11,6 +11,7 @@ import * as Settlement from "./changeSettlement"
 import * as ChangeTable from "./changeTable"
 import * as Generations from "./generations"
 import { RuntimeContext } from "./runtimeContext"
+import * as Terminal from "./terminalSettlement"
 import {
 	engine,
 	ExecutionOutcome,
@@ -108,22 +109,17 @@ const lateSettlement = Effect.fnUntraced(function* (
 	policy: Deadlines,
 	run: Run,
 ) {
-	const attempts = yield* TxRef.get(managed.attempts)
-	const route = yield* TxRef.get(managed.route)
-	const ownedLeases = yield* TxRef.get(managed.leases)
-	const leases = Array.filter(
-		ownedLeases,
-		(lease) => !Option.exists(route, (serving) => serving.id === lease.id),
+	const obligations = yield* Terminal.generations(managed, record)
+	const unresolved = Array.filter(
+		obligations,
+		(obligation) => obligation.state._tag === "Unresolved",
 	)
 	const coordinator = engine(managed, policy, run.evidence)
-	const results = yield* Effect.forEach(
-		leases,
-		(lease) =>
+	yield* Effect.forEach(
+		unresolved,
+		({ lease }) =>
 			Effect.gen(function* () {
-				const attempt = Array.findFirst(
-					attempts,
-					(attempt) => attempt.id === lease.id,
-				)
+				const attempt = yield* TxRef.get(lease.allocated)
 				const termination = yield* awaitLateExit(
 					managed,
 					record,
@@ -138,23 +134,11 @@ const lateSettlement = Effect.fnUntraced(function* (
 						lease.generation,
 					).pipe(Effect.andThen(Capacity.end(managed.runtime.capacity, lease))),
 				)
-				const exited = yield* Settlement.read(lease)
-				yield* lateFact(managed, record, exited)
-				const host = yield* coordinator.releaseHost(lease)
-				yield* lateFact(managed, record, {
-					generation: lease.id,
-					execution: termination.state,
-					cleanup: Exit.isSuccess(host)
-						? "Completed"
-						: Cause.hasInterruptsOnly(host.cause)
-							? "Unknown"
-							: "Failed",
-					cause: Cause.combine(
-						termination.cause ?? Cause.empty,
-						Exit.isFailure(host) ? host.cause : Cause.empty,
-					),
-				})
-				return Exit.isSuccess(host) || !Cause.hasInterruptsOnly(host.cause)
+				const fact = yield* Settlement.read(lease)
+				yield* lateFact(managed, record, fact)
+				yield* coordinator.releaseHost(lease)
+				const closed = yield* Settlement.read(lease)
+				yield* lateFact(managed, record, closed)
 			}).pipe(
 				Effect.catchCause((cause) =>
 					lateFact(managed, record, {
@@ -162,48 +146,42 @@ const lateSettlement = Effect.fnUntraced(function* (
 						execution: "Unconfirmed",
 						cleanup: "Unknown",
 						cause,
-					}).pipe(Effect.as(false)),
+					}),
 				),
 			),
 		{ concurrency: 8 },
 	)
-	if (!Array.every(results, (complete) => complete)) return
 	yield* record.preparation.close
-	const preparationExit = yield* record.preparation.await
-	yield* Effect.tx(
-		ChangeTable.update(managed.runtime.changes, record, (status) => ({
+	yield* record.preparation.await
+	const settlement = yield* Terminal.classify(managed, record)
+	yield* Settlement.observe(
+		managed,
+		record,
+		Array.map(settlement.generations, (obligation) => obligation.fact),
+		(status) => ({
 			...status,
-			preparation: {
-				cleanup: Exit.isSuccess(preparationExit)
-					? "Completed"
-					: Cause.hasInterruptsOnly(preparationExit.cause)
-						? "Unknown"
-						: "Failed",
-				cause: Exit.isFailure(preparationExit)
-					? preparationExit.cause
-					: Cause.empty,
-			},
-		})),
+			preparation: settlement.preparation,
+			evidence:
+				settlement.state._tag === "Settled" ||
+				settlement.state.cause.reasons.length === 0
+					? status.evidence
+					: [
+							...status.evidence,
+							{ phase: "Terminating", cause: settlement.state.cause },
+						],
+		}),
 	)
-	if (Exit.isFailure(preparationExit)) {
-		yield* Effect.tx(
-			ChangeTable.update(managed.runtime.changes, record, (status) => ({
-				...status,
-				evidence: [
-					...status.evidence,
-					{ phase: "Terminating", cause: preparationExit.cause },
-				],
-			})),
-		)
-		if (Cause.hasInterruptsOnly(preparationExit.cause)) return
-	}
 	yield* Effect.tx(
-		ChangeTable.release(record).pipe(
-			Effect.andThen(ChangeTable.archive(managed.runtime.changes, record)),
-			Effect.andThen(
-				TxRef.update(managed.pending, HashSet.remove(record.handle.id)),
-			),
-		),
+		Effect.gen(function* () {
+			if (
+				yield* ChangeTable.retire(
+					managed.runtime.changes,
+					record,
+					settlement.state,
+				)
+			)
+				yield* TxRef.update(managed.pending, HashSet.remove(record.handle.id))
+		}),
 	)
 })
 const work = Effect.fnUntraced(function* (
@@ -213,61 +191,10 @@ const work = Effect.fnUntraced(function* (
 	record: ChangeTable.Record,
 ) {
 	yield* TxRef.set(run.budget.reserved, safetyReserve(policy))
-	const executed = yield* execute(managed, policy, run).pipe(
+	const finalized = yield* execute(managed, policy, run).pipe(
 		Effect.catchCause((cause) => emergency(managed, policy, run, cause)),
 	)
-	const preparationCleanup =
-		executed._tag === "Stuck"
-			? Option.none<Exit.Exit<void>>()
-			: yield* record.preparation.close.pipe(
-					Effect.andThen(
-						Effect.timeoutOption(record.preparation.await, policy.terminate),
-					),
-				)
-	const outcome =
-		executed._tag === "Stuck" ||
-		(Option.isSome(preparationCleanup) &&
-			Exit.isSuccess(preparationCleanup.value))
-			? executed
-			: ExecutionOutcome.Stuck({
-					phase: executed.phase,
-					reason: "UnresolvedCleanup",
-					evidence: [
-						...executed.evidence,
-						{
-							phase: "Terminating",
-							cause:
-								Option.isSome(preparationCleanup) &&
-								Exit.isFailure(preparationCleanup.value)
-									? preparationCleanup.value.cause
-									: Cause.die(
-											new Error(
-												"Candidate metadata cleanup remains unresolved",
-											),
-										),
-						},
-					],
-				})
-	yield* Effect.tx(
-		ChangeTable.update(managed.runtime.changes, record, (status) => ({
-			...status,
-			preparation: {
-				cleanup: Option.isNone(preparationCleanup)
-					? "Pending"
-					: Exit.isSuccess(preparationCleanup.value)
-						? "Completed"
-						: Cause.hasInterruptsOnly(preparationCleanup.value.cause)
-							? "Unknown"
-							: "Failed",
-				cause:
-					Option.isSome(preparationCleanup) &&
-					Exit.isFailure(preparationCleanup.value)
-						? preparationCleanup.value.cause
-						: Cause.empty,
-			},
-		})),
-	)
-	const published = yield* publicOutcome(record, outcome)
+	const published = yield* publicOutcome(record, finalized.outcome)
 	yield* Effect.tx(
 		Effect.gen(function* () {
 			const state = yield* TxRef.get(managed.lifecycle)
@@ -276,12 +203,17 @@ const work = Effect.fnUntraced(function* (
 				Option.contains(state.active, run)
 			)
 				yield* TxRef.set(managed.lifecycle, { ...state, active: Option.none() })
-			yield* ChangeTable.finish(managed.runtime.changes, record, published)
-			if (published._tag !== "Stuck")
+			const released = yield* ChangeTable.finish(
+				managed.runtime.changes,
+				record,
+				published,
+				finalized.settlement.state,
+			)
+			if (released)
 				yield* TxRef.update(managed.pending, HashSet.remove(record.handle.id))
 		}),
 	)
-	if (outcome._tag === "Stuck")
+	if (finalized.settlement.state._tag === "Unresolved")
 		yield* Effect.interruptible(
 			lateSettlement(managed, record, policy, run),
 		).pipe(Effect.forkIn(managed.runtime.changes.scope))

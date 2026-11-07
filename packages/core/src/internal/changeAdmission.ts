@@ -19,7 +19,12 @@ import * as Settlement from "./changeSettlement"
 import * as ChangeTable from "./changeTable"
 import { captureEdges, resolutionChanged } from "./dependencies"
 import { realmOf, Realms, type Runtime } from "./runtime"
-import { type Attempt, type Managed, type Run } from "./transition"
+import {
+	type Attempt,
+	type HostLease,
+	type Managed,
+	type Run,
+} from "./transition"
 import * as Trust from "./trust"
 
 const footprint = Effect.fnUntraced(function* (managed: Managed) {
@@ -364,6 +369,9 @@ const makeRecord = Effect.fnUntraced(function* (
 	if (Option.isSome(current))
 		yield* TxRef.set(current.value.capacity, Option.some(capacity))
 	const record: ChangeTable.Record = {
+		obligations: yield* TxRef.make<ReadonlyArray<HostLease>>(
+			Option.isSome(current) ? [current.value] : [],
+		),
 		runtime,
 		authorization: yield* TxRef.make(authorization),
 		preparation,

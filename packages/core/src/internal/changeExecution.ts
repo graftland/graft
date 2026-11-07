@@ -3,12 +3,11 @@ import { Array, Cause, Effect, Exit, Option, TxRef } from "effect"
 import * as Change from "../Change"
 import * as Admission from "./admission"
 import * as ChangeTable from "./changeTable"
+import * as Terminal from "./terminalSettlement"
 import {
-	confirmed,
 	engine,
 	ExecutionOutcome,
 	failed,
-	unconfirmedAllocations,
 	type Attempt,
 	type Failed,
 	type Managed,
@@ -17,27 +16,19 @@ import {
 import { derive, type Deadlines } from "./transitionBudgets"
 import * as Trust from "./trust"
 
-const settlement = (result: AwaitedRetirement): Effect.Effect<void, Failed> => {
-	if (!confirmed(result))
-		return Effect.fail(
-			failed({ reason: "UnconfirmedTermination", phase: "Terminating" }),
-		)
-	if (result.host._tag !== "Completed")
-		return Effect.fail(
-			failed({ reason: "UnresolvedCleanup", phase: "Terminating" }),
-		)
-	if (Exit.isSuccess(result.host.exit)) return Effect.void
-	return Effect.fail(
-		failed({
-			reason: Cause.hasInterruptsOnly(result.host.exit.cause)
-				? "UnresolvedCleanup"
-				: "Failed",
-			phase: "Terminating",
-		}),
-	)
-}
 type Engine = ReturnType<typeof engine>
-type AwaitedRetirement = Effect.Success<ReturnType<Engine["retire"]>>
+interface Execution {
+	readonly managed: Managed
+	readonly policy: Deadlines
+	readonly run: Run
+	readonly record: ChangeTable.Record
+	readonly coordinator: Engine
+}
+export interface Finalized {
+	readonly outcome: ExecutionOutcome
+	readonly settlement: Terminal.Snapshot
+}
+type Resolution = "Accepted" | "Aborted" | "Recovered" | "RecoveryFailed"
 const closing = Effect.fnUntraced(function* (managed: Managed) {
 	const lifecycle = yield* TxRef.get(managed.lifecycle)
 	return (
@@ -75,10 +66,38 @@ const waitInvalidation = Effect.fnUntraced(function* (
 		}),
 	)
 }, Effect.tx)
-
+const requireSettlement = (
+	state: Terminal.Classification,
+): Effect.Effect<void, Failed> =>
+	state._tag === "Settled"
+		? Effect.void
+		: Effect.fail(
+				failed({
+					reason: state._tag === "Unresolved" ? state.reason : "Failed",
+					phase: "Terminating",
+					cause: state.cause,
+				}),
+			)
+const retirePrevious = Effect.fnUntraced(function* ({
+	coordinator,
+	run,
+}: Execution): Effect.fn.Return<void, Failed> {
+	if (Option.isNone(run.previous)) return
+	const result = yield* coordinator.retire(run.previous.value)
+	yield* requireSettlement(Terminal.generation(result.termination, result.host))
+})
+const settleCandidate = Effect.fnUntraced(function* ({
+	coordinator,
+	run,
+}: Execution): Effect.fn.Return<void, Failed> {
+	const candidate = yield* TxRef.get(run.candidate)
+	if (Option.isNone(candidate)) return
+	const result = yield* coordinator.terminate(candidate.value)
+	yield* requireSettlement(Terminal.generation(result.termination, result.host))
+	yield* TxRef.set(run.candidate, Option.none())
+})
 const prepareCandidate = Effect.fnUntraced(function* (
-	coordinator: Engine,
-	run: Run,
+	{ coordinator, run }: Execution,
 	desired: Change.Candidate,
 ): Effect.fn.Return<Attempt, Failed> {
 	const attempt = yield* coordinator.allocate(desired)
@@ -87,8 +106,7 @@ const prepareCandidate = Effect.fnUntraced(function* (
 	return attempt
 })
 const observeTrial = (
-	coordinator: Engine,
-	policy: Deadlines,
+	{ coordinator, policy }: Execution,
 	attempt: Attempt,
 ): Effect.Effect<void, Failed> =>
 	policy.trial === 0
@@ -99,263 +117,281 @@ const observeTrial = (
 				Effect.asVoid(Effect.timeoutOption(attempt.failure, policy.trial)),
 				Number.POSITIVE_INFINITY,
 			)
-const retirePrevious = Effect.fnUntraced(function* (
-	coordinator: Engine,
-	previous: Option.Option<Attempt>,
-): Effect.fn.Return<void, Failed> {
-	if (Option.isNone(previous)) return
-	const result = yield* coordinator.retire(previous.value)
-	yield* settlement(result)
-})
-const settleCandidate = Effect.fnUntraced(function* (
-	managed: Managed,
-	coordinator: Engine,
-	run: Run,
-): Effect.fn.Return<void, Failed> {
-	const candidate = yield* TxRef.get(run.candidate)
-	if (Option.isSome(candidate)) {
-		const result = yield* coordinator.terminate(candidate.value)
-		yield* settlement(result)
-		yield* TxRef.set(run.candidate, Option.none())
+
+/** One terminal decision reads every original obligation, including retired previous and recovery generations. */
+const terminal = Effect.fnUntraced(function* (
+	execution: Execution,
+	resolution: Resolution,
+	phase: Change.Phase,
+	reason: Change.Reason,
+): Effect.fn.Return<Finalized> {
+	const { managed, run, record, policy } = execution
+	const generations = yield* Terminal.generations(managed, record)
+	const generationState = Terminal.combine(
+		Array.map(generations, (obligation) => obligation.state),
+	)
+	if (generationState._tag !== "Unresolved") {
+		yield* record.preparation.close
+		yield* Effect.timeoutOption(record.preparation.await, policy.terminate)
 	}
-	if (yield* unconfirmedAllocations(managed))
-		return yield* Effect.fail(
-			failed({ reason: "UnconfirmedTermination", phase: "Starting" }),
-		)
+	const settlement = yield* Terminal.classify(managed, record)
+	yield* Effect.tx(
+		Effect.gen(function* () {
+			yield* ChangeTable.update(managed.runtime.changes, record, (status) => ({
+				...status,
+				preparation: settlement.preparation,
+			}))
+			if (
+				settlement.state._tag !== "Settled" &&
+				settlement.state.cause.reasons.length > 0
+			)
+				yield* TxRef.update(
+					run.evidence,
+					Array.append<Change.Evidence>({
+						phase: "Terminating",
+						cause: settlement.state.cause,
+					}),
+				)
+		}),
+	)
+
+	const evidence = yield* TxRef.get(run.evidence)
+	const result = { phase, evidence }
+	if (settlement.state._tag === "Unresolved")
+		return {
+			settlement,
+			outcome: ExecutionOutcome.Stuck({
+				...result,
+				reason: settlement.state.reason,
+			}),
+		}
+	const outcome =
+		resolution === "Accepted" && settlement.state._tag === "Failed"
+			? ExecutionOutcome.RecoveryFailed({ ...result, reason: "Failed" })
+			: resolution === "Accepted"
+				? ExecutionOutcome.Accepted(result)
+				: resolution === "Aborted"
+					? ExecutionOutcome.Aborted({ ...result, reason })
+					: resolution === "Recovered"
+						? ExecutionOutcome.Recovered({ ...result, reason })
+						: ExecutionOutcome.RecoveryFailed({ ...result, reason })
+	return { outcome, settlement }
+})
+const healthyOld = Effect.fnUntraced(function* ({
+	managed,
+	run,
+	coordinator,
+	policy,
+}: Execution) {
+	if (Option.isNone(run.previous)) return false
+	const previous = run.previous.value
+	const observed = yield* Effect.result(
+		coordinator.step(
+			previous.id,
+			"Readiness",
+			Trust.admission(
+				managed.runtime,
+				managed.instance,
+				previous.desired.identity,
+			).pipe(
+				Effect.tx,
+				Effect.andThen(
+					Effect.asVoid(Effect.timeoutOption(previous.failure, 0)),
+				),
+			),
+			policy.startup,
+		),
+	)
+	return observed._tag === "Success"
 })
 const recover = Effect.fnUntraced(function* (
-	coordinator: Engine,
-	policy: Deadlines,
-	run: Run,
+	execution: Execution,
 ): Effect.fn.Return<void, Failed> {
-	yield* retirePrevious(coordinator, run.previous)
+	const { coordinator, policy, run, record } = execution
+	yield* retirePrevious(execution)
 	yield* TxRef.set(run.budget.reserved, derive(policy).cleanup)
 	const restored = yield* coordinator.allocate(run.previousDesired, true)
 	yield* TxRef.set(run.candidate, Option.some(restored))
-	const record = run.record
-	if (record === undefined)
-		return yield* Effect.die(
-			new Error("Recovery requires an admitted Change record"),
-		)
 	yield* Effect.raceFirst(
 		Effect.gen(function* () {
 			yield* coordinator.start(restored)
 			yield* coordinator.cutover(restored)
-			yield* observeTrial(coordinator, policy, restored)
+			yield* observeTrial(execution, restored)
 		}),
 		waitInvalidation(record, run),
 	)
 })
-
-/** Strategies compose the same owned primitives; only their order differs. */
-export const execute = Effect.fnUntraced(function* (
+const stop = Effect.fnUntraced(function* (
+	execution: Execution,
+	failure: Failed,
+): Effect.fn.Return<Finalized> {
+	const { managed, policy, run, record, coordinator } = execution
+	yield* Effect.tx(Admission.pause(managed))
+	yield* TxRef.set(run.budget.reserved, derive(policy).recovery)
+	yield* Effect.result(settleCandidate(execution))
+	const generations = yield* Terminal.generations(managed, record)
+	const state = Terminal.combine(
+		Array.map(
+			Array.filter(
+				generations,
+				(obligation) =>
+					(obligation.retiring &&
+						(failure.reason === "UnconfirmedTermination" ||
+							failure.reason === "UnresolvedCleanup")) ||
+					!Option.exists(
+						run.previous,
+						(previous) => previous.id === obligation.lease.id,
+					),
+			),
+			(obligation) => obligation.state,
+		),
+	)
+	if (state._tag === "Unresolved") {
+		yield* coordinator.setRoute(Option.none())
+		yield* Admission.close(managed, "RecoveryFailed")
+		return yield* terminal(
+			execution,
+			"RecoveryFailed",
+			failure.phase,
+			failure.reason,
+		)
+	}
+	if (yield* closing(managed)) {
+		yield* TxRef.set(run.budget.reserved, 0)
+		yield* Effect.result(retirePrevious(execution))
+		yield* coordinator.setRoute(Option.none())
+		yield* Admission.close(managed, "Closing")
+		return yield* terminal(
+			execution,
+			"RecoveryFailed",
+			failure.phase,
+			failure.reason === "CoordinatorDefect" ? failure.reason : "Closing",
+		)
+	}
+	if (
+		!(yield* TxRef.get(record.oldChanged)) &&
+		(yield* healthyOld(execution))
+	) {
+		yield* Admission.open(managed)
+		return yield* terminal(execution, "Aborted", failure.phase, failure.reason)
+	}
+	yield* coordinator.setRoute(Option.none())
+	const recovered = yield* Effect.result(
+		Effect.interruptible(
+			Effect.raceFirst(recover(execution), waitClosing(managed, run)),
+		),
+	)
+	if (recovered._tag === "Success")
+		return yield* terminal(execution, "Recovered", "Recovery", failure.reason)
+	const progress = yield* TxRef.get(run.progress)
+	yield* TxRef.update(
+		run.evidence,
+		Array.append<Change.Evidence>({
+			...progress,
+			phase: "Recovery",
+			cause: Cause.fail(recovered.failure),
+		}),
+	)
+	yield* TxRef.set(run.budget.reserved, 0)
+	yield* Effect.result(settleCandidate(execution))
+	yield* coordinator.setRoute(Option.none())
+	const isClosing = yield* closing(managed)
+	yield* Admission.close(managed, isClosing ? "Closing" : "RecoveryFailed")
+	return yield* terminal(
+		execution,
+		"RecoveryFailed",
+		"Recovery",
+		recovered.failure.reason,
+	)
+})
+const forward = Effect.fnUntraced(function* (
+	execution: Execution,
+): Effect.fn.Return<Finalized, Failed> {
+	const { managed, run, record, coordinator, policy } = execution
+	const strategy = (yield* TxRef.get(record.status)).strategy
+	if (strategy === "Restart") {
+		yield* Effect.tx(Admission.pause(managed))
+		yield* TxRef.set(
+			run.budget.reserved,
+			derive(policy).recovery + derive(policy).cleanup,
+		)
+		yield* retirePrevious(execution)
+		yield* coordinator.setRoute(Option.none())
+	}
+	const next = yield* prepareCandidate(execution, record.request.candidate)
+	yield* coordinator.cutover(next)
+	yield* observeTrial(execution, next)
+	if (strategy === "Overlap") {
+		yield* TxRef.set(
+			run.budget.reserved,
+			derive(policy).recovery + derive(policy).cleanup,
+		)
+		yield* retirePrevious(execution)
+	}
+	yield* coordinator.step(
+		next.id,
+		"Trial",
+		Effect.asVoid(Effect.timeoutOption(next.failure, 0)),
+		policy.startup,
+	)
+	const finalized = yield* terminal(execution, "Accepted", "Complete", "Failed")
+	if (finalized.settlement.state._tag === "Failed")
+		return yield* Effect.fail(
+			failed({
+				reason: "Failed",
+				phase: "Terminating",
+				cause: finalized.settlement.state.cause,
+			}),
+		)
+	return finalized
+})
+const context = (
 	managed: Managed,
 	policy: Deadlines,
 	run: Run,
-): Effect.fn.Return<ExecutionOutcome> {
-	const record = run.record
-	if (record === undefined)
-		return yield* Effect.die(
-			new Error("Admitted execution requires a Change record"),
-		)
-	const limits = derive(policy)
-	const coordinator = engine(
+	record: ChangeTable.Record,
+): Execution => ({
+	managed,
+	policy,
+	run,
+	record,
+	coordinator: engine(
 		managed,
 		policy,
 		run.evidence,
 		run.budget,
 		run.progress,
 		record,
-	)
-	const strategy = (yield* TxRef.get(record.status)).strategy
-	const previous = run.previous
-	const complete = (
-		tag: ExecutionOutcome["_tag"],
-		phase: Change.Phase,
-		reason: Change.Reason,
-	): Effect.Effect<ExecutionOutcome> =>
-		TxRef.get(run.evidence).pipe(
-			Effect.map((evidence) => {
-				switch (tag) {
-					case "Accepted":
-						return ExecutionOutcome.Accepted({ phase, evidence })
-					case "Aborted":
-						return ExecutionOutcome.Aborted({ phase, reason, evidence })
-					case "Recovered":
-						return ExecutionOutcome.Recovered({ phase, reason, evidence })
-					case "RecoveryFailed":
-						return ExecutionOutcome.RecoveryFailed({ phase, reason, evidence })
-					case "Stuck":
-						return ExecutionOutcome.Stuck({
-							phase,
-							reason:
-								reason === "UnresolvedCleanup"
-									? reason
-									: "UnconfirmedTermination",
-							evidence,
-						})
-				}
-			}),
-		)
-	const healthyOld = Effect.fnUntraced(function* () {
-		if (Option.isNone(previous)) return false
-		const observed = yield* Effect.result(
-			coordinator.step(
-				previous.value.id,
-				"Readiness",
-				Trust.admission(
-					managed.runtime,
-					managed.instance,
-					previous.value.desired.identity,
-				).pipe(
-					Effect.tx,
-					Effect.andThen(
-						Effect.asVoid(Effect.timeoutOption(previous.value.failure, 0)),
-					),
-				),
-				policy.startup,
-			),
-		)
-		return observed._tag === "Success"
-	})
-	const forward = Effect.gen(function* () {
-		if (strategy === "Restart") {
-			yield* Effect.tx(Admission.pause(managed))
-			yield* TxRef.set(run.budget.reserved, limits.recovery + limits.cleanup)
-			yield* retirePrevious(coordinator, previous)
-			yield* coordinator.setRoute(Option.none())
-		}
-		const next = yield* prepareCandidate(
-			coordinator,
-			run,
-			record.request.candidate,
-		)
-		yield* coordinator.cutover(next)
-		yield* observeTrial(coordinator, policy, next)
-		if (strategy === "Overlap") {
-			yield* TxRef.set(run.budget.reserved, limits.recovery + limits.cleanup)
-			yield* retirePrevious(coordinator, previous)
-		}
-		yield* coordinator.step(
-			next.id,
-			"Trial",
-			Effect.asVoid(Effect.timeoutOption(next.failure, 0)),
-			policy.startup,
-		)
-		return yield* complete("Accepted", "Complete", "Failed")
-	})
-	const stop = Effect.fnUntraced(function* (failure: Failed) {
-		yield* Effect.tx(Admission.pause(managed))
-		yield* TxRef.set(run.budget.reserved, limits.recovery)
-		const cleanup = yield* Effect.result(
-			settleCandidate(managed, coordinator, run),
-		)
-		if (
-			cleanup._tag === "Failure" &&
-			(cleanup.failure.reason === "UnconfirmedTermination" ||
-				cleanup.failure.reason === "UnresolvedCleanup")
-		) {
-			yield* coordinator.setRoute(Option.none())
-			yield* Admission.close(managed, "RecoveryFailed")
-			return yield* complete("Stuck", failure.phase, cleanup.failure.reason)
-		}
-		if (yield* closing(managed)) {
-			yield* TxRef.set(run.budget.reserved, 0)
-			const stopped = yield* Effect.result(
-				retirePrevious(coordinator, previous),
-			)
-			yield* coordinator.setRoute(Option.none())
-			yield* Admission.close(managed, "Closing")
-			return yield* complete(
-				stopped._tag === "Failure" &&
-					(stopped.failure.reason === "UnconfirmedTermination" ||
-						stopped.failure.reason === "UnresolvedCleanup")
-					? "Stuck"
-					: "RecoveryFailed",
-				failure.phase,
-				stopped._tag === "Failure"
-					? stopped.failure.reason
-					: failure.reason === "CoordinatorDefect"
-						? failure.reason
-						: "Closing",
-			)
-		}
-		if (failure.reason === "UnconfirmedTermination") {
-			yield* coordinator.setRoute(Option.none())
-			yield* Admission.close(managed, "RecoveryFailed")
-			return yield* complete("Stuck", failure.phase, failure.reason)
-		}
-		if (failure.reason === "UnresolvedCleanup") {
-			if (yield* TxRef.get(record.oldChanged)) {
-				yield* coordinator.setRoute(Option.none())
-				yield* Admission.close(managed, "RecoveryFailed")
-			} else yield* Admission.open(managed)
-			return yield* complete("Stuck", failure.phase, failure.reason)
-		}
-		if (!(yield* TxRef.get(record.oldChanged)) && (yield* healthyOld())) {
-			yield* Admission.open(managed)
-			return yield* complete("Aborted", failure.phase, failure.reason)
-		}
-		yield* coordinator.setRoute(Option.none())
+	),
+})
 
-		const recovered = yield* Effect.result(
-			Effect.interruptible(
-				Effect.raceFirst(
-					recover(coordinator, policy, run),
-					waitClosing(managed, run),
-				),
-			),
+/** Strategies compose owned operations; the terminal classifier alone chooses Stuck. */
+export const execute = Effect.fnUntraced(function* (
+	managed: Managed,
+	policy: Deadlines,
+	run: Run,
+): Effect.fn.Return<Finalized> {
+	const record = run.record
+	if (record === undefined)
+		return yield* Effect.die(
+			new Error("Admitted execution requires a Change record"),
 		)
-		if (recovered._tag === "Success")
-			return yield* complete("Recovered", "Recovery", failure.reason)
-		const recoveryProgress = yield* TxRef.get(run.progress)
-		yield* TxRef.update(
-			run.evidence,
-			Array.append<Change.Evidence>({
-				...recoveryProgress,
-				phase: "Recovery",
-				cause: Cause.fail(recovered.failure),
-			}),
-		)
-		yield* TxRef.set(run.budget.reserved, 0)
-		const ended = yield* Effect.result(
-			settleCandidate(managed, coordinator, run),
-		)
-		yield* coordinator.setRoute(Option.none())
-		yield* Admission.close(
-			managed,
-			(yield* closing(managed)) ? "Closing" : "RecoveryFailed",
-		)
-		return yield* complete(
-			ended._tag === "Failure" &&
-				(ended.failure.reason === "UnconfirmedTermination" ||
-					ended.failure.reason === "UnresolvedCleanup")
-				? "Stuck"
-				: "RecoveryFailed",
-			"Recovery",
-			ended._tag === "Failure"
-				? ended.failure.reason
-				: recovered.failure.reason,
-		)
-	})
-	if (yield* closing(managed))
+	const execution = context(managed, policy, run, record)
+	const isClosing = yield* closing(managed)
+	if (isClosing || (yield* TxRef.get(run.cancel))) {
+		const progress = yield* TxRef.get(run.progress)
 		return yield* stop(
+			execution,
 			failed({
-				reason: "Closing",
-				phase: (yield* TxRef.get(run.progress)).phase,
+				reason: isClosing ? "Closing" : "Cancelled",
+				phase: progress.phase,
 			}),
 		)
-	if (yield* TxRef.get(run.cancel))
-		return yield* stop(
-			failed({
-				reason: "Cancelled",
-				phase: (yield* TxRef.get(run.progress)).phase,
-			}),
-		)
+	}
 	const result = yield* Effect.exit(
 		Effect.interruptible(
 			Effect.raceFirst(
-				forward,
+				forward(execution),
 				Effect.raceFirst(waitCancel(run), waitInvalidation(record, run)),
 			),
 		),
@@ -364,81 +400,55 @@ export const execute = Effect.fnUntraced(function* (
 	const progress = yield* TxRef.get(run.progress)
 	yield* TxRef.update(
 		run.evidence,
-		Array.append({ ...progress, cause: result.cause }),
+		Array.append<Change.Evidence>({ ...progress, cause: result.cause }),
 	)
-	const typed = Array.findFirst(
-		result.cause.reasons,
-		(reason) => reason._tag === "Fail",
-	)
+	const typed = Array.findFirst(result.cause.reasons, Cause.isFailReason)
 	const failure = Option.isSome(typed)
 		? typed.value.error
 		: failed({ reason: "CoordinatorDefect", phase: progress.phase })
-	return yield* stop(failure)
+	return yield* stop(execution, failure)
 })
 
-/** Defects during settlement still produce an observable, conservative conclusion. */
+/** Emergency settlement uses the same obligation registry and terminal decision. */
 export const emergency = Effect.fnUntraced(function* (
 	managed: Managed,
 	policy: Deadlines,
 	run: Run,
 	cause: Cause.Cause<never>,
-) {
-	const coordinator = engine(
-		managed,
-		policy,
-		run.evidence,
-		run.budget,
-		run.progress,
-		run.record,
-	)
+): Effect.fn.Return<Finalized> {
+	const record = run.record
+	if (record === undefined)
+		return yield* Effect.die(
+			new Error("Emergency settlement requires a Change record"),
+		)
+	const execution = context(managed, policy, run, record)
 	const progress = yield* TxRef.get(run.progress)
-	yield* TxRef.update(run.evidence, Array.append({ ...progress, cause }))
-	yield* Effect.tx(
-		Admission.close(managed, "RecoveryFailed").pipe(
-			Effect.andThen(coordinator.setRoute(Option.none())),
-		),
+	yield* TxRef.update(
+		run.evidence,
+		Array.append<Change.Evidence>({ ...progress, cause }),
 	)
+	yield* execution.coordinator.setRoute(Option.none())
+	yield* Admission.close(managed, "RecoveryFailed")
 	yield* TxRef.set(run.budget.reserved, 0)
-	const attempts = yield* TxRef.get(managed.attempts)
-	const results = yield* Effect.forEach(attempts, (attempt) =>
-		coordinator.terminate(attempt).pipe(
-			Effect.tapCause((cause) =>
+	const obligations = yield* TxRef.get(record.obligations)
+	yield* Effect.forEach(obligations, (lease) =>
+		Effect.gen(function* () {
+			const attempt = yield* TxRef.get(lease.allocated)
+			if (Option.isSome(attempt))
+				yield* execution.coordinator.terminate(attempt.value)
+		}).pipe(
+			Effect.catchCause((cause) =>
 				TxRef.update(
 					run.evidence,
-					Array.append({
-						attempt: attempt.id,
-						phase: "Terminating",
-						cause,
-					} satisfies Change.Evidence),
+					Array.append<Change.Evidence>({ phase: "Terminating", cause }),
 				),
 			),
-			Effect.exit,
 		),
 	)
-	const evidence = yield* TxRef.get(run.evidence)
-	const unconfirmed =
-		(yield* unconfirmedAllocations(managed)) ||
-		Array.some(
-			results,
-			(exit) => Exit.isFailure(exit) || !confirmed(exit.value),
-		)
-	const unresolved = Array.some(
-		results,
-		(exit) =>
-			Exit.isSuccess(exit) &&
-			(exit.value.host._tag !== "Completed" ||
-				(Exit.isFailure(exit.value.host.exit) &&
-					Cause.hasInterruptsOnly(exit.value.host.exit.cause))),
+	return yield* terminal(
+		execution,
+		"RecoveryFailed",
+		progress.phase,
+		"CoordinatorDefect",
 	)
-	if (unconfirmed || unresolved)
-		return ExecutionOutcome.Stuck({
-			phase: progress.phase,
-			reason: unconfirmed ? "UnconfirmedTermination" : "UnresolvedCleanup",
-			evidence,
-		})
-	return ExecutionOutcome.RecoveryFailed({
-		phase: progress.phase,
-		reason: "CoordinatorDefect",
-		evidence,
-	})
 })
