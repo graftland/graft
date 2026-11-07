@@ -83,6 +83,9 @@ await Effect.runPromise(Ref.get(claimed)) // => { owner: "local", generation: 0 
 
 宿主為自己的外掛行程持有一份**租約**，每過租約的三分之一就續約一次。宿主停止續約時（當機或網路中斷），runner 會在租約到期時停止外掛行程。runner 消失時，它的外掛行程也會自行關閉。
 
+外掛行程自行結束時，runner 會立即通知宿主，宿主設定項目以 `ProcessExited`
+失敗。無法送出此通知的 runner，宿主要等續約失敗時才會發現。
+
 連線中斷時：
 
 - 進行中的呼叫會失敗，錯誤是 `fromClient` 把 `RpcClientError`

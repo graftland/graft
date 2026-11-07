@@ -32,6 +32,7 @@ export interface FailureGroup<E> {
 	readonly cause: Effect.Effect<Cause.Cause<E>>
 	readonly run: <A, R>(
 		effect: Effect.Effect<A, E, R>,
+		options?: { readonly startImmediately?: boolean },
 	) => Effect.Effect<Fiber.Fiber<A, E>, never, R>
 	readonly fail: (error: E) => Effect.Effect<void>
 	readonly failCause: (cause: Cause.Cause<E>) => Effect.Effect<void>
@@ -70,7 +71,10 @@ export const make = Effect.fnUntraced(function* <E>(): Effect.fn.Return<
 			s._tag === "Open" ? State.Failed({ cause }) : s,
 		)
 
-	const observe = <A, R>(effect: Effect.Effect<A, E, R>) =>
+	const observe = <A, R>(
+		effect: Effect.Effect<A, E, R>,
+		options?: { readonly startImmediately?: boolean },
+	) =>
 		Effect.uninterruptibleMask((restore) =>
 			Effect.gen(function* () {
 				const scope = yield* Scope.make()
@@ -81,6 +85,7 @@ export const make = Effect.fnUntraced(function* <E>(): Effect.fn.Return<
 				const worker = yield* Effect.forkIn(
 					restore(Scope.provide(scope)(effect)),
 					scope,
+					options,
 				)
 				const waiting = yield* Effect.exit(restore(Fiber.await(worker)))
 				if (Exit.isFailure(waiting)) yield* Fiber.interrupt(worker)
@@ -174,8 +179,11 @@ export const make = Effect.fnUntraced(function* <E>(): Effect.fn.Return<
 						run(check.pipe(Effect.andThen(observe(effect)))),
 				),
 			),
-		run: (effect) =>
-			FiberSet.run(fibers, check.pipe(Effect.andThen(observe(effect)))),
+		run: (effect, options) =>
+			FiberSet.run(
+				fibers,
+				check.pipe(Effect.andThen(observe(effect, options))),
+			),
 		fail: (error) => failCause(Cause.fail(error)),
 		failCause,
 		race: (effect) =>

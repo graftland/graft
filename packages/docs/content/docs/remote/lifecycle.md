@@ -90,6 +90,10 @@ renewing, because it crashed or the network is gone, the runner stops the
 process when the lease runs out. When the runner goes away, its plugin processes
 shut down too.
 
+When the plugin process exits on its own, the runner tells the host at once and
+the host entry fails with `ProcessExited`. A runner that cannot send this notice
+leaves the host to find out when renewal fails.
+
 When the connection breaks:
 
 - Calls in flight fail with the error `fromClient` maps `RpcClientError` to.

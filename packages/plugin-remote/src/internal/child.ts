@@ -47,6 +47,8 @@ export const telemetry = Effect.fnUntraced(function* (
 	const dropped = MutableRef.make(0)
 	const encode = (cause: Cause.Cause<unknown>) =>
 		contract.encodeCause(cause).pipe(Effect.orDie)
+	const encodedEmptyCause = yield* encode(Cause.empty)
+	const emptyCause = Effect.succeed(encodedEmptyCause)
 	const logger = Logger.make((entry) => {
 		// Logger callbacks are synchronous; a dropping offer and loss counter cannot suspend.
 		const accepted = Queue.offerUnsafe(logs, {
@@ -77,13 +79,20 @@ export const telemetry = Effect.fnUntraced(function* (
 			),
 		),
 		logStream: Stream.fromQueue(logs).pipe(
-			Stream.mapEffect((entry) =>
-				encode(entry.cause).pipe(
-					Effect.map((cause): typeof LogEvent.Type => ({
-						_tag: "Log",
-						entry: { ...entry, cause },
-						dropped: MutableRef.get(dropped),
-					})),
+			Stream.mapArrayEffect((entries) =>
+				// fromQueue drains at most the existing 128-record capacity. Preserve that
+				// chunk through RPC, so one message and ACK cover all available entries.
+				Effect.forEach(entries, (entry) =>
+					(entry.cause.reasons.length === 0
+						? emptyCause
+						: encode(entry.cause)
+					).pipe(
+						Effect.map((cause): typeof LogEvent.Type => ({
+							_tag: "Log",
+							entry: { ...entry, cause },
+							dropped: MutableRef.get(dropped),
+						})),
+					),
 				),
 			),
 			Stream.concat(

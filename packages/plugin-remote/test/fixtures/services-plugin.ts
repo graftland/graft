@@ -23,24 +23,29 @@ export default Plugin.make({
 		)
 		const service: ChildApi["Service"] = {
 			call: (value) =>
-				value === -999
-					? fs.writeFileString(directory + "/blocked", "ready").pipe(
-							Effect.orDie,
-							Effect.andThen(
-								Effect.sync((): never => {
-									while (true) {
-										/* Block only this fixture's main thread. */
-									}
-								}),
+				value === -998
+					? Effect.sync((): never => {
+							process.stderr.write("Runner crash diagnostic tail\n")
+							process.exit(73)
+						})
+					: value === -999
+						? fs.writeFileString(directory + "/blocked", "ready").pipe(
+								Effect.orDie,
+								Effect.andThen(
+									Effect.sync((): never => {
+										while (true) {
+											/* Block only this fixture's main thread. */
+										}
+									}),
+								),
+							)
+						: host.double(value).pipe(
+								Effect.map((value) => ({
+									value: value + 1,
+									pid: process.pid,
+									...instance,
+								})),
 							),
-						)
-					: host.double(value).pipe(
-							Effect.map((value) => ({
-								value: value + 1,
-								pid: process.pid,
-								...instance,
-							})),
-						),
 			values: Stream.iterate(0, (n) => n + 1).pipe(
 				Stream.ensuring(
 					fs

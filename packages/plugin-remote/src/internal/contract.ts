@@ -1,8 +1,10 @@
-import { Cause, Schema } from "effect"
+import { Array, Cause, Effect, Schema } from "effect"
 
 import * as Contract from "../Contract"
 import { ChildFailure } from "./childErrors"
 import * as Control from "./control"
+
+const emptyCause = Effect.succeed(Cause.empty)
 
 /** Control RPCs and child failures belong to the execution protocol, not the public descriptor. */
 export const prepare = <
@@ -26,6 +28,8 @@ export const prepare = <
 	const codec = Schema.toCodecJson(
 		Schema.Cause(failure, Schema.Defect({ includeStack: true })),
 	)
+	const encode = Schema.encodeEffect(codec)
+	const decode = Schema.decodeUnknownEffect(codec)
 	const declared = Schema.is(failure)
 	const normalizeCause = (cause: Cause.Cause<unknown>) =>
 		Cause.map(cause, (error) =>
@@ -38,8 +42,11 @@ export const prepare = <
 		control: Control.make(codec),
 		normalizeCause,
 		encodeCause: (cause: Cause.Cause<unknown>) =>
-			normalizeCause(cause).pipe(Schema.encodeEffect(codec)),
-		decodeCause: Schema.decodeUnknownEffect(codec),
+			normalizeCause(cause).pipe(encode),
+		// Effect 4 Cause JSON is an array of reasons (Schema.Cause.toCodec).
+		// The empty array has no errors or defects to decode.
+		decodeCause: (input: unknown) =>
+			Array.isArray(input) && input.length === 0 ? emptyCause : decode(input),
 	}
 }
 

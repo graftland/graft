@@ -188,6 +188,8 @@ export const Termination = Schema.Struct({
 })
 export type Termination = typeof Termination.Type
 const Fields = {
+	// Optional v1 extension: old peers strip this field and keep lease-based detection.
+	terminationNotice: Schema.optionalKey(Schema.Literal(true)),
 	version: Schema.Literal(1),
 	handle: Handle,
 	requestId: Schema.String,

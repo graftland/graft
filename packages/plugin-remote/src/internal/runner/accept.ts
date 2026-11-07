@@ -6,7 +6,12 @@ import type { Channel } from "../../Transport"
 import { Peer } from "../Peer"
 import * as Port from "../port"
 import type { Channels } from "./Execution"
-import { SessionAccessDenied, SessionConflict, type Handle } from "./model"
+import {
+	SessionAccessDenied,
+	SessionConflict,
+	SessionStopped,
+	type Handle,
+} from "./model"
 import * as Multiplex from "./Multiplex"
 import type { Supervisor } from "./Supervisor"
 import * as Wire from "./Wire"
@@ -37,13 +42,22 @@ export const accept = Effect.fnUntraced(function* (
 	const handlers = yield* Wire.Session.toHandlers({
 		HighWater: ({ instance }) => supervisor.highWater({ identity, instance }),
 		Open: ({ instance, requestId, expectedGeneration, leaseMillis, limits }) =>
-			supervisor.open({
-				key: { identity, instance },
-				requestId,
-				expectedGeneration,
-				...(leaseMillis === undefined ? {} : { lease: leaseMillis }),
-				limits,
-			}),
+			supervisor
+				.open({
+					key: { identity, instance },
+					requestId,
+					expectedGeneration,
+					...(leaseMillis === undefined ? {} : { lease: leaseMillis }),
+					limits,
+				})
+				.pipe(
+					Effect.map((record) => ({
+						...record,
+						...(supervisor.terminated === undefined
+							? {}
+							: { terminationNotice: true as const }),
+					})),
+				),
 		Load: Effect.fnUntraced(function* ({ handle, ...request }) {
 			yield* authorize(handle)
 			const attachment = yield* Ref.get(attached)
@@ -83,6 +97,18 @@ export const accept = Effect.fnUntraced(function* (
 			authorize(handle).pipe(Effect.andThen(supervisor.renew(handle))),
 		Dispose: (handle) =>
 			authorize(handle).pipe(Effect.andThen(supervisor.dispose(handle))),
+		Terminated: (handle) =>
+			authorize(handle).pipe(
+				Effect.andThen(
+					supervisor.terminated === undefined
+						? Effect.fail(
+								SessionStopped.make({
+									detail: "Termination notices are unavailable",
+								}),
+							)
+						: supervisor.terminated(handle),
+				),
+			),
 		Status: (handle) =>
 			authorize(handle).pipe(Effect.andThen(supervisor.status(handle))),
 	})

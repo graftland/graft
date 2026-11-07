@@ -1,11 +1,22 @@
-import { Cause, Effect, Schema, Sink, Stream } from "effect"
+import {
+	Array,
+	Cause,
+	Effect,
+	Option,
+	Result,
+	Schema,
+	Sink,
+	Stream,
+} from "effect"
 import { Rpc, RpcGroup } from "effect/rpc"
 
 import { TransportError } from "../../Errors"
 import * as Port from "../port"
+import { maxPayload } from "./Framing"
 import {
 	CodeIdentity,
 	ExecutionError,
+	ExitStatus,
 	Handle,
 	LeaseExpired,
 	Limits,
@@ -77,6 +88,12 @@ export const Session = RpcGroup.make(
 		success: Termination,
 		error: SessionError,
 	}),
+	// Called only when Open advertises terminationNotice. One retained reply avoids polling and subscription races.
+	Rpc.make("Terminated", {
+		payload: Handle,
+		success: ExitStatus,
+		error: SessionError,
+	}),
 	Rpc.make("Status", {
 		payload: Handle,
 		success: SessionRecord,
@@ -84,17 +101,36 @@ export const Session = RpcGroup.make(
 	}),
 ).annotateRpcs(Port.Priority, "control")
 
+// Ordinary messages take the direct path. Only an oversized log chunk needs
+// this extra decode to distinguish fragmentation from the existing data-frame rejection.
+const logFrame = Schema.decodeUnknownResult(
+	Schema.fromJsonString(Schema.Struct({ priority: Schema.Literal("log") })),
+)
+const decoder = new TextDecoder()
 export type Peer = Multiplex.Peer
+const send = (peer: Peer, id: 0 | 1, bytes: Uint8Array) =>
+	(bytes.length > maxPayload &&
+	Result.isSuccess(logFrame(decoder.decode(bytes)))
+		? Effect.forEach(
+				Array.unfold(0, (offset) =>
+					offset < bytes.length
+						? Option.some([
+								bytes.subarray(offset, offset + maxPayload),
+								offset + maxPayload,
+							] as const)
+						: Option.none(),
+				),
+				(fragment) => peer.send(id, fragment),
+				{ discard: true },
+			)
+		: peer.send(id, bytes)
+	).pipe(
+		Effect.mapError((error) =>
+			TransportError.make({ cause: Cause.fail(error) }),
+		),
+	)
 /** Preserve the port writer order within each byte channel. */
 export const channel = (peer: Peer, id: 0 | 1): Port.Channel => ({
 	input: Stream.fromEffectRepeat(peer.take(id)),
-	output: Sink.forEach((bytes: Uint8Array) =>
-		peer
-			.send(id, bytes)
-			.pipe(
-				Effect.mapError((error) =>
-					TransportError.make({ cause: Cause.fail(error) }),
-				),
-			),
-	),
+	output: Sink.forEach((bytes: Uint8Array) => send(peer, id, bytes)),
 })

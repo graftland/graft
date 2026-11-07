@@ -84,6 +84,9 @@ await Effect.runPromise(Ref.get(claimed)) // => { owner: "local", generation: 0 
 
 宿主对插件进程持有一份**租约**，每过租约的三分之一续期一次。宿主停止续期（崩溃或网络中断）时，runner 会在租约到期时停止插件进程。runner 自己消失时，它的插件进程也会关闭。
 
+插件进程自行退出时，runner 会立即通知宿主，宿主条目以 `ProcessExited`
+失败。不能发出此通知的 runner，宿主要等续期失败时才会发现。
+
 连接断开时：
 
 - 正在进行的调用失败，错误是 `fromClient` 把 `RpcClientError`

@@ -59,9 +59,9 @@ export const connect = Effect.fnUntraced(function* (
 					leaseMillis: Duration.toMillis(target.lease),
 				}),
 	})
-	const failures = yield* FailureGroup.make<TransportError>().pipe(
-		Scope.provide(resources),
-	)
+	const failures = yield* FailureGroup.make<
+		ProcessExited | TransportError
+	>().pipe(Scope.provide(resources))
 	const finishStarted = yield* Ref.make(false)
 	const terminate = yield* Effect.cached(
 		Effect.gen(function* () {
@@ -138,6 +138,27 @@ export const connect = Effect.fnUntraced(function* (
 		Effect.forkIn(resources),
 	)
 
+	yield* failures.run(peer.await)
+
+	if (record.terminationNotice === true)
+		yield* failures.run(
+			session.Terminated(record.handle).pipe(
+				Effect.mapError((error) =>
+					TransportError.make({ cause: Cause.fail(error) }),
+				),
+				Effect.flatMap((exit) =>
+					Effect.fail(
+						ProcessExited.make({
+							pid: Option.map(childOf(loaded), (child) => child.pid),
+							exitCode: exit.code,
+							stderr: exit.stderr ?? "",
+							statusCause: exit.cause ?? Cause.empty,
+						}),
+					),
+				),
+			),
+		)
+
 	yield* failures.run(
 		Fiber.join(renewed).pipe(
 			Effect.catchCause(
@@ -182,7 +203,7 @@ export const connect = Effect.fnUntraced(function* (
 		}),
 		transport: {
 			...peer,
-			failure: peer.await,
+			failure: failures.await,
 			report,
 		},
 	} satisfies Connected

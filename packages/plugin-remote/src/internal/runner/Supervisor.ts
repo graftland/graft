@@ -94,6 +94,9 @@ export class Supervisor extends Context.Service<
 		readonly status: (
 			handle: Handle,
 		) => Effect.Effect<SessionRecord, StaleSession>
+		readonly terminated?: (
+			handle: Handle,
+		) => Effect.Effect<ExitStatus, SupervisorError>
 		readonly highWater: (key: Key) => Effect.Effect<number | null>
 		readonly open: (
 			request: Open,
@@ -151,6 +154,7 @@ type Live = Extract<Session, { readonly _tag: "Open" | "Loading" | "Loaded" }>
 type Loading = Extract<Session, { readonly _tag: "Loading" }>
 type Stopping = Extract<Session, { readonly _tag: "Stopping" }>
 interface Entry {
+	readonly exitNotice: Deferred.Deferred<ExitStatus, SupervisorError>
 	readonly state: SynchronizedRef.SynchronizedRef<Session>
 	readonly timer: FiberHandle.FiberHandle<void, never>
 	readonly loading: FiberHandle.FiberHandle<void, never>
@@ -488,6 +492,10 @@ const operations = (runtime: Runtime) => {
 		reason: StopReason,
 		exit: Option.Option<ExitStatus>,
 	): Effect.fn.Return<readonly [StopReply, Session]> {
+		// Hold the ref lock before publication, so Dispose cannot race the Exited transition.
+		// The observation includes stderr; journal and cleanup failures remain in the stop reply.
+		if (Option.isSome(exit))
+			yield* Deferred.succeed(entry.exitNotice, exit.value)
 		if (state._tag === "Stopping" || state._tag === "Stopped")
 			return [state.reply, state] as const
 		const reply = yield* Deferred.make<Termination, SupervisorError>()
@@ -497,6 +505,12 @@ const operations = (runtime: Runtime) => {
 		yield* FiberSet.run(
 			workers,
 			finishStop(entry, next, saved).pipe(
+				Effect.onExit((result) =>
+					Deferred.done(
+						entry.exitNotice,
+						Exit.map(result, (termination) => termination.exit),
+					),
+				),
 				Effect.onExit((result) => Deferred.done(reply, result)),
 				observe,
 			),
@@ -705,6 +719,12 @@ const protocol = Effect.fnUntraced(function* (
 	return Supervisor.of({
 		await: health.await,
 		status,
+		terminated: Effect.fnUntraced(function* (handle: Handle) {
+			const record = yield* status(handle)
+			if (record.phase === "Stopped") return record.termination.exit
+			const entry = yield* entryFor(handle)
+			return yield* Deferred.await(entry.exitNotice)
+		}),
 		highWater: (key) =>
 			latest(key).pipe(Effect.map((value) => (value === 0 ? null : value))),
 		open: Effect.fnUntraced(function* (request: Open) {
@@ -773,6 +793,7 @@ const protocol = Effect.fnUntraced(function* (
 							(yield* Clock.monotonicTimeNanos) + nanos(leaseMillis)
 						const scope = yield* Scope.fork(owner)
 						const entry: Entry = {
+							exitNotice: yield* Deferred.make<ExitStatus, SupervisorError>(),
 							state: yield* SynchronizedRef.make<Session>(
 								Session.Open({ record, deadline }),
 							),

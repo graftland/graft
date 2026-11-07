@@ -33,6 +33,7 @@ import { Entry, Include, Loader, ModuleResolver } from "@graftland/loader"
 
 import { inject } from "vitest"
 
+import { ProcessExited } from "../src/Errors"
 import * as Remote from "../src/index"
 import * as Port from "../src/internal/port"
 import * as Model from "../src/internal/runner/model"
@@ -373,6 +374,32 @@ ${Array.join(
 )}`
 
 describe("network runner end to end", () => {
+	it.live(
+		"fails an active fork promptly with the runner's exit code and stderr",
+		() =>
+			Effect.gen(function* () {
+				const { api, proxy } = yield* setup()
+				const crashing = yield* Effect.forkScoped(Effect.exit(api.call(-998)))
+				const failed = yield* proxy.state.pipe(
+					Stream.filter((state) => state._tag === "Failed"),
+					Stream.runHead,
+					Effect.timeout("1 second"),
+				)
+				const state = Option.getOrThrow(failed)
+				assert.equal(state._tag, "Failed")
+				if (state._tag === "Failed") {
+					const process = expectFailure(
+						state.cause,
+						Schema.Struct(ProcessExited.fields),
+					)
+					assert.equal(process.exitCode, 73)
+					assert.include(process.stderr, "Runner crash diagnostic tail")
+				}
+				const call = yield* Fiber.join(crashing)
+				assert.isTrue(Exit.isFailure(call))
+			}).pipe(Effect.scoped, Effect.provide(runtime)),
+	)
+
 	it.live(
 		"loads host and runner entries with application modules and configuration-relative files",
 		() =>

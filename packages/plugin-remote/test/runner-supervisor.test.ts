@@ -148,6 +148,83 @@ const orphan: SessionRecord = {
 
 layer(SecureRandom.layerWebCrypto)("runner session supervisor", (it) => {
 	it.effect(
+		"publishes the confirmed exit while process-scope cleanup is still blocked",
+		() =>
+			Effect.gen(function* () {
+				const gate = yield* Deferred.make<void>()
+				const releasing = yield* Deferred.make<void>()
+				const { driver, spawned } = yield* fake()
+				const store = yield* Stores.memory
+				const supervisor = yield* Supervisor.make().pipe(
+					Effect.provideService(Store, store),
+					Effect.provideService(Execution, {
+						...driver,
+						spawn: (...args) =>
+							driver
+								.spawn(...args)
+								.pipe(
+									Effect.tap(() =>
+										Effect.addFinalizer(() =>
+											Deferred.succeed(releasing, undefined).pipe(
+												Effect.andThen(Deferred.await(gate)),
+											),
+										),
+									),
+								),
+					}),
+				)
+				const record = yield* supervisor.open({
+					key,
+					requestId: "early-notice",
+				})
+				yield* supervisor.load(record.handle, { specifier: "fixture" })
+				const child = yield* Queue.take(spawned)
+				const exit: ExitStatus = {
+					code: 73,
+					signal: null,
+					stderr: "Confirmed exit tail",
+					cause: Cause.die("exit marker"),
+				}
+				yield* Deferred.succeed(child.exit, exit)
+				yield* Deferred.await(releasing)
+				const notice = yield* supervisor.terminated!(record.handle).pipe(
+					Effect.ensuring(Deferred.succeed(gate, undefined)),
+				)
+				assert.deepEqual(notice, exit)
+				const finished = yield* supervisor.dispose(record.handle)
+				assert.deepEqual(finished.exit, exit)
+			}).pipe(Effect.scoped),
+	)
+
+	it.effect(
+		"retains confirmed termination for early and late notice waiters",
+		() =>
+			Effect.gen(function* () {
+				const { supervisor, spawned } = yield* setup()
+				const record = yield* supervisor.open({ key, requestId: "notice" })
+				yield* supervisor.load(record.handle, { specifier: "fixture" })
+				const child = yield* Queue.take(spawned)
+				const waiting = yield* Effect.forkScoped(
+					supervisor.terminated!(record.handle),
+				)
+				const exit: ExitStatus = {
+					code: 73,
+					signal: null,
+					stderr: "Crash tail",
+					cause: Cause.die("observation marker"),
+				}
+				yield* Deferred.succeed(child.exit, exit)
+				const first = yield* Fiber.join(waiting)
+				yield* supervisor.dispose(record.handle)
+				const late = yield* supervisor.terminated!(record.handle)
+				const status = yield* supervisor.status(record.handle)
+				assert.deepEqual(first, exit)
+				assert.deepEqual(late, first)
+				assert.equal(status.phase, "Stopped")
+			}).pipe(Effect.scoped),
+	)
+
+	it.effect(
 		"reports superseded unit cleanup before retention removes its record",
 		() =>
 			Effect.gen(function* () {
