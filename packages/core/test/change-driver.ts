@@ -30,6 +30,8 @@ export class Value extends Context.Service<
 export const register = Effect.fnUntraced(function* (
 	instance: string,
 	options: {
+		readonly budget?: Change.Request["budget"]
+		readonly requirements?: Change.Request["requirements"]
 		readonly prepare?: Transition.Driver["prepare"]
 		readonly ready?: Effect.Effect<void>
 		readonly inject?: boolean
@@ -87,7 +89,8 @@ export const register = Effect.fnUntraced(function* (
 				Transition.registerDriver(driver, {
 					instance,
 					initial: candidate("old"),
-					budget,
+					budget: options.budget ?? budget,
+					requirements: options.requirements,
 					required: [],
 					facades:
 						options.facade === true

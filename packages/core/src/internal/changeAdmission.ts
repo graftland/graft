@@ -18,7 +18,12 @@ import { validate, type Normalized } from "./changeRequest"
 import * as ChangeTable from "./changeTable"
 import { captureEdges, resolutionChanged } from "./dependencies"
 import { realmOf, Realms, type Runtime } from "./runtime"
-import { ExecutionOutcome, type Managed, type Run } from "./transition"
+import {
+	ExecutionOutcome,
+	type Attempt,
+	type Managed,
+	type Run,
+} from "./transition"
 import * as Trust from "./trust"
 
 const footprint = Effect.fnUntraced(function* (managed: Managed) {
@@ -146,7 +151,7 @@ export const makeRun = Effect.fnUntraced(function* (
 		reply: yield* TxRef.make(Option.none<ExecutionOutcome>()),
 		previous: Option.none(),
 		previousDesired: normalized.candidate,
-		candidate: yield* TxRef.make(Option.none<import("./transition").Attempt>()),
+		candidate: yield* TxRef.make(Option.none<Attempt>()),
 		cancel: yield* TxRef.make(false),
 		record: undefined,
 		evidence: yield* TxRef.make<ReadonlyArray<Change.Evidence>>([]),

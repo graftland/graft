@@ -30,5 +30,13 @@ export const derive = (policy: Deadlines) => {
 		terminatePrevious: cleanup,
 		terminateCandidate: cleanup,
 	})
-	return { startup, termination, cleanup, recovery, safety }
+	return {
+		startup,
+		termination,
+		cleanup,
+		recovery,
+		safety,
+		startupTotal: sum(startup),
+		minimum: safety + policy.trial,
+	}
 }

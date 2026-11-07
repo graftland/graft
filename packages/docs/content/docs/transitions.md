@@ -89,7 +89,8 @@ until settlement or safe fencing.
 operation. Defaults are five minutes total, thirty seconds startup, and five
 seconds for other operations. `requirements.probes` defaults to empty and
 `requirements.trial` to zero. Trial is a minimum observation period; both
-forward and recovery trial consume the total.
+forward and recovery trial consume the total. Initial driver registrations use
+the same budget validation.
 
 ## Strategy
 

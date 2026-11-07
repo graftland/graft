@@ -235,7 +235,7 @@ export interface Status {
 		  }
 		| undefined
 	readonly evidence: ReadonlyArray<Evidence>
-	readonly outcome: import("effect").Option.Option<Outcome>
+	readonly outcome: Option.Option<Outcome>
 }
 export const historyLimit = 128
 

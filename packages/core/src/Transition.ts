@@ -1,5 +1,12 @@
 /** Single-fork, stateless transitions and execution-driver extension points. */
-import { Context, Effect, Option, Schema, type Scope } from "effect"
+import {
+	Context,
+	Effect,
+	Option,
+	Schema,
+	type Duration,
+	type Scope,
+} from "effect"
 
 import type * as Change from "./Change"
 import * as Graft from "./Graft"
@@ -162,7 +169,7 @@ export interface Registration {
 	readonly queue?:
 		| {
 				readonly maxWaiters?: number
-				readonly maxWait?: import("effect").Duration.Input
+				readonly maxWait?: Duration.Input
 		  }
 		| undefined
 }

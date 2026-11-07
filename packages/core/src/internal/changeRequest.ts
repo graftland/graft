@@ -1,6 +1,7 @@
 import { Array, Duration, Effect, Option, Record } from "effect"
 
 import * as Change from "../Change"
+import { derive, type Deadlines } from "./transitionBudgets"
 
 export interface Normalized {
 	readonly instance: string
@@ -14,7 +15,7 @@ export interface Normalized {
 	}
 }
 
-const millis = (input: Duration.Input): number =>
+export const millis = (input: Duration.Input): number =>
 	typeof input === "number" && (!Number.isFinite(input) || input < 0)
 		? Number.NaN
 		: Option.match(Duration.fromInput(input), {
@@ -22,17 +23,18 @@ const millis = (input: Duration.Input): number =>
 				onSome: Duration.toMillis,
 			})
 
-/** Peak reserves cover recovery startup, both trials, and both retirement paths. */
+export const deadlines = (request: Normalized): Deadlines => ({
+	...request.budget,
+	...request.requirements,
+})
+/** Admission and execution derive reserves from the same named steps. */
 export const reserves = (request: Normalized) => {
-	const { budget: b, requirements: r } = request
-	const cleanup = 2 * b.terminate
-	const startup = 5 * b.startup + r.probes.length * b.probe
-	const recovery = startup + r.trial + cleanup
+	const limits = derive(deadlines(request))
 	return {
-		startup,
-		cleanup,
-		recovery,
-		minimum: recovery + b.drain + b.stop + 2 * cleanup + r.trial,
+		startup: limits.startupTotal,
+		cleanup: limits.cleanup,
+		recovery: limits.recovery,
+		minimum: limits.minimum,
 	}
 }
 

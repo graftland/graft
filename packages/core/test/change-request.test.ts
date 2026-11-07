@@ -3,6 +3,8 @@ import { assert, describe, it } from "@effect/vitest"
 
 import * as Change from "../src/Change.ts"
 import { normalize } from "../src/internal/changeRequest.ts"
+import { budget, register } from "./change-driver.ts"
+import { run } from "./utils.ts"
 
 const candidate: Change.Candidate = {
 	driver: "fixture",
@@ -71,3 +73,24 @@ describe("Change request normalization", () => {
 		}),
 	)
 })
+
+it.effect(
+	"uses the same two-trial budget validation for registration and Change admission",
+	() =>
+		run(
+			Effect.gen(function* () {
+				const input = { ...budget, total: 1450 }
+				const requirements = { trial: 100 }
+				const change = yield* Effect.result(
+					normalize({ ...request, budget: input, requirements }),
+				)
+				assert.isTrue(Result.isFailure(change))
+				const registration = yield* Effect.result(
+					register("a", { budget: input, requirements }),
+				)
+				assert.isTrue(Result.isFailure(registration))
+				if (Result.isFailure(registration))
+					assert.strictEqual(registration.failure._tag, "DriverError")
+			}),
+		),
+)

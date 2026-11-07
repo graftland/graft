@@ -15,7 +15,7 @@ import * as Capacity from "./capacity"
 import * as Admission from "./changeAdmission"
 import { emergency, execute } from "./changeExecution"
 import { prepare } from "./changePreparation"
-import { normalize } from "./changeRequest"
+import { deadlines, normalize } from "./changeRequest"
 import * as Settlement from "./changeSettlement"
 import * as ChangeTable from "./changeTable"
 import * as Generations from "./generations"
@@ -391,10 +391,7 @@ export const submit = Effect.fnUntraced(function* (
 				attempt: admitted.attempt,
 				phase: "Admission",
 			})
-			const policy: Deadlines = {
-				...normalized.budget,
-				...normalized.requirements,
-			}
+			const policy = deadlines(normalized)
 			yield* work(admitted.managed, policy, admitted.run, admitted.record).pipe(
 				Effect.annotateLogs({
 					change: admitted.record.handle.id,

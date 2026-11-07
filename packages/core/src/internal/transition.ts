@@ -4,7 +4,6 @@ import {
 	Clock,
 	Context,
 	Data,
-	Duration,
 	Effect,
 	Equal,
 	Exit,
@@ -29,6 +28,7 @@ import { withdraw } from "./activation"
 import * as Admission from "./admission"
 import * as AsyncClose from "./asyncClose"
 import * as Capacity from "./capacity"
+import { deadlines, millis, normalize } from "./changeRequest"
 import * as Settlement from "./changeSettlement"
 import * as ChangeTable from "./changeTable"
 import { captureEdges, resolutionChanged } from "./dependencies"
@@ -163,50 +163,7 @@ const foldCauses = <E>(exits: ReadonlyArray<Exit.Exit<unknown, E>>) =>
 		Exit.isFailure(exit) ? Cause.combine(cause, exit.cause) : cause,
 	)
 
-const millis = (input: Duration.Input): number =>
-	typeof input === "number" && !Number.isFinite(input)
-		? Number.NaN
-		: Option.match(Duration.fromInput(input), {
-				onNone: () => Number.NaN,
-				onSome: (duration) =>
-					Duration.isFinite(duration)
-						? Duration.toMillis(duration)
-						: Number.NaN,
-			})
-const policyOf = (
-	input?: Partial<Change.Budget & Change.Requirements>,
-): Deadlines => {
-	const policy = {
-		...{ ...Change.defaultBudget, ...Change.defaultRequirements },
-		...input,
-	}
-	return {
-		total: millis(policy.total),
-		startup: millis(policy.startup),
-		probe: millis(policy.probe),
-		trial: millis(policy.trial),
-		drain: millis(policy.drain),
-		stop: millis(policy.stop),
-		terminate: millis(policy.terminate),
-		probes: policy.probes,
-	}
-}
 export const safetyReserve = (policy: Deadlines) => derive(policy).safety
-const valid = (policy: Deadlines) =>
-	Array.every(
-		[
-			policy.total,
-			policy.startup,
-			policy.probe,
-			policy.drain,
-			policy.stop,
-			policy.terminate,
-		],
-		(n) => Number.isFinite(n) && n > 0,
-	) &&
-	Number.isFinite(policy.trial) &&
-	policy.trial >= 0 &&
-	policy.total > safetyReserve(policy)
 interface Budget {
 	readonly started: bigint
 	readonly reserved: TxRef.TxRef<number>
@@ -999,15 +956,21 @@ export const register = Effect.fnUntraced(function* (
 						),
 					),
 				})
-			const policy = policyOf({
-				...registration.budget,
-				...registration.requirements,
-			})
+			const normalized = yield* normalize({
+				instance,
+				candidate: registration.initial,
+				budget: registration.budget,
+				requirements: registration.requirements,
+			}).pipe(
+				Effect.mapError((error) =>
+					T.DriverError.make({ cause: Cause.fail(error) }),
+				),
+			)
+			const policy = deadlines(normalized)
 			const maxInFlight = registration.maxInFlight ?? 256
 			const maxWaiters = registration.queue?.maxWaiters ?? 256
 			const maxWait = millis(registration.queue?.maxWait ?? 5000)
 			if (
-				!valid(policy) ||
 				!Number.isSafeInteger(maxWaiters) ||
 				maxWaiters < 1 ||
 				!Number.isFinite(maxWait) ||
