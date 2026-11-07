@@ -1,11 +1,130 @@
-import type { Cause, HashMap, HashSet, Option } from "effect"
+import type { Cause, HashMap, HashSet, Option, Schema } from "effect"
 
 export type Strategy = "Overlap" | "Restart"
 export type Placement = "Worker" | "Process" | "Runner"
+export interface ArtifactData {
+	readonly directory: string
+	readonly identity: {
+		readonly version: 1
+		readonly algorithm: "sha256"
+		readonly digest: string
+		readonly entry: string
+	}
+}
+export interface DeploymentData {
+	readonly artifact: ArtifactData
+	readonly contract: string
+	readonly input: Schema.Json
+	readonly runner?: { readonly socket: string; readonly owner: string }
+}
+export interface ResolvedInput {
+	readonly input: Schema.Json
+	readonly identity: string
+	readonly environment: string
+}
+export interface BindingDeclaration {
+	readonly key: string
+	readonly operations: ReadonlyArray<{
+		readonly identity: string
+		readonly tag: string
+		readonly provenance: string
+	}>
+}
+export interface Description {
+	readonly artifact: string
+	readonly configuration: string
+	readonly environment: string
+	readonly protocol: 1
+	readonly overlap: boolean
+	readonly members: number
+	readonly requires: ReadonlyArray<BindingDeclaration>
+	readonly provides: ReadonlyArray<BindingDeclaration>
+	readonly probes: ReadonlyArray<string>
+}
+export interface Policy {
+	readonly version: number
+	readonly allowed: Option.Option<HashSet.HashSet<string>>
+	readonly values: Readonly<Record<string, Schema.Json>>
+}
+export type PreparationResult =
+	| {
+			readonly _tag: "Rejected"
+			readonly reason: Rejection
+			readonly conflicts: HashSet.HashSet<string>
+	  }
+	| { readonly _tag: "Admitted"; readonly change: string }
+	| { readonly _tag: "Described"; readonly description: Description }
+export type PreparationPhase =
+	| "Resolving"
+	| "Spawning"
+	| "Describing"
+	| "Stopping"
+	| "Terminating"
+	| "Concluded"
+export interface Preparation {
+	readonly interrupted: Option.Option<PreparationPhase>
+	readonly parent?: string
+	readonly claim: string
+	readonly archived: boolean
+	readonly id: string
+	readonly request: Request
+	readonly inspect: boolean
+	readonly policyVersion: number
+	readonly phase: PreparationPhase
+	readonly unit: string
+	readonly submitted: number
+	readonly deadline: number
+	readonly resolution: Option.Option<ResolvedInput>
+	readonly description: Option.Option<Description>
+	readonly failure: Option.Option<Rejection>
+	readonly cause: Cause.Cause<unknown>
+	readonly result: Option.Option<PreparationResult>
+	readonly sequence: number
+	readonly nextCommand: number
+	readonly commandIds: HashSet.HashSet<string>
+	readonly timerIds: HashSet.HashSet<string>
+}
+export interface PreparationStatus {
+	readonly interrupted: Option.Option<PreparationPhase>
+	readonly id: string
+	readonly sequence: number
+	readonly phase: PreparationPhase
+	readonly instance: string
+	readonly unit: string
+	readonly remaining: number
+	readonly unconfirmedUnits: HashSet.HashSet<string>
+	readonly exitEvidence: Unit["evidence"]
+	readonly cleanup: Cleanup
+	readonly cause: Cause.Cause<unknown>
+	readonly result: Option.Option<PreparationResult>
+}
+export interface VerifiedDescription {
+	readonly policyValues?: Readonly<Record<string, Schema.Json>>
+	readonly target: Target
+	readonly resolution: ResolvedInput
+	readonly description: Description
+}
+export interface Working extends State {
+	readonly emitted: ReadonlyArray<Command>
+	readonly changed: HashSet.HashSet<string>
+	readonly preparationsChanged: HashSet.HashSet<string>
+	readonly descriptions: ReadonlyArray<{
+		readonly change: string
+		readonly result: PreparationResult
+		readonly cause: Cause.Cause<unknown>
+		readonly resolution: Option.Option<ResolvedInput>
+	}>
+	readonly admissions: ReadonlyArray<{
+		readonly preparation: string
+		readonly request: Request
+	}>
+	readonly reply: Reply
+}
 export interface Target {
 	readonly identity: string
 	readonly placement: Placement
 	readonly overlap: boolean
+	readonly deployment?: DeploymentData
 }
 export interface Budget {
 	readonly total: number
@@ -38,6 +157,11 @@ export interface RequestIdentity {
 	readonly trial: number
 }
 export interface Request {
+	readonly submitted?: number
+	readonly preparation?: string
+	readonly policyVersion?: number
+	readonly description?: Description
+	readonly resolution?: ResolvedInput
 	readonly identity?: RequestIdentity
 	readonly probes?: ReadonlyArray<string>
 	readonly instance: string
@@ -72,6 +196,8 @@ export type Cleanup =
 	| { readonly _tag: "Completed" }
 	| { readonly _tag: "Failed"; readonly cause: Cause.Cause<unknown> }
 export interface Unit {
+	readonly progress?: string
+	readonly kind: "Inspection" | "Execution"
 	readonly id: string
 	readonly incarnation: string
 	readonly instance: string
@@ -126,6 +252,9 @@ export interface Conclusion {
 	readonly units: HashSet.HashSet<string>
 }
 export interface Change {
+	readonly resolved: Option.Option<ResolvedInput>
+	readonly description: Option.Option<Description>
+	readonly policyVersion: number
 	readonly id: string
 	readonly request: Request
 	readonly previous: Target
@@ -161,6 +290,8 @@ export interface Change {
 }
 export type CommandKind =
 	| "Resolve"
+	| "Describe"
+	| "PublishPreparation"
 	| "Spawn"
 	| "Start"
 	| "Serve"
@@ -183,12 +314,22 @@ export interface Token {
 }
 export type Report =
 	| { readonly _tag: "Succeeded" }
+	| { readonly _tag: "Resolved"; readonly value: ResolvedInput }
+	| { readonly _tag: "Described"; readonly value: Description }
+	| { readonly _tag: "Started"; readonly value: Description }
 	| {
 			readonly _tag: "Failed"
 			readonly cause: Cause.Cause<unknown>
 			readonly creation: "NotStarted" | "Unknown"
+			readonly delivery?: "Unavailable"
 	  }
 export interface Command {
+	readonly dispatched: boolean
+	readonly resolution?: ResolvedInput
+	readonly policy?: Policy
+	readonly preparation?: PreparationStatus
+	readonly probes?: ReadonlyArray<string>
+	readonly description?: Description
 	readonly id: string
 	readonly change: string
 	readonly kind: CommandKind
@@ -231,6 +372,13 @@ export interface State {
 	readonly open: boolean
 	readonly now: number
 	readonly nextChange: number
+	readonly nextPreparation: number
+	readonly preparationHistory: ReadonlyArray<string>
+	readonly verifiedHistory: ReadonlyArray<Target>
+	readonly preparations: HashMap.HashMap<string, Preparation>
+	readonly preparationKeys: HashMap.HashMap<string, string>
+	readonly verified: HashMap.HashMap<Target, VerifiedDescription>
+	readonly policies: HashMap.HashMap<string, Policy>
 	readonly historyLimit: number
 	readonly history: ReadonlyArray<string>
 	readonly maxUnits: number
@@ -250,6 +398,64 @@ export interface State {
 	readonly accesses: HashMap.HashMap<string, number>
 }
 export type Event =
+	| {
+			readonly _tag: "UnitDiagnostic"
+			readonly unit: string
+			readonly incarnation: string
+			readonly observer: string
+			readonly cause: Cause.Cause<unknown>
+			readonly now: number
+	  }
+	| {
+			readonly _tag: "UnitCleanup"
+			readonly unit: string
+			readonly incarnation: string
+			readonly observer: string
+			readonly cleanup: Cleanup
+			readonly cause: Cause.Cause<unknown>
+			readonly now: number
+	  }
+	| {
+			readonly _tag: "UnitDisconnected"
+			readonly unit: string
+			readonly incarnation: string
+			readonly observer: string
+			readonly cause: Cause.Cause<unknown>
+			readonly now: number
+	  }
+	| {
+			readonly _tag: "UnitProgress"
+			readonly unit: string
+			readonly incarnation: string
+			readonly observer: string
+			readonly stage: string
+			readonly now: number
+	  }
+	| {
+			readonly _tag: "UnitFailed"
+			readonly unit: string
+			readonly incarnation: string
+			readonly observer: string
+			readonly cause: Cause.Cause<unknown>
+			readonly now: number
+	  }
+	| {
+			readonly _tag: "InspectRequested"
+			readonly request: Input
+			readonly now: number
+	  }
+	| {
+			readonly _tag: "PreparationObserved"
+			readonly preparation: string
+			readonly now: number
+	  }
+	| {
+			readonly _tag: "PolicyChanged"
+			readonly instance: string
+			readonly allowed: ReadonlyArray<string>
+			readonly values: Readonly<Record<string, Schema.Json>>
+			readonly now: number
+	  }
 	| {
 			readonly _tag: "Requested"
 			readonly request: Input
@@ -300,6 +506,8 @@ export type Event =
 	  }
 	| { readonly _tag: "Shutdown"; readonly now: number }
 export type Rejection =
+	| "DescriptionFailed"
+	| "Unauthorized"
 	| "Closing"
 	| "UnsupportedTarget"
 	| "Unsupported"
@@ -310,10 +518,17 @@ export type Rejection =
 	| "KeyConflict"
 export type Reply =
 	| { readonly _tag: "None" }
-	| { readonly _tag: "Admitted"; readonly change: string }
+	| { readonly _tag: "Preparing"; readonly preparation: string }
+	| {
+			readonly _tag: "Admitted"
+			readonly change: string
+			readonly preparation?: string
+	  }
 	| {
 			readonly _tag: "Rejected"
 			readonly reason: Rejection
+			readonly preparation?: string
+			readonly cause?: Cause.Cause<unknown>
 			readonly conflicts: HashSet.HashSet<string>
 	  }
 export interface Transition {

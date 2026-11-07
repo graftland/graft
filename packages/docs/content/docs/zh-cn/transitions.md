@@ -34,6 +34,8 @@ export const upgrade = Effect.gen(function* () {
 `Change.get` 返回当前事实。`Change.changes` 发布带序号的快照。发现序号缺口时通过
 `get` 对账；慢订阅者不会阻塞协调。即使无键历史记录过期，句柄仍保留不可变结局。
 
+检查、容量和原生退出证据见[执行单元](../units/)。
+
 ## 结局
 
 | Outcome          | Meaning                                      |

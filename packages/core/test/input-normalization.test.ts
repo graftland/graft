@@ -2,7 +2,8 @@ import { HashMap, Option } from "effect"
 import { assert, it } from "@effect/vitest"
 
 import * as Core from "../src/internal/decisionCore.ts"
-import { accept, initial, target } from "./change-model/scenarios.ts"
+import { accept, initial } from "./change-model/scenarios.ts"
+import { described, exit, id, target } from "./preparation-fixture.ts"
 
 it("snapshots caller-owned probe arrays before retaining normalized identity (I1, I2)", () => {
 	const probes = ["health"]
@@ -18,8 +19,8 @@ it("snapshots caller-owned probe arrays before retaining normalized identity (I1
 	})
 	probes[0] = "Changed after submission"
 	assert.deepEqual(
-		Option.getOrThrow(HashMap.get(result.state.changes, "change-1")).request
-			.probes,
+		Option.getOrThrow(HashMap.get(result.state.preparations, "preparation-1"))
+			.request.probes,
 		["health"],
 	)
 })
@@ -34,7 +35,13 @@ it("finds normalized keyed identity before changed versions or closed admission 
 		now: 0,
 		request: input,
 	}).state
-	const accepted = accept(submitted, "change-1")
+	const p = id({
+		state: submitted,
+		commands: [],
+		reply: { _tag: "Preparing", preparation: "preparation-1" },
+	})
+	const admitted = exit(described(submitted, p), p).state
+	const accepted = accept(admitted, "change-1")
 	const closed = Core.reduce(accepted, {
 		_tag: "Shutdown",
 		now: accepted.now,

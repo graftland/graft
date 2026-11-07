@@ -26,6 +26,7 @@ import * as Probes from "./internal/probes"
 import { RuntimeContext } from "./internal/runtimeContext"
 import * as TaskGroup from "./internal/tasks"
 import type { Tasks } from "./internal/tasks"
+import type { ManagedFork } from "./Transition"
 
 export type { Tasks } from "./internal/tasks"
 
@@ -105,11 +106,7 @@ export type Requirements<Inject extends ReadonlyArray<Dependency>> =
  */
 export type Update<Config, E = never, R = never> = (
 	next: Config,
-) => Effect.Effect<
-	boolean,
-	import("./Transition").ManagedFork,
-	Graft | Scope.Scope | R | Tasks<E>
->
+) => Effect.Effect<boolean, ManagedFork, Graft | Scope.Scope | R | Tasks<E>>
 
 /** Starts an activation-owned worker. Its unhandled errors belong to the plugin, not the launch operation. */
 export const fork: <A, E, R>(
@@ -338,3 +335,23 @@ export const service = <
 		provides: options.provides ?? [key],
 		apply: () => Effect.flatMap(build, (value) => provide(key, value)),
 	})
+
+/** A unit-only operation was requested from an embedded runtime. */
+export class UnitOnly extends Schema.TaggedError<
+	UnitOnly,
+	{ readonly brand: unique symbol }
+>()("UnitOnly", {}) {}
+/** Granted only when a kernel execution unit creates its embedded runtime. */
+export const UnitTerm = Context.Reference<Option.Option<number>>(
+	"@graftland/graft/Plugin/UnitTerm",
+	{ defaultValue: Option.none },
+)
+/** The current execution term for external fencing. Inspection has no serving term. */
+export const term: Effect.Effect<number, UnitOnly> = Effect.flatMap(
+	UnitTerm,
+	(value) =>
+		Option.match(value, {
+			onNone: () => UnitOnly.make({}),
+			onSome: Effect.succeed,
+		}),
+)

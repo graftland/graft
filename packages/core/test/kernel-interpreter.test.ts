@@ -20,9 +20,23 @@ import * as Core from "../src/internal/decisionCore.ts"
 import * as Interpreter from "../src/internal/kernel.ts"
 import { UnitControl } from "../src/internal/unitControl.ts"
 import { initial, request } from "./change-model/scenarios.ts"
+import {
+	described,
+	exit,
+	id,
+	prepare,
+	resolved,
+	target,
+} from "./preparation-fixture"
 
+const publicInput: Core.Input = { instance: "instance-0", target: target() }
+const withDescription = (s: Core.State): Core.State => {
+	const p = prepare(s, publicInput, true)
+	return exit(described(p.state, id(p)), id(p)).state
+}
 const control = (commands: Queue.Queue<Core.Command>) =>
 	UnitControl.of({
+		events: Stream.empty,
 		send: (command) =>
 			Queue.offer(commands, command).pipe(
 				Effect.as({ _tag: "Succeeded" } satisfies Core.Report),
@@ -103,7 +117,10 @@ it.effect(
 				Cause.die("Control failed"),
 				Cause.die("Control defect"),
 			)
-			const backend = UnitControl.of({ send: () => Effect.failCause(failed) })
+			const backend = UnitControl.of({
+				events: Stream.empty,
+				send: () => Effect.failCause(failed),
+			})
 			const kernel = yield* make(core).pipe(
 				Effect.provideService(UnitControl, backend),
 			)
@@ -124,6 +141,7 @@ it.effect(
 			const started = yield* Deferred.make<void>()
 			const finish = yield* Deferred.make<Core.Report>()
 			const backend = UnitControl.of({
+				events: Stream.empty,
 				send: (c) =>
 					c.kind === "Spawn"
 						? Deferred.succeed(started, undefined).pipe(
@@ -202,6 +220,7 @@ it.effect(
 			const started = yield* Deferred.make<void>()
 			const failure = yield* Deferred.make<void>()
 			const backend = UnitControl.of({
+				events: Stream.empty,
 				send: (c) =>
 					c.kind === "Spawn"
 						? Deferred.succeed(started, undefined).pipe(
@@ -238,8 +257,9 @@ it.effect(
 	"retains handle completion after unkeyed history is evicted (I10)",
 	() =>
 		Effect.gen(function* () {
-			const core = { ...initial(), historyLimit: 1 }
+			const core = withDescription({ ...initial(), historyLimit: 1 })
 			const backend = UnitControl.of({
+				events: Stream.empty,
 				send: () =>
 					Effect.succeed<Core.Report>({
 						_tag: "Failed",
@@ -250,10 +270,10 @@ it.effect(
 			const kernel = yield* make(core).pipe(
 				Effect.provideService(UnitControl, backend),
 			)
-			const first = yield* kernel.submit(request(core))
+			const first = yield* kernel.submit(publicInput)
 			const handle = Option.getOrThrow(first.completion)
 			const original = yield* handle.await
-			const second = yield* kernel.submit(request(core))
+			const second = yield* kernel.submit(publicInput)
 			yield* Option.getOrThrow(second.completion).await
 			const queried = yield* kernel.get(handle.id)
 			assert.isTrue(Option.isNone(queried))
@@ -281,18 +301,23 @@ it.effect(
 					Deferred.await(crash).pipe(Effect.andThen(Effect.failCause(fault))),
 			}
 			const backend = UnitControl.of({
+				events: Stream.empty,
 				send: (command) =>
 					command.kind === "Spawn"
 						? Deferred.succeed(started, undefined).pipe(
 								Effect.andThen(Effect.never),
 							)
-						: Effect.succeed<Core.Report>({ _tag: "Succeeded" }),
+						: Effect.succeed<Core.Report>(
+								command.kind === "Resolve"
+									? { _tag: "Resolved", value: resolved }
+									: { _tag: "Succeeded" },
+							),
 			})
-			const kernel = yield* Interpreter.make(initial()).pipe(
+			const kernel = yield* Interpreter.make(withDescription(initial())).pipe(
 				Effect.provideService(UnitControl, backend),
 				Effect.provideService(Clock.Clock, broken),
 			)
-			yield* kernel.submit(request(initial()))
+			yield* kernel.submit(publicInput)
 			yield* Deferred.await(started)
 			yield* Deferred.succeed(crash, undefined)
 			const conclusion = yield* terminal(kernel, "change-1")

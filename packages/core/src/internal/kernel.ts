@@ -2,6 +2,7 @@ import {
 	Array as Arr,
 	Cause,
 	Clock,
+	HashSet as CoreSet,
 	Deferred,
 	Effect,
 	Exit,
@@ -23,12 +24,20 @@ export interface Completion {
 	readonly await: Effect.Effect<Core.Conclusion>
 	readonly cancel: Effect.Effect<void>
 }
+export interface Submission {
+	readonly reply: Core.Reply
+	readonly completion: Option.Option<Completion>
+	readonly inspection: Option.Option<Core.PreparationStatus>
+}
 export interface Controller {
+	readonly time: Effect.Effect<number>
 	readonly apply: (event: Core.Event) => Effect.Effect<Core.Reply>
-	readonly submit: (request: Core.Request | Core.Input) => Effect.Effect<{
-		readonly reply: Core.Reply
-		readonly completion: Option.Option<Completion>
-	}>
+	readonly submit: (request: Core.Input) => Effect.Effect<Submission>
+	readonly inspect: (request: Core.Input) => Effect.Effect<Submission>
+	readonly getPreparation: (
+		id: string,
+	) => Effect.Effect<Option.Option<Core.PreparationStatus>>
+	readonly preparations: Stream.Stream<Core.PreparationStatus>
 	readonly get: (id: string) => Effect.Effect<Option.Option<Core.Status>>
 	readonly snapshot: Effect.Effect<Core.State>
 	readonly await: (id: string) => Effect.Effect<Core.Conclusion>
@@ -39,6 +48,11 @@ interface Runtime {
 	readonly state: TxRef.TxRef<Core.State>
 	readonly outbox: TxQueue.TxQueue<Core.Command>
 	readonly events: TxPubSub.TxPubSub<Core.Status>
+	readonly preparations: TxPubSub.TxPubSub<Core.PreparationStatus>
+	readonly submissions: TxRef.TxRef<
+		HashMap.HashMap<string, Deferred.Deferred<Submission>>
+	>
+	readonly deliveries: TxRef.TxRef<HashMap.HashMap<string, Completion>>
 	readonly completions: TxRef.TxRef<
 		HashMap.HashMap<string, Deferred.Deferred<Core.Conclusion>>
 	>
@@ -52,16 +66,90 @@ const time = Effect.fnUntraced(function* (runtime: Runtime) {
 	const now = yield* Clock.monotonicTimeNanos
 	return runtime.initialTime + Number(now - runtime.origin) / 1_000_000
 })
-const consume = Effect.fnUntraced(function* (
+const completion = (
+	runtime: Runtime,
+	id: string,
+	mailbox: Deferred.Deferred<Core.Conclusion>,
+): Completion => ({
+	id,
+	await: Deferred.await(mailbox),
+	cancel: Effect.gen(function* () {
+		const now = yield* time(runtime)
+		yield* consume(runtime, {
+			_tag: "Cancel",
+			change: id,
+			cause: Cause.fail("Cancelled"),
+			now,
+		})
+	}),
+})
+const consumeTx = Effect.fnUntraced(function* (
 	runtime: Runtime,
 	event: Core.Event,
 ) {
 	const previous = yield* TxRef.get(runtime.state)
 	const transition = Core.reduce(previous, event)
 	yield* TxRef.set(runtime.state, transition.state)
+	const admissions =
+		transition.reply._tag === "Admitted"
+			? Option.some(transition.reply)
+			: Option.none()
+	const actions: ReadonlyArray<{
+		readonly mailbox: Deferred.Deferred<Core.Conclusion>
+		readonly conclusion: Core.Conclusion
+	}> = yield* Option.match(admissions, {
+		onNone: () => Effect.succeed([]),
+		onSome: Effect.fnUntraced(function* (reply) {
+			const boxes = yield* TxRef.get(runtime.completions)
+			const existing = HashMap.get(boxes, reply.change)
+			const mailbox = Option.isSome(existing)
+				? existing.value
+				: yield* Deferred.make<Core.Conclusion>()
+			yield* TxRef.set(
+				runtime.completions,
+				HashMap.set(boxes, reply.change, mailbox),
+			)
+			const pending = yield* TxRef.get(runtime.submissions)
+			if (
+				reply.preparation !== undefined &&
+				HashMap.has(pending, reply.preparation)
+			)
+				yield* TxRef.update(
+					runtime.deliveries,
+					HashMap.set(
+						reply.preparation,
+						completion(runtime, reply.change, mailbox),
+					),
+				)
+			const concluded = Option.flatMap(
+				Core.get(transition.state, reply.change),
+				(s) => s.conclusion,
+			)
+			return Option.isSome(concluded)
+				? [{ mailbox, conclusion: concluded.value }]
+				: []
+		}),
+	})
 	yield* TxQueue.offerAll(runtime.outbox, transition.commands)
-	return transition.reply
-}, Effect.tx)
+	return { reply: transition.reply, actions }
+})
+const completeActions = (
+	actions: ReadonlyArray<{
+		readonly mailbox: Deferred.Deferred<Core.Conclusion>
+		readonly conclusion: Core.Conclusion
+	}>,
+) =>
+	Effect.forEach(actions, (a) => Deferred.succeed(a.mailbox, a.conclusion), {
+		discard: true,
+	})
+const consume = Effect.fnUntraced(function* (
+	runtime: Runtime,
+	event: Core.Event,
+) {
+	const result = yield* Effect.tx(consumeTx(runtime, event))
+	yield* completeActions(result.actions)
+	return result.reply
+}, Effect.uninterruptible)
 const report = Effect.fnUntraced(function* (
 	runtime: Runtime,
 	command: Core.Command,
@@ -91,6 +179,40 @@ const publish = Effect.fnUntraced(function* (
 		)
 	}
 	yield* TxPubSub.publish(runtime.events, status)
+})
+const publishPreparation = Effect.fnUntraced(function* (
+	runtime: Runtime,
+	command: Core.Command,
+) {
+	const status = command.preparation
+	if (status === undefined) return
+	if (Option.isSome(status.result)) {
+		const pending = yield* TxRef.get(runtime.submissions)
+		const waiter = HashMap.get(pending, status.id)
+		const deliveries = yield* TxRef.get(runtime.deliveries)
+		const result = status.result.value
+		const reply: Core.Reply =
+			result._tag === "Rejected"
+				? {
+						_tag: "Rejected",
+						reason: result.reason,
+						conflicts: result.conflicts,
+						preparation: status.id,
+						cause: status.cause,
+					}
+				: result._tag === "Admitted"
+					? { _tag: "Admitted", change: result.change, preparation: status.id }
+					: { _tag: "Preparing", preparation: status.id }
+		if (Option.isSome(waiter))
+			yield* Deferred.succeed(waiter.value, {
+				reply,
+				completion: HashMap.get(deliveries, status.id),
+				inspection: Option.some(status),
+			})
+		yield* TxRef.update(runtime.submissions, HashMap.remove(status.id))
+		yield* TxRef.update(runtime.deliveries, HashMap.remove(status.id))
+	}
+	yield* TxPubSub.publish(runtime.preparations, status)
 })
 const fire = Effect.fnUntraced(function* (runtime: Runtime, timer: Core.Timer) {
 	const now = yield* time(runtime)
@@ -140,6 +262,9 @@ const execute = Effect.fnUntraced(function* (
 	command: Core.Command,
 ): Effect.fn.Return<Core.Report> {
 	switch (command.kind) {
+		case "PublishPreparation":
+			yield* publishPreparation(runtime, command)
+			return { _tag: "Succeeded" }
 		case "Publish":
 			yield* publish(runtime, command)
 			return { _tag: "Succeeded" }
@@ -206,6 +331,13 @@ const close = Effect.fnUntraced(function* (runtime: Runtime) {
 		Effect.gen(function* () {
 			const state = yield* TxRef.get(runtime.state)
 			if (
+				CoreSet.some(
+					CoreSet.fromIterable(HashMap.keys(state.preparations)),
+					(id) =>
+						Option.exists(HashMap.get(state.preparations, id), (p) =>
+							Option.isNone(p.result),
+						),
+				) ||
 				Arr.some(Arr.fromIterable(state.active), (id) =>
 					Option.exists(HashMap.get(state.changes, id), (c) =>
 						Option.isNone(c.conclusion),
@@ -216,63 +348,90 @@ const close = Effect.fnUntraced(function* (runtime: Runtime) {
 		}),
 	)
 })
-const submit = Effect.fnUntraced(function* (
+const handoff = Effect.fnUntraced(function* (
 	runtime: Runtime,
-	request: Core.Request | Core.Input,
+	request: Core.Input,
+	inspect: boolean,
 ) {
-	const mailbox = yield* Deferred.make<Core.Conclusion>()
+	const waiting = yield* Deferred.make<Submission>()
 	const now = yield* time(runtime)
-	const result = yield* Effect.tx(
+	const selected = yield* Effect.tx(
 		Effect.gen(function* () {
-			const reply = yield* consume(
+			const result = yield* consumeTx(
 				runtime,
-				"reads" in request
-					? { _tag: "Submit", request, now }
+				inspect
+					? { _tag: "InspectRequested", request, now }
 					: { _tag: "Requested", request, now },
 			)
-			if (reply._tag !== "Admitted")
-				return {
-					reply,
-					mailbox: Option.none<Deferred.Deferred<Core.Conclusion>>(),
-					conclusion: Option.none<Core.Conclusion>(),
-				}
-			const state = yield* TxRef.get(runtime.state)
-			const pending = yield* TxRef.get(runtime.completions)
-			const existing = HashMap.get(pending, reply.change)
-			const conclusion = Option.flatMap(
-				Core.get(state, reply.change),
-				(s) => s.conclusion,
-			)
-			const selected = Option.getOrElse(existing, () => mailbox)
-			if (Option.isNone(conclusion))
-				yield* TxRef.set(
-					runtime.completions,
-					HashMap.set(pending, reply.change, selected),
+			if (result.reply._tag === "Preparing") {
+				const pending = yield* TxRef.get(runtime.submissions)
+				const status = yield* TxRef.get(runtime.state).pipe(
+					Effect.map((s) =>
+						Core.getPreparation(
+							s,
+							result.reply._tag === "Preparing" ? result.reply.preparation : "",
+						),
+					),
 				)
-			return { reply, mailbox: Option.some(selected), conclusion }
+				if (Option.isSome(status) && Option.isSome(status.value.result))
+					return {
+						reply: result.reply,
+						actions: result.actions,
+						waiting: Option.none<Deferred.Deferred<Submission>>(),
+						inspection: status,
+					}
+				const mailbox = Option.getOrElse(
+					HashMap.get(pending, result.reply.preparation),
+					() => waiting,
+				)
+				yield* TxRef.set(
+					runtime.submissions,
+					HashMap.set(pending, result.reply.preparation, mailbox),
+				)
+				return {
+					...result,
+					waiting: Option.some(mailbox),
+					inspection: Option.none<Core.PreparationStatus>(),
+				}
+			}
+			return {
+				...result,
+				waiting: Option.none<Deferred.Deferred<Submission>>(),
+				inspection: Option.none<Core.PreparationStatus>(),
+			}
 		}),
 	)
-	if (Option.isSome(result.mailbox) && Option.isSome(result.conclusion))
-		yield* Deferred.succeed(result.mailbox.value, result.conclusion.value)
-	const completion =
-		result.reply._tag === "Admitted"
-			? Option.map(result.mailbox, (mailbox): Completion => ({
-					id: result.reply._tag === "Admitted" ? result.reply.change : "",
-					await: Deferred.await(mailbox),
-					cancel: Effect.gen(function* () {
-						const now = yield* time(runtime)
-						if (result.reply._tag === "Admitted")
-							yield* consume(runtime, {
-								_tag: "Cancel",
-								change: result.reply.change,
-								cause: Cause.fail("Cancelled"),
-								now,
-							})
-					}),
-				}))
+	yield* completeActions(selected.actions)
+	const boxes = yield* TxRef.get(runtime.completions)
+	const handle =
+		selected.reply._tag === "Admitted"
+			? Option.map(HashMap.get(boxes, selected.reply.change), (mailbox) =>
+					completion(
+						runtime,
+						selected.reply._tag === "Admitted" ? selected.reply.change : "",
+						mailbox,
+					),
+				)
 			: Option.none<Completion>()
-	return { reply: result.reply, completion }
+	return {
+		waiting: selected.waiting,
+		result: {
+			reply: selected.reply,
+			completion: handle,
+			inspection: selected.inspection,
+		},
+	}
 }, Effect.uninterruptible)
+const submit = Effect.fnUntraced(function* (
+	runtime: Runtime,
+	request: Core.Input,
+	inspect = false,
+): Effect.fn.Return<Submission> {
+	const delivery = yield* handoff(runtime, request, inspect)
+	return Option.isSome(delivery.waiting)
+		? yield* Deferred.await(delivery.waiting.value)
+		: delivery.result
+})
 export const make = Effect.fnUntraced(function* (
 	initial: Core.State,
 ): Effect.fn.Return<Controller, never, Scope.Scope | UnitControl> {
@@ -280,6 +439,11 @@ export const make = Effect.fnUntraced(function* (
 		state: yield* TxRef.make(initial),
 		outbox: yield* TxQueue.unbounded<Core.Command>(),
 		events: yield* TxPubSub.sliding<Core.Status>(64),
+		preparations: yield* TxPubSub.sliding<Core.PreparationStatus>(64),
+		submissions: yield* TxRef.make(
+			HashMap.empty<string, Deferred.Deferred<Submission>>(),
+		),
+		deliveries: yield* TxRef.make(HashMap.empty<string, Completion>()),
 		completions: yield* TxRef.make(
 			HashMap.empty<string, Deferred.Deferred<Core.Conclusion>>(),
 		),
@@ -290,10 +454,33 @@ export const make = Effect.fnUntraced(function* (
 		initialTime: initial.now,
 	}
 	yield* dispatch(runtime).pipe(Effect.forever, Effect.forkScoped)
+	yield* Stream.runForEach(runtime.control.events, (event) =>
+		Effect.gen(function* () {
+			const now = yield* time(runtime)
+			yield* consume(runtime, { ...event, now })
+		}),
+	).pipe(Effect.forkScoped)
 	yield* Effect.addFinalizer(() => close(runtime))
 	return {
+		time: time(runtime),
 		apply: (event) => consume(runtime, event),
 		submit: (request) => submit(runtime, request),
+		inspect: (request) => submit(runtime, request, true),
+		getPreparation: Effect.fnUntraced(function* (id: string) {
+			const now = yield* time(runtime)
+			yield* consume(runtime, {
+				_tag: "PreparationObserved",
+				preparation: id,
+				now,
+			})
+			const state = yield* TxRef.get(runtime.state)
+			return Core.getPreparation(state, id)
+		}),
+		preparations: Stream.unwrap(
+			Effect.map(TxPubSub.subscribe(runtime.preparations), (queue) =>
+				Stream.fromEffectRepeat(TxQueue.take(queue)),
+			),
+		),
 		snapshot: TxRef.get(runtime.state),
 		await: (id) => waitConclusion(runtime, id),
 		shutdown: close(runtime),

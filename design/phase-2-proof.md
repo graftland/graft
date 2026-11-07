@@ -1,9 +1,9 @@
 # Phase 2 proof
 
-Status: steps 1–2 implementation. Phase 2 is not complete. The production
-reducer now drives the Effect interpreter and public Change service. Native
-termination, preparation, direct channels, calls and the gateway remain
-required; no simulated exit report is claimed as native proof.
+Status: steps 1–3 implementation. Phase 2 is not complete. The production
+reducer drives the Effect interpreter, inspection and native placement control.
+Direct channels, calls and the gateway remain required. Native evidence below is
+distinguished from finite reducer exploration.
 
 ## 1. Production reducer exploration
 
@@ -285,3 +285,112 @@ Final full-check logs: `phase2-step2-{typecheck,build,test}-release.log` and
 `phase2-step2-docs-final.log` under `.cache`. No check was deliberately
 interrupted. No packed script was invoked directly. All remaining unit,
 transport, call and gateway acceptance is still required by steps 3–7.
+
+## Step 3: preparation and native execution
+
+The reducer owns inspection records before Resolve or Spawn, including their
+claims, absolute deadline, command ids and native observer identity. Inspection
+has term zero, a distinct preparation id and no serving grant. Only exact native
+exit or confirmed prevention releases its claim. Describe is imported and
+decoded inside a Worker or child. The subsequent execution independently checks
+its resolved input fingerprint/environment and returns matching declarations
+before Serve. Serving failures, diagnostics, cleanup and native exit remain
+separate facts. The placement executor imports no business module.
+
+`preparation-core.test.ts` has 21 cases: intent and inspection capacity before
+action; pending keyed deduplication/conflict; Describe deadline/ack uncertainty;
+late exit after preflight rejection; full multi-reason Cause; inherited total
+budget; expanded footprint rejection; uncached full-capacity rejection; exact
+verified cache identity; Runner Overlap rejection; current authorization; Start
+declaration mismatch; uncertain spawn/consumed term; confirmed noncreation;
+bounded settled history with unresolved records retained; fresh recovery
+Describe using its reserved claim; termination reserve; and immutable
+declaration snapshots. `native-evidence-core.test.ts` adds four cases for idle
+failure/capacity, serving ownership transfer, stale incarnation and retirement
+exit before Stop response. The existing 56 focused core/interpreter cases remain
+required.
+
+`native-units.test.ts` has eleven real-unit cases. Both Worker and Process reach
+blocked contract import and blocked decoder stages before native termination;
+querying the kernel remains possible. Both describe without activation, expose
+the execution term and forcibly retire an old blocked finalizer while preserving
+unknown cleanup. The runner owner observes real child exits; disconnecting its
+control clients leaves execution evidence Missing. An additional Worker case
+performs Restart at maxUnits=1 using the verified description. Embedded
+Plugin.term fails with UnitOnly. Native deadlines are test guards and escalation
+inputs, not proof of exit; each assertion reads exact unit evidence.
+
+### Step 3 interpretations
+
+- Inspection cache entries and settled preparation history are bounded by the
+  runtime history limit. Pending/unresolved preparations remain regardless of
+  that bound. A fully settled rejected key can plan again (phase-2.md:143–158).
+- The fixed resolver supports JSON `$reference` values from current data-only
+  policy values; no resolver callback enters the kernel. Authorization and
+  reference resolution run again for every execution attempt (phase-2.md:97–98,
+  171–177, 222–226). Recovery whose current resolution lacks a matching verified
+  description performs a distinct inspection under its existing claim. It keeps
+  the original deadline and cannot expand the member footprint.
+- A lost Stop reply is unavailable protocol evidence, not a known failed cleanup
+  Exit. It preserves its full Cause and lets termination/native evidence settle
+  retirement. This handles either scheduling order of exit notification and the
+  command waiter awakened by that exit (phase-2.md:184–189, 204–220).
+- Runner control uses a fixed local socket and an independent execution owner;
+  transport disconnect never becomes native exit. Worker and Process are owned
+  locally; Runner remains Restart-only (phase-2.md:26, 135–141, 184–189).
+- The former managed host preparation/allocation path was removed in step 2. The
+  ordinary embedded Remote path is still scheduled for deletion with its
+  dependent callers in step 6; it is not reachable from the new kernel entry
+  (phase-2.md implementation-order rows 3 and 6).
+
+### Step 3 development failures
+
+Red tests failed for absent preparation/native APIs and the initial missing
+runner owner API. Further failures exposed: declaration and unit data type
+mismatches; wrong Effect v4 Array/Stream API names; callback/context inference
+and unused imports; missing fixture exports; a parser error in a generated edit
+(fixed before continuing devenv); inspection reservation/budget errors; uncopied
+declarations; unbounded settled inspection records; omitted known-noncreation
+settlement; and forward declarations reused during recovery. Native tests
+exposed an eval Worker entry incompatible with NodeServices, a double-encoded
+file URL, a fixture loading workspace TypeScript in plain Node, a missing
+execution-term grant, and the race between native exit and an unavailable Stop
+reply. Real stage assertions prevented bootstrap failures from falsely
+satisfying blocked-import/decoder tests. The first full build failed on three
+new guide links using source filenames instead of relative page URLs. Typecheck
+initially also failed on stale published core declarations and yield-in-call
+diagnostics; rebuilding the changed public entry and fixing the diagnostics
+resolves those failures. No Effect API was patched, no genuine public-API gap
+has been established, and no check was deliberately interrupted. Further
+acceptance review removed the interpreter submission overload for normalized
+internal requests; public submission now always follows public preflight. It
+also found that pre-admission Busy rejection lost its conflict identities; the
+new red case retains those in the preparation result. Removing a still-used
+HashSet import briefly failed seven interpreter tests; the import is restored.
+The first full root run passed 310 files and 2,279 cases, with 45 skipped cases
+and only the two allowed macOS benchmark failures. Final full-check results are
+recorded after completion.
+
+The final failure review added the native inspection executor-failure cell: the
+Cause had remained only on the unit, and inspection failure took the ordinary
+serving-failure path. The reducer now retains the Cause and interrupted phase in
+its preparation and terminates only that inspection. Its red Cause and phase
+assertions are recorded in the step 3 development logs.
+
+### Step 3 final verification
+
+| Check                                        | Result                                                                                      |
+| -------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| Focused core/interpreter/boundary acceptance | 82 passed, including 21 preparation, 4 native-evidence and 1 preparation exploration case   |
+| Real native unit acceptance                  | 11 passed: Worker, Process and runner owner                                                 |
+| Typecheck                                    | Passed                                                                                      |
+| Build                                        | Passed; 92 public entries and 2,569 documentation pages                                     |
+| Root tests                                   | 310 files / 2,281 cases passed; 45 skipped; only the two permitted macOS benchmark failures |
+| Independent docs                             | 25 Node/TypeDoc checks and 41 Vitest cases in 21 files passed                               |
+| Formatting                                   | 1,197 files, zero changes; diff checks passed                                               |
+
+Final logs are `.cache/phase2-step3-typecheck-final5.log`,
+`phase2-step3-build-final4.log`, `phase2-step3-test-final2.log` and
+`phase2-step3-docs-final2.log`. The preceding full run passed 2,280 cases with
+only the same two allowed failures. No check was deliberately interrupted and no
+packed script was invoked directly. Steps 4–7 remain required.

@@ -1,0 +1,119 @@
+/** Fixed control data. This module imports no business contract or implementation. */
+import { Schema } from "effect"
+
+export const Token = Schema.Struct({
+	authority: Schema.String,
+	change: Schema.String,
+	unit: Schema.String,
+	incarnation: Schema.String,
+	term: Schema.Int,
+	view: Schema.Int,
+})
+export type Token = typeof Token.Type
+export const Artifact = Schema.Struct({
+	directory: Schema.String,
+	identity: Schema.Struct({
+		version: Schema.Literal(1),
+		algorithm: Schema.Literal("sha256"),
+		digest: Schema.String,
+		entry: Schema.String,
+	}),
+})
+export const Deployment = Schema.Struct({
+	artifact: Artifact,
+	contract: Schema.String,
+	input: Schema.Json,
+	runner: Schema.optionalKey(
+		Schema.Struct({ socket: Schema.String, owner: Schema.String }),
+	),
+})
+export const Target = Schema.Struct({
+	identity: Schema.String,
+	placement: Schema.Literals(["Worker", "Process", "Runner"]),
+	overlap: Schema.Boolean,
+	deployment: Schema.optionalKey(Deployment),
+})
+export const Resolved = Schema.Struct({
+	input: Schema.Json,
+	identity: Schema.String,
+	environment: Schema.String,
+})
+export const Binding = Schema.Struct({
+	key: Schema.String,
+	operations: Schema.Array(
+		Schema.Struct({
+			identity: Schema.String,
+			tag: Schema.String,
+			provenance: Schema.String,
+		}),
+	),
+})
+export const Description = Schema.Struct({
+	artifact: Schema.String,
+	configuration: Schema.String,
+	environment: Schema.String,
+	protocol: Schema.Literal(1),
+	overlap: Schema.Boolean,
+	members: Schema.Int,
+	requires: Schema.Array(Binding),
+	provides: Schema.Array(Binding),
+	probes: Schema.Array(Schema.String),
+})
+export const Command = Schema.Struct({
+	id: Schema.String,
+	kind: Schema.Literals([
+		"Resolve",
+		"Describe",
+		"Spawn",
+		"Start",
+		"Serve",
+		"Ready",
+		"Probe",
+		"Install",
+		"Activate",
+		"Stop",
+		"Terminate",
+		"ArmTimer",
+		"CancelTimer",
+		"Publish",
+		"PublishPreparation",
+	]),
+	token: Token,
+	target: Target,
+	resolution: Schema.optionalKey(Resolved),
+	description: Schema.optionalKey(Description),
+	probes: Schema.optionalKey(Schema.Array(Schema.String)),
+})
+export type Command = typeof Command.Type
+export const Cause = Schema.toCodecJson(
+	Schema.Cause(
+		Schema.Defect({ includeStack: true }),
+		Schema.Defect({ includeStack: true }),
+	),
+)
+export const Report = Schema.Union([
+	Schema.TaggedStruct("Succeeded", {}),
+	Schema.TaggedStruct("Resolved", { value: Resolved }),
+	Schema.TaggedStruct("Described", { value: Description }),
+	Schema.TaggedStruct("Started", { value: Description }),
+	Schema.TaggedStruct("Failed", {
+		cause: Schema.Json,
+		creation: Schema.Literals(["Unknown", "NotStarted"]),
+		delivery: Schema.optionalKey(Schema.Literal("Unavailable")),
+	}),
+])
+export type Report = typeof Report.Type
+export const Incoming = Schema.Union([
+	Schema.TaggedStruct("Init", { command: Command }),
+	Schema.TaggedStruct("Run", { command: Command }),
+])
+export type Incoming = typeof Incoming.Type
+export const Outgoing = Schema.Union([
+	Schema.TaggedStruct("Online", {}),
+	Schema.TaggedStruct("Initialized", {}),
+	Schema.TaggedStruct("Result", { command: Schema.String, result: Report }),
+	Schema.TaggedStruct("Failure", { cause: Schema.Json }),
+	Schema.TaggedStruct("Cleanup", { cause: Schema.optionalKey(Schema.Json) }),
+	Schema.TaggedStruct("Progress", { stage: Schema.String }),
+])
+export type Outgoing = typeof Outgoing.Type

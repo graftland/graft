@@ -32,6 +32,9 @@ export default async function setup(project) {
 		entry: [
 			"cli",
 			"internal/childMain",
+			"internal/nativeUnit",
+			"internal/nativeUnitMain",
+			"Units",
 			"index",
 			"runner/index",
 			"Contract",

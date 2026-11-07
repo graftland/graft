@@ -145,8 +145,13 @@
 			"source": "./src/Transport.ts",
 			"default": "./dist/Transport.js"
 		},
+		"./Units": {
+			"source": "./src/Units.ts",
+			"default": "./dist/Units.js"
+		},
 		"./package.json": "./package.json",
 		"./internal/child": "./dist/internal/childMain.js",
+		"./internal/unit": "./dist/internal/nativeUnitMain.js",
 		"./internal/sandbox": "./dist/sandbox/child.js",
 		"./internal/watchdog": "./dist/internal/watchdogMain.js",
 		"./internal/worker": "./dist/internal/workerMain.js",
@@ -212,8 +217,10 @@
 			"./schema": "./dist/schema.js",
 			"./Testing": "./dist/Testing.js",
 			"./Transport": "./dist/Transport.js",
+			"./Units": "./dist/Units.js",
 			"./package.json": "./package.json",
 			"./internal/child": "./dist/internal/childMain.js",
+			"./internal/unit": "./dist/internal/nativeUnitMain.js",
 			"./internal/sandbox": "./dist/sandbox/child.js",
 			"./internal/watchdog": "./dist/internal/watchdogMain.js",
 			"./internal/worker": "./dist/internal/workerMain.js",

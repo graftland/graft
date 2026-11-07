@@ -15,6 +15,7 @@ export default defineConfig([
 					),
 				),
 				"./internal/child": "./dist/internal/childMain.js",
+				"./internal/unit": "./dist/internal/nativeUnitMain.js",
 				"./internal/sandbox": "./dist/sandbox/child.js",
 				"./internal/watchdog": "./dist/internal/watchdogMain.js",
 				"./internal/worker": "./dist/internal/workerMain.js",
@@ -23,6 +24,9 @@ export default defineConfig([
 		},
 		entry: [
 			"src/index.ts",
+			"src/Units.ts",
+			"src/internal/nativeUnit.ts",
+			"src/internal/nativeUnitMain.ts",
 			"src/runner/index.ts",
 			"src/Contract.ts",
 			"src/Artifact.ts",

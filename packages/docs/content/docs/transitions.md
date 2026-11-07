@@ -38,6 +38,8 @@ snapshots. Reconcile sequence gaps with `get`; a slow subscriber does not block
 coordination. A handle retains its immutable conclusion even after bounded
 unkeyed history expires.
 
+See [Units](../units/) for inspection, capacity and native exit evidence.
+
 ## Outcomes
 
 | Outcome          | Meaning                                                            |

@@ -8,6 +8,7 @@ import {
 	Option,
 } from "effect"
 
+import * as InputSnapshot from "./decisionInput"
 import type {
 	Budget,
 	Cell,
@@ -23,9 +24,9 @@ import type {
 	Outcome,
 	Phase,
 	Rejection,
-	Reply,
 	Request,
 	RequestIdentity,
+	ResolvedInput,
 	Settlement,
 	State,
 	Status,
@@ -34,15 +35,13 @@ import type {
 	TimerPurpose,
 	Transition,
 	Unit,
+	Working,
 } from "./decisionState.ts"
+import * as Preparation from "./preparationCore"
 
+export const getPreparation = Preparation.get
 export type * from "./decisionState.ts"
 
-interface Working extends State {
-	readonly emitted: ReadonlyArray<Command>
-	readonly changed: HashSet.HashSet<string>
-	readonly reply: Reply
-}
 const instanceOwner = (id: string): string => `instance:${id}`
 const emptyCell: Cell = {
 	version: 0,
@@ -181,6 +180,13 @@ export const make = (options: {
 			open: true,
 			now: 0,
 			nextChange: 1,
+			nextPreparation: 1,
+			preparationHistory: [],
+			verifiedHistory: [],
+			preparations: HashMap.empty(),
+			preparationKeys: HashMap.empty(),
+			verified: HashMap.empty(),
+			policies: HashMap.empty(),
 			historyLimit: 128,
 			history: [],
 			maxUnits: options.maxUnits,
@@ -199,11 +205,12 @@ export const make = (options: {
 		(s: State, entry): State => {
 			const id = `${entry.id}@0`
 			const unit: Unit = {
+				kind: "Execution",
 				id,
 				incarnation: `${options.authority}/${id}`,
 				instance: entry.id,
 				term: 0,
-				target: entry.target,
+				target: InputSnapshot.target(entry.target),
 				owner: instanceOwner(entry.id),
 				claim: id,
 				spawn: `${id}/initial`,
@@ -217,7 +224,7 @@ export const make = (options: {
 				...s,
 				instances: HashMap.set(s.instances, entry.id, {
 					id: entry.id,
-					desired: entry.target,
+					desired: InputSnapshot.target(entry.target),
 					current: Option.some(id),
 					term: 0,
 					healthy: true,
@@ -248,6 +255,7 @@ const emit = (
 ): Working => {
 	const u = HashMap.get(s.units, unit)
 	const command: Command = {
+		dispatched: true,
 		id: `${c.id}/${c.nextCommand}`,
 		change: c.id,
 		kind,
@@ -255,6 +263,12 @@ const emit = (
 		participant,
 		timer,
 		target: c.recovering ? c.previous : c.request.target,
+		policy: Preparation.policy(s, c.request.instance),
+		...(Option.isSome(c.resolved) ? { resolution: c.resolved.value } : {}),
+		...(Option.isSome(c.description)
+			? { description: c.description.value }
+			: {}),
+		probes: c.request.probes ?? [],
 		token: {
 			authority: s.authority,
 			change: c.id,
@@ -696,6 +710,7 @@ const spawn = (s: Working, c: Change): Working => {
 	const term = instance.value.term + 1
 	const id = `${c.request.instance}@${term}`
 	const unit: Unit = {
+		kind: "Execution",
 		id,
 		incarnation: `${s.authority}/${id}`,
 		instance: c.request.instance,
@@ -828,9 +843,9 @@ export const defaultBudget: Budget = {
 	stop: 5000,
 	terminate: 5000,
 }
-const requested = (s: Working, input: Input): Working => {
+const requested = (s: Working, input: Input, inspect = false): Working => {
 	const budget: Budget = { ...defaultBudget, ...input.budget }
-	const target = { ...input.target }
+	const target = InputSnapshot.target(input.target)
 	const identity = {
 		instance: input.instance,
 		target,
@@ -859,7 +874,50 @@ const requested = (s: Working, input: Input): Working => {
 		trial: identity.trial,
 		...(input.key === undefined ? {} : { key: input.key }),
 	}
-	return submit(s, request)
+
+	if (input.key !== undefined && HashMap.has(s.keys, input.key))
+		return submit(s, request)
+	if (input.key !== undefined && HashMap.has(s.preparationKeys, input.key))
+		return Preparation.start(s, request, inspect)
+	if (!s.open) return reject(s, "Closing")
+	if (!HashMap.has(s.instances, input.instance))
+		return reject(s, "UnsupportedTarget")
+	if (!validBudget(request.budget, request.trial))
+		return reject(s, "InvalidBudget")
+	if (
+		input.expected !== undefined &&
+		input.expected !== cell(s, input.instance).version
+	)
+		return reject(s, "Stale", HashSet.make(input.instance))
+	if (input.target.placement === "Runner" && input.strategy === "Overlap")
+		return reject(s, "Unsupported")
+	if (input.target.deployment === undefined)
+		return reject(s, "UnsupportedTarget")
+	if (!Preparation.authorized(s, input.instance, input.target))
+		return reject(s, "Unauthorized")
+	const known = Preparation.cached(s, input.target)
+	if (
+		!inspect &&
+		Option.isSome(known) &&
+		Equal.equals(
+			known.value.policyValues ?? {},
+			Preparation.policy(s, input.instance).values,
+		)
+	)
+		return submit(s, {
+			...request,
+			submitted: s.now,
+			policyVersion: Preparation.policy(s, input.instance).version,
+			description: known.value.description,
+			resolution: known.value.resolution,
+			target: { ...request.target, overlap: known.value.description.overlap },
+			strategy:
+				input.strategy ??
+				(known.value.description.overlap && input.target.placement !== "Runner"
+					? "Overlap"
+					: "Restart"),
+		})
+	return Preparation.start(s, request, inspect)
 }
 export const empty = (options: {
 	readonly authority: string
@@ -874,7 +932,7 @@ export const empty = (options: {
 		...s,
 		instances: HashMap.set(s.instances, entry.id, {
 			id: entry.id,
-			desired: entry.target,
+			desired: InputSnapshot.target(entry.target),
 			current: Option.none(),
 			term: 0,
 			healthy: false,
@@ -932,7 +990,19 @@ const submit = (s: Working, r: Request): Working => {
 			(!r.target.overlap || r.target.placement === "Runner"))
 	)
 		return reject(s, "Unsupported")
-	if (!validBudget(r.budget, r.trial)) return reject(s, "InvalidBudget")
+	if (
+		!validBudget(
+			{
+				...r.budget,
+				total:
+					r.submitted === undefined
+						? r.budget.total
+						: Math.max(0, r.submitted + r.budget.total - s.now),
+			},
+			r.trial,
+		)
+	)
+		return reject(s, "InvalidBudget")
 	const checked = HashSet.reduce(
 		keys(r),
 		{ state: s, busy: HashSet.empty<string>(), stale: HashSet.empty<string>() },
@@ -988,6 +1058,9 @@ const submit = (s: Working, r: Request): Working => {
 		)
 	})
 	const c: Change = {
+		resolved: Option.fromNullishOr(r.resolution),
+		description: Option.fromNullishOr(r.description),
+		policyVersion: r.policyVersion ?? 0,
 		id,
 		request: r,
 		previous: instance.value.desired,
@@ -1018,7 +1091,7 @@ const submit = (s: Working, r: Request): Working => {
 		nextCommand: 1,
 		commandIds: HashSet.empty(),
 		timerIds: HashSet.empty(),
-		deadline: s.now + r.budget.total,
+		deadline: (r.submitted ?? s.now) + r.budget.total,
 		cause: Cause.empty,
 		conclusion: Option.none(),
 		transferred: Option.none(),
@@ -1061,11 +1134,88 @@ const submit = (s: Working, r: Request): Working => {
 			: resolve(s, c),
 	)
 }
+const inspectAttempt = (
+	s: Working,
+	c: Change,
+	resolution: ResolvedInput,
+): Working => {
+	const free = Arr.findFirst(c.claims, (id) =>
+		Option.exists(
+			HashMap.get(s.claims, id),
+			(claim) => claim.owner === c.id && Option.isNone(claim.unit),
+		),
+	)
+	if (Option.isNone(free))
+		return fail(s, c, Cause.fail("Reserved inspection capacity is unavailable"))
+	const { key: _key, identity: _identity, ...request } = c.request
+	const started = Preparation.start(
+		disarm(s, c, HashSet.make("Operation")),
+		{ ...request, target: c.recovering ? c.previous : c.request.target },
+		true,
+		{
+			parent: c.id,
+			claim: free.value,
+			resolution,
+			submitted: c.deadline - c.request.budget.total,
+		},
+	)
+	return { ...started, reply: s.reply }
+}
+const descriptionReady = (
+	s: Working,
+	ready: Working["descriptions"][number],
+): Working =>
+	withChange(s, ready.change, (s, c) => {
+		if (Option.isSome(c.conclusion)) return s
+		if (ready.result._tag !== "Described") return fail(s, c, ready.cause)
+		if (c.failure) return progressSettlement(s, c)
+		const verified = {
+			...c,
+			description: Option.some(ready.result.description),
+			resolved: ready.resolution,
+		}
+		return spawn(save(s, verified), verified)
+	})
 const reportSuccess = (s: Working, c: Change, command: Command): Working => {
 	if (Option.isSome(c.conclusion) || c.failure) return s
 	switch (command.kind) {
 		case "Resolve":
-			return c.phase === "Resolving" ? spawn(s, c) : s
+			if (c.phase !== "Resolving") return s
+			if (
+				!Preparation.authorized(
+					s,
+					c.request.instance,
+					c.recovering ? c.previous : c.request.target,
+				)
+			)
+				return fail(s, c, Cause.fail("Current policy denies execution"))
+			if (
+				Option.isSome(command.report) &&
+				command.report.value._tag === "Resolved"
+			) {
+				const resolved = {
+					...c,
+					resolved: Option.some(command.report.value.value),
+					policyVersion: Preparation.policy(s, c.request.instance).version,
+				}
+				const target = c.recovering ? c.previous : c.request.target
+				const known = Preparation.cached(s, target, command.report.value.value)
+				if (target.deployment === undefined)
+					return spawn(save(s, resolved), resolved)
+				if (Option.isSome(known)) {
+					const verified = {
+						...resolved,
+						description: Option.some(known.value.description),
+					}
+					return spawn(save(s, verified), verified)
+				}
+				return inspectAttempt(
+					save(s, resolved),
+					resolved,
+					command.report.value.value,
+				)
+			}
+			return spawn(s, c)
 		case "Spawn":
 			return c.phase === "Spawning"
 				? withUnit(s, command.unit, (s, u) =>
@@ -1083,6 +1233,22 @@ const reportSuccess = (s: Working, c: Change, command: Command): Working => {
 					)
 				: s
 		case "Start":
+			if (Option.isSome(c.description)) {
+				const evidence = command.report
+				if (
+					!Option.exists(
+						evidence,
+						(r) =>
+							r._tag === "Started" &&
+							Equal.equals(r.value, c.description.pipe(Option.getOrUndefined)),
+					)
+				)
+					return fail(
+						s,
+						c,
+						Cause.fail("Execution declarations differ from inspection"),
+					)
+			}
 			return c.phase === "Starting"
 				? operation(
 						s,
@@ -1139,6 +1305,8 @@ const reportSuccess = (s: Working, c: Change, command: Command): Working => {
 		case "Stop":
 		case "Terminate":
 		case "ArmTimer":
+		case "Describe":
+		case "PublishPreparation":
 		case "Publish":
 		case "CancelTimer":
 			return s
@@ -1156,8 +1324,8 @@ const endUnit = (
 		...u,
 		evidence,
 		phase: evidence === "NotStarted" ? "NotStarted" : "Exited",
-		cleanup,
-		cause,
+		cleanup: cleanup._tag === "Unknown" ? u.cleanup : cleanup,
+		cause: Cause.combine(u.cause, cause),
 		leases: HashSet.empty(),
 	}
 	const claim = HashMap.get(s.claims, u.claim)
@@ -1252,12 +1420,22 @@ const reported = (
 						}))
 					: recorded
 			return withChange(recorded, command.change, (s, c) => {
-				if (event.result._tag === "Succeeded")
+				if (
+					event.result._tag === "Succeeded" ||
+					event.result._tag === "Resolved" ||
+					event.result._tag === "Started" ||
+					event.result._tag === "Described"
+				)
 					return command.disposition === "Obsolete" ||
 						!currentReport(c, command)
 						? s
-						: reportSuccess(s, c, command)
+						: reportSuccess(s, c, {
+								...command,
+								report: Option.some(event.result),
+							})
 				const result = event.result
+				if (command.kind === "Stop" && result.delivery === "Unavailable")
+					return save(s, { ...c, cause: Cause.combine(c.cause, result.cause) })
 				const failed =
 					Option.isSome(c.conclusion) || !currentReport(c, command)
 						? save(s, { ...c, cause: Cause.combine(c.cause, result.cause) })
@@ -1379,6 +1557,7 @@ const shutdownUnit = (s: Working, u: Unit): Working => {
 	if (u.evidence !== "Missing" || u.phase === "Terminating") return s
 	const id = `${s.authority}/shutdown/${u.id}`
 	const command: Command = {
+		dispatched: true,
 		id,
 		change: "$runtime",
 		kind: "Terminate",
@@ -1456,26 +1635,251 @@ const timerEnded = (
 			})
 		},
 	})
+const policyChanged = (
+	s: Working,
+	event: Extract<Event, { _tag: "PolicyChanged" }>,
+): Working => {
+	const previous = Preparation.policy(s, event.instance)
+	const next: Working = {
+		...s,
+		policies: HashMap.set(s.policies, event.instance, {
+			version: previous.version + 1,
+			allowed: Option.some(HashSet.fromIterable(event.allowed)),
+			values: InputSnapshot.values(event.values),
+		}),
+		instances: HashMap.modify(s.instances, event.instance, (i) => ({
+			...i,
+			authorized: HashSet.has(
+				HashSet.fromIterable(event.allowed),
+				i.desired.identity,
+			),
+		})),
+	}
+	return HashSet.reduce(
+		Option.getOrElse(HashMap.get(s.observers, event.instance), () =>
+			HashSet.empty(),
+		),
+		next,
+		(s, id) =>
+			withChange(s, id, (s, c) =>
+				Option.isSome(c.conclusion)
+					? s
+					: fail(s, c, Cause.fail("Current authorization premise changed")),
+			),
+	)
+}
+const eventPreparations = (s: State, event: Event): HashSet.HashSet<string> => {
+	switch (event._tag) {
+		case "PreparationObserved":
+			return HashSet.make(event.preparation)
+		case "Reported":
+			return HashSet.fromIterable(
+				Option.toArray(
+					Option.map(HashMap.get(s.commands, event.command), (c) => c.change),
+				),
+			)
+		case "UnitCleanup":
+		case "UnitDisconnected":
+		case "UnitDiagnostic":
+		case "UnitProgress":
+		case "UnitFailed":
+		case "Exited":
+			return HashSet.fromIterable(
+				Option.toArray(
+					Option.map(HashMap.get(s.units, event.unit), (u) => u.owner),
+				),
+			)
+		case "TimerFired":
+		case "TimerEnded":
+			return HashSet.fromIterable(
+				Option.toArray(
+					Option.map(HashMap.get(s.timers, event.timer), (t) => t.change),
+				),
+			)
+		default:
+			return HashSet.empty()
+	}
+}
+const unitFailed = (
+	s: Working,
+	event: Extract<Event, { _tag: "UnitFailed" }>,
+): Working =>
+	withUnit(s, event.unit, (s, u) => {
+		if (u.incarnation !== event.incarnation || u.spawn !== event.observer)
+			return s
+		const changed = Option.getOrElse(HashMap.get(s.observers, u.instance), () =>
+			HashSet.empty<string>(),
+		)
+		const observed: Working = {
+			...s,
+			units: HashMap.set(s.units, u.id, {
+				...u,
+				cause: Cause.combine(u.cause, event.cause),
+			}),
+			instances: HashMap.modify(s.instances, u.instance, (i) =>
+				Option.contains(i.current, u.id) ? { ...i, healthy: false } : i,
+			),
+			changed: HashSet.union(s.changed, changed),
+		}
+		const failed = HashSet.reduce(
+			HashSet.add(changed, u.owner),
+			observed,
+			(s, id) =>
+				withChange(s, id, (s, c) =>
+					Option.isSome(c.conclusion)
+						? s
+						: fail(
+								s,
+								{
+									...c,
+									oldChanged: c.oldChanged || Option.contains(c.old, u.id),
+								},
+								event.cause,
+							),
+				),
+		)
+		return u.owner === instanceOwner(u.instance)
+			? withUnit(failed, u.id, shutdownUnit)
+			: failed
+	})
+const unitCleanup = (
+	s: Working,
+	event: Extract<Event, { _tag: "UnitCleanup" }>,
+): Working =>
+	withUnit(s, event.unit, (s, u) =>
+		u.incarnation !== event.incarnation || u.spawn !== event.observer
+			? s
+			: {
+					...s,
+					units: HashMap.set(s.units, u.id, {
+						...u,
+						cleanup: event.cleanup,
+						cause: Cause.combine(u.cause, event.cause),
+					}),
+				},
+	)
+const disconnected = (
+	s: Working,
+	event: Extract<Event, { _tag: "UnitDisconnected" }>,
+): Working =>
+	withUnit(s, event.unit, (s, u) => {
+		if (u.incarnation !== event.incarnation || u.spawn !== event.observer)
+			return s
+		const owners = HashSet.add(
+			Option.getOrElse(HashMap.get(s.observers, u.instance), () =>
+				HashSet.empty<string>(),
+			),
+			u.owner,
+		)
+		const stopping =
+			!s.open ||
+			HashSet.some(owners, (owner) =>
+				Option.exists(HashMap.get(s.changes, owner), (c) =>
+					HashSet.some(c.commandIds, (id) =>
+						Option.exists(
+							HashMap.get(s.commands, id),
+							(command) => command.unit === u.id && command.kind === "Stop",
+						),
+					),
+				),
+			) ||
+			u.kind === "Inspection"
+		return stopping
+			? {
+					...s,
+					units: HashMap.set(s.units, u.id, {
+						...u,
+						cause: Cause.combine(u.cause, event.cause),
+					}),
+				}
+			: unitFailed(s, { ...event, _tag: "UnitFailed" })
+	})
 const apply = (s: Working, event: Event): Working => {
 	switch (event._tag) {
+		case "UnitDiagnostic":
+			return withUnit(s, event.unit, (s, u) =>
+				u.incarnation !== event.incarnation || u.spawn !== event.observer
+					? s
+					: {
+							...s,
+							units: HashMap.set(s.units, u.id, {
+								...u,
+								cause: Cause.combine(u.cause, event.cause),
+							}),
+						},
+			)
+		case "UnitCleanup":
+			return unitCleanup(s, event)
+		case "UnitDisconnected":
+			return Option.exists(
+				HashMap.get(s.units, event.unit),
+				(u) => u.kind === "Inspection",
+			)
+				? Preparation.nativeFailure(s, event)
+				: disconnected(s, event)
+		case "UnitProgress":
+			return withUnit(s, event.unit, (s, u) =>
+				u.incarnation !== event.incarnation || u.spawn !== event.observer
+					? s
+					: {
+							...s,
+							units: HashMap.set(s.units, u.id, {
+								...u,
+								progress: event.stage,
+							}),
+						},
+			)
+		case "UnitFailed":
+			return Option.exists(
+				HashMap.get(s.units, event.unit),
+				(u) => u.kind === "Inspection",
+			)
+				? Preparation.nativeFailure(s, event)
+				: unitFailed(s, event)
 		case "TimerEnded":
-			return timerEnded(s, event)
+			return Option.exists(HashMap.get(s.timers, event.timer), (t) =>
+				HashMap.has(s.preparations, t.change),
+			)
+				? Preparation.timerEnded(s, event)
+				: timerEnded(s, event)
 		case "Requested":
 			return requested(s, event.request)
+		case "InspectRequested":
+			return requested(s, event.request, true)
+		case "PreparationObserved":
+			return Preparation.observed(s, event.preparation)
+		case "PolicyChanged":
+			return policyChanged(s, event)
 		case "Observed":
 			return withChange(s, event.change, save)
 		case "Submit":
 			return submit(s, event.request)
 		case "Reported":
-			return reported(s, event)
+			return Option.exists(HashMap.get(s.commands, event.command), (c) =>
+				HashMap.has(s.preparations, c.change),
+			)
+				? Preparation.reported(s, event)
+				: reported(s, event)
 		case "Exited":
+			if (
+				Option.exists(
+					HashMap.get(s.units, event.unit),
+					(u) =>
+						u.kind === "Inspection" && HashMap.has(s.preparations, u.owner),
+				)
+			)
+				return Preparation.exited(s, event)
 			return withUnit(s, event.unit, (s, u) =>
 				u.incarnation === event.incarnation && u.spawn === event.observer
 					? endUnit(s, u, "Exited", event.cleanup, event.cause)
 					: s,
 			)
 		case "TimerFired":
-			return timerFired(s, event)
+			return Option.exists(HashMap.get(s.timers, event.timer), (t) =>
+				HashMap.has(s.preparations, t.change),
+			)
+				? Preparation.timer(s, event)
+				: timerFired(s, event)
 		case "Cancel":
 			return withChange(s, event.change, (s, c) =>
 				c.cancelRequested
@@ -1485,13 +1889,16 @@ const apply = (s: Working, event: Event): Working => {
 		case "Invalidated":
 			return invalidated(s, event)
 		case "Shutdown":
-			return shutdown(s)
+			return Preparation.shutdown(shutdown(s))
 	}
 }
 const eventOwners = (s: State, event: Event): HashSet.HashSet<string> => {
 	switch (event._tag) {
 		case "Observed":
 			return HashSet.make(event.change)
+		case "InspectRequested":
+		case "PreparationObserved":
+		case "PolicyChanged":
 		case "Requested":
 		case "Submit":
 			return HashSet.empty()
@@ -1501,6 +1908,11 @@ const eventOwners = (s: State, event: Event): HashSet.HashSet<string> => {
 					Option.map(HashMap.get(s.commands, event.command), (c) => c.change),
 				),
 			)
+		case "UnitCleanup":
+		case "UnitDisconnected":
+		case "UnitDiagnostic":
+		case "UnitProgress":
+		case "UnitFailed":
 		case "Exited":
 			return HashSet.fromIterable(
 				Option.toArray(
@@ -1556,12 +1968,19 @@ const expireObservedDeadlines = (s: Working, id: string): Working =>
 				),
 		})
 	})
-export const reduce = (state: State, event: Event): Transition => {
+export const reduce = (state: State, incoming: Event): Transition => {
+	const event: Event =
+		incoming._tag === "Reported"
+			? { ...incoming, result: InputSnapshot.report(incoming.result) }
+			: incoming
 	const before: Working = {
 		...state,
 		now: Num.max(state.now, event.now),
 		emitted: [],
 		changed: HashSet.empty(),
+		preparationsChanged: HashSet.empty(),
+		admissions: [],
+		descriptions: [],
 		reply: { _tag: "None" },
 	}
 	const timed = HashSet.reduce(
@@ -1569,8 +1988,37 @@ export const reduce = (state: State, event: Event): Transition => {
 		before,
 		expireObservedDeadlines,
 	)
-	const applied = apply(timed, event)
-	const revised = HashSet.reduce(applied.changed, applied, (s, id) =>
+	const prepTimed = HashSet.reduce(
+		eventPreparations(state, event),
+		timed,
+		Preparation.expire,
+	)
+	const appliedEvent = apply(prepTimed, event)
+	const applied = Arr.reduce(
+		appliedEvent.admissions,
+		appliedEvent,
+		(s, ready) =>
+			Preparation.admitResult(submit(s, ready.request), ready.preparation),
+	)
+	const parents = HashSet.reduce(
+		eventPreparations(state, event),
+		HashSet.empty<string>(),
+		(ids, id) =>
+			Option.match(HashMap.get(state.preparations, id), {
+				onNone: () => ids,
+				onSome: (p) =>
+					p.parent === undefined ? ids : HashSet.add(ids, p.parent),
+			}),
+	)
+	const settledParents = HashSet.reduce(parents, applied, (s, id) =>
+		withChange(s, id, progressSettlement),
+	)
+	const described = Arr.reduce(
+		settledParents.descriptions,
+		settledParents,
+		descriptionReady,
+	)
+	const revised = HashSet.reduce(described.changed, described, (s, id) =>
 		withChange(s, id, (s, c) => {
 			const previous = HashMap.get(state.changes, id)
 			return Option.isNone(previous) ||
@@ -1599,6 +2047,18 @@ export const reduce = (state: State, event: Event): Transition => {
 				: s
 		}),
 	)
-	const { emitted: commands, reply, changed: _changed, ...next } = published
+	const prepared = Preparation.publish(
+		state,
+		Preparation.cancelTimers(state, published),
+	)
+	const {
+		emitted: commands,
+		reply,
+		changed: _changed,
+		preparationsChanged: _preparationsChanged,
+		admissions: _admissions,
+		descriptions: _descriptions,
+		...next
+	} = prepared
 	return { state: next, commands, reply }
 }

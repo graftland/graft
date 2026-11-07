@@ -83,7 +83,12 @@ export const checked = (
 				Equal.equals(old, Option.getOrThrow(HashMap.get(next.state.units, id))),
 				label,
 			)
-	if (next.reply._tag === "Rejected") {
+	if (
+		next.reply._tag === "Rejected" &&
+		(event._tag === "Submit" ||
+			event._tag === "Requested" ||
+			event._tag === "InspectRequested")
+	) {
 		assert.isTrue(Equal.equals(s.claims, next.state.claims), label)
 		assert.isTrue(Equal.equals(s.cells, next.state.cells), label)
 	}

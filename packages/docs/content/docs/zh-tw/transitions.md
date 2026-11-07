@@ -35,6 +35,8 @@ export const upgrade = Effect.gen(function* () {
 `get`
 核對；慢訂閱者不會阻塞協調。即使無鍵歷史紀錄到期，控制代碼仍保留不可變結局。
 
+檢查、容量及原生退出證據見[執行單元](../units/)。
+
 ## 結局
 
 | Outcome          | Meaning                                    |

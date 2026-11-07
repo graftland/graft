@@ -55,13 +55,19 @@ export const pending = (
 export const report = (
 	s: Core.State,
 	c: Core.Command,
-	result: Core.Report = { _tag: "Succeeded" },
+	result?: Core.Report,
 ): Core.State =>
 	Core.reduce(s, {
 		_tag: "Reported",
 		command: c.id,
 		token: c.token,
-		result,
+		result:
+			result ??
+			(c.kind === "Start" && c.description !== undefined
+				? { _tag: "Started", value: c.description }
+				: c.kind === "Resolve" && c.resolution !== undefined
+					? { _tag: "Resolved", value: c.resolution }
+					: { _tag: "Succeeded" }),
 		now: s.now,
 	}).state
 export const succeed = (
