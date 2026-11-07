@@ -360,3 +360,11 @@ outside the release plugin's subtree. Protect its store and Unix socket
 directory, and give the store one application owner. The journal selects the
 last fully accepted release after a crash. Fleet rollout remains in your
 deployment tooling.
+
+## Untrusted integrations
+
+Use [operator trust policy](../../trust/) for immutable managed entries. Keep
+host code, CLI extensions and contract modules trusted. Test the Linux launcher
+on the deployment host; unavailable isolation fails closed. Protect the policy,
+journal and control socket together. `graft add` disables lifecycle scripts;
+build packages that need scripts in a separate trusted environment.

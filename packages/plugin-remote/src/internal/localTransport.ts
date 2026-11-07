@@ -13,17 +13,22 @@ export const make = Effect.map(
 				const scope = yield* Effect.scope
 				// Readers must outlive the process finalizer to capture its final diagnostics.
 				const readers = yield* Scope.fork(scope)
-				const argv = yield* command(options.command)
+				const argv =
+					options.sandbox?.command ?? (yield* command(options.command))
 				const child = yield* spawner.spawn(
 					ChildProcess.make(
 						argv[0],
 						[
 							...Array.drop(argv, 1),
-							options.contractModule,
-							options.implementation,
+							options.sandbox?.contractModule ?? options.contractModule,
+							options.sandbox?.implementation ?? options.implementation,
 							options.session,
 						],
 						{
+							...(options.sandbox === undefined &&
+							options.clearEnvironment !== true
+								? {}
+								: { env: {}, extendEnv: false }),
 							stdin: "pipe",
 							stdout: "pipe",
 							stderr: "pipe",

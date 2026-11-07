@@ -10,6 +10,8 @@ import type { ProcessExited, TransportError } from "../Errors"
 import type { Channel } from "../Transport"
 
 export interface LocalOptions {
+	readonly clearEnvironment?: boolean
+	readonly sandbox?: import("../Sandbox").Launch
 	readonly command?: readonly [string, ...string[]]
 	readonly contractModule: string
 	/** Implementation module selected by deployment, independently of the contract. */
@@ -35,6 +37,7 @@ export class LocalTransport extends Context.Service<
 >()("@graftland/plugin-remote/internal/directTransport/LocalTransport") {}
 
 export interface WorkerOptions {
+	readonly clearEnvironment?: boolean
 	readonly execArgv?: ReadonlyArray<string>
 	readonly contractModule: string
 	/** Implementation module selected by deployment, independently of the contract. */

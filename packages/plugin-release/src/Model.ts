@@ -1,6 +1,6 @@
 import { Array, Context, Effect, Schema } from "effect"
 
-import { Manifest, type Transition } from "@graftland/graft"
+import { Manifest, Trust, type Transition } from "@graftland/graft"
 import { Artifact, Publication } from "@graftland/plugin-remote"
 import * as RemoteConfig from "@graftland/plugin-remote/Config"
 
@@ -38,12 +38,14 @@ export const Release = Schema.Struct({
 })
 export type Release = typeof Release.Type
 export const Build = Schema.Struct({
+	metadataOnly: Schema.optionalKey(Schema.Boolean),
 	file: Schema.NonEmptyString,
 	references: Schema.Array(Schema.NonEmptyString),
 	revocations: Schema.Array(Schema.NonEmptyString),
 })
 export type Build = typeof Build.Type
 export const Diagnostic = Schema.Struct({
+	reference: Schema.optionalKey(Schema.String),
 	entry: Schema.String,
 	code: Schema.String,
 	message: Schema.String,
@@ -116,9 +118,15 @@ export const summarize = (outcome: Transition.Outcome): OutcomeSummary => ({
 	})),
 })
 export const Event = Schema.Struct({
+	approval: Schema.optionalKey(Trust.Approval),
+	revocations: Schema.optionalKey(Schema.Array(Schema.NonEmptyString)),
+	who: Schema.optionalKey(Schema.NonEmptyString),
+	at: Schema.optionalKey(Schema.Finite),
 	kind: Schema.Literals([
 		"Bootstrap",
 		"Startup",
+		"Approval",
+		"Revocation",
 		"Intent",
 		"Outcome",
 		"Compensation",
@@ -162,6 +170,7 @@ export const Apply = Schema.Struct({
 })
 export type Apply = typeof Apply.Type
 export interface Options {
+	readonly trust?: string
 	readonly store: string
 	readonly initial: string
 	readonly host: Manifest.Host
@@ -169,6 +178,7 @@ export interface Options {
 	readonly policy?: Partial<Transition.Policy>
 }
 export const Config = Schema.Struct({
+	trust: Schema.optionalKey(Schema.NonEmptyString),
 	store: Schema.NonEmptyString,
 	initial: Id,
 	host: Manifest.Host,
@@ -178,6 +188,14 @@ export type Config = typeof Config.Type
 export class Releases extends Context.Service<
 	Releases,
 	{
+		readonly approvals: Effect.Effect<ReadonlyArray<Trust.Statement>>
+		readonly approve: (
+			request: Trust.Approve,
+		) => Effect.Effect<Trust.Approval, ReleaseError>
+		readonly revoke: (
+			references: ReadonlyArray<string>,
+			who: string,
+		) => Effect.Effect<void, ReleaseError>
 		readonly build: (request: Build) => Effect.Effect<string, ReleaseError>
 		readonly plan: (target: string) => Effect.Effect<Plan, ReleaseError>
 		readonly apply: (request: Apply) => Effect.Effect<Applied, ReleaseError>

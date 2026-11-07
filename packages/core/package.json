@@ -52,6 +52,10 @@
 			"source": "./src/Transition.ts",
 			"default": "./dist/Transition.js"
 		},
+		"./Trust": {
+			"source": "./src/Trust.ts",
+			"default": "./dist/Trust.js"
+		},
 		"./package.json": "./package.json"
 	},
 	"scripts": {
@@ -76,6 +80,7 @@
 			"./Plugin": "./dist/Plugin.js",
 			"./Release": "./dist/Release.js",
 			"./Transition": "./dist/Transition.js",
+			"./Trust": "./dist/Trust.js",
 			"./package.json": "./package.json"
 		}
 	}

@@ -83,6 +83,34 @@ export default async function setup(project) {
 		].map((name) => new URL(`./fixtures/${name}.ts`, import.meta.url).pathname),
 		outDir: new URL("../.cache/integration", import.meta.url).pathname,
 	})
+	await build({
+		...common,
+		entry: [
+			new URL("./fixtures/untrusted-plugin.ts", import.meta.url).pathname,
+		],
+		outDir: new URL("../.cache/untrusted", import.meta.url).pathname,
+		deps: { alwaysBundle: [/^(?!node:)/] },
+	})
+	await writeFile(
+		new URL("../.cache/untrusted/package.json", import.meta.url),
+		JSON.stringify({
+			name: "@example/untrusted",
+			version: "1.0.0",
+			type: "module",
+		}),
+	)
+	await build({
+		...common,
+		entry: {
+			"sandbox/child": new URL(
+				"../src/internal/sandboxChildMain.ts",
+				import.meta.url,
+			).pathname,
+		},
+		outDir: new URL("../dist", import.meta.url).pathname,
+		clean: false,
+		deps: { alwaysBundle: [/^(?!node:)/] },
+	})
 	const installation = new URL("../.cache/runner-install", import.meta.url)
 		.pathname
 	const fixture = installation + "/node_modules/remote-fixture"

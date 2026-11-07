@@ -8,7 +8,7 @@ import {
 	type RpcGroup,
 } from "effect/rpc"
 
-import { Graft, Transition } from "@graftland/graft"
+import { Graft, Transition, Trust } from "@graftland/graft"
 
 import type { Service } from "../Contract"
 import { identities } from "./operations"
@@ -86,10 +86,12 @@ export const service = <
 									): error is
 										| Transition.DriverError
 										| Transition.Unavailable
-										| Transition.AdmissionRejected =>
+										| Transition.AdmissionRejected
+										| Trust.Unapproved =>
 										Schema.is(Transition.DriverError)(error) ||
 										Schema.is(Transition.Unavailable)(error) ||
-										Schema.is(Transition.AdmissionRejected)(error),
+										Schema.is(Transition.AdmissionRejected)(error) ||
+										Schema.is(Trust.Unapproved)(error),
 									(error) =>
 										Effect.fail(
 											RpcClientError.RpcClientError.make({

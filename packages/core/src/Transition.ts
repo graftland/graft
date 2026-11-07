@@ -13,6 +13,7 @@ import {
 import * as Graft from "./Graft"
 import * as Coordinator from "./internal/transition"
 import type { OperationIdentity } from "./Plugin"
+import type { Unapproved } from "./Trust"
 
 /** An immutable implementation identity and driver-owned immutable deployment snapshot. Custom drivers must detach and validate caller-owned input before registration or admission. */
 export interface Candidate {
@@ -195,7 +196,11 @@ export interface Invoke {
 	<I, S, A, E, R>(
 		key: Context.Key<I, S>,
 		use: (service: S) => Effect.Effect<A, E, R>,
-	): Effect.Effect<A, E | Unavailable | DriverError | AdmissionRejected, R>
+	): Effect.Effect<
+		A,
+		E | Unavailable | DriverError | AdmissionRejected | Unapproved,
+		R
+	>
 }
 
 export interface Facade {
@@ -211,7 +216,11 @@ export const facade = <I, S>(
 	make: (
 		invoke: <A, E, R>(
 			use: (service: S) => Effect.Effect<A, E, R>,
-		) => Effect.Effect<A, E | Unavailable | DriverError | AdmissionRejected, R>,
+		) => Effect.Effect<
+			A,
+			E | Unavailable | DriverError | AdmissionRejected | Unapproved,
+			R
+		>,
 	) => S,
 ): Facade => ({
 	key: key.key,

@@ -58,6 +58,7 @@ import { RuntimeContext } from "./internal/runtimeContext"
 import { ownedScope } from "./internal/scope"
 import * as Slots from "./internal/slots"
 import * as Coordinator from "./internal/transition"
+import * as TrustState from "./internal/trust"
 import type { ErrorOf, InputOf, Plugin } from "./Plugin"
 import type * as Transition from "./Transition"
 
@@ -163,6 +164,7 @@ const runtimeLayer = Layer.effect(
 		const ambient = yield* Effect.context<never>()
 		const runtime: Runtime = {
 			mutations: yield* TxRef.make(0),
+			trust: yield* TxRef.make(TrustState.empty),
 			transitionBusy: yield* TxRef.make(false),
 			transitionStuck: yield* TxRef.make(false),
 			ambient,

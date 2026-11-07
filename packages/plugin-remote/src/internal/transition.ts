@@ -16,10 +16,12 @@ import {
 import { SecureRandom } from "effect/crypto"
 import { ChildProcessSpawner } from "effect/process"
 
-import { Plugin, Transition } from "@graftland/graft"
+import { Graft, Plugin, Transition, Trust } from "@graftland/graft"
 
 import * as Artifact from "../Artifact"
+import * as Capabilities from "../Capabilities"
 import * as Contract from "../Contract"
+import * as Sandbox from "../Sandbox"
 import { candidate, CandidateOptions, driverName } from "./candidate"
 import { type Execution } from "./directTransport"
 import { layer as localLayer } from "./localTransport"
@@ -40,9 +42,13 @@ const failure = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
 export const driver = Effect.fnUntraced(function* <
 	S extends Contract.ConfigSchema,
 	E extends Contract.ErrorSchema,
->(contract: Contract.Contract<S, E>) {
+>(contract: Contract.Contract<S, E>, instance?: string) {
 	const environment =
 		yield* Effect.context<Effect.Services<ReturnType<typeof Unit.open<S, E>>>>()
+	const ambient = yield* Effect.context<never>()
+	const runtime = Context.getOption(ambient, Graft.Graft)
+	const selection = yield* Sandbox.Current
+	const launcher = Option.fromUndefinedOr(selection)
 	return {
 		name: driverName,
 		allocate: (value, attempt) =>
@@ -58,6 +64,69 @@ export const driver = Effect.fnUntraced(function* <
 					yield* Artifact.verify(options.artifact).pipe(
 						Effect.provideContext(environment),
 					)
+					const binding = Effect.gen(function* () {
+						if (instance === undefined) return undefined
+						if (Option.isNone(runtime))
+							return yield* Effect.die("Managed Remote requires Graft")
+						if (
+							!(yield* Trust.enabled.pipe(
+								Effect.provideService(Graft.Graft, runtime.value),
+							))
+						)
+							return undefined
+						const fs = Context.get(environment, FileSystem.FileSystem)
+						const path = Context.get(environment, Path.Path)
+						const json = yield* fs.readFileString(
+							path.join(options.artifact.directory, "package.json"),
+						)
+						const pkg = yield* Schema.decodeEffect(
+							Schema.fromJsonString(
+								Schema.Struct({ name: Schema.NonEmptyString }),
+							),
+						)(json)
+						return yield* Trust.bind(
+							instance,
+							value.identity,
+							{
+								package: pkg.name,
+								digest: options.artifact.identity.digest,
+							},
+							Array.map(contract.provides, (service) => service.key.key),
+						).pipe(Effect.provideService(Graft.Graft, runtime.value))
+					})
+					const assignment = yield* binding
+
+					const sandbox: Effect.Effect<
+						Sandbox.Launch | undefined,
+						Sandbox.SandboxError,
+						Scope.Scope
+					> =
+						assignment?.tier !== "untrusted"
+							? Effect.undefined
+							: Effect.gen(function* () {
+									if (options.target._tag !== "Local")
+										return yield* Sandbox.SandboxError.make({
+											reason: "UnsupportedPlacement",
+											message:
+												"Untrusted entries require a sandboxed child process; Workers are not a security boundary",
+										})
+									if (Option.isNone(launcher))
+										return yield* Sandbox.SandboxError.make({
+											reason: "LauncherUnavailable",
+											message:
+												"No sandbox launcher is installed; untrusted execution is disabled",
+										})
+									if (assignment.contractEntry === undefined)
+										return yield* Sandbox.SandboxError.make({
+											reason: "UnsupportedLayout",
+											message:
+												"Untrusted entries need a bundled contractEntry inside the artifact",
+										})
+									return yield* launcher.value.prepare({
+										artifact: options.artifact,
+										contractEntry: assignment.contractEntry,
+									})
+								})
 					type Handle = Effect.Success<ReturnType<typeof Unit.open<S, E>>>
 					const handle = yield* Deferred.make<Handle, Transition.DriverError>()
 					type Lifecycle =
@@ -141,20 +210,78 @@ export const driver = Effect.fnUntraced(function* <
 								const result = yield* Effect.exit(
 									restore(
 										failure(
-											Unit.open(contract, {
-												...options,
-												onSpawn: TxRef.update(lifecycle, (state) =>
-													state._tag === "Starting"
-														? { ...state, spawned: true }
-														: state,
+											sandbox.pipe(
+												Effect.flatMap((launch) =>
+													Effect.gen(function* () {
+														const broker =
+															assignment === undefined
+																? undefined
+																: yield* Capabilities.make(
+																		assignment.entry,
+																		value.identity,
+																		assignment,
+																	).pipe(
+																		Effect.provideService(
+																			Graft.Graft,
+																			Option.getOrThrow(runtime),
+																		),
+																	)
+														return yield* Unit.open(contract, {
+															...options,
+															clearEnvironment: assignment !== undefined,
+															...(launch === undefined
+																? {}
+																: { sandbox: launch }),
+															onSpawn: TxRef.update(lifecycle, (state) =>
+																state._tag === "Starting"
+																	? { ...state, spawned: true }
+																	: state,
+															),
+															onExecution: (current) =>
+																Effect.gen(function* () {
+																	yield* TxRef.update(lifecycle, (state) =>
+																		state._tag === "Starting"
+																			? {
+																					...state,
+																					execution: Option.some(current),
+																				}
+																			: state,
+																	)
+																	if (assignment !== undefined)
+																		yield* Trust.onRevoke(
+																			assignment.entry,
+																			value.identity,
+																			current.terminate.pipe(
+																				Effect.andThen(current.exited),
+																				Effect.asVoid,
+																				Effect.timeout("5 seconds"),
+																				Effect.catchCause((cause) =>
+																					Trust.PolicyError.make({
+																						message:
+																							"Revoked execution exit is unconfirmed",
+																						cause,
+																					}),
+																				),
+																			),
+																		).pipe(
+																			Scope.provide(scope),
+																			Effect.provideService(
+																				Graft.Graft,
+																				Option.getOrThrow(runtime),
+																			),
+																		)
+																}).pipe(Effect.orDie),
+														}).pipe((effect) =>
+															broker === undefined
+																? effect
+																: Effect.provideService(
+																		effect,
+																		Capabilities.Broker,
+																		broker,
+																	),
+														)
+													}),
 												),
-												onExecution: (current) =>
-													TxRef.update(lifecycle, (state) =>
-														state._tag === "Starting"
-															? { ...state, execution: Option.some(current) }
-															: state,
-													),
-											}).pipe(
 												Scope.provide(scope),
 												Effect.provideContext(environment),
 											),
@@ -284,20 +411,25 @@ export const managedPlugin = <
 					!Number.isSafeInteger(maxInFlight) ||
 					maxInFlight < 1 ||
 					maxInFlight > 16 ||
-					contract.inject.length > 0 ||
+					!Array.every(
+						contract.inject,
+						(service) => service.key.key === Capabilities.Broker.key,
+					) ||
 					!Array.every(contract.provides, (service) => service.unary)
 				)
 					return yield* Transition.DriverError.make({
 						cause: Cause.die(
 							new Error(
-								"Managed Remote plugins require unary contracts without injected services and an admission limit between 1 and 16",
+								"Managed Remote plugins require unary contracts with only host capability injection and an admission limit between 1 and 16",
 							),
 						),
 					})
 				const transports = yield* Layer.build(
 					Layer.merge(localLayer, workerLayer),
 				)
-				const execution = yield* driver(contract).pipe(
+				const bound = yield* Transition.CurrentInstance
+				const instance = options.instance ?? Option.getOrUndefined(bound)
+				const execution = yield* driver(contract, instance).pipe(
 					Effect.provideContext(transports),
 				)
 				yield* Transition.registerDriver(execution, {

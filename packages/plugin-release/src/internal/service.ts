@@ -1,18 +1,20 @@
 import {
 	Array,
 	Cause,
+	Clock,
 	Effect,
 	Fiber,
 	FileSystem,
 	Option,
 	Path,
+	Record,
 	Ref,
 	Schema,
 	Semaphore,
 	Stream,
 } from "effect"
 
-import { Graft, Manifest, Transition } from "@graftland/graft"
+import { Graft, Manifest, Transition, Trust } from "@graftland/graft"
 import { ModuleResolver } from "@graftland/loader"
 import * as Remote from "@graftland/plugin-remote"
 
@@ -59,7 +61,18 @@ export const make = Effect.fnUntraced(function* (options: Options) {
 	const recovered =
 		saved === undefined ? undefined : yield* validate(store, saved)
 	const initial = recovered?.status.current ?? options.initial
-	const initialRelease = yield* load(store, initial)
+	const governed = options.trust !== undefined
+	const policy =
+		options.trust === undefined
+			? undefined
+			: yield* read(options.trust, Trust.Policy)
+	const initialRelease = yield* load(store, initial, governed)
+	if (policy !== undefined)
+		yield* Trust.install(
+			policy,
+			recovered?.approvals ?? [],
+			saved?.status.revocations ?? initialRelease.revocations,
+		)
 	const state = yield* Ref.make<Journal>(
 		saved ?? {
 			version: 1,
@@ -110,7 +123,12 @@ export const make = Effect.fnUntraced(function* (options: Options) {
 	})
 	const prepared = Effect.fnUntraced(function* (entry: Entry) {
 		const declaration = yield* contract(entry)
-		const input = yield* resolveInput(entry.input)
+		if (governed && hasEnvironmentReference(entry.input))
+			return yield* failure(
+				"Secrets",
+				"Governed inputs must not resolve environment values; use host capability credential references",
+			)
+		const input = governed ? entry.input : yield* resolveInput(entry.input)
 		// Decoded values never enter release files, plans, or the durable journal.
 		yield* Schema.decodeEffect(declaration.config)(input).pipe(
 			Effect.mapError((cause) => importError(entry.id, cause)),
@@ -131,8 +149,8 @@ export const make = Effect.fnUntraced(function* (options: Options) {
 	}, Effect.scoped)
 	const inspect = Effect.fnUntraced(function* (target: string) {
 		const journal = yield* Ref.get(state)
-		const current = yield* load(store, journal.status.current)
-		const next = yield* load(store, target)
+		const current = yield* load(store, journal.status.current, governed)
+		const next = yield* load(store, target, governed)
 		const selections = Array.map(next.entries, (entry) => ({
 			id: entry.id,
 			package: entry.package,
@@ -212,14 +230,16 @@ export const make = Effect.fnUntraced(function* (options: Options) {
 						service.key.key,
 				}))
 				const placement: ReadonlyArray<Diagnostic> =
-					declaration.inject.length > 0 ||
-					!Array.every(declaration.provides, (service) => service.unary)
+					!Array.every(
+						declaration.inject,
+						(service) => service.key.key === Remote.Capabilities.Broker.key,
+					) || !Array.every(declaration.provides, (service) => service.unary)
 						? [
 								{
 									entry: entry.id,
 									code: "Placement",
 									message:
-										"Managed direct releases require unary contracts without injected services",
+										"Managed direct releases require unary contracts with only host capability injection",
 								},
 							]
 						: []
@@ -237,16 +257,39 @@ export const make = Effect.fnUntraced(function* (options: Options) {
 				message: "Live removals require application restart",
 			}),
 		)
+		const grantReferences =
+			policy === undefined
+				? []
+				: Array.flatMap(next.entries, (entry) =>
+						Array.flatMap(
+							Array.filter(
+								policy.entries,
+								(assignment: Trust.Assignment) =>
+									assignment.entry === entry.id &&
+									assignment.artifact.package === entry.package.name &&
+									assignment.artifact.digest === entry.artifact.identity.digest,
+							),
+							(assignment: Trust.Assignment) =>
+								Array.flatMap(assignment.grants, (grant) =>
+									grant._tag === "Http" && grant.credential !== undefined
+										? [grant.id, "env:" + grant.credential]
+										: [grant.id],
+								),
+						),
+					)
 		const revoked = Array.map(
-			Array.filter(next.references, (reference) =>
-				Array.contains(
-					[...journal.status.revocations, ...next.revocations],
-					reference,
-				),
+			Array.filter(
+				Array.dedupe([...next.references, ...grantReferences]),
+				(reference) =>
+					Array.contains(
+						[...journal.status.revocations, ...next.revocations],
+						reference,
+					),
 			),
 			(reference): Diagnostic => ({
 				entry: "release",
 				code: "Revoked",
+				reference,
 				message: "Release restores revoked reference " + reference,
 			}),
 		)
@@ -259,9 +302,32 @@ export const make = Effect.fnUntraced(function* (options: Options) {
 	})
 	const startupPlan = yield* inspect(initial)
 	const acceptedOverride = recovered?.override === true
+	const assignmentEquals = Schema.toEquivalence(Trust.Assignment)
+	const restoredGrantOverrides = Array.flatMap(
+		recovered?.approvals ?? [],
+		(approval) =>
+			approval.overrideRevocations &&
+			approval.statement.policyVersion === policy?.version &&
+			Array.some(policy?.entries ?? [], (entry) =>
+				assignmentEquals(entry, approval.statement.assignment),
+			)
+				? Array.flatMap(approval.statement.assignment.grants, (grant) =>
+						grant._tag === "Http" && grant.credential !== undefined
+							? [grant.id, "env:" + grant.credential]
+							: [grant.id],
+					)
+				: [],
+	)
 	const startupDiagnostics = Array.filter(
 		startupPlan.diagnostics,
-		(item) => item.code !== "Revoked" || !acceptedOverride,
+		(item) =>
+			item.code !== "Revoked" ||
+			!(
+				acceptedOverride ||
+				(item.reference !== undefined &&
+					!Array.contains(initialRelease.references, item.reference) &&
+					Array.contains(restoredGrantOverrides, item.reference))
+			),
 	)
 	if (startupDiagnostics.length > 0) return yield* planError(startupDiagnostics)
 	const forks = yield* Effect.forEach(
@@ -359,8 +425,8 @@ export const make = Effect.fnUntraced(function* (options: Options) {
 		if (diagnostics.length > 0) return yield* planError(diagnostics)
 		if (request.target === journal.status.current)
 			return { status: journal.status, outcomes: [] }
-		const previous = yield* load(store, journal.status.current)
-		const next = yield* load(store, request.target)
+		const previous = yield* load(store, journal.status.current, governed)
+		const next = yield* load(store, request.target, governed)
 		// Prepare all in-memory recovery inputs before admitting any transition.
 		const work = yield* Effect.forEach(
 			planned.changes,
@@ -445,6 +511,13 @@ export const make = Effect.fnUntraced(function* (options: Options) {
 				},
 			],
 		})
+		if (progress._tag !== "Rejected")
+			yield* Trust.revoke(
+				Array.filter(
+					status.revocations,
+					(ref) => !Array.contains(journal.status.revocations, ref),
+				),
+			)
 		const finalGenerations = yield* generations
 		yield* Ref.set(known, finalGenerations)
 		return { status, outcomes: progress.outcomes }
@@ -489,11 +562,66 @@ export const make = Effect.fnUntraced(function* (options: Options) {
 			).pipe(Effect.flatMap((fiber) => restore(Fiber.join(fiber)))),
 		)
 	return Releases.of({
+		approvals: Trust.statements.pipe(Effect.provideContext(environment)),
+		approve: (request) =>
+			Effect.gen(function* () {
+				const approval = yield* Trust.review(request)
+				const journal = yield* Ref.get(state)
+				yield* persist({
+					...journal,
+					events: [
+						...journal.events,
+						{
+							kind: "Approval",
+							current: journal.status.current,
+							target: journal.status.current,
+							approval,
+						},
+					],
+				})
+				yield* Trust.approve(approval)
+				return approval
+			}).pipe(owned, protect),
+		revoke: (references, who) =>
+			Effect.gen(function* () {
+				if (who.length === 0)
+					return yield* failure("Approval", "An operator identity is required")
+				const journal = yield* Ref.get(state)
+				yield* persist({
+					...journal,
+					status: {
+						...journal.status,
+						revocations: Array.dedupe([
+							...journal.status.revocations,
+							...references,
+						]),
+					},
+					events: [
+						...journal.events,
+						{
+							kind: "Revocation",
+							current: journal.status.current,
+							target: journal.status.current,
+							revocations: references,
+							who,
+							at: yield* Clock.currentTimeMillis,
+						},
+					],
+				})
+				yield* Trust.revoke(references)
+			}).pipe(owned, protect),
 		build: (request) =>
 			protect(
 				Ref.get(state).pipe(
 					Effect.flatMap((journal) =>
-						build(store, request, journal.status.revocations),
+						build(
+							store,
+							{
+								...request,
+								metadataOnly: governed || request.metadataOnly === true,
+							},
+							journal.status.revocations,
+						),
 					),
 					Effect.provideContext(environment),
 				),
@@ -540,3 +668,13 @@ const planError = (diagnostics: ReadonlyArray<Diagnostic>) =>
 				Cause.combine(cause, diagnostic.cause ?? Cause.empty),
 		),
 	})
+
+const isJsonArray = (value: Schema.Json): value is Schema.JsonArray =>
+	Array.isArray(value)
+const hasEnvironmentReference = (value: Schema.Json): boolean =>
+	isJsonArray(value)
+		? Array.some(value, hasEnvironmentReference)
+		: value !== null && typeof value === "object"
+			? "$env" in value ||
+				Array.some(Record.values(value), hasEnvironmentReference)
+			: false

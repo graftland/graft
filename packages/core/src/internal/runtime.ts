@@ -147,6 +147,7 @@ export interface Handler<
 }
 
 export interface Runtime {
+	readonly trust: TxRef.TxRef<import("./trust").State>
 	readonly mutations: TxRef.TxRef<number>
 	readonly transitionBusy: TxRef.TxRef<boolean>
 	readonly transitionStuck: TxRef.TxRef<boolean>

@@ -22,6 +22,8 @@ import * as Local from "./runner/Local"
 import * as Services from "./services"
 
 export interface Options {
+	readonly clearEnvironment?: boolean
+	readonly sandbox?: import("../Sandbox").Launch
 	readonly contractModule: string
 	readonly artifact: Artifact.Artifact
 	readonly target: LocalTarget | WorkerTarget
@@ -51,6 +53,10 @@ export const open = Effect.fnUntraced(function* <
 	> = transport.start(
 		{
 			...options.target,
+			...(options.clearEnvironment === undefined
+				? {}
+				: { clearEnvironment: options.clearEnvironment }),
+			...(options.sandbox === undefined ? {} : { sandbox: options.sandbox }),
 			contractModule: options.contractModule,
 			implementation,
 			session,

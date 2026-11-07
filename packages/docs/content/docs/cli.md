@@ -380,3 +380,17 @@ Enable `@graftland/plugin-release/cli` to use `graft release build`, `plan`,
 Rejections and unsuccessful transition outcomes exit nonzero. See
 [Application releases](../application-releases/) for the source format,
 revocations and durable startup selection.
+
+## graft approve
+
+Enable `@graftland/plugin-release/approve-cli` to use
+`graft approve statement.json --who operator@example --socket /app/control.sock --json`.
+Enable `@graftland/plugin-release/cli` for the release commands.
+`graft release approvals` returns reviewable statements;
+`graft release revoke GRANT --who operator@example` records revocation and
+terminates affected units. Both release commands require `--socket`. Rejections
+exit nonzero. See [trust and isolation](../trust/).
+
+`graft add` disables lifecycle scripts for all packages, including recovery
+installs. This also applies to `add --plugin`; enabling a CLI extension still
+grants it execution in the host.

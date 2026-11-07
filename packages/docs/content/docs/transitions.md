@@ -33,9 +33,10 @@ export const integration = Remote.plugin(contract, {
 Pass business input to `Graft.plugin(integration, input)`. Use
 `{ _tag: "Local" }` for a child process. The host runtime supplies filesystem,
 path, secure random and child-process services. Managed Remote contracts support
-unary operations and no injected host services. Graph-resolved host dependencies
-and automatic plugin retry are unsupported. Module-based `Remote.plugin` options
-continue to use ordinary restart behavior.
+unary operations and only the optional [host capability broker](../trust/) as an
+injected service. Graph-resolved host dependencies and automatic plugin retry
+are unsupported. Module-based `Remote.plugin` options continue to use ordinary
+restart behavior.
 
 Loader binds the entry id to the instance name. Embedded registrations must
 supply `instance`; blank, conflicting or duplicate names fail before a unit

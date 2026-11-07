@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process"
 import {
 	mkdirSync,
 	mkdtempSync,
@@ -60,6 +61,19 @@ function fixture(files, run) {
 it("keeps every published entry's signature publicly nameable", () => {
 	assert.lengthOf(publicPackages(root), 12)
 	assert.deepEqual(checkWorkspace(root), [])
+})
+
+it("imports the public trust entry independently of the package barrel", () => {
+	const output = execFileSync(
+		process.execPath,
+		[
+			"--input-type=module",
+			"--eval",
+			'import { install, Policy } from "@graftland/graft/Trust"; console.log(typeof install, typeof Policy)',
+		],
+		{ cwd: join(root, "packages/core"), encoding: "utf8" },
+	)
+	assert.equal(output.trim(), "function function")
 })
 
 it("emits unannotated consumer declarations using only public entry paths", () => {

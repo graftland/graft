@@ -27,6 +27,7 @@ import { withdraw } from "./activation"
 import type { Activation, ForkEntry, Provision, Runtime } from "./runtime"
 import { RuntimeContext } from "./runtimeContext"
 import { derive, type Deadlines } from "./transitionBudgets"
+import * as Trust from "./trust"
 
 type HostRelease =
 	| { readonly _tag: "Pending" }
@@ -48,6 +49,7 @@ interface Attempt {
 	readonly hostRelease: Ref.Ref<HostRelease>
 }
 export interface Managed {
+	readonly runtime: Runtime
 	readonly instance: string
 	readonly driver: T.Driver
 	readonly facades: ReadonlyArray<T.Facade>
@@ -592,6 +594,11 @@ const invoke =
 						const selected = yield* TxRef.get(managed.route)
 						if (Option.isNone(selected))
 							return yield* T.Unavailable.make({ fork: managed.entry.id })
+						yield* Trust.admission(
+							managed.runtime,
+							managed.instance,
+							selected.value.candidate.identity,
+						)
 						const calls = yield* TxRef.get(selected.value.calls)
 						if (calls >= managed.maxInFlight)
 							return yield* T.AdmissionRejected.make({
@@ -678,6 +685,7 @@ export const register = Effect.fnUntraced(function* (
 					cause: Cause.die(new Error("Invalid execution driver registration")),
 				})
 			const managed: Managed = {
+				runtime,
 				instance,
 				driver,
 				required: registration.required,

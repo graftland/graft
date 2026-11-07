@@ -86,7 +86,11 @@ const install = Effect.fn("Manage.install")(function* (
 	const userAgent = yield* Config.String("npm_config_user_agent").pipe(
 		Config.withDefault(""),
 	)
-	const manager = yield* PackageManager.make({ directory, userAgent })
+	const manager = yield* PackageManager.make({
+		directory,
+		userAgent,
+		ignoreScripts: true,
+	})
 	const result = yield* manager.install(decoded)
 	yield* report(result)
 	yield* refreshSchema(directory)

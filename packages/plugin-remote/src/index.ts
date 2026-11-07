@@ -175,3 +175,7 @@ export function plugin<
 export * as Publication from "./Publication"
 
 export * as Conformance from "./Conformance"
+
+export * as Sandbox from "./Sandbox"
+
+export * as Capabilities from "./Capabilities"

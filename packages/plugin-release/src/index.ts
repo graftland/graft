@@ -1,9 +1,10 @@
-import { Effect, FileSystem, Option, Path } from "effect"
+import { Context, Effect, FileSystem, Layer, Option, Path } from "effect"
 import { SecureRandom } from "effect/crypto"
 import { ChildProcessSpawner } from "effect/process"
 
 import { Graft, Plugin } from "@graftland/graft"
 import { ConfigDirectory, ModuleResolver } from "@graftland/loader"
+import { Sandbox } from "@graftland/plugin-remote"
 
 import * as Control from "./Control"
 import { make } from "./internal/service"
@@ -20,11 +21,26 @@ const activate = Effect.fnUntraced(function* (options: Options) {
 	const resolved: Options = {
 		...options,
 		store: path.resolve(base, options.store),
+		...(options.trust === undefined
+			? {}
+			: { trust: path.resolve(base, options.trust) }),
 		...(options.socket === undefined
 			? {}
 			: { socket: path.resolve(base, options.socket) }),
 	}
-	const releases = yield* make(resolved)
+	const installed = yield* Sandbox.Current
+	const fallback =
+		installed === undefined && options.trust !== undefined
+			? yield* Layer.build(Sandbox.linux)
+			: undefined
+	const launcher =
+		installed ??
+		(fallback === undefined
+			? undefined
+			: Context.get(fallback, Sandbox.Launcher))
+	const releases = yield* make(resolved).pipe(
+		Effect.provideService(Sandbox.Current, launcher),
+	)
 	if (resolved.socket !== undefined)
 		yield* Control.serve(resolved.socket, releases)
 	yield* Graft.provide(Releases, releases)

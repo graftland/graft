@@ -28,7 +28,7 @@ export const integration = Remote.plugin(contract, {
 ```
 
 将业务输入传给 `Graft.plugin(integration, input)`。子进程使用
-`{ _tag: "Local" }`。宿主运行时提供文件系统、路径、安全随机数和子进程服务。受管理 Remote 契约支持一元操作，不支持注入宿主服务。通过服务图解析的宿主依赖与插件自动重试尚不支持。使用模块位置的
+`{ _tag: "Local" }`。宿主运行时提供文件系统、路径、安全随机数和子进程服务。受管理 Remote 契约支持一元操作，仅允许注入可选的[主机能力代理](../trust/)。通过服务图解析的宿主依赖与插件自动重试尚不支持。使用模块位置的
 `Remote.plugin` 选项仍采用普通重启行为。
 
 Loader 将条目 id 绑定为实例名称。嵌入式注册必须提供

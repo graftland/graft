@@ -9,6 +9,7 @@ import {
 	Schema,
 } from "effect"
 
+import { Manifest } from "@graftland/graft"
 import { Artifact, Publication } from "@graftland/plugin-remote"
 
 import { parseDocument } from "yaml"
@@ -173,8 +174,13 @@ export const verify = Effect.fnUntraced(function* (store: string, id: string) {
 	return release
 }, protect)
 /** Inspects runtime availability and current provenance only for a selected deployment. */
-export const load = Effect.fnUntraced(function* (store: string, id: string) {
+export const load = Effect.fnUntraced(function* (
+	store: string,
+	id: string,
+	metadataOnly: boolean = false,
+) {
 	const release = yield* verify(store, id)
+	if (metadataOnly) return release
 	const path = yield* Path.Path
 	const directory = path.join(store, id)
 	for (const entry of release.entries) {
@@ -245,7 +251,9 @@ export const build = Effect.fnUntraced(
 			source,
 			Effect.fnUntraced(function* (entry) {
 				const directory = path.resolve(path.dirname(file), entry.config.package)
-				const generated = yield* Publication.generate(directory)
+				const generated = yield* request.metadataOnly === true
+					? read(path.join(directory, "package.json"), Manifest.Package)
+					: Publication.generate(directory)
 				const selected = generated.graft.entries[entry.config.entry]
 				if (selected === undefined)
 					return yield* failure(
@@ -257,7 +265,12 @@ export const build = Effect.fnUntraced(
 					entry: selected.implementation,
 					store: path.join(stage, "artifacts"),
 				})
-				const captured = yield* Publication.generate(artifact.directory)
+				const captured = yield* request.metadataOnly === true
+					? read(
+							path.join(artifact.directory, "package.json"),
+							Manifest.Package,
+						)
+					: Publication.generate(artifact.directory)
 				if (!(yield* equal(generated, captured)))
 					return yield* failure(
 						"Integrity",

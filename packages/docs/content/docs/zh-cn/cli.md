@@ -335,3 +335,15 @@ graft remote manifest ./release --check --provenance ./provenance.json
 `rollback` 还必须提供 `--expected`。CI 输出使用
 `--json`。拒绝和不成功的切换结果返回非零退出码。源格式、撤销和持久化启动选择见
 [应用发布](../application-releases/)。
+
+## graft approve
+
+启用 `@graftland/plugin-release/approve-cli` 后，使用
+`graft approve statement.json --who operator@example --socket /app/control.sock --json`。发布命令需要另行启用
+`@graftland/plugin-release/cli`。`graft release approvals`
+返回可审阅声明；`graft release revoke GRANT --who operator@example`
+记录撤销并终止相关单元。两个 release 命令都需要
+`--socket`。拒绝时退出码非零。参见[信任与隔离](../trust/)。
+
+`graft add` 对所有包禁用生命周期脚本，恢复安装也一样。这也适用于
+`add --plugin`；启用 CLI 扩展仍会允许其在主机执行。

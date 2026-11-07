@@ -1,5 +1,7 @@
 import { Array, Effect } from "effect"
 
+import { Trust } from "@graftland/graft"
+
 import type { Event, Journal, Release, Status } from "../Model"
 import { changes } from "./changes"
 import { equal, failure, verify } from "./storage"
@@ -12,6 +14,7 @@ interface Pending {
 	readonly degraded: boolean
 }
 interface Replay {
+	readonly approvals: ReadonlyArray<Trust.Approval>
 	readonly status: Status
 	readonly release: Release
 	readonly override: boolean
@@ -32,6 +35,7 @@ export const validate = Effect.fnUntraced(function* (
 	const replay = yield* Effect.reduce(
 		events,
 		(): Replay => ({
+			approvals: [],
 			status: {
 				current: bootstrap.current,
 				previous: null,
@@ -49,6 +53,34 @@ export const validate = Effect.fnUntraced(function* (
 					"event current id disagrees with accepted checkpoint",
 				)
 			switch (event.kind) {
+				case "Approval":
+					if (
+						pending !== undefined ||
+						event.target !== state.status.current ||
+						event.approval === undefined
+					)
+						return yield* corrupt("approval has no accepted checkpoint")
+					return { ...state, approvals: [...state.approvals, event.approval] }
+				case "Revocation":
+					if (
+						pending !== undefined ||
+						event.target !== state.status.current ||
+						event.revocations === undefined ||
+						event.who === undefined ||
+						event.at === undefined
+					)
+						return yield* corrupt("invalid revocation audit record")
+					return {
+						...state,
+						approvals: retainApprovals(state.approvals, event.revocations),
+						status: {
+							...state.status,
+							revocations: Array.dedupe([
+								...state.status.revocations,
+								...event.revocations,
+							]),
+						},
+					}
 				case "Bootstrap":
 					return yield* corrupt("duplicate bootstrap")
 				case "Startup":
@@ -177,6 +209,13 @@ export const validate = Effect.fnUntraced(function* (
 							"commit restores a revoked reference without an override",
 						)
 					return {
+						approvals: retainApprovals(
+							state.approvals,
+							Array.filter(
+								next.revocations,
+								(ref) => !Array.contains(state.status.revocations, ref),
+							),
+						),
 						release: next,
 						override: event.overrideRevocations === true,
 						pending: undefined,
@@ -202,3 +241,20 @@ export const validate = Effect.fnUntraced(function* (
 		)
 	return replay
 })
+
+const retainApprovals = (
+	records: ReadonlyArray<Trust.Approval>,
+	refs: ReadonlyArray<string>,
+) =>
+	Array.filter(
+		records,
+		(record) =>
+			!Array.some(
+				record.statement.assignment.grants,
+				(grant) =>
+					Array.contains(refs, grant.id) ||
+					(grant._tag === "Http" &&
+						grant.credential !== undefined &&
+						Array.contains(refs, "env:" + grant.credential)),
+			),
+	)

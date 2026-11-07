@@ -7,12 +7,18 @@
 {
   devenv.warnOnNewVersion = false;
 
-  packages = with pkgs; [
-    git
-    gh
-    corepack
-    ripgrep
-  ];
+  packages =
+    with pkgs;
+    [
+      git
+      gh
+      corepack
+      ripgrep
+    ]
+    ++ lib.optionals stdenv.isLinux [
+      bubblewrap
+      util-linux
+    ];
 
   languages = {
     javascript = {

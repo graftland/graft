@@ -20,7 +20,7 @@ import {
 import { Rpc, RpcMiddleware } from "effect/rpc"
 import { assert, it } from "@effect/vitest"
 
-import { Event, Graft, Plugin } from "@graftland/graft"
+import { Event, Graft, Plugin, Trust } from "@graftland/graft"
 import { Contract } from "@graftland/plugin-remote"
 
 import core from "../src/index.ts"
@@ -35,7 +35,9 @@ class Local extends Context.Service<
 			readonly city: string
 		}) => Effect.Effect<
 			string,
-			string | { readonly _tag: string; readonly secret: string }
+			| string
+			| Trust.Unapproved
+			| { readonly _tag: string; readonly secret: string }
 		>
 	}
 >()("@graftland/plugin-mcp-server/test/contract-projection.test/Local") {}
@@ -475,6 +477,7 @@ it.effect("bounds retained descriptions and records every revision", () =>
 		Effect.gen(function* () {
 			const { controller } = yield* start()
 			const count = yield* Ref.make(0)
+
 			yield* Event.on(Projection.Changed, () => Ref.update(count, (n) => n + 1))
 			for (let revision = 0; revision < 40; revision++)
 				yield* controller.update([binding(`Forecast revision ${revision}`)])
@@ -777,3 +780,164 @@ for (const stage of ["success", "business"] as const) {
 		)
 	})
 }
+
+for (const owner of ["contributor", "caller"] as const) {
+	for (const stage of [
+		"invocation",
+		"success encoder",
+		"business encoder",
+	] as const) {
+		it.effect(
+			`preserves ${owner} cancellation during ${stage} with failing cleanup`,
+			() => {
+				const entries: Array<{
+					readonly cause: Cause.Cause<unknown>
+					readonly annotations: Readonly<Record<string, unknown>>
+				}> = []
+				return run(
+					Effect.gen(function* () {
+						const admitted = yield* Deferred.make<void>()
+						const observed = yield* Deferred.make<Exit.Exit<unknown, unknown>>()
+						const defect = new Error("Cleanup defect")
+						const pending = Deferred.succeed(admitted, undefined).pipe(
+							Effect.andThen(Effect.never),
+							Effect.ensuring(Effect.die(defect)),
+						)
+						const encoding = Schema.String.pipe(
+							Schema.middlewareEncoding(() => pending),
+						)
+						const declaration = Contract.operation(
+							"forecast/read",
+							1,
+							Rpc.make("Read", {
+								payload: { city: Schema.String },
+								success: stage === "success encoder" ? encoding : Schema.String,
+								error: stage === "business encoder" ? encoding : Schema.String,
+							}),
+						).annotate(Projection.Annotation, metadata)
+						const item = Projection.operation(
+							Local,
+							declaration,
+							(service, input) => service.read(input),
+						)
+						yield* Event.on(CallMiddleware, (call, next) =>
+							next(call).pipe(
+								Effect.onExit((exit) => Deferred.succeed(observed, exit)),
+							),
+						)
+						const { client, contributor } = yield* start(
+							() =>
+								stage === "invocation"
+									? pending
+									: stage === "business encoder"
+										? Effect.fail("No forecast")
+										: Effect.succeed("London"),
+							[item],
+						)
+						const call = yield* client
+							.callTool({ name: "forecast", arguments: { city: "London" } })
+							.pipe(Effect.forkScoped)
+						yield* Deferred.await(admitted)
+						if (owner === "contributor") yield* contributor.dispose
+						else yield* Fiber.interrupt(call)
+						const serverExit = yield* Deferred.await(observed)
+						assert.isTrue(
+							Exit.isFailure(serverExit) &&
+								Cause.hasInterruptsOnly(serverExit.cause),
+						)
+						const clientExit = yield* Fiber.await(call)
+						assert.isTrue(Exit.isFailure(clientExit))
+						const logged = Array.findFirst(
+							entries,
+							({ cause }) =>
+								Cause.hasInterrupts(cause) &&
+								Array.some(
+									cause.reasons,
+									(reason) =>
+										Cause.isDieReason(reason) && reason.defect === defect,
+								),
+						)
+						assert.isTrue(Option.isSome(logged))
+						assert.deepInclude(Option.getOrThrow(logged).annotations, {
+							service: Local.key,
+							operation: "forecast/read@1",
+						})
+					}),
+				).pipe(
+					Effect.provide(
+						Logger.layer([
+							Logger.make((entry) => {
+								entries.push({
+									cause: entry.cause,
+									annotations: entry.fiber.getRef(
+										References.CurrentLogAnnotations,
+									),
+								})
+							}),
+						]),
+					),
+				)
+			},
+		)
+	}
+}
+
+it.effect(
+	"rejects cached tool calls after a description change until exact reapproval",
+	() =>
+		run(
+			Effect.gen(function* () {
+				const artifact = {
+					package: "@example/forecast",
+					digest: String.repeat(64)("a"),
+				}
+				yield* Trust.install({
+					version: "1",
+					entries: [{ entry: "forecast", artifact, tier: "own", grants: [] }],
+				})
+				yield* Trust.bind("forecast", "current", artifact, [Local.key])
+				const count = yield* Ref.make(0)
+				const graft = yield* Graft.Graft
+				const h = yield* start(({ city }) =>
+					Trust.check("forecast", "current").pipe(
+						Effect.provideService(Graft.Graft, graft),
+						Effect.andThen(Ref.update(count, (n) => n + 1)),
+						Effect.as(city),
+					),
+				)
+				const approve = Effect.gen(function* () {
+					const expected = yield* Trust.statement("forecast", artifact)
+					const record = yield* Trust.review({ expected, who: "operator" })
+					yield* Trust.approve(record)
+				})
+				const tools = yield* h.client.listTools()
+				assert.equal(tools.tools[0]?.description, metadata.description)
+				yield* approve
+				const first = yield* h.client.callTool({
+					name: "forecast",
+					arguments: { city: "London" },
+				})
+				assert.notEqual(first.isError, true)
+				yield* h.controller.update([binding("Changed description")])
+				const notification = yield* Queue.take(h.client.notifications)
+				assert.equal(notification.method, "notifications/tools/list_changed")
+				const blocked = yield* h.client.callTool({
+					name: "forecast",
+					arguments: { city: "London" },
+				})
+				assert.isTrue(blocked.isError)
+				const serialized = yield* Schema.encodeEffect(
+					Schema.fromJsonString(Schema.Unknown),
+				)(blocked)
+				assert.include(serialized, "Unapproved")
+				const executed = yield* Ref.get(count)
+				assert.equal(executed, 1)
+				yield* approve
+				const second = yield* h.client.callTool({
+					name: "forecast",
+					arguments: { city: "Paris" },
+				})
+				assert.notEqual(second.isError, true)
+			}),
+		),
+)

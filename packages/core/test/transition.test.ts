@@ -24,8 +24,9 @@ import {
 import { TestClock } from "effect/testing"
 import { assert, it } from "@effect/vitest"
 
-import { Graft, Plugin, Transition } from "../src/index"
+import { Graft, Plugin, Transition, Trust } from "../src/index"
 import { RuntimeContext } from "../src/internal/runtimeContext"
+import { run } from "./utils"
 
 class Value extends Context.Service<
 	Value,
@@ -35,6 +36,7 @@ class Value extends Context.Service<
 			| Transition.DriverError
 			| Transition.Unavailable
 			| Transition.AdmissionRejected
+			| import("../src/Trust").Unapproved
 		>
 	}
 >()("@graftland/graft/test/transition.test/Value") {}
@@ -1529,4 +1531,48 @@ it.effect(
 			const calls = yield* Ref.get(finalizers)
 			assert.deepEqual(Array.sort(calls, Order.Number), [1, 2])
 		}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
+)
+
+it.effect(
+	"checks approval when a reused facade effect executes, before admitting the call",
+	() =>
+		Effect.gen(function* () {
+			const artifact = {
+				package: "@example/integration",
+				digest: Array.join(Array.replicate("a", 64), ""),
+			}
+			yield* Trust.install({
+				version: "1",
+				entries: [
+					{ entry: "integration", artifact, tier: "trusted", grants: [] },
+				],
+			})
+			yield* Trust.bind("integration", "old", artifact, [Value.key])
+			const state = yield* setup()
+			const expected = yield* Trust.statement("integration", artifact)
+			const record = yield* Trust.review({ expected, who: "operator" })
+			yield* Trust.approve(record)
+			const value = yield* state.value.read
+			assert.equal(value, "old")
+			yield* Trust.describe({}, [
+				{
+					service: Value.key,
+					operation: "read@1",
+					metadata: {
+						name: "read",
+						title: "Read",
+						description: "Changed",
+						readOnlyHint: true,
+						destructiveHint: false,
+						idempotentHint: true,
+						openWorldHint: false,
+						output: "json",
+					},
+				},
+			])
+			const exit = yield* state.value.read.pipe(Effect.exit)
+			assert.isTrue(Exit.isFailure(exit))
+			if (Exit.isFailure(exit))
+				assert.include(Cause.pretty(exit.cause), "ChangedStatement")
+		}).pipe(run),
 )

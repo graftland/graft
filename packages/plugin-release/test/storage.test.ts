@@ -12,10 +12,11 @@ import {
 import { NodeServices } from "@effect/platform-node"
 import { assert, it } from "@effect/vitest"
 
-import { Graft } from "@graftland/graft"
+import { Graft, Trust } from "@graftland/graft"
 import { ModuleResolver } from "@graftland/loader"
 import { Artifact } from "@graftland/plugin-remote"
 
+import { validate } from "../src/internal/journal"
 import { make } from "../src/internal/service"
 import {
 	build,
@@ -388,5 +389,136 @@ it.effect(
 			assert.equal(error.code, "Journal")
 			const persisted = yield* read(path.join(store, "journal.json"), Journal)
 			assert.deepEqual(persisted, corrupted)
+		}).pipe(Effect.scoped, Effect.provide(runtime)),
+)
+
+it.effect(
+	"journals exact approvals and replays revocations before granting access",
+	() =>
+		Effect.gen(function* () {
+			const h = yield* setup()
+			const artifact = {
+				package: "@example/plugin",
+				digest: String.repeat(64)("a"),
+			}
+			const policy: Trust.Policy = {
+				version: "1",
+				entries: [
+					{
+						entry: "test",
+						artifact,
+						tier: "trusted",
+						grants: [{ _tag: "Files", id: "data", directory: "/data" }],
+					},
+				],
+			}
+			const file = h.path.join(h.store, "trust.json")
+			yield* write(file, policy)
+			const service = yield* make({
+				store: h.store,
+				initial: h.id,
+				host,
+				trust: file,
+			}).pipe(Effect.provideService(ModuleResolver.ModuleResolver, h.resolver))
+			yield* Trust.bind("test", "candidate", artifact, ["test"])
+			const expected = yield* Trust.statement("test", artifact)
+			const approval = yield* service.approve({
+				expected,
+				who: "operator@example",
+			})
+			assert.equal(approval.who, "operator@example")
+			yield* Trust.check("test", "candidate")
+			yield* service.revoke(["data"], "operator@example")
+			const error = yield* Trust.check("test", "candidate").pipe(Effect.flip)
+			assert.equal(error.reason, "Revoked")
+			const journal = yield* read(h.path.join(h.store, "journal.json"), Journal)
+			const replay = yield* validate(h.store, journal)
+			assert.deepEqual(replay.approvals, [])
+			assert.deepEqual(replay.status.revocations, ["data"])
+			const override = yield* service.approve({
+				expected,
+				who: "emergency operator",
+				overrideRevocations: true,
+			})
+			assert.isTrue(override.overrideRevocations)
+			yield* Trust.check("test", "candidate")
+			const source = h.path.join(h.store, "carried-forward.yml")
+			yield* h.fs.writeFileString(source, "[]")
+			const target = yield* build(h.store, {
+				file: source,
+				references: [],
+				revocations: ["data"],
+			})
+			yield* service.apply({ expected: h.id, target })
+			yield* Trust.check("test", "candidate")
+			const updated = yield* read(h.path.join(h.store, "journal.json"), Journal)
+			const accepted = yield* validate(h.store, updated)
+			assert.equal(accepted.approvals.length, 1)
+			assert.isTrue(accepted.approvals[0]!.overrideRevocations)
+		}).pipe(Effect.scoped, Effect.provide(runtime)),
+)
+
+it.effect(
+	"builds and verifies untrusted release metadata without importing package code",
+	() =>
+		Effect.gen(function* () {
+			const h = yield* setup()
+			const directory = h.path.join(h.store, "untrusted")
+			yield* h.fs.makeDirectory(directory)
+			yield* h.fs.writeFileString(
+				h.path.join(directory, "index.js"),
+				"throw new Error('Untrusted import must not execute')",
+			)
+			yield* h.fs.writeFileString(
+				h.path.join(h.store, "contract.js"),
+				"export default null",
+			)
+			yield* write(h.path.join(directory, "package.json"), {
+				name: "@example/untrusted",
+				version: "1.0.0",
+				type: "module",
+				engines: { node: ">=22.19.0" },
+				peerDependencies: { effect: "4.1.*", "@graftland/graft": "0.0.0" },
+				graft: {
+					version: 1,
+					entries: {
+						".": {
+							implementation: "index.js",
+							contracts: [],
+							probes: [],
+							requirements: {
+								placements: ["Local"],
+								filesystem: false,
+								nativeModules: false,
+							},
+							services: { required: [], optional: [], implements: [] },
+							operations: [],
+						},
+					},
+				},
+			})
+			const source = h.path.join(h.store, "untrusted.yml")
+			yield* write(source, [
+				{
+					id: "untrusted",
+					name: "@graftland/plugin-remote",
+					config: {
+						package: "./untrusted",
+						entry: ".",
+						contract: "./contract.js",
+						target: { _tag: "Local" },
+						config: {},
+						probes: [],
+					},
+				},
+			])
+			const id = yield* build(h.store, {
+				file: source,
+				references: [],
+				revocations: [],
+				metadataOnly: true,
+			})
+			const result = yield* load(h.store, id, true)
+			assert.equal(result.entries[0]?.package.name, "@example/untrusted")
 		}).pipe(Effect.scoped, Effect.provide(runtime)),
 )

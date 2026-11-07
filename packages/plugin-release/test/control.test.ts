@@ -23,6 +23,9 @@ it.effect(
 			const ready = yield* Deferred.make<void>()
 			const id = String.repeat(64)("a")
 			const service = Releases.of({
+				approvals: Effect.succeed([]),
+				approve: () => failure("test", "Unavailable"),
+				revoke: () => Effect.void,
 				build: () => failure("Unsupported", "Build is not used by this test"),
 				plan: (target) =>
 					Deferred.succeed(entered, undefined).pipe(

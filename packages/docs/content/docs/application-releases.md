@@ -132,3 +132,13 @@ Restrict the socket directory to the application owner; the socket has mode
 `0600`. Keep host gateways outside the release plugin's subtree. Graft handles
 transitions within one application. Use existing deployment tooling for fleet
 rollout. External steps and points of no return are outside this release layer.
+
+## Operator approvals
+
+Set `trust` to the operator policy file. Governed builds and plans use stored
+publication metadata without importing implementations in the host. They reject
+environment-value resolution in inputs; credential references belong to host
+capability grants. Startup restores journaled approvals and revocations, and
+revoked grant references also participate in rollback checks. See
+[trust and isolation](../trust/) for approval, revocation and explicit override
+commands.

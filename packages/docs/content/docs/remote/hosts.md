@@ -168,3 +168,10 @@ dependencies. Watcher failures are logged and retried against the previous file
 digests, so edits made during recovery still trigger a restart.
 
 Without `--watch`, restart the host after rebuilding its contract.
+
+## Operator policy
+
+With [trust policy](../../trust/) installed, use captured managed entries.
+Untrusted entries require a sandboxed child process; Worker placement is
+rejected. Ordinary module deployments and runner targets cannot bypass this
+boundary.

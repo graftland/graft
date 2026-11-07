@@ -68,21 +68,37 @@ export const own = <Args extends ReadonlyArray<unknown>, A, E, R>(
 							(_: Context.Context<never>) => context as Context.Context<R>,
 						),
 					)
-					return yield* restore(Fiber.join(fiber)).pipe(
-						Effect.onInterrupt(() =>
-							Fiber.interrupt(fiber).pipe(
-								Effect.andThen(Fiber.await(fiber)),
-								Effect.flatMap((exit) =>
-									Exit.isFailure(exit) && !Cause.hasInterruptsOnly(exit.cause)
-										? Effect.logError(
-												"An MCP handler failed while stopping",
-												exit.cause,
-											)
-										: Effect.void,
-								),
+					// Observe outside the interruptible handler so owner shutdown cannot
+					// bypass cause classification or its cleanup diagnostics.
+					const waiting = yield* Effect.exit(restore(Fiber.await(fiber)))
+					if (Exit.isFailure(waiting)) yield* Fiber.interrupt(fiber)
+					const exit = Exit.isSuccess(waiting)
+						? waiting.value
+						: yield* Fiber.await(fiber)
+					if (
+						Exit.isFailure(exit) &&
+						!Cause.hasInterruptsOnly(exit.cause) &&
+						(Exit.isFailure(waiting) || Cause.hasInterrupts(exit.cause))
+					) {
+						yield* Effect.logError(
+							"An MCP handler failed while stopping",
+							exit.cause,
+						).pipe(
+							Effect.annotateLogs(
+								Context.get(context, References.CurrentLogAnnotations),
 							),
-						),
-					)
+						)
+					}
+					if (Exit.isFailure(waiting))
+						return yield* Effect.failCause(waiting.cause)
+					if (Exit.isFailure(exit) && Cause.hasInterrupts(exit.cause)) {
+						return yield* Effect.failCause(
+							Cause.fromReasons<never>(
+								Array.filter(exit.cause.reasons, Cause.isInterruptReason),
+							),
+						)
+					}
+					return yield* exit
 				}),
 			)
 	})

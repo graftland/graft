@@ -449,14 +449,14 @@ test(
 				yield* fs.makeDirectory(cliDirectory)
 				yield* fs.writeFileString(
 					cliDirectory + "/graft.yml",
-					'- name: "@graftland/plugin-release/cli"\n  cli: true\n',
+					'- name: "@graftland/plugin-release/cli"\n  cli: true\n- name: "@graftland/plugin-release/approve-cli"\n  cli: true\n',
 				)
-				const command = (...args) =>
+				const invoke = (root, ...args) =>
 					ChildProcess.make(
 						process.execPath,
 						[
 							new URL(import.meta.resolve("@graftland/cli/bin")).pathname,
-							"release",
+							root,
 							...args,
 							"--socket",
 							app.socket,
@@ -464,6 +464,46 @@ test(
 						],
 						{ cwd: cliDirectory },
 					)
+				const command = (...args) => invoke("release", ...args)
+				const available = JSON.parse(
+					yield* spawner.string(command("approvals")),
+				)
+				assert.deepEqual(available, { ok: true, value: [] })
+				const statement = cliDirectory + "/statement.json"
+				yield* fs.writeFileString(
+					statement,
+					JSON.stringify({
+						assignment: {
+							entry: "forecasts",
+							artifact: {
+								package: "@example/forecasts",
+								digest: "a".repeat(64),
+							},
+							tier: "untrusted",
+							grants: [],
+						},
+						policyVersion: "1",
+						descriptions: [],
+					}),
+				)
+				const denied = yield* Effect.scoped(
+					Effect.gen(function* () {
+						const child = yield* spawner.spawn(
+							invoke("approve", statement, "--who", "ci operator"),
+						)
+						const [code, output, errors] = yield* Effect.all(
+							[
+								child.exitCode,
+								Stream.mkString(Stream.decodeText(child.stdout)),
+								Stream.mkString(Stream.decodeText(child.stderr)),
+							],
+							{ concurrency: 3 },
+						)
+						return { code, output, errors }
+					}),
+				)
+				assert.notEqual(Number(denied.code), 0, denied.errors)
+				assert.equal(JSON.parse(denied.output).ok, false, denied.output)
 				const status = JSON.parse(yield* spawner.string(command("status")))
 				assert.equal(status.ok, true)
 				assert.equal(status.value.current, app.initial)

@@ -92,6 +92,7 @@ export default defineConfig({
 						"replace",
 						"transitions",
 						"application-releases",
+						"trust",
 					],
 				},
 				{

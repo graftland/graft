@@ -40,6 +40,7 @@ export const start: typeof WorkerTransport.Service.start = Effect.fnUntraced(
 						),
 						{
 							workerData: data,
+							...(options.clearEnvironment === true ? { env: {} } : {}),
 							...(options.execArgv === undefined
 								? {}
 								: { execArgv: [...options.execArgv] }),

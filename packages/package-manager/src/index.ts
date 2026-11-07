@@ -112,6 +112,8 @@ export interface Options {
 	/** Project directory, containing package.json. Use the workspace root for workspace installs. */
 	readonly directory: string
 	/** Explicit selection takes precedence over detection. */
+	/** Disables all dependency lifecycle scripts, including recovery installs. */
+	readonly ignoreScripts?: boolean
 	readonly agent?: Agent
 	/** Optional npm_config_user_agent supplied by the caller; used only as a fallback. */
 	readonly userAgent?: string
@@ -133,7 +135,11 @@ const backupFiles = [
 	".pnp.cjs",
 	".pnp.loader.mjs",
 ]
-const strategy = (agent: Agent, operation: "install" | "recover") => {
+const strategy = (
+	agent: Agent,
+	operation: "install" | "recover",
+	ignoreScripts = false,
+) => {
 	const recovery = operation === "recover"
 	return Match.value(agent).pipe(
 		Match.when("npm", () => ({
@@ -142,6 +148,7 @@ const strategy = (agent: Agent, operation: "install" | "recover") => {
 				"install",
 				"--no-audit",
 				"--no-fund",
+				...(ignoreScripts ? ["--ignore-scripts"] : []),
 				...(recovery ? ["--prefer-offline"] : []),
 			],
 			env: { CI: "true" },
@@ -153,6 +160,7 @@ const strategy = (agent: Agent, operation: "install" | "recover") => {
 				"install",
 				recovery ? "--frozen-lockfile" : "--no-frozen-lockfile",
 				"--config.confirmModulesPurge=false",
+				...(ignoreScripts ? ["--ignore-scripts"] : []),
 			],
 			env: { CI: "true" },
 			lockfiles: ["pnpm-lock.yaml"],
@@ -162,6 +170,7 @@ const strategy = (agent: Agent, operation: "install" | "recover") => {
 			args: [
 				"install",
 				"--non-interactive",
+				...(ignoreScripts ? ["--ignore-scripts"] : []),
 				...(recovery ? ["--frozen-lockfile", "--prefer-offline"] : []),
 			],
 			env: { CI: "true" },
@@ -174,6 +183,7 @@ const strategy = (agent: Agent, operation: "install" | "recover") => {
 				CI: "true",
 				YARN_ENABLE_IMMUTABLE_INSTALLS: recovery ? "true" : "false",
 				YARN_NODE_LINKER: "node-modules",
+				...(ignoreScripts ? { YARN_ENABLE_SCRIPTS: "false" } : {}),
 			},
 			lockfiles: ["yarn.lock"],
 		})),
@@ -622,7 +632,7 @@ export const make = Effect.fnUntraced(function* (
 		forceKillAfter: "5 seconds",
 	}
 	const run = Effect.fnUntraced(function* (operation: "install" | "recover") {
-		const command = strategy(agent, operation)
+		const command = strategy(agent, operation, options.ignoreScripts)
 		// Acquire and install the release handler atomically, then wait interruptibly.
 		return yield* Effect.acquireUseRelease(
 			spawner

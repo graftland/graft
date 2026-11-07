@@ -16,6 +16,8 @@ import {
 	Schema,
 } from "effect"
 
+import { Trust } from "@graftland/graft"
+
 import { failure, json, protect } from "./internal/storage"
 import {
 	Apply,
@@ -27,6 +29,12 @@ import {
 } from "./Model"
 
 export const Request = Schema.Union([
+	Schema.TaggedStruct("approvals", {}),
+	Schema.TaggedStruct("approve", { request: Trust.Approve }),
+	Schema.TaggedStruct("revoke", {
+		references: Schema.Array(Schema.NonEmptyString),
+		who: Schema.NonEmptyString,
+	}),
 	Schema.TaggedStruct("build", { request: Build }),
 	Schema.TaggedStruct("plan", { target: Id }),
 	Schema.TaggedStruct("apply", { request: Apply }),
@@ -84,6 +92,13 @@ export const dispatch = Effect.fnUntraced(function* (
 	request: Request,
 ): Effect.fn.Return<Reply, ReleaseError> {
 	switch (request._tag) {
+		case "approvals":
+			return { ok: true, value: yield* service.approvals }
+		case "approve":
+			return { ok: true, value: yield* service.approve(request.request) }
+		case "revoke":
+			yield* service.revoke(request.references, request.who)
+			return { ok: true, value: null }
 		case "build":
 			return { ok: true, value: yield* service.build(request.request) }
 		case "plan": {

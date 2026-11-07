@@ -1,42 +1,13 @@
-import { Console, Effect, Schema } from "effect"
-import { Argument, CliError, Command, Flag } from "effect/cli"
+import { Effect } from "effect"
+import { Argument, Command, Flag } from "effect/cli"
 
 import { platform } from "@graftland/cli/Application"
 import { Commands } from "@graftland/cli/Commands"
 import { Plugin } from "@graftland/graft"
 
-import * as Control from "./Control"
+import { common, invoke, overrideRevocations } from "./internal/cliCommand"
 
-const common = {
-	socket: Flag.String("socket"),
-	json: Flag.Boolean("json").pipe(Flag.withDefault(false)),
-}
 const expected = Flag.String("expected")
-const overrideRevocations = Flag.Boolean("override-revocations").pipe(
-	Flag.withDefault(false),
-)
-const invoke = Effect.fnUntraced(
-	function* (
-		options: { readonly socket: string; readonly json: boolean },
-		request: Control.Request,
-	) {
-		const reply = yield* Control.call(options.socket, request)
-		const text = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Json))(
-			reply,
-		)
-		yield* Console.log(
-			options.json ? text : `${reply.ok ? "Accepted" : "Rejected"}: ${text}`,
-		)
-		if (!reply.ok)
-			return yield* CliError.UserError.make({
-				cause: reply,
-				userMessage: "Release command rejected",
-			})
-	},
-	Effect.mapError((cause) =>
-		CliError.UserError.make({ cause, userMessage: "Release command failed" }),
-	),
-)
 const command = Command.make("release").pipe(
 	Command.withSubcommands([
 		Command.make(
@@ -88,6 +59,23 @@ const command = Command.make("release").pipe(
 					_tag: "rollback",
 					expected: options.expected,
 					overrideRevocations: options.overrideRevocations,
+				}),
+		),
+		Command.make("approvals", common, (options) =>
+			invoke(options, { _tag: "approvals" }),
+		),
+		Command.make(
+			"revoke",
+			{
+				...common,
+				reference: Argument.String("reference"),
+				who: Flag.String("who"),
+			},
+			(options) =>
+				invoke(options, {
+					_tag: "revoke",
+					references: [options.reference],
+					who: options.who,
 				}),
 		),
 		Command.make("history", common, (options) =>

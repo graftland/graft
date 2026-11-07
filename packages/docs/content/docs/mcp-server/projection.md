@@ -99,9 +99,10 @@ Full failure causes are logged with the service key and operation identity,
 including encoding failures. Business error values are intentionally exposed; do
 not put credentials in those values.
 
-Cancellation takes precedence even when cleanup also fails. The complete mixed
-cause is logged; it never becomes a business or system tool result.
-Server-initiated cancellation reaches clients as a protocol error.
+Cancellation takes precedence for caller cancellation and contributor disposal,
+even when invocation or encoder cleanup also fails. The complete mixed cause is
+logged; it never becomes a business or system tool result. Server-initiated
+cancellation reaches clients as a protocol error.
 
 ## Publish a changed view
 
@@ -139,3 +140,11 @@ stream (`405`); unsolicited list-change delivery on that path is not
 implemented. Clients on that path can still list and call tools without
 reconnecting. Tracked upstream in
 [Effect #10436](https://github.com/Effect-TS/effect/issues/10436).
+
+## Operator approval
+
+For governed entries, projection metadata becomes part of the exact
+[approval statement](../../trust/). Publishing changed metadata blocks new calls
+until reapproval, including calls from clients with cached tool lists. A
+list-change notification is not approval; already admitted calls retain their
+serving attempt.

@@ -28,7 +28,7 @@ export const integration = Remote.plugin(contract, {
 ```
 
 將業務輸入傳給 `Graft.plugin(integration, input)`。子行程使用
-`{ _tag: "Local" }`。宿主執行環境提供檔案系統、路徑、安全亂數和子行程服務。受管理 Remote 契約支援一元操作，不支援注入宿主服務。透過服務圖解析的宿主相依服務與外掛自動重試尚不支援。使用模組位置的
+`{ _tag: "Local" }`。宿主執行環境提供檔案系統、路徑、安全亂數和子行程服務。受管理 Remote 契約支援一元操作，僅允許注入可選的[主機能力代理](../trust/)。透過服務圖解析的宿主相依服務與外掛自動重試尚不支援。使用模組位置的
 `Remote.plugin` 選項仍採用一般重新啟動行為。
 
 Loader 將項目 id 綁定為實例名稱。嵌入式註冊必須提供

@@ -29,6 +29,10 @@
 			"source": "./src/Auth.ts",
 			"default": "./dist/Auth.js"
 		},
+		"./Capabilities": {
+			"source": "./src/Capabilities.ts",
+			"default": "./dist/Capabilities.js"
+		},
 		"./cli": {
 			"source": "./src/cli.ts",
 			"default": "./dist/cli.js"
@@ -121,6 +125,10 @@
 			"source": "./src/runner/websocket.ts",
 			"default": "./dist/runner/websocket.js"
 		},
+		"./Sandbox": {
+			"source": "./src/Sandbox.ts",
+			"default": "./dist/Sandbox.js"
+		},
 		"./schema": {
 			"source": "./src/schema.ts",
 			"default": "./dist/schema.js"
@@ -135,6 +143,7 @@
 		},
 		"./package.json": "./package.json",
 		"./internal/child": "./dist/internal/childMain.js",
+		"./internal/sandbox": "./dist/sandbox/child.js",
 		"./internal/watchdog": "./dist/internal/watchdogMain.js",
 		"./internal/worker": "./dist/internal/workerMain.js",
 		"./internal/publication": "./dist/internal/publicationMain.js"
@@ -170,6 +179,7 @@
 			".": "./dist/index.js",
 			"./Artifact": "./dist/Artifact.js",
 			"./Auth": "./dist/Auth.js",
+			"./Capabilities": "./dist/Capabilities.js",
 			"./cli": "./dist/cli.js",
 			"./Config": "./dist/Config.js",
 			"./Conformance": "./dist/Conformance.js",
@@ -193,11 +203,13 @@
 			"./runner/stdio": "./dist/runner/stdio.js",
 			"./runner/unix": "./dist/runner/unix.js",
 			"./runner/websocket": "./dist/runner/websocket.js",
+			"./Sandbox": "./dist/Sandbox.js",
 			"./schema": "./dist/schema.js",
 			"./Testing": "./dist/Testing.js",
 			"./Transport": "./dist/Transport.js",
 			"./package.json": "./package.json",
 			"./internal/child": "./dist/internal/childMain.js",
+			"./internal/sandbox": "./dist/sandbox/child.js",
 			"./internal/watchdog": "./dist/internal/watchdogMain.js",
 			"./internal/worker": "./dist/internal/workerMain.js",
 			"./internal/publication": "./dist/internal/publicationMain.js"

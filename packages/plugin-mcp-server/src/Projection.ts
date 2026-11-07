@@ -19,7 +19,7 @@ import {
 import { Tool, Toolkit } from "effect/ai"
 import { RpcSchema, type Rpc, type RpcMiddleware } from "effect/rpc"
 
-import { Event, type Graft } from "@graftland/graft"
+import { Event, Trust, type Graft } from "@graftland/graft"
 import { Contract } from "@graftland/plugin-remote"
 
 import * as Catalog from "./Catalog"
@@ -230,6 +230,29 @@ export const operation = <
 						yield* Effect.logError("Projected contract call failed", exit.cause)
 						const error = Cause.findError(exit.cause)
 						if (
+							Result.isSuccess(error) &&
+							Schema.is(Trust.Unapproved)(error.success)
+						)
+							return yield* Effect.fail<ToolFailure>({
+								kind: "system",
+								message: error.success.message,
+							})
+						if (
+							Result.isSuccess(error) &&
+							typeof error.success === "object" &&
+							error.success !== null &&
+							"reason" in error.success &&
+							typeof error.success.reason === "object" &&
+							error.success.reason !== null &&
+							"cause" in error.success.reason &&
+							Schema.is(Trust.Unapproved)(error.success.reason.cause)
+						)
+							return yield* Effect.fail<ToolFailure>({
+								kind: "system",
+								message: "Unapproved: " + error.success.reason.cause.reason,
+							})
+
+						if (
 							!Cause.hasDies(exit.cause) &&
 							Result.isSuccess(error) &&
 							!(
@@ -378,7 +401,13 @@ export const offer = <R>(
 							(item) =>
 								[
 									item.metadata.name,
-									(payload: unknown) => invoke(item, payload),
+									(payload: unknown) =>
+										invoke(item, payload).pipe(
+											Effect.annotateLogs({
+												service: item.service,
+												operation: item.operation,
+											}),
+										),
 								] as const,
 						),
 					) as Toolkit.HandlersFrom<Record<string, Tool.Any>>,
@@ -394,6 +423,23 @@ export const offer = <R>(
 				operation,
 				metadata,
 			}))
+		const owner = {}
+		const record = (items: ReadonlyArray<Prepared<R>>) =>
+			Trust.describe(owner, descriptions(items)).pipe(
+				Effect.tapCause((cause) =>
+					Effect.logError("Projected approval metadata rejected", cause),
+				),
+				Effect.mapError((cause) =>
+					ProjectionError.make({
+						service: "projection",
+						operation: "approval",
+						reason: cause.message,
+					}),
+				),
+				Scope.provide(scope),
+			)
+		yield* record(initial)
+		yield* Effect.addFinalizer(() => Trust.withdraw(owner))
 		const initialChange: Change = {
 			revision: 1,
 			before: [],
@@ -413,6 +459,7 @@ export const offer = <R>(
 		yield* Event.emit(Changed, initialChange)
 		const publish = (items: ReadonlyArray<Prepared<R>>) =>
 			Effect.gen(function* () {
+				yield* record(items)
 				const next = yield* registration(items)
 				const change = yield* Ref.modify(current, (state) => {
 					const previous = state.history.at(-1)!
