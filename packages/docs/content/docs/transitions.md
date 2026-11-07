@@ -43,8 +43,8 @@ retains 128 Changes. Keyed admission records and unresolved records are retained
 separately.
 
 Member actual facts follow the current route, version and availability,
-including during trial and recovery. Recorded outcome members remain an
-immutable snapshot.
+including during trial, recovery and recreation of the logical instance.
+Recorded outcome members remain an immutable snapshot.
 
 ## Request keys
 

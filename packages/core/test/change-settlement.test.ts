@@ -195,3 +195,54 @@ it.effect(
 			}),
 		),
 )
+
+it.effect(
+	"current member facts follow the indexed registration after instance recreation",
+	() =>
+		run(
+			Effect.gen(function* () {
+				const previous = yield* register("recreated")
+				const outcome = yield* Change.run({
+					instance: "recreated",
+					candidate: candidate("next"),
+					budget,
+				})
+				yield* previous.fork.dispose
+				const absentStatus = yield* Change.get(outcome.change)
+				const absent = Option.getOrThrow(absentStatus)
+				assert.equal(absent.members[0]?.actual.health, "Unavailable")
+				const replacement = yield* register("recreated")
+				const observed = yield* Change.get(outcome.change)
+				const status = Option.getOrThrow(observed)
+				assert.equal(status.members[0]?.actual.health, "Serving")
+				assert.isAbove(
+					status.members[0]!.actual.version,
+					outcome.members[0]!.actual.version,
+				)
+				assert.isAbove(
+					status.members[0]!.actual.generation!,
+					outcome.members[0]!.actual.generation!,
+				)
+				assert.isFalse(status.members[0]?.actual.matchesTarget)
+				assert.deepStrictEqual(status.outcome, Option.some(outcome))
+				const next = yield* Change.run({
+					instance: "recreated",
+					candidate: candidate("next"),
+					budget,
+				})
+				const laterStatus = yield* Change.get(outcome.change)
+				const later = Option.getOrThrow(laterStatus)
+				assert.equal(
+					later.members[0]?.actual.generation,
+					next.members[0]?.actual.generation,
+				)
+				assert.isTrue(later.members[0]?.actual.matchesTarget)
+				assert.deepStrictEqual(later.outcome, Option.some(outcome))
+				yield* replacement.fork.dispose
+				const closedStatus = yield* Change.get(outcome.change)
+				const closed = Option.getOrThrow(closedStatus)
+				assert.equal(closed.members[0]?.actual.health, "Unavailable")
+				assert.deepStrictEqual(closed.outcome, Option.some(outcome))
+			}),
+		),
+)

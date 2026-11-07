@@ -19,7 +19,6 @@ import * as Capacity from "./capacity"
 import type { Preparation } from "./changePreparation"
 import type { Normalized } from "./changeRequest"
 import type { Runtime } from "./runtime"
-import type { Managed } from "./transition"
 import * as Trust from "./trust"
 
 export interface Cell {
@@ -35,7 +34,6 @@ export interface Condition {
 }
 export interface Record {
 	readonly runtime: Runtime
-	readonly route: Managed["route"]
 	readonly authorization: TxRef.TxRef<Trust.Condition>
 	readonly preparation: Preparation
 	readonly capacity: Capacity.Claim

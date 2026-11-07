@@ -12,7 +12,7 @@ import {
 
 import type * as Change from "../Change"
 import * as ChangeTable from "./changeTable"
-import type { HostLease, Managed } from "./transition"
+import type { Attempt, HostLease, Managed } from "./transition"
 
 /** Original ownership evidence determines current facts, independently of the recorded outcome. */
 export const read = Effect.fnUntraced(function* (
@@ -44,12 +44,29 @@ export const read = Effect.fnUntraced(function* (
 		),
 	}
 })
-/** Read the actual route and owned version cells; outcomes keep their earlier immutable snapshot. */
+/** Look up one logical instance and fence its route by the installed registration and exact attempt. */
+const currentRoute = Effect.fnUntraced(function* (
+	record: ChangeTable.Record,
+): Effect.fn.Return<Option.Option<Attempt>> {
+	const instances = yield* TxRef.get(record.runtime.instances)
+	const indexed = HashMap.get(instances, record.request.instance)
+	if (Option.isNone(indexed)) return Option.none()
+	const registration = indexed.value
+	const installed = yield* TxRef.get(registration.entry.status.managed)
+	if (!Option.contains(installed, registration)) return Option.none()
+	const route = yield* TxRef.get(registration.route)
+	const attempts = yield* TxRef.get(registration.attempts)
+	return Option.filter(route, (attempt) =>
+		Array.some(attempts, (current) => current === attempt),
+	)
+})
+
+/** Current facts follow the indexed registration; outcomes retain their immutable earlier snapshot. */
 export const members = Effect.fnUntraced(function* (
 	record: ChangeTable.Record,
 	current: ReadonlyArray<Change.Member>,
 ): Effect.fn.Return<ReadonlyArray<Change.Member>> {
-	const route = yield* TxRef.get(record.route)
+	const route = yield* currentRoute(record)
 	const termination = Option.isSome(route)
 		? yield* TxRef.get(route.value.terminated)
 		: Option.none<Change.Termination>()
