@@ -28,6 +28,7 @@ export default defineConfig([
 			"src/Artifact.ts",
 			"src/Sandbox.ts",
 			"src/Capabilities.ts",
+			"src/Policy.ts",
 			"src/Conformance.ts",
 			"src/Publication.ts",
 			"src/Config.ts",

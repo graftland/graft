@@ -1,8 +1,9 @@
 import { Array, Context, Effect, Schema } from "effect"
 
-import { Manifest, Trust, type Transition } from "@graftland/graft"
+import { Manifest, type Transition } from "@graftland/graft"
 import { Artifact, Publication } from "@graftland/plugin-remote"
 import * as RemoteConfig from "@graftland/plugin-remote/Config"
+import * as Policy from "@graftland/plugin-remote/Policy"
 
 export const Id = Schema.String.check(Schema.isPattern(/^[a-f0-9]{64}$/))
 export const SourceEntry = Schema.Struct({
@@ -118,7 +119,7 @@ export const summarize = (outcome: Transition.Outcome): OutcomeSummary => ({
 	})),
 })
 export const Event = Schema.Struct({
-	approval: Schema.optionalKey(Trust.Approval),
+	approval: Schema.optionalKey(Policy.Approval),
 	revocations: Schema.optionalKey(Schema.Array(Schema.NonEmptyString)),
 	who: Schema.optionalKey(Schema.NonEmptyString),
 	at: Schema.optionalKey(Schema.Finite),
@@ -188,10 +189,10 @@ export type Config = typeof Config.Type
 export class Releases extends Context.Service<
 	Releases,
 	{
-		readonly approvals: Effect.Effect<ReadonlyArray<Trust.Statement>>
+		readonly approvals: Effect.Effect<ReadonlyArray<Policy.Statement>>
 		readonly approve: (
-			request: Trust.Approve,
-		) => Effect.Effect<Trust.Approval, ReleaseError>
+			request: Policy.Approve,
+		) => Effect.Effect<Policy.Approval, ReleaseError>
 		readonly revoke: (
 			references: ReadonlyArray<string>,
 			who: string,

@@ -55,12 +55,21 @@ same assignment and approval checks.
 | `contractEntry`        | For untrusted code, the bundled contract export inside the artifact.                           |
 | `grants`               | Named host capabilities; changing them requires approval. Filesystem roots are absolute.       |
 
-Install policy before managed entries start. Policy is immutable for one
-runtime; restart after editing it. List each intended artifact identity,
-including upgrade candidates. Host code, CLI extensions, launchers and the
-host's contract modules are trusted application code, outside plugin
+Install policy before managed entries or projections are used. Policy is
+immutable for one runtime; restart after editing it. List each intended artifact
+identity, including upgrade candidates. Host code, CLI extensions, launchers and
+the host's contract modules are trusted application code, outside plugin
 confinement. Do not import an untrusted package into those roles. Ordinary
 Remote and runner deployments are rejected while policy is installed.
+
+`@graftland/plugin-remote/Policy` owns tier, grant and revocation rules. Its
+public `Policy.Service` registers through core's `Trust.register`, which other
+policy plugins can use too. Core performs atomic admission and compares opaque
+immutable values. Projection plugins validate their own tagged approval
+payloads; these payloads describe external views, not contract schemas or
+identities. Each allocated attempt owns a separate binding lease, including
+attempts that fail or never start. A service key is reusable after all its
+owners retire.
 
 ## Approve a statement
 
@@ -76,29 +85,35 @@ graft approve statement.json --who operator@example --socket /app/control.sock -
 graft release revoke weather --who operator@example --socket /app/control.sock --json
 ```
 
-| Approval covers | Comparison                                                                                                         |
-| --------------- | ------------------------------------------------------------------------------------------------------------------ |
-| Artifact        | Package name and captured directory digest, including dependencies present in that directory.                      |
-| Exposed tools   | Exact service/operation binding, name, title, description, all four hints and output handling. Whitespace matters. |
-| Grants          | Exact capability ids, destinations, filesystem roots and credential reference names.                               |
-| Policy          | Exact version and entry assignment.                                                                                |
+| Approval covers | Comparison                                                                                                                                                  |
+| --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Artifact        | Package name and captured directory digest, including dependencies present in that directory.                                                               |
+| Exposed views   | Exact projection tag, service/operation binding and payload. MCP includes name, title, description, all four hints and output handling. Whitespace matters. |
+| Grants          | Exact capability ids, destinations, filesystem roots and credential reference names.                                                                        |
+| Policy          | Exact version and entry assignment.                                                                                                                         |
 
 The journal records who, when and the complete statement before enabling calls.
-A stale statement returns `Unapproved`. Description publication changes the
-approval statement before notifying MCP clients. `tools/list_changed` never
-approves a tool: clients with cached lists also receive `Unapproved` at
-admission. Approved code bytes do not guarantee deterministic behavior or freeze
-the behavior of an allowed external service.
+A stale statement returns `Unapproved`. Published presentation facts persist
+independently of mounted views. Withdrawing or remounting an unchanged view does
+not change approval or block unrelated host consumers. Description publication
+changes the approval statement before notifying MCP clients.
+`tools/list_changed` never approves a tool: clients with cached lists also
+receive `Unapproved` at admission. Approved code bytes do not guarantee
+deterministic behavior or freeze the behavior of an allowed external service.
 
 Revoking a grant or `env:NAME` reference blocks admission first, then waits up
 to five seconds for each affected unit's termination and independently observed
-exit. Failure reports that exit remains unconfirmed; it does not reopen
-admission. Revocations survive restart. Rollback checks grant references too.
-Restoration needs the recorded `--override-revocations` and a matching approval
-with that explicit override; neither removes the revocation record. A restarted
-unit can initialize under that recorded override, but admission remains blocked
-until its exact approved tool metadata is present. Carrying a revocation forward
-does not revoke an override again; a new explicit revocation does.
+exit, with at most four retirements in parallel. `Policy.termination` defines
+these shared limits for revocation, late owners and policy closure. Launcher
+preparation propagates pure cancellation without an error log; it logs mixed
+cleanup causes completely. Failure reports that exit remains unconfirmed; it
+does not reopen admission. Revocations survive restart. Rollback checks grant
+references too. Restoration needs the recorded `--override-revocations` and a
+matching approval with that explicit override; neither removes the revocation
+record. A restarted unit can initialize under that recorded override. Startup
+restores the approved presentation facts; publishing different metadata blocks
+admission again. Carrying a revocation forward does not revoke an override
+again; a new explicit revocation does.
 
 ## Run untrusted code
 
@@ -130,9 +145,10 @@ are not captured or pinned and are not mounted into the sandbox. Use
 `build(..., { file, references, revocations, metadataOnly: true })` when
 bootstrapping an untrusted release. Governed release builds and plans read
 stored publication metadata; they do not import untrusted implementations in the
-host. Runtime readiness checks still compare the unit's declarations. Run author
-publication and conformance tooling only on code you trust or inside separate
-isolation.
+host, including when building the same release again. Reusing an existing
+release verifies its immutable bytes and stored metadata only. Runtime readiness
+checks still compare the unit's declarations. Run author publication and
+conformance tooling only on code you trust or inside separate isolation.
 
 ## Broker capabilities
 

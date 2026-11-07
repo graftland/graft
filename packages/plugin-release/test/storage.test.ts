@@ -12,9 +12,10 @@ import {
 import { NodeServices } from "@effect/platform-node"
 import { assert, it } from "@effect/vitest"
 
-import { Graft, Trust } from "@graftland/graft"
+import { Graft } from "@graftland/graft"
 import { ModuleResolver } from "@graftland/loader"
 import { Artifact } from "@graftland/plugin-remote"
+import * as Policy from "@graftland/plugin-remote/Policy"
 
 import { validate } from "../src/internal/journal"
 import { make } from "../src/internal/service"
@@ -401,7 +402,7 @@ it.effect(
 				package: "@example/plugin",
 				digest: String.repeat(64)("a"),
 			}
-			const policy: Trust.Policy = {
+			const policy: Policy.Policy = {
 				version: "1",
 				entries: [
 					{
@@ -420,16 +421,16 @@ it.effect(
 				host,
 				trust: file,
 			}).pipe(Effect.provideService(ModuleResolver.ModuleResolver, h.resolver))
-			yield* Trust.bind("test", "candidate", artifact, ["test"])
-			const expected = yield* Trust.statement("test", artifact)
+			yield* Policy.bind("test", "candidate", artifact, ["test"])
+			const expected = yield* Policy.statement("test", artifact)
 			const approval = yield* service.approve({
 				expected,
 				who: "operator@example",
 			})
 			assert.equal(approval.who, "operator@example")
-			yield* Trust.check("test", "candidate")
+			yield* Policy.check("test", "candidate")
 			yield* service.revoke(["data"], "operator@example")
-			const error = yield* Trust.check("test", "candidate").pipe(Effect.flip)
+			const error = yield* Policy.check("test", "candidate").pipe(Effect.flip)
 			assert.equal(error.reason, "Revoked")
 			const journal = yield* read(h.path.join(h.store, "journal.json"), Journal)
 			const replay = yield* validate(h.store, journal)
@@ -441,7 +442,7 @@ it.effect(
 				overrideRevocations: true,
 			})
 			assert.isTrue(override.overrideRevocations)
-			yield* Trust.check("test", "candidate")
+			yield* Policy.check("test", "candidate")
 			const source = h.path.join(h.store, "carried-forward.yml")
 			yield* h.fs.writeFileString(source, "[]")
 			const target = yield* build(h.store, {
@@ -450,7 +451,7 @@ it.effect(
 				revocations: ["data"],
 			})
 			yield* service.apply({ expected: h.id, target })
-			yield* Trust.check("test", "candidate")
+			yield* Policy.check("test", "candidate")
 			const updated = yield* read(h.path.join(h.store, "journal.json"), Journal)
 			const accepted = yield* validate(h.store, updated)
 			assert.equal(accepted.approvals.length, 1)
@@ -459,15 +460,18 @@ it.effect(
 )
 
 it.effect(
-	"builds and verifies untrusted release metadata without importing package code",
+	"reuses a metadata-only release without importing package code on either build",
 	() =>
 		Effect.gen(function* () {
 			const h = yield* setup()
 			const directory = h.path.join(h.store, "untrusted")
 			yield* h.fs.makeDirectory(directory)
+			const marker = h.path.join(h.store, "imported.txt")
+			const secret = h.path.join(h.store, "host-secret.txt")
+			yield* h.fs.writeFileString(secret, "Host-only data")
 			yield* h.fs.writeFileString(
 				h.path.join(directory, "index.js"),
-				"throw new Error('Untrusted import must not execute')",
+				`import { copyFileSync } from "node:fs"; copyFileSync(${yield* Schema.encodeEffect(Schema.fromJsonString(Schema.String))(secret)}, ${yield* Schema.encodeEffect(Schema.fromJsonString(Schema.String))(marker)}); throw new Error("Untrusted import executed")`,
 			)
 			yield* h.fs.writeFileString(
 				h.path.join(h.store, "contract.js"),
@@ -518,6 +522,17 @@ it.effect(
 				revocations: [],
 				metadataOnly: true,
 			})
+			const firstImport = yield* h.fs.exists(marker)
+			assert.isFalse(firstImport)
+			const repeated = yield* build(h.store, {
+				file: source,
+				references: [],
+				revocations: [],
+				metadataOnly: true,
+			})
+			assert.equal(repeated, id)
+			const secondImport = yield* h.fs.exists(marker)
+			assert.isFalse(secondImport)
 			const result = yield* load(h.store, id, true)
 			assert.equal(result.entries[0]?.package.name, "@example/untrusted")
 		}).pipe(Effect.scoped, Effect.provide(runtime)),

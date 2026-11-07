@@ -11,7 +11,7 @@ import {
 import { SecureRandom } from "effect/crypto"
 import { ChildProcessSpawner } from "effect/process"
 
-import { Graft, Plugin, Trust, type Fork } from "@graftland/graft"
+import { Graft, Plugin, type Fork } from "@graftland/graft"
 import { ConfigDirectory, Entry, ModuleResolver } from "@graftland/loader"
 
 import * as Contract from "../Contract"
@@ -26,6 +26,7 @@ import { follow } from "../internal/follow"
 import type { LocalTarget, WorkerTarget } from "../internal/runner/Connection"
 import { resolveEntry } from "../internal/runner/Packages"
 import { managedPlugin } from "../internal/transition"
+import * as Policy from "../Policy"
 import * as HostAssembly from "./assembly"
 
 /** Direct execution installs only its execution capability in a private realm. */
@@ -207,10 +208,10 @@ export const launch = Effect.fnUntraced(function* <
 	options: ExecutionOptions,
 	authOverride?: typeof Assembly.Invocation.Type,
 ) {
-	if (yield* Trust.enabled)
+	if (yield* Policy.enabled)
 		return yield* RemoteError.make({
 			cause: Cause.fail(
-				Trust.PolicyError.make({
+				Policy.PolicyError.make({
 					message:
 						"Operator policy requires captured managed direct entries; ordinary and runner deployments are unavailable",
 				}),

@@ -6,9 +6,10 @@ import { HttpServerRequest, HttpServerResponse } from "effect/http"
 import { NodeHttpServer, NodeServices } from "@effect/platform-node"
 import { assert, it } from "@effect/vitest"
 
-import { Graft, Trust } from "@graftland/graft"
+import { Graft } from "@graftland/graft"
 
 import { Capabilities } from "../src/index"
+import * as Policy from "../src/Policy"
 
 it.live(
 	"brokers credentials on the host and rejects redirects and foreign origins",
@@ -35,7 +36,7 @@ it.live(
 				package: "@example/client",
 				digest: String.repeat(64)("a"),
 			}
-			const assignment: Trust.Assignment = {
+			const assignment: Policy.Assignment = {
 				entry: "client",
 				artifact,
 				tier: "untrusted",
@@ -43,11 +44,11 @@ it.live(
 					{ _tag: "Http", id: "weather", origin, credential: "WEATHER_KEY" },
 				],
 			}
-			yield* Trust.install({ version: "1", entries: [assignment] })
-			yield* Trust.bind("client", "candidate", artifact, [])
-			const expected = yield* Trust.statement("client", artifact)
-			const approval = yield* Trust.review({ expected, who: "operator" })
-			yield* Trust.approve(approval)
+			yield* Policy.install({ version: "1", entries: [assignment] })
+			yield* Policy.bind("client", "candidate", artifact, [])
+			const expected = yield* Policy.statement("client", artifact)
+			const approval = yield* Policy.review({ expected, who: "operator" })
+			yield* Policy.approve(approval)
 			const broker = yield* Capabilities.make("client", "candidate", assignment)
 			const request = (url: string) =>
 				broker
@@ -70,7 +71,7 @@ it.live(
 			assert.equal(foreign._tag, "CapabilityDenied")
 			if (foreign._tag === "CapabilityDenied")
 				assert.equal(foreign.reason, "DestinationDenied")
-			yield* Trust.revoke(["env:WEATHER_KEY"])
+			yield* Policy.revoke(["env:WEATHER_KEY"])
 			const revoked = yield* request(origin + "/forecast").pipe(Effect.flip)
 			assert.equal(revoked._tag, "CapabilityDenied")
 			if (revoked._tag === "CapabilityDenied")

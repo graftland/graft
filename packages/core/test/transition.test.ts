@@ -68,7 +68,7 @@ interface Control {
 	readonly terminating: Deferred.Deferred<void>
 }
 interface Script {
-	readonly allocate?: Effect.Effect<void, Transition.DriverError>
+	readonly allocate?: Effect.Effect<void, Transition.DriverError, Scope.Scope>
 	readonly serve?: Effect.Effect<void, Transition.DriverError>
 	readonly missingServices?: boolean
 	readonly exitAtReadiness?: boolean
@@ -1537,42 +1537,120 @@ it.effect(
 	"checks approval when a reused facade effect executes, before admitting the call",
 	() =>
 		Effect.gen(function* () {
-			const artifact = {
-				package: "@example/integration",
-				digest: Array.join(Array.replicate("a", 64), ""),
-			}
-			yield* Trust.install({
-				version: "1",
-				entries: [
-					{ entry: "integration", artifact, tier: "trusted", grants: [] },
-				],
+			const comparison = yield* TxRef.make<Trust.Comparison>({
+				current: { revision: 1 },
+				approved: Option.some({ revision: 1 }),
+				missing: "MissingApproval",
 			})
-			yield* Trust.bind("integration", "old", artifact, [Value.key])
+			yield* Trust.register({
+				services: Context.empty(),
+				compare: () => TxRef.get(comparison),
+				publish: () => Effect.void,
+			})
 			const state = yield* setup()
-			const expected = yield* Trust.statement("integration", artifact)
-			const record = yield* Trust.review({ expected, who: "operator" })
-			yield* Trust.approve(record)
-			const value = yield* state.value.read
-			assert.equal(value, "old")
-			yield* Trust.describe({}, [
-				{
-					service: Value.key,
-					operation: "read@1",
-					metadata: {
-						name: "read",
-						title: "Read",
-						description: "Changed",
-						readOnlyHint: true,
-						destructiveHint: false,
-						idempotentHint: true,
-						openWorldHint: false,
-						output: "json",
-					},
-				},
-			])
+			const observed1 = yield* state.value.read
+			assert.equal(observed1, "old")
+			yield* TxRef.update(comparison, (value) => ({
+				...value,
+				current: { revision: 2 },
+			}))
+
 			const exit = yield* state.value.read.pipe(Effect.exit)
 			assert.isTrue(Exit.isFailure(exit))
 			if (Exit.isFailure(exit))
 				assert.include(Cause.pretty(exit.cause), "ChangedStatement")
 		}).pipe(run),
+)
+
+it.effect(
+	"closes allocation resources on failure before a unit can start",
+	() =>
+		Effect.gen(function* () {
+			const live = yield* Ref.make(0)
+			const allocation = Effect.acquireRelease(
+				Ref.update(live, (n) => n + 1),
+				() => Ref.update(live, (n) => n - 1),
+			).pipe(Effect.andThen(problem))
+			const state = yield* setup((id) =>
+				id === 1 ? {} : { allocate: allocation },
+			)
+			const outcome = yield* state.request()
+			assert.equal(outcome._tag, "Aborted")
+			const observed2 = yield* Ref.get(live)
+			assert.equal(observed2, 0)
+			const observed3 = yield* state.value.read
+			assert.equal(observed3, "old")
+		}).pipe(run),
+)
+
+it.effect(
+	"rejects installing an admission authority after a managed entry starts",
+	() =>
+		Effect.gen(function* () {
+			yield* setup()
+			const error = yield* Trust.register({
+				services: Context.empty(),
+				compare: () =>
+					Effect.succeed({
+						current: null,
+						approved: Option.some(null),
+						missing: "MissingApproval",
+					}),
+				publish: () => Effect.void,
+			}).pipe(Effect.flip)
+			assert.equal(error._tag, "AdmissionRegistrationError")
+		}).pipe(run),
+)
+
+it.effect("retains failed-allocation finalizer causes for disposal", () =>
+	Effect.gen(function* () {
+		const allocation = Effect.addFinalizer(() =>
+			Effect.die("Allocation lease cleanup failed"),
+		).pipe(Effect.andThen(problem))
+		const state = yield* setup((id) =>
+			id === 1 ? {} : { allocate: allocation },
+		)
+		const outcome = yield* state.request()
+		assert.equal(outcome._tag, "Aborted")
+		assert.isTrue(
+			Array.some(
+				outcome.evidence,
+				(evidence) =>
+					evidence.cause !== undefined &&
+					String.includes("Allocation lease cleanup failed")(
+						Cause.pretty(evidence.cause),
+					),
+			),
+		)
+		const disposal = yield* state.fork.dispose.pipe(Effect.exit)
+		assert.isTrue(Exit.isFailure(disposal))
+		if (Exit.isFailure(disposal))
+			assert.include(
+				Cause.pretty(disposal.cause),
+				"Allocation lease cleanup failed",
+			)
+	}).pipe(run),
+)
+
+it.effect("bounds failed-allocation cleanup without abandoning its owner", () =>
+	Effect.gen(function* () {
+		const closing = yield* Deferred.make<void>()
+		const release = yield* Deferred.make<void>()
+		const allocation = Effect.addFinalizer(() =>
+			Deferred.succeed(closing, undefined).pipe(
+				Effect.andThen(Deferred.await(release)),
+			),
+		).pipe(Effect.andThen(problem))
+		const state = yield* setup((id) =>
+			id === 1 ? {} : { allocate: allocation },
+		)
+		const pending = yield* state.request().pipe(Effect.forkScoped)
+		yield* Deferred.await(closing)
+		yield* TestClock.adjust(policy.terminate)
+		const outcome = yield* Fiber.join(pending)
+		assert.equal(outcome._tag, "Aborted")
+		yield* Deferred.succeed(release, undefined)
+		const disposal = yield* state.fork.dispose.pipe(Effect.exit)
+		assert.isTrue(Exit.isFailure(disposal))
+	}).pipe(run),
 )

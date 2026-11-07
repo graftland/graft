@@ -69,11 +69,24 @@ it("imports the public trust entry independently of the package barrel", () => {
 		[
 			"--input-type=module",
 			"--eval",
-			'import { install, Policy } from "@graftland/graft/Trust"; console.log(typeof install, typeof Policy)',
+			'import { register, Projection } from "@graftland/graft/Trust"; console.log(typeof register, typeof Projection)',
 		],
 		{ cwd: join(root, "packages/core"), encoding: "utf8" },
 	)
 	assert.equal(output.trim(), "function function")
+})
+
+it("imports the Remote policy service through its independent public entry", () => {
+	const output = execFileSync(
+		process.execPath,
+		[
+			"--input-type=module",
+			"--eval",
+			'import { install, Policy, Service } from "@graftland/plugin-remote/Policy"; console.log(typeof install, typeof Policy, typeof Service)',
+		],
+		{ cwd: join(root, "packages/plugin-remote"), encoding: "utf8" },
+	)
+	assert.equal(output.trim(), "function function function")
 })
 
 it("emits unannotated consumer declarations using only public entry paths", () => {

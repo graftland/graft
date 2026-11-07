@@ -423,9 +423,15 @@ export const offer = <R>(
 				operation,
 				metadata,
 			}))
-		const owner = {}
 		const record = (items: ReadonlyArray<Prepared<R>>) =>
-			Trust.describe(owner, descriptions(items)).pipe(
+			Trust.publish(
+				Array.map(descriptions(items), ({ service, operation, metadata }) => ({
+					projection: "mcp/tools",
+					service,
+					operation,
+					value: metadata,
+				})),
+			).pipe(
 				Effect.tapCause((cause) =>
 					Effect.logError("Projected approval metadata rejected", cause),
 				),
@@ -439,7 +445,6 @@ export const offer = <R>(
 				Scope.provide(scope),
 			)
 		yield* record(initial)
-		yield* Effect.addFinalizer(() => Trust.withdraw(owner))
 		const initialChange: Change = {
 			revision: 1,
 			before: [],

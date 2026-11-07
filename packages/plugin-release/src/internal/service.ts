@@ -14,9 +14,10 @@ import {
 	Stream,
 } from "effect"
 
-import { Graft, Manifest, Transition, Trust } from "@graftland/graft"
+import { Graft, Manifest, Transition } from "@graftland/graft"
 import { ModuleResolver } from "@graftland/loader"
 import * as Remote from "@graftland/plugin-remote"
+import * as Policy from "@graftland/plugin-remote/Policy"
 
 import {
 	Journal,
@@ -65,10 +66,10 @@ export const make = Effect.fnUntraced(function* (options: Options) {
 	const policy =
 		options.trust === undefined
 			? undefined
-			: yield* read(options.trust, Trust.Policy)
+			: yield* read(options.trust, Policy.Policy)
 	const initialRelease = yield* load(store, initial, governed)
 	if (policy !== undefined)
-		yield* Trust.install(
+		yield* Policy.install(
 			policy,
 			recovered?.approvals ?? [],
 			saved?.status.revocations ?? initialRelease.revocations,
@@ -264,12 +265,12 @@ export const make = Effect.fnUntraced(function* (options: Options) {
 						Array.flatMap(
 							Array.filter(
 								policy.entries,
-								(assignment: Trust.Assignment) =>
+								(assignment: Policy.Assignment) =>
 									assignment.entry === entry.id &&
 									assignment.artifact.package === entry.package.name &&
 									assignment.artifact.digest === entry.artifact.identity.digest,
 							),
-							(assignment: Trust.Assignment) =>
+							(assignment: Policy.Assignment) =>
 								Array.flatMap(assignment.grants, (grant) =>
 									grant._tag === "Http" && grant.credential !== undefined
 										? [grant.id, "env:" + grant.credential]
@@ -302,7 +303,7 @@ export const make = Effect.fnUntraced(function* (options: Options) {
 	})
 	const startupPlan = yield* inspect(initial)
 	const acceptedOverride = recovered?.override === true
-	const assignmentEquals = Schema.toEquivalence(Trust.Assignment)
+	const assignmentEquals = Schema.toEquivalence(Policy.Assignment)
 	const restoredGrantOverrides = Array.flatMap(
 		recovered?.approvals ?? [],
 		(approval) =>
@@ -512,7 +513,7 @@ export const make = Effect.fnUntraced(function* (options: Options) {
 			],
 		})
 		if (progress._tag !== "Rejected")
-			yield* Trust.revoke(
+			yield* Policy.revoke(
 				Array.filter(
 					status.revocations,
 					(ref) => !Array.contains(journal.status.revocations, ref),
@@ -562,10 +563,10 @@ export const make = Effect.fnUntraced(function* (options: Options) {
 			).pipe(Effect.flatMap((fiber) => restore(Fiber.join(fiber)))),
 		)
 	return Releases.of({
-		approvals: Trust.statements.pipe(Effect.provideContext(environment)),
+		approvals: Policy.statements.pipe(Effect.provideContext(environment)),
 		approve: (request) =>
 			Effect.gen(function* () {
-				const approval = yield* Trust.review(request)
+				const approval = yield* Policy.review(request)
 				const journal = yield* Ref.get(state)
 				yield* persist({
 					...journal,
@@ -579,7 +580,7 @@ export const make = Effect.fnUntraced(function* (options: Options) {
 						},
 					],
 				})
-				yield* Trust.approve(approval)
+				yield* Policy.approve(approval)
 				return approval
 			}).pipe(owned, protect),
 		revoke: (references, who) =>
@@ -608,7 +609,7 @@ export const make = Effect.fnUntraced(function* (options: Options) {
 						},
 					],
 				})
-				yield* Trust.revoke(references)
+				yield* Policy.revoke(references)
 			}).pipe(owned, protect),
 		build: (request) =>
 			protect(

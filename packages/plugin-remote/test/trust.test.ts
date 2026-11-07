@@ -19,9 +19,10 @@ import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import { NodeHttpServer, NodeServices } from "@effect/platform-node"
 import { assert, it } from "@effect/vitest"
 
-import { Graft, Plugin, Trust } from "@graftland/graft"
+import { Graft, Plugin } from "@graftland/graft"
 
 import * as Remote from "../src/index"
+import * as Policy from "../src/Policy"
 import { Attack, contract } from "./fixtures/untrusted-contract"
 
 const runtime = Graft.layer.pipe(
@@ -63,7 +64,7 @@ const setup = Effect.fnUntraced(function* (
 		package: "@example/untrusted",
 		digest: artifact.identity.digest,
 	}
-	yield* Trust.install({
+	yield* Policy.install({
 		version: "1",
 		entries: [
 			{
@@ -102,7 +103,7 @@ const setup = Effect.fnUntraced(function* (
 		}),
 		{},
 	).pipe(Effect.provideService(Remote.Sandbox.Current, launcher))
-	return { fork, root, identity }
+	return { fork, root, identity, artifact, target }
 })
 const client = Effect.gen(function* () {
 	const found = yield* Deferred.make<Attack["Service"]>()
@@ -119,21 +120,21 @@ const client = Effect.gen(function* () {
 	yield* consumer.await
 	return yield* Deferred.await(found)
 })
-const approve = (identity: Trust.Identity) =>
+const approve = (identity: Policy.Identity) =>
 	Effect.gen(function* () {
-		const expected = yield* Trust.statement("untrusted", identity)
-		const approval = yield* Trust.review({ expected, who: "test operator" })
-		yield* Trust.approve(approval)
+		const expected = yield* Policy.statement("untrusted", identity)
+		const approval = yield* Policy.review({ expected, who: "test operator" })
+		yield* Policy.approve(approval)
 	})
 const reason = (error: unknown) => {
 	assert.isTrue(
 		Schema.is(
-			Schema.Struct({ reason: Schema.Struct({ cause: Trust.Unapproved }) }),
+			Schema.Struct({ reason: Schema.Struct({ cause: Policy.Unapproved }) }),
 		)(error),
 	)
 	if (
 		Schema.is(
-			Schema.Struct({ reason: Schema.Struct({ cause: Trust.Unapproved }) }),
+			Schema.Struct({ reason: Schema.Struct({ cause: Policy.Unapproved }) }),
 		)(error)
 	)
 		return error.reason.cause.reason
@@ -166,11 +167,12 @@ it.live(
 				value: "https://not-allowed.example",
 			})
 			assert.equal(destination, "DestinationDenied")
-			yield* Trust.describe({}, [
+			yield* Policy.publish([
 				{
+					projection: "mcp/tools",
 					service: Attack.key,
 					operation: "@graftland/test/untrusted/run@1",
-					metadata: {
+					value: {
 						name: "attack",
 						title: "Attack",
 						description: "Changed description",
@@ -189,7 +191,7 @@ it.live(
 			yield* approve(h.identity)
 			const pidText = yield* api.run({ action: "pid", value: "" })
 			const pid = Number(pidText)
-			yield* Trust.revoke(["data"])
+			yield* Policy.revoke(["data"])
 			const revoked = yield* api
 				.run({ action: "read", value: "allowed.txt" })
 				.pipe(Effect.flip)
@@ -325,4 +327,30 @@ it.live.skipIf(process.platform !== "linux")(
 			})
 			assert.equal(grantedFile, "Granted data")
 		}).pipe(Effect.scoped, Effect.provide(runtime)),
+)
+
+it.live("retires each attempt binding across repeated direct transitions", () =>
+	Effect.gen(function* () {
+		const h = yield* setup(fake)
+		yield* h.fork.await
+		for (let revision = 0; revision < 4; revision++) {
+			const outcome = yield* Graft.transition({
+				target: "untrusted",
+				candidate: Remote.candidate({
+					artifact: h.artifact,
+					contractModule: new URL(
+						"file://" + h.artifact.directory + "/untrusted-plugin.js",
+					).href,
+					target: h.target,
+					input: { revision },
+				}),
+			})
+			assert.equal(outcome._tag, "Accepted")
+			const observed1 = yield* Policy.bindings
+			assert.equal(observed1, 1)
+		}
+		yield* h.fork.dispose
+		const observed2 = yield* Policy.bindings
+		assert.equal(observed2, 0)
+	}).pipe(Effect.scoped, Effect.provide(runtime)),
 )

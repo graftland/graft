@@ -179,3 +179,5 @@ export * as Conformance from "./Conformance"
 export * as Sandbox from "./Sandbox"
 
 export * as Capabilities from "./Capabilities"
+
+export * as Policy from "./Policy"

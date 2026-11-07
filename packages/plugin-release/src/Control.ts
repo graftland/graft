@@ -16,7 +16,7 @@ import {
 	Schema,
 } from "effect"
 
-import { Trust } from "@graftland/graft"
+import * as Policy from "@graftland/plugin-remote/Policy"
 
 import { failure, json, protect } from "./internal/storage"
 import {
@@ -30,7 +30,7 @@ import {
 
 export const Request = Schema.Union([
 	Schema.TaggedStruct("approvals", {}),
-	Schema.TaggedStruct("approve", { request: Trust.Approve }),
+	Schema.TaggedStruct("approve", { request: Policy.Approve }),
 	Schema.TaggedStruct("revoke", {
 		references: Schema.Array(Schema.NonEmptyString),
 		who: Schema.NonEmptyString,

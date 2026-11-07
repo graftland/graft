@@ -3,7 +3,8 @@ import { Argument, CliError, Command, Flag } from "effect/cli"
 
 import { platform } from "@graftland/cli/Application"
 import { Commands } from "@graftland/cli/Commands"
-import { Plugin, Trust } from "@graftland/graft"
+import { Plugin } from "@graftland/graft"
+import * as Policy from "@graftland/plugin-remote/Policy"
 
 import { common, invoke, overrideRevocations } from "./internal/cliCommand"
 
@@ -20,7 +21,7 @@ const approve = Command.make(
 			const fs = yield* FileSystem.FileSystem
 			const text = yield* fs.readFileString(options.statement)
 			const expected = yield* Schema.decodeEffect(
-				Schema.fromJsonString(Trust.Statement),
+				Schema.fromJsonString(Policy.Statement),
 			)(text)
 			yield* invoke(options, {
 				_tag: "approve",

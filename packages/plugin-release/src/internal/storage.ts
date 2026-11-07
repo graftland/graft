@@ -336,7 +336,7 @@ export const build = Effect.fnUntraced(
 		)
 		const id = (yield* Artifact.directoryIdentity(stage)).digest
 		const destination = path.join(store, id)
-		if (yield* fs.exists(destination)) yield* load(store, id)
+		if (yield* fs.exists(destination)) yield* verify(store, id)
 		else {
 			yield* syncDirectory(stage)
 			yield* fs.rename(stage, destination)

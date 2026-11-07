@@ -148,3 +148,8 @@ For governed entries, projection metadata becomes part of the exact
 until reapproval, including calls from clients with cached tool lists. A
 list-change notification is not approval; already admitted calls retain their
 serving attempt.
+
+The projection validates its MCP fields and publishes them with the `mcp/tools`
+tag for approval. Withdrawing a contributor removes its live tools but preserves
+these approval facts. Remounting identical metadata needs no new approval;
+publishing different metadata blocks admission before exposing the change.

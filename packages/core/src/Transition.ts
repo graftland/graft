@@ -182,13 +182,13 @@ export interface Unit {
 	readonly failure: Effect.Effect<never, DriverError>
 }
 
-/** Allocation is inert: external execution starts only in Unit.start. */
+/** Allocation owns resources in the attempt scope, even if startup never runs. External execution starts only in Unit.start. */
 export interface Driver {
 	readonly name: string
 	readonly allocate: (
 		candidate: Candidate,
 		attempt: number,
-	) => Effect.Effect<Unit, DriverError>
+	) => Effect.Effect<Unit, DriverError, Scope.Scope>
 }
 
 /** Selection and admission happen when the returned Effect executes. */

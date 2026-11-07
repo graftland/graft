@@ -483,7 +483,7 @@ test(
 							grants: [],
 						},
 						policyVersion: "1",
-						descriptions: [],
+						projections: [],
 					}),
 				)
 				const denied = yield* Effect.scoped(

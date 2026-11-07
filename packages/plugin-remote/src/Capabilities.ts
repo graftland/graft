@@ -18,9 +18,10 @@ import {
 import { FetchHttpClient, HttpClient } from "effect/http"
 import { Rpc, RpcGroup, type RpcClientError } from "effect/rpc"
 
-import { Trust, type Graft } from "@graftland/graft"
+import { type Graft } from "@graftland/graft"
 
 import * as Contract from "./Contract"
+import * as Policy from "./Policy"
 
 export class Denied extends Schema.TaggedError<
 	Denied,
@@ -89,12 +90,12 @@ export const service = Contract.service(Broker, group, {
 export const make = Effect.fnUntraced(function* (
 	entry: string,
 	candidate: string,
-	assignment: Trust.Assignment,
+	assignment: Policy.Assignment,
 ) {
 	const fs = yield* FileSystem.FileSystem
 	const path = yield* Path.Path
 	const environment = yield* Effect.context<Graft.Graft>()
-	const admitted = Trust.check(entry, candidate).pipe(
+	const admitted = Policy.check(entry, candidate).pipe(
 		Effect.provideContext(environment),
 		Effect.mapError((error) =>
 			Denied.make({

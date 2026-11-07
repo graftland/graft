@@ -20,8 +20,9 @@ import {
 import { Rpc, RpcMiddleware } from "effect/rpc"
 import { assert, it } from "@effect/vitest"
 
-import { Event, Graft, Plugin, Trust } from "@graftland/graft"
+import { Event, Graft, Plugin } from "@graftland/graft"
 import { Contract } from "@graftland/plugin-remote"
+import * as Policy from "@graftland/plugin-remote/Policy"
 
 import core from "../src/index.ts"
 import { Middleware as CallMiddleware } from "../src/Middleware.ts"
@@ -36,7 +37,7 @@ class Local extends Context.Service<
 		}) => Effect.Effect<
 			string,
 			| string
-			| Trust.Unapproved
+			| Policy.Unapproved
 			| { readonly _tag: string; readonly secret: string }
 		>
 	}
@@ -891,24 +892,24 @@ it.effect(
 					package: "@example/forecast",
 					digest: String.repeat(64)("a"),
 				}
-				yield* Trust.install({
+				yield* Policy.install({
 					version: "1",
 					entries: [{ entry: "forecast", artifact, tier: "own", grants: [] }],
 				})
-				yield* Trust.bind("forecast", "current", artifact, [Local.key])
+				yield* Policy.bind("forecast", "current", artifact, [Local.key])
 				const count = yield* Ref.make(0)
 				const graft = yield* Graft.Graft
 				const h = yield* start(({ city }) =>
-					Trust.check("forecast", "current").pipe(
+					Policy.check("forecast", "current").pipe(
 						Effect.provideService(Graft.Graft, graft),
 						Effect.andThen(Ref.update(count, (n) => n + 1)),
 						Effect.as(city),
 					),
 				)
 				const approve = Effect.gen(function* () {
-					const expected = yield* Trust.statement("forecast", artifact)
-					const record = yield* Trust.review({ expected, who: "operator" })
-					yield* Trust.approve(record)
+					const expected = yield* Policy.statement("forecast", artifact)
+					const record = yield* Policy.review({ expected, who: "operator" })
+					yield* Policy.approve(record)
 				})
 				const tools = yield* h.client.listTools()
 				assert.equal(tools.tools[0]?.description, metadata.description)
@@ -938,6 +939,66 @@ it.effect(
 					arguments: { city: "Paris" },
 				})
 				assert.notEqual(second.isError, true)
+			}),
+		),
+)
+
+it.effect(
+	"keeps approval when an unchanged projection is withdrawn and remounted",
+	() =>
+		run(
+			Effect.gen(function* () {
+				const artifact = {
+					package: "@example/forecast",
+					digest: String.repeat(64)("a"),
+				}
+				yield* Policy.install({
+					version: "1",
+					entries: [{ entry: "forecast", artifact, tier: "own", grants: [] }],
+				})
+				yield* Policy.bind("forecast", "current", artifact, [Local.key])
+				const h = yield* start()
+				const before = yield* Policy.statement("forecast", artifact)
+				const approval = yield* Policy.review({
+					expected: before,
+					who: "Operator",
+				})
+				yield* Policy.approve(approval)
+				yield* h.contributor.dispose
+				yield* Queue.take(h.client.notifications)
+				assert.deepEqual((yield* h.client.listTools()).tools, [])
+				yield* Policy.check("forecast", "current")
+				const afterWithdrawal = yield* Policy.statement("forecast", artifact)
+				assert.deepEqual(afterWithdrawal, before)
+				const ready = yield* Deferred.make<Projection.Controller<Local>>()
+				const remounted = yield* Graft.plugin(
+					Plugin.make({
+						name: "remounted-tools",
+						inject: [Local],
+						apply: () =>
+							Projection.offer([binding()]).pipe(
+								Effect.flatMap((controller) =>
+									Deferred.succeed(ready, controller).pipe(Effect.asVoid),
+								),
+							),
+					}),
+				)
+				yield* remounted.await
+				yield* Queue.take(h.client.notifications)
+				yield* Policy.check("forecast", "current")
+				const afterRemount = yield* Policy.statement("forecast", artifact)
+				assert.deepEqual(afterRemount, before)
+				assert.equal(
+					(yield* h.client.listTools()).tools[0]?.description,
+					metadata.description,
+				)
+				const controller = yield* Deferred.await(ready)
+				yield* controller.update([binding("New operator-visible description")])
+				yield* Queue.take(h.client.notifications)
+				assert.equal(
+					(yield* Policy.check("forecast", "current").pipe(Effect.flip)).reason,
+					"ChangedStatement",
+				)
 			}),
 		),
 )

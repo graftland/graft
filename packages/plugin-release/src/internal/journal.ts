@@ -1,6 +1,6 @@
 import { Array, Effect } from "effect"
 
-import { Trust } from "@graftland/graft"
+import * as Policy from "@graftland/plugin-remote/Policy"
 
 import type { Event, Journal, Release, Status } from "../Model"
 import { changes } from "./changes"
@@ -14,7 +14,7 @@ interface Pending {
 	readonly degraded: boolean
 }
 interface Replay {
-	readonly approvals: ReadonlyArray<Trust.Approval>
+	readonly approvals: ReadonlyArray<Policy.Approval>
 	readonly status: Status
 	readonly release: Release
 	readonly override: boolean
@@ -243,7 +243,7 @@ export const validate = Effect.fnUntraced(function* (
 })
 
 const retainApprovals = (
-	records: ReadonlyArray<Trust.Approval>,
+	records: ReadonlyArray<Policy.Approval>,
 	refs: ReadonlyArray<string>,
 ) =>
 	Array.filter(

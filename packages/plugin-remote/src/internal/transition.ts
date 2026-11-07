@@ -16,11 +16,12 @@ import {
 import { SecureRandom } from "effect/crypto"
 import { ChildProcessSpawner } from "effect/process"
 
-import { Graft, Plugin, Transition, Trust } from "@graftland/graft"
+import { Graft, Plugin, Transition } from "@graftland/graft"
 
 import * as Artifact from "../Artifact"
 import * as Capabilities from "../Capabilities"
 import * as Contract from "../Contract"
+import * as Policy from "../Policy"
 import * as Sandbox from "../Sandbox"
 import { candidate, CandidateOptions, driverName } from "./candidate"
 import { type Execution } from "./directTransport"
@@ -69,7 +70,7 @@ export const driver = Effect.fnUntraced(function* <
 						if (Option.isNone(runtime))
 							return yield* Effect.die("Managed Remote requires Graft")
 						if (
-							!(yield* Trust.enabled.pipe(
+							!(yield* Policy.enabled.pipe(
 								Effect.provideService(Graft.Graft, runtime.value),
 							))
 						)
@@ -84,7 +85,7 @@ export const driver = Effect.fnUntraced(function* <
 								Schema.Struct({ name: Schema.NonEmptyString }),
 							),
 						)(json)
-						return yield* Trust.bind(
+						return yield* Policy.bind(
 							instance,
 							value.identity,
 							{
@@ -248,15 +249,14 @@ export const driver = Effect.fnUntraced(function* <
 																			: state,
 																	)
 																	if (assignment !== undefined)
-																		yield* Trust.onRevoke(
+																		yield* Policy.onRevoke(
 																			assignment.entry,
 																			value.identity,
 																			current.terminate.pipe(
 																				Effect.andThen(current.exited),
 																				Effect.asVoid,
-																				Effect.timeout("5 seconds"),
 																				Effect.catchCause((cause) =>
-																					Trust.PolicyError.make({
+																					Policy.PolicyError.make({
 																						message:
 																							"Revoked execution exit is unconfirmed",
 																						cause,

@@ -183,6 +183,10 @@ or transition admission, including every nested deployment value needed for
 recovery. Core retains that snapshot; it cannot clone arbitrary driver
 resources.
 
+`Driver.allocate` receives the attempt's scope. Use it for allocation leases;
+the coordinator closes it on allocation failure or after confirmed retirement,
+even when `Unit.start` never runs. Overlapping attempts have separate scopes.
+
 Allocation must be inert: external execution starts in `Unit.start`. Terminating
 an allocated unit must prevent later startup and report `NotStarted`.
 Termination racing startup must await definitive spawn or exit evidence. Driver

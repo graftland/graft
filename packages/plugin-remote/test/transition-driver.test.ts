@@ -4,12 +4,14 @@ import {
 	Context,
 	Deferred,
 	Effect,
+	Exit,
 	Fiber,
 	FileSystem,
 	Layer,
 	Option,
 	Path,
 	Ref,
+	Scope,
 	Sink,
 	Stream,
 } from "effect"
@@ -27,6 +29,7 @@ import {
 	WorkerTransport,
 } from "../src/internal/directTransport"
 import { driver } from "../src/internal/transition"
+import * as Policy from "../src/Policy"
 import { contract } from "./fixtures/transition-contract"
 
 it.effect(
@@ -195,7 +198,10 @@ it.effect(
 		Effect.gen(function* () {
 			const fs = yield* FileSystem.FileSystem
 			const root = yield* fs.makeTempDirectoryScoped()
-			yield* fs.writeFileString(root + "/package.json", '{"type":"module"}')
+			yield* fs.writeFileString(
+				root + "/package.json",
+				'{"type":"module","name":"@example/allocated"}',
+			)
 			yield* fs.writeFileString(root + "/plugin.js", "export default undefined")
 			const store = yield* fs.makeTempDirectoryScoped()
 			const artifact = yield* Remote.Artifact.capture({
@@ -203,22 +209,43 @@ it.effect(
 				entry: "plugin.js",
 				store,
 			})
+			yield* Policy.install({
+				version: "1",
+				entries: [
+					{
+						entry: "allocated",
+						artifact: {
+							package: "@example/allocated",
+							digest: artifact.identity.digest,
+						},
+						tier: "trusted",
+						grants: [],
+					},
+				],
+			})
+			const owner = yield* Effect.acquireRelease(Scope.make(), (scope) =>
+				Scope.close(scope, Exit.void),
+			)
 			const launches = yield* Ref.make(0)
 			const start = () =>
 				Ref.update(launches, (n) => n + 1).pipe(Effect.andThen(Effect.never))
-			const remote = yield* driver(contract).pipe(
+			const remote = yield* driver(contract, "allocated").pipe(
 				Effect.provideService(WorkerTransport, { start }),
 				Effect.provideService(LocalTransport, { start }),
 			)
-			const unit = yield* remote.allocate(
-				Remote.candidate({
-					artifact,
-					contractModule: "unused",
-					target: { _tag: "Worker" },
-					input: { value: "old" },
-				}),
-				1,
-			)
+			const unit = yield* remote
+				.allocate(
+					Remote.candidate({
+						artifact,
+						contractModule: "unused",
+						target: { _tag: "Worker" },
+						input: { value: "old" },
+					}),
+					1,
+				)
+				.pipe(Scope.provide(owner))
+			const allocatedBindings = yield* Policy.bindings
+			assert.equal(allocatedBindings, 1)
 			const pending = yield* Effect.forkScoped(
 				unit.terminate.pipe(
 					Effect.andThen(unit.exited),
@@ -234,10 +261,17 @@ it.effect(
 			assert.equal(started._tag, "Failure")
 			const count = yield* Ref.get(launches)
 			assert.equal(count, 0)
+			yield* Scope.close(owner, Exit.void)
+			const retiredBindings = yield* Policy.bindings
+			assert.equal(retiredBindings, 0)
 		}).pipe(
 			Effect.scoped,
 			Effect.provide(
-				Layer.merge(NodeServices.layer, SecureRandom.layerWebCrypto),
+				Graft.layer.pipe(
+					Layer.provideMerge(
+						Layer.merge(NodeServices.layer, SecureRandom.layerWebCrypto),
+					),
+				),
 			),
 		),
 )

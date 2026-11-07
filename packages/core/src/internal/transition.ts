@@ -37,16 +37,18 @@ type HostRelease =
 	  }
 	| { readonly _tag: "Completed"; readonly exit: Exit.Exit<void> }
 
-interface Attempt {
+interface HostLease {
 	readonly id: number
+	readonly scope: Scope.Closeable
+	readonly hostRelease: Ref.Ref<HostRelease>
+}
+interface Attempt extends HostLease {
 	readonly candidate: T.Candidate
 	readonly unit: T.Unit
 	readonly failure: Effect.Effect<never, T.DriverError>
 	readonly calls: TxRef.TxRef<number>
-	readonly scope: Scope.Closeable
 	readonly services: Ref.Ref<Context.Context<never>>
 	readonly terminated: Ref.Ref<Option.Option<T.Termination>>
-	readonly hostRelease: Ref.Ref<HostRelease>
 }
 export interface Managed {
 	readonly runtime: Runtime
@@ -302,38 +304,58 @@ const engine = (
 			yield* record({ attempt, phase })
 			return result.value.value
 		})
-	const allocate = Effect.fnUntraced(function* (candidate: T.Candidate) {
-		const id = yield* Ref.getAndUpdate(managed.next, (id) => id + 1)
-		const unit = yield* step(
-			id,
-			"Starting",
-			Effect.suspend(() => managed.driver.allocate(candidate, id)),
-			limits.startup.allocate,
-		)
-		const attempt: Attempt = {
-			id,
-			candidate,
-			unit,
-			failure: Effect.raceFirst(
-				unit.failure,
-				unit.exited.pipe(
-					Effect.flatMap((termination) =>
-						T.DriverError.make({
-							cause: termination.cause ?? Cause.fail(termination),
-						}),
+	const allocate = (candidate: T.Candidate) =>
+		Effect.uninterruptibleMask((restore) =>
+			Effect.gen(function* () {
+				const id = yield* Ref.getAndUpdate(managed.next, (id) => id + 1)
+				const scope = yield* Scope.fork(managed.scope)
+				const lease: HostLease = {
+					id,
+					scope,
+					hostRelease: yield* Ref.make<HostRelease>({ _tag: "Pending" }),
+				}
+				const unit = yield* restore(
+					step(
+						id,
+						"Starting",
+						Scope.provide(
+							Effect.suspend(() => managed.driver.allocate(candidate, id)),
+							scope,
+						),
+						limits.startup.allocate,
 					),
-				),
-			),
-			calls: yield* TxRef.make(0),
-			scope: yield* Scope.make(),
-			services: yield* Ref.make(Context.empty()),
-			terminated: yield* Ref.make<Option.Option<T.Termination>>(Option.none()),
-			hostRelease: yield* Ref.make<HostRelease>({ _tag: "Pending" }),
-		}
-		yield* Ref.update(managed.attempts, Array.append(attempt))
-		yield* generation(managed, attempt, "Starting")
-		return attempt
-	})
+				).pipe(
+					Effect.onExit((exit) =>
+						Exit.isFailure(exit)
+							? awaitHostRelease(lease).pipe(Effect.asVoid)
+							: Effect.void,
+					),
+				)
+				const attempt: Attempt = {
+					...lease,
+					candidate,
+					unit,
+					failure: Effect.raceFirst(
+						unit.failure,
+						unit.exited.pipe(
+							Effect.flatMap((termination) =>
+								T.DriverError.make({
+									cause: termination.cause ?? Cause.fail(termination),
+								}),
+							),
+						),
+					),
+					calls: yield* TxRef.make(0),
+					services: yield* Ref.make(Context.empty()),
+					terminated: yield* Ref.make<Option.Option<T.Termination>>(
+						Option.none(),
+					),
+				}
+				yield* Ref.update(managed.attempts, Array.append(attempt))
+				yield* generation(managed, attempt, "Starting")
+				return attempt
+			}),
+		)
 	const start = Effect.fnUntraced(function* (attempt: Attempt) {
 		const { unit, id } = attempt
 		yield* step(
@@ -411,7 +433,7 @@ const engine = (
 				policy.probe,
 			)
 	})
-	const beginHostRelease = Effect.fnUntraced(function* (attempt: Attempt) {
+	const beginHostRelease = Effect.fnUntraced(function* (attempt: HostLease) {
 		return yield* Effect.uninterruptible(
 			Effect.gen(function* () {
 				const completed = yield* Deferred.make<Exit.Exit<void>>()
@@ -458,7 +480,7 @@ const engine = (
 							yield* Ref.set(attempt.hostRelease, { _tag: "Completed", exit })
 							yield* Ref.update(
 								managed.attempts,
-								Array.filter((item) => item !== attempt),
+								Array.filter((item) => item.id !== attempt.id),
 							)
 							yield* Deferred.succeed(completed, exit)
 						}),
@@ -469,13 +491,13 @@ const engine = (
 			}),
 		)
 	})
-	const releaseHost = Effect.fnUntraced(function* (attempt: Attempt) {
+	const releaseHost = Effect.fnUntraced(function* (attempt: HostLease) {
 		const state = yield* beginHostRelease(attempt)
 		return state._tag === "Completed"
 			? state.exit
 			: yield* Deferred.await(state.completed)
 	})
-	const awaitHostRelease = Effect.fnUntraced(function* (attempt: Attempt) {
+	const awaitHostRelease = Effect.fnUntraced(function* (attempt: HostLease) {
 		const state = yield* beginHostRelease(attempt)
 		if (state._tag === "Completed") return state
 		const waited = yield* Effect.exit(
@@ -735,6 +757,10 @@ export const register = Effect.fnUntraced(function* (
 								),
 							})
 					}
+					yield* TxRef.update(runtime.trust, (state) => ({
+						...state,
+						used: true,
+					}))
 					yield* TxRef.set(entry.status.managed, Option.some(managed))
 				}),
 			)

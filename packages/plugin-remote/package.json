@@ -89,6 +89,10 @@
 			"source": "./src/host/worker.ts",
 			"default": "./dist/host/worker.js"
 		},
+		"./Policy": {
+			"source": "./src/Policy.ts",
+			"default": "./dist/Policy.js"
+		},
 		"./Publication": {
 			"source": "./src/Publication.ts",
 			"default": "./dist/Publication.js"
@@ -194,6 +198,7 @@
 			"./host/unix": "./dist/host/unix.js",
 			"./host/websocket": "./dist/host/websocket.js",
 			"./host/worker": "./dist/host/worker.js",
+			"./Policy": "./dist/Policy.js",
 			"./Publication": "./dist/Publication.js",
 			"./runner": "./dist/runner/index.js",
 			"./runner/auth/bearer": "./dist/runner/auth/bearer.js",

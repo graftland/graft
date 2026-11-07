@@ -21,6 +21,7 @@ import {
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 
 import type { Artifact } from "./Artifact"
+import { cancelled } from "./internal/sandboxCancellation"
 
 export class SandboxError extends Schema.TaggedError<
 	SandboxError,
@@ -189,19 +190,7 @@ export const linux = Layer.effect(
 					}
 				}).pipe(
 					Effect.catchCause((cause) => {
-						if (Cause.hasInterrupts(cause))
-							return Effect.logError(
-								"Sandbox preparation was interrupted",
-								cause,
-							).pipe(
-								Effect.andThen(
-									Effect.failCause(
-										Cause.fromReasons<never>(
-											Array.filter(cause.reasons, Cause.isInterruptReason),
-										),
-									),
-								),
-							)
+						if (Cause.hasInterrupts(cause)) return cancelled(cause)
 						const error = Cause.findError(cause)
 						if (
 							Result.isSuccess(error) &&
