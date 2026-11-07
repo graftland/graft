@@ -114,13 +114,13 @@ describe("SaaS tenant plugin trees", () => {
 				assert.strictEqual(after.length, 3)
 				for (const fork of Array.filter(
 					after,
-					(fork) => fork.name === "tenant",
+					(fork) => fork.name === "@graftland/sample-saas-tenants/tenant",
 				)) {
 					assert.deepStrictEqual(
 						Array.map(fork.children, (child) => [child.name, child.state._tag]),
 						[
-							["notes", "Active"],
-							["storage", "Active"],
+							["@graftland/sample-saas-tenants/notes", "Active"],
+							["@graftland/sample-saas-tenants/storage", "Active"],
 						],
 					)
 				}
@@ -207,7 +207,10 @@ describe("SaaS tenant plugin trees", () => {
 					)
 					assert.strictEqual(checks.length, 7)
 					for (const entry of checks) {
-						assert.strictEqual(entry.annotations["graft.plugin"], "notes")
+						assert.strictEqual(
+							entry.annotations["graft.plugin"],
+							"@graftland/sample-saas-tenants/notes",
+						)
 						const free = entry.annotations["tenant"] === "acorn"
 						assert.deepStrictEqual(entry.message, [
 							"Quota checked",
@@ -216,7 +219,10 @@ describe("SaaS tenant plugin trees", () => {
 					}
 					const snapshot = yield* tree
 					assert.strictEqual(
-						Array.filter(snapshot, (fork) => fork.name === "quota").length,
+						Array.filter(
+							snapshot,
+							(fork) => fork.name === "@graftland/sample-saas-tenants/quota",
+						).length,
 						1,
 					)
 				}),

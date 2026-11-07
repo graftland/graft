@@ -15,7 +15,7 @@ import { Graft, Plugin } from "@graftland/graft"
 import { Entry, Loader, ModuleResolver } from "@graftland/loader"
 
 const admin = Plugin.make({
-	name: "admin",
+	name: "app/admin",
 	inject: [Loader.Loader],
 	apply: () =>
 		Effect.gen(function* () {
@@ -26,8 +26,8 @@ const admin = Plugin.make({
 		}),
 })
 
-const cron = Plugin.make({ name: "cron", apply: () => Effect.void })
-const api = Plugin.make({ name: "api", apply: () => Effect.void })
+const cron = Plugin.make({ name: "app/cron", apply: () => Effect.void })
+const api = Plugin.make({ name: "app/api", apply: () => Effect.void })
 const resolver = ModuleResolver.fromRecord({ "./plugins/cron.mjs": cron, api })
 
 const entries = await Effect.runPromise(
@@ -40,7 +40,7 @@ const entries = await Effect.runPromise(
 		yield* fork.await
 		const read = yield* Deferred.make<ReadonlyArray<Entry.Entry>>()
 		const probe = Plugin.make({
-			name: "probe",
+			name: "app/probe",
 			inject: [Loader.Loader],
 			apply: () =>
 				Loader.Loader.pipe(
@@ -59,6 +59,10 @@ const entries = await Effect.runPromise(
 entries[0]?.disabled // => true
 entries[1]?.config // => { every: "5 minutes" }
 ```
+
+For a tree containing a managed fork, Loader rejects edits, refreshes and retry
+before invoking store mutations. See [Execution transitions](../transitions/)
+for bypass protection.
 
 ## Edit entries from code
 
@@ -207,3 +211,16 @@ arbitrary editors. If this remaining risk is not acceptable, do not save in an
 editor and write through the API at the same time.
 
 :::
+
+## Address a managed entry
+
+Use an entry id as `Graft.transition`'s `target`; numeric fork ids are also
+accepted. Loader binds the name before the entry registers its driver. Embedded
+registrations supply `instance` explicitly; a conflicting name or duplicate
+registration fails before a unit starts.
+
+`update`, `remove`, `create`, refresh and retry remain bypass operations: a
+managed descendant rejects the operation before the store is invoked.
+[Managed configuration](../config-file/#managed-integrations) describes the file
+boundary. An accepted transition does not change `loader.entries`; that value
+describes persisted configuration, not current generations.

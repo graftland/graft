@@ -21,7 +21,7 @@ import { Duration, Effect, Option, Schedule, Schema, Stream } from "effect"
 import { Fork, Graft, Plugin } from "@graftland/graft"
 
 const ticker = Plugin.make({
-	name: "ticker",
+	name: "app/ticker",
 	config: Schema.Struct({ every: Schema.Duration }),
 	apply: ({ every }) =>
 		Effect.log("tick").pipe(
@@ -42,13 +42,17 @@ await Effect.runPromise(
 
 ### 選項
 
-| 選項     | 作用                                                                   |
-| -------- | ---------------------------------------------------------------------- |
-| `name`   | 用於日誌和 fork 樹的名稱。                                             |
-| `config` | Effect `Schema`，用於在執行 `apply` 前解碼輸入。不需要設定時可以省略。 |
-| `inject` | 外掛需要的服務。請參閱[相依](#相依)。                                  |
-| `apply`  | 啟動外掛，在 fork 的 `Scope` 內執行。                                  |
-| `retry`  | 在 `apply` 或受監督任務失敗後重新啟動外掛的 `Schedule`。               |
+| 選項       | 作用                                                                                              |
+| ---------- | ------------------------------------------------------------------------------------------------- |
+| `name`     | 用於日誌和 fork 樹的名稱，[按 Effect 服務鍵的方式建構](../best-practices/packaging/#為外掛命名)。 |
+| `config`   | Effect `Schema`，用於在執行 `apply` 前解碼輸入。不需要設定時可以省略。                            |
+| `inject`   | 外掛需要的服務。請參閱[相依](#相依)。                                                             |
+| `provides` | 宣告本地服務鍵或結構化契約描述，不會發布服務。                                                    |
+| `overlap`  | 宣告重疊執行安全性，預設 `false`。僅為中繼資料，不改變重新啟動行為。                              |
+| `apply`    | 啟動外掛，在 fork 的 `Scope` 內執行。                                                             |
+| `retry`    | 在 `apply` 或受監督任務失敗後重新啟動外掛的 `Schedule`。                                          |
+
+透過 [Plugin.probe](../probes/) 註冊屬於目前服務嘗試的健康檢查。
 
 ### 在 `apply` 內該用什麼
 
@@ -139,7 +143,7 @@ class Cache extends Context.Service<
 >()("app/Cache") {}
 
 const report = Plugin.make({
-	name: "report",
+	name: "app/report",
 	inject: [Database, Plugin.optional(Cache)],
 	apply: () =>
 		Effect.gen(function* () {
@@ -202,7 +206,7 @@ const startServer = (port: number, banner: Ref.Ref<string>) =>
 	Ref.update(starts, Array.append(port))
 
 const server = Plugin.make({
-	name: "server",
+	name: "app/server",
 	config: Schema.Struct({ port: Schema.Int, banner: Schema.String }),
 	apply: (config) =>
 		Effect.gen(function* () {
@@ -273,7 +277,7 @@ const connect = Effect.flatMap(
 )
 
 const client = Plugin.make({
-	name: "client",
+	name: "app/client",
 	retry: Schedule.exponential("1 second"),
 	apply: () => connect,
 })
@@ -316,7 +320,7 @@ const openDatabase = Effect.acquireRelease(
 )
 
 export const database = Plugin.service(Database, openDatabase, {
-	name: "database",
+	name: "app/database",
 })
 ```
 
@@ -350,14 +354,14 @@ const StorageLive = Layer.mergeAll(
 )
 
 const storage = Plugin.layer(StorageLive, {
-	name: "storage",
+	name: "app/storage",
 	inject: [Database],
 	provides: [Storage, StorageAdmin],
 })
 
 // Starts only once both services are published.
 const files = Plugin.make({
-	name: "files",
+	name: "app/files",
 	inject: [Storage, StorageAdmin],
 	apply: () => Effect.void,
 })
@@ -403,3 +407,27 @@ npm create @graftland@latest review -- --template plugin
 | 發布 JavaScript                                          | Node 不會移除 `node_modules` 內檔案的型別。`npm publish` 會先執行 `build`，把 `src` 編譯到 `dist`。                                                            |
 
 發布套件需要注意的其他事項見[外掛套件](../best-practices/packaging/)。
+
+## 託管項目
+
+將項目清單欄位宣告為 `Entry.Entries`，並傳給 `Group.Group`。
+
+```ts
+import { Effect, Schema } from "effect"
+
+import { Graft, Plugin } from "@graftland/graft"
+import { Entry, Group } from "@graftland/loader"
+
+export const host = Plugin.make({
+	name: "host",
+	config: Schema.Struct({ plugins: Entry.Entries }),
+	apply: Effect.fnUntraced(function* ({ plugins }) {
+		const subtree = yield* Graft.plugin(Group.Group, plugins)
+		return (next) => subtree.update(next.plugins).pipe(Effect.as(true))
+	}),
+})
+```
+
+Graft 會補上缺少的 id，將它們寫回設定檔，並用每個子外掛自己的設定 Schema 驗證其設定。組合後的編輯器 Schema 也會對這些清單套用已登記的子外掛 Schema。
+
+像上例一樣回傳更新函式，可在 Graft 首次寫回 id 時保持子外掛執行。沒有更新函式的宿主會在這次寫入後重新啟動。身分規則見[設定項目欄位](../config-file/#設定項目欄位)。

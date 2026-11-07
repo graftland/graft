@@ -39,7 +39,7 @@ export const make = (
 		),
 })
 export default Plugin.make({
-	name: "remote-websocket-connector",
+	name: "@graftland/plugin-remote/host/websocket",
 	config: Config,
 	inject: [FileSystem.FileSystem, Path.Path],
 	apply: Effect.fnUntraced(function* (config) {

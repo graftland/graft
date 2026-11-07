@@ -475,8 +475,7 @@ it.live.each(
 				{ failure: "import", repair: "dependency" },
 				{ failure: "exports", repair: "contract" },
 				{ failure: "exports", repair: "dependency" },
-				{ failure: "startup", repair: "contract" },
-				{ failure: "startup", repair: "dependency" },
+				{ failure: "startup", repair: "deployment" },
 				{ failure: "startup", repair: "implementation" },
 			],
 			(scenario) => ({ target, ...scenario }),
@@ -523,16 +522,14 @@ it.live.each(
 				`
 import { make } from ${contract};
 import { Schema } from ${effect};
-import { valid, selected } from './helper.mjs';
-export const contract = valid ? make({ name: 'cli-remote', config: Schema.String,
-module: new URL(selected ?? './implementation.mjs', import.meta.url).href }) : undefined;
+import { valid } from './helper.mjs';
+export const contract = valid ? make({ name: 'cli-remote', config: Schema.String }) : undefined;
 `,
 			)
 			const validContract = yield* fs.readFileString(
 				`${directory}/contract.mjs`,
 			)
-			const validHelper =
-				"export const valid = true; export const selected = undefined;"
+			const validHelper = "export const valid = true;"
 			yield* fs.writeFileString(`${directory}/helper.mjs`, validHelper)
 			if (failure === "import")
 				yield* fs.writeFileString(
@@ -543,7 +540,7 @@ module: new URL(selected ?? './implementation.mjs', import.meta.url).href }) : u
 				yield* fs.writeFileString(
 					`${directory}/${repair === "dependency" ? "helper" : "contract"}.mjs`,
 					repair === "dependency"
-						? "export const valid = false; export const selected = undefined;"
+						? "export const valid = false;"
 						: "export const wrongName = 1;",
 				)
 			const implementation = (marker: string) => `
@@ -574,6 +571,7 @@ apply: (value) => Effect.acquireRelease(Effect.logInfo('${marker} ' + value),
   name: remote
   config:
     contract: ./contract.mjs
+    implementation: ./implementation.mjs
     connect:
       ${target === "local" ? `local: { command: [${executable}, ${bin}] }` : "worker: { execArgv: [] }"}
     config: hello
@@ -628,19 +626,11 @@ Start.run({ config: ${config}, watch: true }).pipe(NodeRuntime.runMain);`,
 							`${directory}/fixed.mjs`,
 							implementation("REMOTE_STARTED"),
 						)
-						if (repair === "contract")
-							yield* fs.writeFileString(
-								`${directory}/contract.mjs`,
-								String.replace(
-									"./implementation.mjs",
-									"./fixed.mjs",
-								)(validContract),
-							)
-						else
-							yield* fs.writeFileString(
-								`${directory}/helper.mjs`,
-								"export const valid = true; export const selected = './fixed.mjs';",
-							)
+						const deployment = yield* fs.readFileString(file)
+						yield* fs.writeFileString(
+							file,
+							String.replace("./implementation.mjs", "./fixed.mjs")(deployment),
+						)
 					}
 				} else
 					yield* fs.writeFileString(
@@ -687,14 +677,14 @@ Start.run({ config: ${config}, watch: true }).pipe(NodeRuntime.runMain);`,
 
 			yield* fs.writeFileString(
 				`${directory}/next.mjs`,
-				implementation("CONTRACT_UPDATED"),
+				implementation("DEPLOYMENT_UPDATED"),
 			)
-			const original = yield* fs.readFileString(`${directory}/contract.mjs`)
+			const original = yield* fs.readFileString(file)
 			yield* fs.writeFileString(
-				`${directory}/contract.mjs`,
+				file,
 				String.replace("./implementation.mjs", "./next.mjs")(original),
 			)
-			yield* waitFor("CONTRACT_UPDATED hello")
+			yield* waitFor("DEPLOYMENT_UPDATED hello")
 			yield* fs.writeFileString(
 				`${directory}/next.mjs`,
 				implementation("NEXT_UPDATED"),

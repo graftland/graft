@@ -24,7 +24,7 @@ To log forks that stay `Pending`, add the plugin from
 [Diagnose with the fork tree](../observability/#diagnose-with-the-fork-tree).
 The
 [`http-gateway`](https://github.com/graftland/graft/tree/main/samples/http-gateway)
-sample serves the tree over HTTP at `GET /_graft`.
+sample mounts the live tree on the [HTTP server](../../http/) at `GET /_graft`.
 
 ## Read the state
 
@@ -67,12 +67,15 @@ Messages about plugins are listed in
 [What Graft logs](../observability/#what-graft-logs). These messages from
 `graft start` and the loader point at a problem with code or configuration:
 
-| Message                                              | Meaning                                                                                                                                                   |
-| ---------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `Restart required…`                                  | A module change cannot be hot reloaded. The old plugins keep running. See [When a reload does not apply](../../hot-reload/#when-a-reload-does-not-apply). |
-| `Reloading plugin modules failed`                    | The new code did not import or pass its checks. The old plugins keep running; fix the code and save again.                                                |
-| `Waiting for valid configuration in <file>`          | The first `graft.yml` is invalid under `--watch`. See [Invalid first configuration](../../cli/#invalid-first-configuration).                              |
-| `Dropped an edit to "<id>": the file changed it too` | An API edit lost to an edit in the file. See [Conflicts with external edits](../../loader-api/#conflicts-with-external-edits).                            |
+| Message                                              | Meaning                                                                                                                                                                     |
+| ---------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Restart required…`                                  | A module change cannot be hot reloaded. The old plugins keep running. See [When a reload does not apply](../../hot-reload/#when-a-reload-does-not-apply).                   |
+| `Reloading plugin modules failed`                    | The new code did not import or pass its checks. The old plugins keep running; fix the code and save again.                                                                  |
+| `Kept the previous code: plugin "<name>" …`          | The replacement failed or timed out; counted restored forks are active or `Pending`. A failure carries its full cause; a timeout has no cause. Fix the code and save again. |
+| `Replacement abandoned: plugin "<name>" …`           | `RecoveryFailed`: why the new code was abandoned. Errors carry full causes; timeouts name the plugin.                                                                       |
+| `Previous code failed to restart: plugin "<name>" …` | `RecoveryFailed`: the restored plugin also failed. The error carries its full cause. Fix the startup failure and save again.                                                |
+| `Waiting for valid configuration in <file>`          | The first `graft.yml` is invalid under `--watch`. See [Invalid first configuration](../../cli/#invalid-first-configuration).                                                |
+| `Dropped an edit to "<id>": the file changed it too` | An API edit lost to an edit in the file. See [Conflicts with external edits](../../loader-api/#conflicts-with-external-edits).                                              |
 
 ## Symptoms
 

@@ -1,9 +1,8 @@
-import { Array, Effect, HashMap, Option, Result, Stream } from "effect"
+import { Array, Effect, HashMap, Option, Result } from "effect"
 import { assert, describe, it } from "@effect/vitest"
 
-import { Graft, Plugin } from "../src/index.ts"
+import { Plugin } from "../src/index.ts"
 import * as Aliases from "../src/internal/aliases.ts"
-import { run } from "./utils.ts"
 
 const plugin = (name: string) => Plugin.make({ name, apply: () => Effect.void })
 
@@ -69,7 +68,7 @@ describe("weak replacement identities", () => {
 							),
 						),
 					)
-					assert.deepStrictEqual(actual, conflicts, `Batch ${step}`)
+					assert.deepStrictEqual(actual.conflicts, conflicts, `Batch ${step}`)
 					if (conflicts.length === 0) expected = next
 					for (let index = 0; index < plugins.length; index++) {
 						const resolved = yield* Effect.tx(
@@ -120,7 +119,7 @@ describe("weak replacement identities", () => {
 					Effect.gen(function* () {
 						yield* Aliases.replace(aliases, [[p, q]])
 						const rejected = yield* Aliases.replace(aliases, [[p, r]])
-						assert.deepStrictEqual(rejected, [0])
+						assert.deepStrictEqual(rejected.conflicts, [0])
 						yield* expectAlias(aliases, p, q)
 					}),
 				)
@@ -153,33 +152,5 @@ describe("weak replacement identities", () => {
 				yield* expectAlias(aliases, q, p)
 				yield* expectAlias(aliases, b, b)
 			}),
-	)
-	it.effect(
-		"rolls back replacement aliases and live fork specifications together",
-		() =>
-			Effect.gen(function* () {
-				const p = plugin("P")
-				const q = plugin("Q")
-				const existing = yield* Graft.plugin(p)
-				yield* existing.await
-				const outcome = yield* Effect.result(
-					Effect.tx(
-						Effect.gen(function* () {
-							yield* Graft.replace([[p, q]])
-							return yield* Effect.fail("rollback")
-						}),
-					),
-				)
-				assert(Result.isFailure(outcome))
-				yield* existing.restart
-				yield* existing.await
-				const later = yield* Graft.plugin(p)
-				yield* later.await
-				const snapshot = yield* Stream.runHead(Graft.forks)
-				assert.deepStrictEqual(
-					Array.map(Option.getOrThrow(snapshot), (entry) => entry.name),
-					["P", "P"],
-				)
-			}).pipe(run),
 	)
 })

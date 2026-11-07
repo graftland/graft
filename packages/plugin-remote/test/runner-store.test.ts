@@ -38,7 +38,7 @@ const record: typeof LoadedRecord.Type = {
 	limits: defaults,
 	phase: "Loaded",
 	child: { pid: 42, start: { born: "process-start" } },
-	load: { specifier: "fixture" },
+	load: { contract: "fixture-contract", implementation: "fixture" },
 	code: { name: "fixture", version: "1.0.0", digest: "digest" },
 }
 const runtime = Layer.mergeAll(

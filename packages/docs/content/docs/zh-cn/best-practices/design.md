@@ -62,7 +62,7 @@ class Visits extends Context.Service<
 >()("@acme/graft-plugin-visits/Visits") {}
 
 const visits = Plugin.make({
-	name: "visits",
+	name: "app/visits",
 	apply: () =>
 		Effect.gen(function* () {
 			const count = yield* Ref.make(0)
@@ -74,7 +74,7 @@ const visits = Plugin.make({
 })
 
 const visitor = Plugin.make({
-	name: "visitor",
+	name: "app/visitor",
 	inject: [Visits],
 	apply: () =>
 		Effect.gen(function* () {
@@ -148,15 +148,15 @@ import { Effect, Option, Schema, Stream } from "effect"
 
 import { Fork, Graft, Plugin } from "@graftland/graft"
 
-const notes = Plugin.make({ name: "notes", apply: () => Effect.void })
+const notes = Plugin.make({ name: "app/notes", apply: () => Effect.void })
 const storage = Plugin.make({
-	name: "storage",
+	name: "app/storage",
 	config: Schema.Struct({ file: Schema.String }),
 	apply: () => Effect.void,
 })
 
 const tenant = Plugin.make({
-	name: "tenant",
+	name: "app/tenant",
 	config: Schema.Struct({ file: Schema.String }),
 	apply: (config) =>
 		Effect.gen(function* () {
@@ -171,7 +171,7 @@ const trees = await Effect.runPromise(
 		return yield* Stream.runHead(Graft.forks)
 	}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
 )
-trees // => Option.some([{ id: 1, name: "tenant", input: { file: "acorn.json" }, state: Fork.ForkState.Active(), children: [{ id: 2, name: "notes", input: undefined, state: Fork.ForkState.Active(), children: [] }, { id: 3, name: "storage", input: { file: "acorn.json" }, state: Fork.ForkState.Active(), children: [] }] }])
+trees // => Option.some([{ id: 1, name: "app/tenant", input: { file: "acorn.json" }, state: Fork.ForkState.Active(), children: [{ id: 2, name: "app/notes", input: undefined, state: Fork.ForkState.Active(), children: [] }, { id: 3, name: "app/storage", input: { file: "acorn.json" }, state: Fork.ForkState.Active(), children: [] }] }])
 ```
 
 ```yaml title="graft.yml"

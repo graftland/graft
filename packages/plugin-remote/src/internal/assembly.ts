@@ -1,18 +1,8 @@
-import {
-	Array,
-	Context,
-	Deferred,
-	Effect,
-	Fiber,
-	Option,
-	Schema,
-	Stream,
-} from "effect"
+import { Array, Context, Effect, Option, Schema, Stream } from "effect"
 
 import { Graft, Plugin, type Fork } from "@graftland/graft"
 
 import {
-	Authenticator,
 	Credentials,
 	type AuthenticatorApi,
 	type CredentialsApi,
@@ -20,17 +10,12 @@ import {
 import { AuthenticationFailed } from "../Errors"
 import {
 	Connector,
-	Listener,
 	type Accept,
 	type Properties,
 	type Session,
 } from "../Transport"
 import { follow } from "./follow"
 import { findSubtree, isSubtreeActive } from "./forkTree"
-import { Peer } from "./Peer"
-import { closedNormally, connectionEnded } from "./runner/connectionEnded"
-import { RunnerLifecycle } from "./RunnerLifecycle"
-import { Supervisor } from "./Supervisor"
 
 export class ListenerConfigError extends Schema.TaggedError<
 	ListenerConfigError,
@@ -92,15 +77,19 @@ const failure = (tree: Fork.ForkTree): Effect.Effect<void, CapabilityFailed> =>
 		? Effect.fail(CapabilityFailed.make({ cause: tree.state.cause }))
 		: Effect.forEach(tree.children, failure, { discard: true })
 
-const probe = (name: string, key: Context.Key<unknown, unknown>) =>
+const probe = (
+	assembly: string,
+	plugin: string,
+	key: Context.Key<unknown, unknown>,
+) =>
 	Plugin.make({
-		name: "remote-capability-contract",
+		name: `${assembly}/probe`,
 		inject: [Plugin.optional(key)],
 		apply: Effect.fnUntraced(function* () {
 			const value = yield* Effect.serviceOption(key)
 			if (Option.isNone(value))
 				return yield* CapabilityContractError.make({
-					plugin: name,
+					plugin,
 					key: key.key,
 				})
 		}),
@@ -109,7 +98,11 @@ const probe = (name: string, key: Context.Key<unknown, unknown>) =>
 /** Resolve the key in a fresh consumer after the provider subtree settles.
  * An optional consumer started earlier could still hold a pre-publication snapshot.
  */
-const watch = (provider: Fork.Fork, key: Context.Key<unknown, unknown>) =>
+const watch = (
+	assembly: string,
+	provider: Fork.Fork,
+	key: Context.Key<unknown, unknown>,
+) =>
 	Plugin.fork(
 		Graft.forks.pipe(
 			Stream.map((trees) => findSubtree(trees, provider.id)),
@@ -124,7 +117,7 @@ const watch = (provider: Fork.Fork, key: Context.Key<unknown, unknown>) =>
 			Stream.filter((tree) => tree.active),
 			Stream.runForEach((tree) =>
 				Effect.scoped(
-					Graft.plugin(probe(tree.name, key)).pipe(
+					Graft.plugin(probe(assembly, tree.name, key)).pipe(
 						Effect.flatMap((fork) => fork.await),
 					),
 				),
@@ -132,11 +125,16 @@ const watch = (provider: Fork.Fork, key: Context.Key<unknown, unknown>) =>
 		),
 	)
 
-const assembly = (
+/**
+ * An assembly runs a transport and an auth provider in its own realm, then the
+ * consumer that uses them. Each side defines its own, under its own name.
+ */
+export const make = (
+	name: string,
 	keys: readonly [Context.Key<unknown, unknown>, Context.Key<unknown, unknown>],
 ) =>
 	Plugin.make({
-		name: "remote-assembly",
+		name,
 		config: Input,
 		apply: Effect.fnUntraced(function* (input) {
 			yield* Effect.forEach(
@@ -149,7 +147,7 @@ const assembly = (
 						invocation.plugin,
 						invocation.config,
 					)
-					yield* watch(provider, key)
+					yield* watch(name, provider, key)
 				}),
 			)
 			const consumer = yield* Graft.plugin(input.consumer, input.input)
@@ -170,21 +168,6 @@ const assembly = (
 			)
 		}),
 	})
-const hostAssembly = assembly([Connector, Credentials])
-const runnerAssembly = assembly([Listener, Authenticator])
-
-export const host = (input: Input) =>
-	Graft.plugin(hostAssembly, input, { isolate: [Connector, Credentials] })
-export const runner = (
-	input: Omit<Input, "consumer">,
-	consumer = listenerConsumer,
-) =>
-	Graft.plugin(
-		runnerAssembly,
-		{ ...input, consumer },
-		{ isolate: [Listener, Authenticator] },
-	)
-
 export const compatible = (
 	properties: Properties,
 	kind: CredentialsApi["kind"],
@@ -208,13 +191,13 @@ export const compatible = (
 		)
 	return Effect.void
 }
-const kind = (auth: AuthenticatorApi): CredentialsApi["kind"] =>
+export const kind = (auth: AuthenticatorApi): CredentialsApi["kind"] =>
 	auth._tag === "Mtls"
 		? "Certificate"
 		: auth._tag === "Header"
 			? "Authorization"
 			: "None"
-const warn = (
+export const warn = (
 	properties: Properties,
 	credentials: CredentialsApi["kind"],
 	side: "host" | "runner",
@@ -279,70 +262,5 @@ export const accept =
 						).pipe(Effect.as(auth.identity))
 		return identity.pipe(Effect.map(session))
 	}
-
-export const makeListenerConsumer = (
-	prepare: (
-		properties: Properties,
-		auth: AuthenticatorApi,
-	) => Effect.Effect<void, CapabilityCombinationError> = () => Effect.void,
-	ready: Effect.Effect<void> = Effect.void,
-) =>
-	Plugin.make({
-		name: "remote-listener-consumer",
-		inject: [
-			Listener,
-			Authenticator,
-			Supervisor,
-			Plugin.optional(RunnerLifecycle),
-		],
-		apply: Effect.fnUntraced(function* () {
-			const listener = yield* Listener
-			const auth = yield* Authenticator
-			const supervisor = yield* Supervisor
-			const lifecycle = yield* Effect.serviceOption(RunnerLifecycle)
-			yield* prepare(listener.properties, auth)
-			yield* compatible(listener.properties, kind(auth)).pipe(
-				Effect.mapError((error) =>
-					ListenerConfigError.make({ detail: error.detail }),
-				),
-			)
-			yield* warn(listener.properties, kind(auth), "runner")
-			const serving = yield* listener.bind(
-				auth._tag === "Mtls" ? Option.some(auth.tls) : Option.none(),
-			)
-			const running = yield* Plugin.fork(
-				serving
-					.serve(
-						accept(
-							auth,
-							listener.properties,
-							(identity) => (channel) =>
-								supervisor.accept(channel).pipe(
-									Effect.catchCause((cause) =>
-										listener.properties.protocol === "stdio"
-											? closedNormally(cause)
-												? Effect.void
-												: Effect.failCause(cause)
-											: connectionEnded(cause),
-									),
-									Effect.provideService(Peer, identity),
-								),
-						),
-					)
-					.pipe(
-						Effect.onExit((exit) =>
-							listener.properties.protocol === "stdio" &&
-							Option.isSome(lifecycle)
-								? Deferred.done(lifecycle.value.ended, exit)
-								: Effect.void,
-						),
-					),
-			)
-			yield* serving.ready.pipe(Effect.raceFirst(Fiber.join(running)))
-			yield* ready
-		}),
-	})
-
-export const listenerConsumer = makeListenerConsumer()
 
 export const connect = connectWith()

@@ -10,7 +10,7 @@ import { Forecasts } from "../Forecasts.ts"
  * while a forecasts provider is loaded; nothing here checks for that.
  */
 export default Plugin.make({
-	name: "weather",
+	name: "@graftland/sample-chat-bot/plugins/weather",
 	inject: [Forecasts],
 	apply: Effect.fn("weather.apply")(function* () {
 		const forecasts = yield* Forecasts

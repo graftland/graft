@@ -39,7 +39,13 @@ export class Api extends Context.Service<
 >()("@graftland/benchmarks/remote-contract/Api") {}
 const signals = Contract.service(
 	Signals,
-	RpcGroup.make(Rpc.make("Notice", { payload: { kind: Schema.String } })),
+	RpcGroup.make(
+		Contract.operation(
+			"@graftland/benchmarks/remote/Notice",
+			1,
+			Rpc.make("Notice", { payload: { kind: Schema.String } }),
+		),
+	),
 	{
 		toHandlers: (service) => ({
 			Notice: ({ kind }: { readonly kind: string }) => service.notice(kind),
@@ -53,26 +59,54 @@ const signals = Contract.service(
 const api = Contract.service(
 	Api,
 	RpcGroup.make(
-		Rpc.make("Echo", { payload: { text: Schema.String }, success: Reply }),
-		Rpc.make("Batch", {
-			payload: { texts: Schema.Array(Schema.String) },
-			success: Schema.Array(Reply),
-		}),
-		Rpc.make("Info", { success: Info }),
-		Rpc.make("Values", {
-			payload: { count: Schema.Int },
-			success: Schema.Int,
-			stream: true,
-		}),
-		Rpc.make("Burn", {
-			payload: { iterations: Schema.Int },
-			success: Schema.Int,
-		}),
-		Rpc.make("Logs", {
-			payload: { count: Schema.Int, paced: Schema.Boolean },
-			success: Schema.Int,
-		}),
-		Rpc.make("Crash"),
+		Contract.operation(
+			"@graftland/benchmarks/remote/Echo",
+			1,
+			Rpc.make("Echo", { payload: { text: Schema.String }, success: Reply }),
+		),
+		Contract.operation(
+			"@graftland/benchmarks/remote/Batch",
+			1,
+			Rpc.make("Batch", {
+				payload: { texts: Schema.Array(Schema.String) },
+				success: Schema.Array(Reply),
+			}),
+		),
+		Contract.operation(
+			"@graftland/benchmarks/remote/Info",
+			1,
+			Rpc.make("Info", { success: Info }),
+		),
+		Contract.operation(
+			"@graftland/benchmarks/remote/Values",
+			1,
+			Rpc.make("Values", {
+				payload: { count: Schema.Int },
+				success: Schema.Int,
+				stream: true,
+			}),
+		),
+		Contract.operation(
+			"@graftland/benchmarks/remote/Burn",
+			1,
+			Rpc.make("Burn", {
+				payload: { iterations: Schema.Int },
+				success: Schema.Int,
+			}),
+		),
+		Contract.operation(
+			"@graftland/benchmarks/remote/Logs",
+			1,
+			Rpc.make("Logs", {
+				payload: { count: Schema.Int, paced: Schema.Boolean },
+				success: Schema.Int,
+			}),
+		),
+		Contract.operation(
+			"@graftland/benchmarks/remote/Crash",
+			1,
+			Rpc.make("Crash"),
+		),
 	),
 	{
 		toHandlers: (service) => ({
@@ -106,7 +140,6 @@ const api = Contract.service(
 export const contract = Contract.make({
 	name: "benchmark-remote",
 	config: Config,
-	module: new URL("./remote-implementation.js", import.meta.url).href,
 	inject: [signals],
 	provides: [api],
 })

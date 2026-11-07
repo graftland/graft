@@ -1,8 +1,8 @@
 ---
 title: Graft
-description:
-  园艺学 Effect 系统。基于 Effect
-  的插件框架，可在进程运行期间加载、替换和卸载插件。
+description: >-
+  园艺学 Effect 系统。面向长期运行的 TypeScript 应用、基于 Effect
+  的插件运行时，可在进程运行期间加载、替换和卸载插件。
 template: splash
 hero:
   title: "<span>园艺学</span> <span>Effect</span> <span>系统</span>"
@@ -39,19 +39,19 @@ import { Card, CardGrid } from "@astrojs/starlight/components"
 ## 三项承诺
 
 <CardGrid>
-	<Card title="砧木">
-		服务是 Effect 的 <code>Context</code> 键，由 layer 或其他插件提供。插件在{" "}
-		<code>inject</code> 中列出所需服务，由编译器检查。见
-		<a href="services/">服务</a>。
+	<Card title="热替换">
+		不砍树，只换品种。热重载只替换受改动影响的插件，在一次事务中完成；新代码失败时保留旧代码。见
+		<a href="hot-reload/">热重载</a>。
 	</Card>
-	<Card title="修剪">
+	<Card title="干净卸载">
 		每个插件都在自己的 <code>Scope</code>{" "}
 		中运行。插件消失时，依赖它的部分先停止，再执行它的 finalizer。失败保留完整的{" "}
 		<code>Cause</code>。见<a href="lifecycle/">生命周期</a>。
 	</Card>
-	<Card title="高接换种">
-		不砍树，只换品种。热重载只替换受改动影响的插件，在一次事务中完成；新代码失败时保留旧代码。见
-		<a href="hot-reload/">热重载</a>。
+	<Card title="依赖受检查">
+		服务是 Effect 的 <code>Context</code> 键，由 layer 或其他插件提供。插件在{" "}
+		<code>inject</code> 中列出所需服务，由编译器检查。见
+		<a href="services/">服务</a>。
 	</Card>
 </CardGrid>
 
@@ -69,7 +69,7 @@ class Greeter extends Context.Service<
 
 // Publishes a Greeter while it is loaded.
 const greeter = Plugin.make({
-	name: "greeter",
+	name: "app/greeter",
 	config: Schema.Struct({ greeting: Schema.String }),
 	apply: ({ greeting }) =>
 		Graft.provide(Greeter, {
@@ -79,7 +79,7 @@ const greeter = Plugin.make({
 
 // Starts once a Greeter exists, and stops before it goes away.
 const hello = Plugin.make({
-	name: "hello",
+	name: "app/hello",
 	inject: [Greeter],
 	apply: () => Effect.flatMap(Greeter, (greeter) => greeter.greet("world")),
 })
@@ -138,15 +138,19 @@ states // => [Option.some(Fork.ForkState.Pending({ missing: ["app/Greeter"] })),
 
 ## 包
 
-| 包                           | 功能                                                                             |
-| ---------------------------- | -------------------------------------------------------------------------------- |
-| `@graftland/graft`           | 基于 Effect 的插件框架：插件、fork、服务、隔离、事件和日志。                     |
-| `@graftland/loader`          | 从配置项列表或 YAML 配置文件加载插件。                                           |
-| `@graftland/hmr`             | 在 Node.js 中重载插件模块，无需重启进程。                                        |
-| `@graftland/cli`             | 提供 `graft` 命令：`start`、`create`、`add` 和 `remove`。                        |
-| `@graftland/create`          | 创建新的 Graft 项目：`npm create @graftland` 和 `graft create`。                 |
-| `@graftland/package-manager` | 使用 npm、pnpm 或 Yarn 安装依赖。安装失败时，通过[快照回滚](cli/#包管理器)撤销。 |
-| `@graftland/plugin-remote`   | 让插件在子进程、worker 或另一台机器上运行。见 [Remote](remote/overview/)。       |
+| 包                             | 功能                                                                                                 |
+| ------------------------------ | ---------------------------------------------------------------------------------------------------- |
+| `@graftland/graft`             | 基于 Effect 的插件框架：插件、fork、服务、隔离、事件和日志。                                         |
+| `@graftland/loader`            | 从配置项列表或 YAML 配置文件加载插件。                                                               |
+| `@graftland/hmr`               | 在 Node.js 中重载插件模块，无需重启进程。                                                            |
+| `@graftland/cli`               | 提供 `graft` 命令：`start`、`create`、`add` 和 `remove`。                                            |
+| `@graftland/create`            | 创建新的 Graft 项目：`npm create @graftland` 和 `graft create`。                                     |
+| `@graftland/package-manager`   | 使用 npm、pnpm 或 Yarn 安装依赖。安装失败时，通过[快照回滚](cli/#包管理器)撤销。                     |
+| `@graftland/plugin-remote`     | 让插件在子进程、worker 或另一台机器上运行。见 [Remote](remote/overview/)。                           |
+| `@graftland/plugin-otlp`       | 把一棵插件子树的 span 导出到 OpenTelemetry。见[导出 span](best-practices/observability/#导出-span)。 |
+| `@graftland/plugin-http`       | [共享 HTTP 服务器；路由和流随插件的生命周期加载和卸载。](http/)                                      |
+| `@graftland/plugin-http-api`   | [实时 HttpApi 路由组、类型化客户端和 OpenAPI 文档。](http-api/)                                      |
+| `@graftland/plugin-mcp-server` | 把插件的工具提供给 MCP 客户端。见 [MCP 服务器](mcp-server/overview/)。                               |
 
 所有包共用同一个版本号，一同发布，并需要 `effect` 4.1.x。
 

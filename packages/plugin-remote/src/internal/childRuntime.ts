@@ -48,6 +48,7 @@ const connect = Effect.fnUntraced(function* (
 /** One execution unit; the executable supplies the platform and Graft services. */
 export const run: (
 	descriptor: RunnerContract,
+	implementation: string,
 	channel: Port.Channel,
 	session?: string,
 	bootstrap?: Bootstrap,
@@ -55,6 +56,7 @@ export const run: (
 ) => Effect.Effect<void, ExecutionError, Graft.Graft> = Effect.fnUntraced(
 	function* (
 		descriptor: RunnerContract,
+		implementation: string,
 		channel: Port.Channel,
 		session: string = "local",
 		bootstrap?: Bootstrap,
@@ -67,13 +69,17 @@ export const run: (
 			const peer = yield* connect(contract, channel, session, bootstrap)
 			const instance = yield* Child.lifecycle(
 				contract,
+				implementation,
 				peer,
 				bootstrap?.identity ?? { id: session, generation: 1 },
 				telemetry,
 			)
 			const handlers = yield* contract.control.toHandlers({
-				Load: ({ input }) => instance.load(input),
-				Dispose: () => instance.dispose,
+				Describe: () => instance.describe,
+				Serve: ({ input }) => instance.serve(input),
+				Ready: () => instance.ready,
+				Probe: ({ name }) => instance.probe(name),
+				Stop: () => instance.stop,
 				Events: () => telemetry.eventStream,
 				Logs: () => telemetry.logStream,
 			})

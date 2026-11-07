@@ -8,7 +8,7 @@ English |
 The `graft` command: `start`, `create`, `add` and `remove`.
 
 ```sh
-npm install @graftland/cli effect
+npm install @graftland/cli @graftland/graft @graftland/loader effect
 ```
 
 Create a project with `npm create @graftland@latest my-app`, which runs the same

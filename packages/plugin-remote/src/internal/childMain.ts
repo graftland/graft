@@ -19,12 +19,18 @@ const child = Command.make(
 	"child",
 	{
 		contract: Argument.String("contract"),
+		implementation: Argument.String("implementation"),
 		session: Argument.String("session"),
 		bootstrap: Argument.String("bootstrap").pipe(
 			Argument.withSchema(Schema.fromJsonString(Bootstrap)),
 		),
 	},
-	Effect.fnUntraced(function* ({ contract, session, bootstrap }) {
+	Effect.fnUntraced(function* ({
+		contract,
+		implementation,
+		session,
+		bootstrap,
+	}) {
 		const watchdog = yield* Watchdog.start
 		// The executable owns stdin; it must not retain the process after a supervisor stop.
 		yield* Effect.addFinalizer(() =>
@@ -39,24 +45,33 @@ const child = Command.make(
 		if (!begin) return
 		const definition = yield* load(pathToFileURL(contract).href)
 		const channel = yield* bytes
-		return yield* run(definition, channel, session, bootstrap, watchdog.stop)
+		return yield* run(
+			definition,
+			pathToFileURL(implementation).href,
+			channel,
+			session,
+			bootstrap,
+			watchdog.stop,
+		)
 	}),
 )
 const cli = Command.make(
 	"remote-child",
 	{
 		contract: Argument.String("contract").pipe(Argument.optional),
+		implementation: Argument.String("implementation").pipe(Argument.optional),
 		session: Argument.String("session").pipe(Argument.withDefault("local")),
 	},
-	Effect.fnUntraced(function* ({ contract, session }) {
-		if (Option.isNone(contract))
+	Effect.fnUntraced(function* ({ contract, implementation, session }) {
+		if (Option.isNone(contract) || Option.isNone(implementation))
 			return yield* CliError.UserError.make({
-				cause: "Missing contract module",
-				userMessage: "A contract module or the child subcommand is required",
+				cause: "Missing contract or implementation module",
+				userMessage:
+					"Contract and implementation modules or the child subcommand are required",
 			})
 		const definition = yield* load(contract.value)
 		const channel = yield* bytes
-		return yield* run(definition, channel, session)
+		return yield* run(definition, implementation.value, channel, session)
 	}),
 ).pipe(Command.withSubcommands([child]))
 

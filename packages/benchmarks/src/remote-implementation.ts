@@ -5,11 +5,12 @@ import { Array, Effect, Ref, Stream } from "effect"
 
 import { Graft, Plugin } from "@graftland/graft"
 
-import { Api, Config, Signals } from "./remote-contract"
+import { Api, Config, contract, Signals } from "./remote-contract"
 
 export default Plugin.make({
 	name: "benchmark-remote-implementation",
 	config: Config,
+	provides: contract.provides,
 	inject: [Signals],
 	apply: Effect.fnUntraced(function* (initial) {
 		const signals = yield* Signals

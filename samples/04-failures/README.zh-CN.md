@@ -26,12 +26,12 @@ devenv shell -- pnpm --filter @graftland/sample-failures start
 
 ```text
 Connecting, attempt 1
-Plugin "client" failed
+Plugin "@graftland/sample-failures/main/makeClient" failed
   ConnectionRefused: Connection refused on attempt 1
 heartbeat: still running
 heartbeat: still running
 Connecting, attempt 2
-Plugin "client" failed
+Plugin "@graftland/sample-failures/main/makeClient" failed
   ConnectionRefused: Connection refused on attempt 2
 heartbeat: still running
 Connecting, attempt 3

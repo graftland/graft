@@ -45,7 +45,7 @@ const ledger = {
 }
 
 const writer = Plugin.make({
-	name: "writer",
+	name: "app/writer",
 	apply: () =>
 		Effect.gen(function* () {
 			const { id, generation } = yield* Instance

@@ -3,6 +3,7 @@ import { assert, describe, it } from "@effect/vitest"
 
 import {
 	agentFor,
+	execPrefix,
 	installCommand,
 	parseUserAgent,
 	runPrefix,
@@ -32,17 +33,21 @@ describe("user agent", () => {
 		assert.strictEqual(agentFor("pnpm", "9.15.9"), "pnpm")
 	})
 
-	it("names the commands that install and run scripts", () => {
+	it("names the commands that install, run scripts and run executables", () => {
 		assert.deepStrictEqual(
 			Array.map(
 				["npm", "pnpm", "yarn-classic", "yarn-berry"] as const,
-				(agent) => [installCommand(agent), `${runPrefix(agent)} dev`],
+				(agent) => [
+					installCommand(agent),
+					`${runPrefix(agent)} dev`,
+					`${execPrefix(agent)} graft schema`,
+				],
 			),
 			[
-				["npm install", "npm run dev"],
-				["pnpm install", "pnpm dev"],
-				["yarn", "yarn dev"],
-				["yarn", "yarn dev"],
+				["npm install", "npm run dev", "npx graft schema"],
+				["pnpm install", "pnpm dev", "pnpm exec graft schema"],
+				["yarn", "yarn dev", "yarn graft schema"],
+				["yarn", "yarn dev", "yarn graft schema"],
 			],
 		)
 	})

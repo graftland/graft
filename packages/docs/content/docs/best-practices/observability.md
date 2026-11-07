@@ -217,7 +217,7 @@ class Pager extends Context.Service<
 >()("app/Pager") {}
 
 const alerts = Plugin.make({
-	name: "alerts",
+	name: "app/alerts",
 	inject: [Pager],
 	apply: () =>
 		Effect.gen(function* () {
@@ -275,7 +275,7 @@ import { Graft, Plugin } from "@graftland/graft"
 const connect = (url: string) => Effect.logDebug(`Connecting to ${url}`)
 
 const feed = Plugin.make({
-	name: "feed",
+	name: "app/feed",
 	config: Schema.Struct({ url: Schema.String }),
 	apply: Effect.fn("feed.apply")(function* ({ url }) {
 		yield* connect(url).pipe(
@@ -308,7 +308,7 @@ await Effect.runPromise(
 		Effect.provide(Graft.layer),
 	),
 )
-spans // => ["graft.plugin feed", "graft.plugin feed > feed.apply", "feed.apply > feed.connect"]
+spans // => ["graft.plugin app/feed", "graft.plugin app/feed > feed.apply", "feed.apply > feed.connect"]
 ```
 
 - `graft.plugin <name>` sits under the span where the plugin was loaded, so a
@@ -319,10 +319,102 @@ spans // => ["graft.plugin feed", "graft.plugin feed > feed.apply", "feed.apply 
   `Effect.fn("exchange.apply")`.
 - A printed cause shows the span as a frame: `at graft.plugin <name>`.
 
+Each `graft.plugin <name>` span carries the plugin's log identity, `graft.fork`
+and `graft.plugin`, and also `graft.revision`:
+
+| Attribute        | Value                                                                                   |
+| ---------------- | --------------------------------------------------------------------------------------- |
+| `graft.fork`     | The fork's `id`.                                                                        |
+| `graft.plugin`   | The plugin's `name`.                                                                    |
+| `graft.revision` | Starts at 0 and grows on `restart`, replacement and rollback; a config update keeps it. |
+
 ### Export spans
 
-`graft start` creates the spans but installs no exporter. To send them to a
-collector, embed Graft and provide a tracer layer where the
+`graft start` creates the spans but installs no exporter. Export them with the
+[`@graftland/plugin-otlp`](https://github.com/graftland/graft/tree/main/packages/plugin-otlp)
+plugin, an ordinary plugin built from public Graft APIs. It loads the entries in
+its `plugins` itself and sends the spans of that subtree to an OTLP/HTTP
+collector:
+
+```yaml title="graft.yml"
+- id: traced
+  name: "@graftland/plugin-otlp"
+  config:
+    url: !env OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
+    serviceName: chat-bot
+    plugins:
+      - id: bot
+        name: ./src/bot.ts
+```
+
+| Change                                  | Effect                                                                                                                                                                                                                                                                              |
+| --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| HTTP exporter settings                  | New spans go to a new exporter. Started spans keep the old one, which flushes and closes when they end. Draining waits at most its `shutdownTimeout`; Effect then allows a separate `shutdownTimeout` for flushing (at most twice the timeout in total). The subtree keeps running. |
+| `exporter.config`                       | Forwarded to the exporter’s update function; a compatible update keeps the subtree running.                                                                                                                                                                                         |
+| `plugins`                               | Reconciled like a group: unchanged entries keep running. The exporter is not updated when its config is unchanged.                                                                                                                                                                  |
+| `exporter.name`                         | Restarts the traced subtree with the new provider.                                                                                                                                                                                                                                  |
+| Moving entries into or out of `plugins` | Restarts those entries, because their parent and intercept change.                                                                                                                                                                                                                  |
+| Exporter failure                        | The subtree waits for `Exporter` and resumes when the exporter’s own retry succeeds; no config change is needed.                                                                                                                                                                    |
+| Unloading the entry                     | The subtree stops first, then all remaining exporters flush and close concurrently.                                                                                                                                                                                                 |
+
+Plugins outside `plugins` are not traced. Graft writes missing ids in `plugins`
+back to the file, just like top-level entries, so reordering them preserves
+their identities.
+
+The HTTP fields are shorthand for the ordinary `@graftland/plugin-otlp/http`
+plugin. It supports `serialization: json | protobuf`, resource attributes and
+batching options; see the
+[package configuration](https://github.com/graftland/graft/tree/main/packages/plugin-otlp#readme)
+for defaults. Durations are milliseconds; numeric fields accept `!env` strings.
+Headers are `Redacted` values; supply credentials through `headers` with `!env`.
+The HTTP plugin waits in `Pending` without `HttpClient`.
+
+Select a third-party exporter with `exporter` instead of the HTTP fields:
+
+```yaml title="graft.yml"
+- id: traced
+  name: "@graftland/plugin-otlp"
+  config:
+    exporter:
+      name: graft-plugin-custom-traces
+      config:
+        destination: !env TRACE_DESTINATION
+    plugins:
+      - id: bot
+        name: ./src/bot.ts
+```
+
+| Exporter contract | Rule                                                                                                                                                          |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Service           | Publish the stable `Tracer.Tracer` service `Exporter` from `@graftland/plugin-otlp/Exporter`, keyed `@graftland/plugin-otlp/Exporter`, using `Graft.provide`. |
+| Lifetime          | Own resources and fibers in the plugin scope, retain in-flight spans across updates, and flush on close. Preserve failure causes.                             |
+| Updates           | Return an update function that keeps the published tracer object. A restart withdraws it and restarts its consumers.                                          |
+| Isolation         | Each host isolates `Exporter`; implementations can inject application services. Both shorthand and explicit names use `ModuleResolver`.                       |
+| Verification      | Run `Testing.exporter` with a fresh `Graft.layer` and a collector; `received` returns flushed span names after close.                                         |
+
+```ts
+import { Effect } from "effect"
+
+import type { Plugin } from "@graftland/graft"
+import * as Testing from "@graftland/plugin-otlp/Testing"
+
+declare const exporter: Plugin.Plugin
+declare const received: Effect.Effect<ReadonlyArray<string>>
+
+const conformance = Testing.exporter({
+	plugin: exporter,
+	config: { destination: "test" },
+	nextConfig: { destination: "updated" },
+	received,
+})
+```
+
+Effect has one tracer per subtree and no fan-out combinator. Nested hosts
+override the outer tracer. Other transports, enrichment, and vendor exporters
+belong to third parties. This package provides no log or metrics export; third
+parties may implement them.
+
+When you embed Graft, you can instead provide a tracer layer where the
 [`Logger` layer](#choose-the-output-in-your-host) goes, such as the OTLP
 exporter from `effect/observability`:
 
@@ -370,7 +462,7 @@ const unhealthy = (
 	])
 
 const waiting = Plugin.make({
-	name: "waiting",
+	name: "app/waiting",
 	apply: () =>
 		Graft.forks.pipe(
 			Stream.debounce("5 seconds"),
@@ -388,7 +480,7 @@ const waiting = Plugin.make({
 class Database extends Context.Service<Database, {}>()("app/Database") {}
 
 const reports = Plugin.make({
-	name: "reports",
+	name: "app/reports",
 	inject: [Database],
 	apply: () => Effect.void,
 })
@@ -403,7 +495,7 @@ const warning = await Effect.runPromise(
 		return Option.map(entry, (entry) => entry.message)
 	}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
 )
-warning // => Option.some(["Forks not running", ["reports: Pending"]])
+warning // => Option.some(["Forks not running", ["app/reports: Pending"]])
 ```
 
 - `unhealthy` is the walker from [Report health](../production/#report-health).

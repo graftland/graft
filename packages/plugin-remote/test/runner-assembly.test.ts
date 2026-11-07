@@ -189,13 +189,17 @@ it.live(
 					],
 				})
 				yield* owner.await
-				const engine = yield* snapshot("remote-supervisor")
+				const engine = yield* snapshot(
+					"@graftland/plugin-remote/runner/supervisor",
+				)
 				const client = yield* session(port)
 				const record = yield* open(client, "before-failure")
 				yield* Deferred.succeed(fail, undefined)
 				yield* Deferred.await(closed)
 				const failed = yield* Graft.forks.pipe(
-					Stream.map((trees) => find(trees, "remote-assembly")),
+					Stream.map((trees) =>
+						find(trees, "@graftland/plugin-remote/runner/assembly"),
+					),
 					Stream.filter(
 						(tree) => Option.isSome(tree) && tree.value.state._tag === "Failed",
 					),
@@ -206,7 +210,9 @@ it.live(
 				const generation = yield* next.HighWater({ instance: "worker" })
 				assert.equal(generation, record.handle.generation)
 				yield* next.Renew(record.handle)
-				const after = yield* snapshot("remote-supervisor")
+				const after = yield* snapshot(
+					"@graftland/plugin-remote/runner/supervisor",
+				)
 				assert.equal(after.id, engine.id)
 				assert.equal(after.state._tag, "Active")
 				const active = yield* Stream.runHead(owner.state)

@@ -1,4 +1,4 @@
-# yaml-language-server: $schema=../../packages/cli/schema.json
+# yaml-language-server: $schema=./graft.schema.json
 - id: runner
   name: remote/runner
   config:

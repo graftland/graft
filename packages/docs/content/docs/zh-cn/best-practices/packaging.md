@@ -43,7 +43,7 @@ declare const openPool: (
 }>
 
 export default Plugin.make({
-	name: "postgres",
+	name: "graft-plugin-postgres",
 	config: Config,
 	apply: ({ url, poolSize }) =>
 		Effect.gen(function* () {
@@ -63,15 +63,15 @@ export default Plugin.make({
 | `.`          | 插件本身，作为默认导出或名为 `plugin` 的导出。       | 加载器，对应 `graft.yml` 中的 `name:`。                                           |
 | `./tokens`   | 服务键、事件、Reference、带标签的错误和配置 schema。 | 消费方插件、测试，以及实现同一服务的其他包。                                      |
 | `./<plugin>` | 另一个插件，每个模块一个。                           | `name: postgres/migrations` 这样的条目。                                          |
-| `./contract` | [Remote 契约](../../remote/hosts/#定义契约)。        | 插件能在别处运行时，供宿主和 [runner](../../remote/runners/#部署-runner) 导入。   |
-| `./schema`   | 配置的[编辑器登记项](#编辑器补全)。                  | 应用的编辑器 schema。                                                             |
+| `./contract` | [Remote 契约](../../remote/contracts/)。             | 插件能在别处运行时，供宿主和 [runner](../../remote/runners/#部署-runner) 导入。   |
+| `./schema`   | 配置的[编辑器登记项](#编辑器补全)。                  | [`graft schema`](../../cli/#graft-schema)，用于生成应用的编辑器 schema。          |
 | `./cli`      | 添加 `graft` 子命令的命令插件。                      | [`graft add --plugin <package>`](../../cli/#命令插件)，它会启用 `<package>/cli`。 |
 
-| 规则                             | 避免的问题                                                                                                 |
-| -------------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| `./tokens` 不导入任何实现。      | 否则只注入 `Database` 的插件、或伪造它的测试，也会加载你的驱动及其依赖。                                   |
-| 每个模块一个插件。               | 加载器从一个模块中只取一个插件：默认导出，没有时取 `plugin`。模块导出的其他插件无法在 `graft.yml` 中引用。 |
-| 契约通过 `module` URL 指明实现。 | 如果契约导入实现，实现也会在宿主上加载，而不只是在插件进程中。                                             |
+| 规则                        | 避免的问题                                                                                                 |
+| --------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `./tokens` 不导入任何实现。 | 否则只注入 `Database` 的插件、或伪造它的测试，也会加载你的驱动及其依赖。                                   |
+| 每个模块一个插件。          | 加载器从一个模块中只取一个插件：默认导出，没有时取 `plugin`。模块导出的其他插件无法在 `graft.yml` 中引用。 |
+| 部署配置指定实现。          | 契约只包含协议声明。                                                                                       |
 
 ## 声明依赖
 
@@ -155,13 +155,34 @@ export default Plugin.make({
 
 - 应用从自己的目录解析[插件名称](../../config-file/#插件名称)，因此应用必须依赖你的包，例如通过
   `graft add` 添加。
-- 短名称先按原样尝试，只有某个候选不存在时，Graft 才会尝试下一个。如果应用能解析到名为
-  `postgres` 的包（比如你的驱动），`name: postgres` 和
-  `name: postgres/migrations` 都会以 `ModuleInvalid` 失败。
+- 短名称先按原样尝试。该模块不存在，或能导入但没有导出插件（例如 Node 的 `http`
+  或你的 `postgres` 驱动）时，Graft 才会改试命名约定。其他导入失败都会以
+  `ModuleInvalid` 终止解析。
 - README 中的 `graft.yml` 示例请写完整包名，它不会解析到别的包。
 - `graft add --plugin` 会保留以 `@` 或 `graft-plugin-`
-  开头的名称，其他名称则变成 `@graftland/plugin-<name>`。带 `./cli`
-  导出的包需要使用这两种形式之一。
+  开头的名称；其他名称会变成 registry 中存在的那一个：`@graftland/plugin-<name>`
+  或 `graft-plugin-<name>`，两者都存在时失败。带 `./cli`
+  导出的包需要使用这些形式之一。
+
+## 为插件命名
+
+插件的 `name` 用于在日志、span 和 fork 树中标识它。按 Effect 的
+`deterministicKeys` 诊断生成服务键的方式构造它，名称就能说明插件由哪个模块定义：
+
+| 部分 | 取值                                                                         |
+| ---- | ---------------------------------------------------------------------------- |
+| 1    | 包名。                                                                       |
+| 2    | 模块在 `src/` 下的路径，不含扩展名，省略 `index`。                           |
+| 3    | 持有插件的绑定名。默认导出、名为 `plugin` 的导出或与模块同名的导出省略此段。 |
+
+| 插件                                    | `name`                                    |
+| --------------------------------------- | ----------------------------------------- |
+| `src/index.ts` 的默认导出               | `graft-plugin-postgres`                   |
+| `src/migrations.ts` 的默认导出          | `graft-plugin-postgres/migrations`        |
+| `src/migrations.ts` 中的 `const warmup` | `graft-plugin-postgres/migrations/warmup` |
+
+Graft 不检查名称。应用用自己 `package.json`
+中的包名，以同样方式为自己的插件命名。
 
 ## 编辑器补全
 
@@ -193,8 +214,8 @@ export const entries = () => [
 | `schema`   | 配置 schema 的编码侧。`referencePolicy: () => undefined` 会把定义内联，否则这些定义会丢失。`onExcessProperty: "error"` 会标出未知字段，否则解码时它们会被悄悄丢弃。 |
 | `required` | 配置有必填字段时设为 `true`，这样没有 `config` 的条目会被标出。                                                                                                     |
 
-这里只导入令牌模块：生成 schema 不能加载插件。应用把登记项传给
-`ConfigSchema.make`，见[编辑器支持](../../config-file/#编辑器支持)。
+这里只导入令牌模块：生成 schema 不能加载插件。[`graft schema`](../../cli/#graft-schema)
+通过 `./schema` 导出和对 `@graftland/graft` 的 peer 依赖找到这个模块。
 
 ## 支持的 Graft 版本
 
@@ -223,3 +244,27 @@ export const entries = () => [
 就装在那里，于是应用里每个包都会多出一份。
 
 :::
+
+## 编写独立集成
+
+| 包   | 公开声明                                                                                 |
+| ---- | ---------------------------------------------------------------------------------------- |
+| 契约 | 服务 key、RPC schema 和 `Contract.operation(name, version, rpc)`；不含实现位置。         |
+| 实现 | `Plugin.make({ provides, overlap })`、普通 `apply` 和 `Plugin.probe("health", effect)`。 |
+| 宿主 | 安装契约，捕获构建后的实现，并提供部署配置。                                             |
+
+将 Effect 和共享 Graft 包声明为 peer
+dependency。probe 只在服务尝试中收到请求时运行。部署前捕获构建后的包目录；外部运行时依赖不会被捕获或固定版本。
+[integration-gateway 示例](https://github.com/graftland/graft/tree/main/samples/integration-gateway)
+分别打包并安装契约包和实现包。
+
+## 发布清单
+
+从已构建包生成[插件清单](../../ecosystem/manifest/)，打包前验证。服务身份来自
+`inject`、`provides`
+和契约描述符，运行时版本范围来自包元数据。显式声明放置能力，信任留给运维策略。
+
+对已安装的 tarball 运行[一致性测试](../../ecosystem/conformance/)，并对每种声明支持的宿主运行
+[兼容性检查](../../ecosystem/compatibility/)。一方包遵循同样的检查。
+[插件作者夹具](https://github.com/graftland/graft/tree/main/samples/plugin-authors)
+不使用工作区别名或私有导入，完整演示此流程。

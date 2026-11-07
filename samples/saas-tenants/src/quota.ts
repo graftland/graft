@@ -5,7 +5,7 @@ import { Graft, Plugin } from "@graftland/graft"
 import { Plan, Quota } from "./services.ts"
 
 export const quota = Plugin.make({
-	name: "quota",
+	name: "@graftland/sample-saas-tenants/quota",
 	apply: Effect.fn("quota.apply")(function* () {
 		yield* Effect.log("Shared quota service started")
 		yield* Graft.provide(Quota, {

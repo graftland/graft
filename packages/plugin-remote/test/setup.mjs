@@ -37,11 +37,12 @@ export default async function setup(project) {
 			"Contract",
 			"internal/watchdogMain",
 			"internal/workerMain",
+			"internal/publicationMain",
 			"host/worker",
 			"host/local",
 			"host/websocket",
 			"host/auth/mtls",
-			"internal/supervisorPlugin",
+			"runner/supervisor",
 			"runner/websocket",
 			"runner/auth/mtls",
 			"host/unix",
@@ -70,11 +71,45 @@ export default async function setup(project) {
 			"plugin",
 			"services-contract",
 			"services-plugin",
+			"unit-contract",
+			"unit-plugin",
+			"conformance-contract",
+			"conformance-plugin",
+			"transition-contract",
+			"transition-plugin",
 			"loader-entry",
 			"entry-host",
 			"stdio-echo",
 		].map((name) => new URL(`./fixtures/${name}.ts`, import.meta.url).pathname),
 		outDir: new URL("../.cache/integration", import.meta.url).pathname,
+	})
+	await build({
+		...common,
+		entry: [
+			new URL("./fixtures/untrusted-plugin.ts", import.meta.url).pathname,
+		],
+		outDir: new URL("../.cache/untrusted", import.meta.url).pathname,
+		deps: { alwaysBundle: [/^(?!node:)/] },
+	})
+	await writeFile(
+		new URL("../.cache/untrusted/package.json", import.meta.url),
+		JSON.stringify({
+			name: "@example/untrusted",
+			version: "1.0.0",
+			type: "module",
+		}),
+	)
+	await build({
+		...common,
+		entry: {
+			"sandbox/child": new URL(
+				"../src/internal/sandboxChildMain.ts",
+				import.meta.url,
+			).pathname,
+		},
+		outDir: new URL("../dist", import.meta.url).pathname,
+		clean: false,
+		deps: { alwaysBundle: [/^(?!node:)/] },
 	})
 	const installation = new URL("../.cache/runner-install", import.meta.url)
 		.pathname
@@ -93,6 +128,22 @@ export default async function setup(project) {
 			version: "1.0.0",
 			type: "module",
 			exports: "./services-contract.js",
+		}),
+	)
+	const implementation = installation + "/node_modules/remote-implementation"
+	await mkdir(implementation, { recursive: true })
+	await cp(
+		new URL("../.cache/integration", import.meta.url).pathname,
+		implementation,
+		{ recursive: true },
+	)
+	await writeFile(
+		implementation + "/package.json",
+		JSON.stringify({
+			name: "remote-implementation",
+			version: "2.0.0",
+			type: "module",
+			exports: "./services-plugin.js",
 		}),
 	)
 	project.provide("remoteRoot", installation)

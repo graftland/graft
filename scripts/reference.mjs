@@ -25,6 +25,15 @@ export function verifyReference(root) {
 			),
 		),
 	}))
+	const invalid = reports.flatMap((report) =>
+		(report.invalid ?? []).map(
+			(warning) => `${report.packageName}: ${warning}`,
+		),
+	)
+	if (invalid.length > 0)
+		throw new Error(
+			`TypeDoc validation failed. Export every type a public signature mentions:\n${invalid.join("\n")}`,
+		)
 	const coverage = reports.flatMap((report) => report.coverage)
 	if (
 		coverage.length !== entries.length ||

@@ -89,6 +89,10 @@ describe("chat-bot", () => {
 							"../.cache/implementation/forecastContract.js",
 							import.meta.url,
 						).href,
+						implementation: new URL(
+							"../dist/plugins/forecasts.js",
+							import.meta.url,
+						).href,
 						connect: { local: {} },
 					}),
 					{ units: "celsius" },

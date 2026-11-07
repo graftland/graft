@@ -40,7 +40,7 @@ const heard = await Effect.runPromise(
 	Effect.gen(function* () {
 		const texts = yield* Ref.make<ReadonlyArray<string>>([])
 		const listener = Plugin.make({
-			name: "listener",
+			name: "app/listener",
 			apply: () =>
 				Event.on(Message, (text) => Ref.update(texts, (all) => [...all, text])),
 		})
@@ -57,10 +57,11 @@ heard // => ["Hello"]
 
 ### Options
 
-| Option    | What it does                                                       |
-| --------- | ------------------------------------------------------------------ |
-| `prepend` | Runs before the handlers registered earlier.                       |
-| `global`  | Receives the event from every realm, and ignores dispatch filters. |
+| Option    | What it does                                                                                                                                                       |
+| --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `order`   | Lower numbers run first and outermost; default `0`. Equal orders retain registration order, with `prepend` first. Use distinct orders when relative order matters. |
+| `prepend` | Runs before the handlers registered earlier.                                                                                                                       |
+| `global`  | Receives the event from every realm, and ignores dispatch filters.                                                                                                 |
 
 ### Handler context
 
@@ -88,12 +89,13 @@ that dispatched the event.
 
 ## Dispatch an event
 
-| Function          | Calls handlers           | Result                                              |
-| ----------------- | ------------------------ | --------------------------------------------------- |
-| `Event.emit`      | One after another        | Stops at the first failure.                         |
-| `Event.parallel`  | All at once              | Every result; all failures combined in one `Cause`. |
-| `Event.bail`      | One after another        | The first `Some` a handler returns.                 |
-| `Event.waterfall` | As a chain of middleware | The output of the chain.                            |
+| Function          | Calls handlers           | Result                                                                             |
+| ----------------- | ------------------------ | ---------------------------------------------------------------------------------- |
+| `Event.emit`      | One after another        | Stops at the first failure.                                                        |
+| `Event.parallel`  | All at once              | Every result; all failures combined in one `Cause`.                                |
+| `Event.settle`    | All at once              | The `Exit` of each handler that ran; a failing handler does not fail the dispatch. |
+| `Event.bail`      | One after another        | The first `Some` a handler returns.                                                |
+| `Event.waterfall` | As a chain of middleware | The output of the chain.                                                           |
 
 ```ts import.meta.vitest name="events: dispatch an event"
 import { Effect, Option } from "effect"
@@ -117,7 +119,7 @@ await Effect.runPromise(status.pipe(Effect.scoped, Effect.provide(Graft.layer)))
 | Situation                                   | Result                                                                                                                                                  |
 | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | A handler is removed during dispatch        | It is not called afterwards.                                                                                                                            |
-| The handler's owner stops                   | The interruption skips the handler.                                                                                                                     |
+| The handler's owner stops                   | The interruption skips an ordinary handler; middleware follows the rule below.                                                                          |
 | A handler interrupts itself or is cancelled | Its full `Cause` goes through the dispatch, and so do cleanup defects.                                                                                  |
 | `Event.parallel` is cancelled               | It waits for the cleanup of every call, then combines the interruption with the failures and defects that already happened, including cleanup failures. |
 
@@ -186,6 +188,45 @@ The `next` of each step executes downstream once.
 - Unloading a handler's owner never replays downstream work that already ran.
 - If the first downstream execution was interrupted, later calls get that
   interruption instead of starting again.
+
+Unloading a running middleware interrupts the chain, whether it is waiting
+before `next` or post-processing its result. Downstream failures are preserved;
+a downstream success never bypasses post-processing. A handler removed before it
+is claimed is skipped.
+
+The dispatcher can cancel its wait when `next` runs in an independently owned
+fiber. The call still interrupts; it never returns a result that bypasses the
+middleware. The external owner remains responsible for that fiber's cleanup and
+failures.
+
+## Recognize a dispatch origin
+
+An **origin** is an opaque token for recognizing a dispatch chain without
+sharing the caller's services.
+
+```ts import.meta.vitest name="events: origins"
+import { Effect } from "effect"
+
+import { Event, Graft } from "@graftland/graft"
+
+const origin = Event.makeOrigin()
+const Changed = Event.make<[], boolean>("@acme/example/Changed")
+
+const check = Effect.gen(function* () {
+	yield* Event.on(Changed, () => Event.isWithin(origin))
+	return yield* Event.parallel(Changed).pipe(Event.within(origin))
+})
+
+await Effect.runPromise(check.pipe(Effect.scoped, Effect.provide(Graft.layer))) // => [true]
+```
+
+| Operation                | Rule                                                                                                                                                                                                  |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Event.makeOrigin()`     | Creates a fresh token; another token never matches it.                                                                                                                                                |
+| `Event.within(origin)`   | Marks the wrapped effect and its nested dispatches; existing origins remain active.                                                                                                                   |
+| `Event.isWithin(origin)` | Returns only whether this exact token is active in the current fiber.                                                                                                                                 |
+| Scope and isolation      | Origins follow the effect, not handler registration. Handler services and realms stay unchanged; no caller Context is exposed.                                                                        |
+| Trust boundary           | Tokens cannot be forged. Membership is carried in a context reference; code that provides that reference can change `isWithin` answers. This is re-entrancy detection, not an authorization boundary. |
 
 ## Realms and filters
 

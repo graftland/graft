@@ -15,12 +15,18 @@ import { ModuleResolver } from "@graftland/loader"
 
 import * as Contract from "./Contract"
 import { MissingInstance, RemoteError, RemoteWithdrawn } from "./Errors"
+import * as Credential from "./host/credentials"
+import { launch } from "./host/index"
 import { CapabilityFailed } from "./internal/assembly"
-import * as Credential from "./internal/credentials"
-import { launch } from "./internal/entry"
 import * as Configuration from "./internal/entryConfig"
 import { publicError } from "./internal/execution"
 import { follow } from "./internal/follow"
+import { managedPlugin, type ManagedOptions } from "./internal/transition"
+
+export type { ManagedOptions } from "./internal/transition"
+export { candidate, type CandidateOptions } from "./internal/candidate"
+
+export * as Artifact from "./Artifact"
 
 export { Contract }
 export { Instance } from "./Instance"
@@ -32,7 +38,7 @@ export type {
 	Authentication,
 	Token as CredentialToken,
 	Source as CredentialSource,
-} from "./internal/credentials"
+} from "./host/credentials"
 
 export interface Options<
 	D extends ReadonlyArray<Plugin.Dependency> = readonly [],
@@ -40,6 +46,8 @@ export interface Options<
 	readonly connect: Credential.Connect<D>
 	/** Contract module resolved independently in each execution environment. */
 	readonly contractModule: string
+	/** Implementation module selected by deployment, independently of the contract. */
+	readonly implementation: string
 	readonly retry?: Schedule.Schedule<unknown, unknown> | undefined
 	readonly shutdownTimeout?: Duration.Input | undefined
 }
@@ -70,7 +78,7 @@ const publicCause = <E extends Schema.Top>(
 	)
 
 /** Fixes deployment options; business config is plugin input, and updates restart the execution unit. */
-export const plugin = <
+const unmanagedPlugin = <
 	S extends Schema.Top & {
 		readonly Encoded: Schema.Json
 		readonly DecodingServices: never
@@ -106,12 +114,18 @@ export const plugin = <
 		apply: (config) =>
 			Effect.gen(function* () {
 				const auth = Credential.invocation(options.connect)
-				const input = yield* Schema.decodeUnknownEffect(Configuration.Host)({
+				const input = yield* Schema.decodeUnknownEffect(
+					Configuration.OrdinaryHost,
+				)({
 					contract: options.contractModule,
+					implementation: options.implementation,
 					connect:
 						auth === undefined
 							? options.connect
-							: { ...options.connect, auth: { name: "effect-credentials" } },
+							: {
+									...options.connect,
+									auth: { name: "effect-credentials" },
+								},
 					config,
 				})
 				yield* Schema.decodeEffect(contract.config)(input.config)
@@ -120,6 +134,7 @@ export const plugin = <
 					input,
 					{
 						contractModule: options.contractModule,
+						implementation: options.implementation,
 						shutdownTimeout: options.shutdownTimeout,
 					},
 					auth,
@@ -129,4 +144,40 @@ export const plugin = <
 				)
 			}).pipe(Effect.mapError((error) => publicError(contract.error, error))),
 	})
-export { host as default } from "./internal/entry"
+export { default } from "./host/index"
+
+/** Selects an ordinary module deployment or an artifact-backed managed direct deployment. */
+export function plugin<
+	S extends Contract.ConfigSchema,
+	E extends Contract.ErrorSchema,
+>(
+	contract: Contract.Contract<S, E>,
+	options: ManagedOptions,
+): ReturnType<typeof managedPlugin<S, E>>
+export function plugin<
+	S extends Contract.ConfigSchema,
+	E extends Contract.ErrorSchema,
+	const D extends ReadonlyArray<Plugin.Dependency> = readonly [],
+>(
+	contract: Contract.Contract<S, E>,
+	options: Options<D>,
+): ReturnType<typeof unmanagedPlugin<S, E, D>>
+export function plugin<
+	S extends Contract.ConfigSchema,
+	E extends Contract.ErrorSchema,
+	const D extends ReadonlyArray<Plugin.Dependency> = readonly [],
+>(contract: Contract.Contract<S, E>, options: Options<D> | ManagedOptions) {
+	return "artifact" in options
+		? managedPlugin(contract, options)
+		: unmanagedPlugin(contract, options)
+}
+
+export * as Publication from "./Publication"
+
+export * as Conformance from "./Conformance"
+
+export * as Sandbox from "./Sandbox"
+
+export * as Capabilities from "./Capabilities"
+
+export * as Policy from "./Policy"

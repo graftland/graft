@@ -86,6 +86,7 @@ describe("local remote lifecycle", () => {
 			const fork = yield* Graft.plugin(
 				Remote.plugin(contract, {
 					contractModule,
+					implementation: new URL("plugin.js", contractModule).href,
 					connect: { local: {} },
 				}),
 				{
@@ -114,6 +115,7 @@ describe("local remote lifecycle", () => {
 			const fork = yield* Graft.plugin(
 				Remote.plugin(contract, {
 					contractModule,
+					implementation: new URL("plugin.js", contractModule).href,
 					connect: { local: {} },
 				}),
 				{
@@ -157,6 +159,7 @@ describe("local remote lifecycle", () => {
 			const fork = yield* Graft.plugin(
 				Remote.plugin(contract, {
 					contractModule,
+					implementation: new URL("plugin.js", contractModule).href,
 					retry: Schedule.recurs(1),
 					connect: { local: {} },
 				}),
@@ -181,6 +184,7 @@ describe("local remote lifecycle", () => {
 			const fork = yield* Graft.plugin(
 				Remote.plugin(contract, {
 					contractModule,
+					implementation: new URL("plugin.js", contractModule).href,
 					connect: { local: {} },
 				}),
 				{
@@ -213,6 +217,7 @@ describe("local remote lifecycle", () => {
 				const fork = yield* Graft.plugin(
 					Remote.plugin(contract, {
 						contractModule,
+						implementation: new URL("plugin.js", contractModule).href,
 						connect: { local: {} },
 					}),
 					{
@@ -243,6 +248,7 @@ describe("local remote lifecycle", () => {
 			const fork = yield* Graft.plugin(
 				Remote.plugin(contract, {
 					contractModule,
+					implementation: new URL("plugin.js", contractModule).href,
 					connect: { local: {} },
 				}),
 				{
@@ -265,6 +271,7 @@ describe("local remote lifecycle", () => {
 			const fork = yield* Graft.plugin(
 				Remote.plugin(contract, {
 					contractModule,
+					implementation: new URL("plugin.js", contractModule).href,
 					connect: { local: {} },
 				}),
 				{
@@ -302,6 +309,7 @@ describe("local remote lifecycle", () => {
 			const fork = yield* Graft.plugin(
 				Remote.plugin(contract, {
 					contractModule,
+					implementation: new URL("plugin.js", contractModule).href,
 					connect: { local: {} },
 				}),
 				{
@@ -354,6 +362,7 @@ describe("local remote lifecycle", () => {
 			const fork = yield* Graft.plugin(
 				Remote.plugin(contract, {
 					contractModule,
+					implementation: new URL("plugin.js", contractModule).href,
 					connect: { local: {} },
 				}),
 				{
@@ -385,6 +394,7 @@ describe("local remote lifecycle", () => {
 				const fork = yield* Graft.plugin(
 					Remote.plugin(contract, {
 						contractModule,
+						implementation: new URL("plugin.js", contractModule).href,
 						connect: { local: {} },
 					}),
 					{
@@ -426,6 +436,7 @@ describe("local remote lifecycle", () => {
 				const fork = yield* Graft.plugin(
 					Remote.plugin(contract, {
 						contractModule,
+						implementation: new URL("plugin.js", contractModule).href,
 						connect: { local: {} },
 					}),
 					{
@@ -463,6 +474,7 @@ describe("local remote lifecycle", () => {
 			const fork = yield* Graft.plugin(
 				Remote.plugin(contract, {
 					contractModule,
+					implementation: new URL("plugin.js", contractModule).href,
 					shutdownTimeout: "100 millis",
 					connect: { local: {} },
 				}),
@@ -483,6 +495,7 @@ describe("local remote lifecycle", () => {
 				const fork = yield* Graft.plugin(
 					Remote.plugin(contract, {
 						contractModule,
+						implementation: new URL("plugin.js", contractModule).href,
 						connect: { local: {} },
 					}),
 					{
@@ -538,6 +551,7 @@ describe("local remote lifecycle", () => {
 			const fork = yield* Graft.plugin(
 				Remote.plugin(contract, {
 					contractModule,
+					implementation: new URL("plugin.js", contractModule).href,
 					connect: { local: {} },
 				}),
 				{
@@ -563,6 +577,10 @@ it.live("accepts null and empty objects as plugin input", () =>
 					"../.cache/integration/null-config-contract.js",
 					import.meta.url,
 				).href,
+				implementation: new URL(
+					"../.cache/integration/empty-plugin.js",
+					import.meta.url,
+				).href,
 				connect: { local: {} },
 			}),
 			null,
@@ -573,6 +591,10 @@ it.live("accepts null and empty objects as plugin input", () =>
 			Remote.plugin(emptyContract, {
 				contractModule: new URL(
 					"../.cache/integration/empty-config-contract.js",
+					import.meta.url,
+				).href,
+				implementation: new URL(
+					"../.cache/integration/empty-plugin.js",
 					import.meta.url,
 				).href,
 				connect: { local: {} },

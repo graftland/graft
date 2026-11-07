@@ -14,14 +14,18 @@ import { CliError } from "effect/cli"
 import * as PackageManager from "@graftland/package-manager"
 
 import {
+	AmbiguousPluginName,
 	create,
 	CreateError,
 	InvalidName,
 	InvalidPackageManager,
+	PluginNotFound,
+	pluginSpec,
 } from "../index"
 import * as Git from "./git"
 import { install } from "./install"
 import { resolve, type Input } from "./resolve"
+import * as EditorSchema from "./schema"
 
 /** A path as typed in a shell; anything but plain characters is single-quoted. */
 const shellQuote = (value: string) =>
@@ -36,9 +40,14 @@ const scripts = {
 } as const
 
 /** A mistake in the answers, shown as a message rather than a failure trace. */
-const userError = (
-	error: CreateError | InvalidName | InvalidPackageManager,
-): CliError.UserError =>
+type Mistake =
+	| CreateError
+	| InvalidName
+	| InvalidPackageManager
+	| PluginNotFound
+	| AmbiguousPluginName
+
+const userError = (error: Mistake): CliError.UserError =>
 	CliError.UserError.make({
 		cause: error,
 		userMessage:
@@ -46,11 +55,19 @@ const userError = (
 				? `${error.directory}: ${error.message}`
 				: error._tag === "InvalidName"
 					? `Invalid package name ${error.packageName}: ${error.message}`
-					: `Unsupported package manager ${error.value}: ${error.message}`,
+					: error._tag === "InvalidPackageManager"
+						? `Unsupported package manager ${error.value}: ${error.message}`
+						: error.message,
 	})
 
 const isMistake = Schema.is(
-	Schema.Union([CreateError, InvalidName, InvalidPackageManager]),
+	Schema.Union([
+		CreateError,
+		InvalidName,
+		InvalidPackageManager,
+		PluginNotFound,
+		AmbiguousPluginName,
+	]),
 )
 const reportMistakes = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
 	Effect.mapError(effect, (error) =>
@@ -66,10 +83,13 @@ export const main = Effect.fn("Create.main")(function* (input: Input) {
 		reportMistakes,
 	)
 	const { agent, declaration } = answers.packageManager
+	const plugins = yield* Effect.forEach(answers.plugins, (spec) =>
+		pluginSpec(spec, { directory: path.resolve("."), agent }),
+	).pipe(reportMistakes)
 	const project = yield* create({
 		directory: answers.directory,
 		template: answers.template,
-		plugins: answers.plugins,
+		plugins,
 		...(answers.name === undefined ? {} : { name: answers.name }),
 		...(declaration === undefined ? {} : { packageManager: declaration }),
 	}).pipe(reportMistakes)
@@ -84,6 +104,17 @@ export const main = Effect.fn("Create.main")(function* (input: Input) {
 		yield* Effect.logError(
 			"Installing dependencies failed; the project is kept",
 			installed.cause,
+		)
+
+	// Needs the installed CLI and plugins; without them the next steps say how.
+	const schema =
+		installed !== undefined && Exit.isSuccess(installed)
+			? yield* Effect.exit(EditorSchema.write(project.directory))
+			: undefined
+	if (schema !== undefined && Exit.isFailure(schema))
+		yield* Effect.logError(
+			"Writing graft.schema.json failed; the project is kept",
+			schema.cause,
 		)
 
 	const git = answers.git
@@ -107,6 +138,9 @@ export const main = Effect.fn("Create.main")(function* (input: Input) {
 		...(installed === undefined || Exit.isFailure(installed)
 			? [PackageManager.installCommand(agent)]
 			: []),
+		...(schema === undefined || Exit.isFailure(schema)
+			? [`${PackageManager.execPrefix(agent)} graft schema`]
+			: []),
 		...(git !== undefined && Exit.isFailure(git) ? ["git init"] : []),
 		...Array.map(
 			scripts[project.template],
@@ -124,6 +158,7 @@ export const main = Effect.fn("Create.main")(function* (input: Input) {
 		...(installed !== undefined && Exit.isFailure(installed)
 			? [installed.cause]
 			: []),
+		...(schema !== undefined && Exit.isFailure(schema) ? [schema.cause] : []),
 		...(git !== undefined && Exit.isFailure(git) ? [git.cause] : []),
 	]
 	if (failures.length > 0)

@@ -412,7 +412,13 @@ export const supervise = Effect.fnUntraced(function* (
 		).pipe(
 			// @effect-diagnostics-next-line anyUnknownInErrorContext:off -- plugin errors are preserved in the fiber's Exit
 			Effect.flatMap((config) => spec.plugin.apply(config)),
-			Effect.withSpan(`graft.plugin ${spec.plugin.name}`),
+			Effect.withSpan(`graft.plugin ${spec.plugin.name}`, {
+				attributes: {
+					"graft.fork": id,
+					"graft.plugin": spec.plugin.name,
+					"graft.revision": spec.revision,
+				},
+			}),
 			inActivation(context, spec),
 			Effect.forkIn(scope),
 		)

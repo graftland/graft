@@ -35,6 +35,8 @@ import * as Services from "./services"
 
 export interface ExecutionOptions {
 	readonly contractModule: string
+	/** Implementation module selected by deployment, independently of the contract. */
+	readonly implementation: string
 	readonly shutdownTimeout?: Duration.Input | undefined
 }
 
@@ -88,6 +90,7 @@ export const executionPlugin = <
 				const active = yield* Connection.acquire(
 					configured,
 					options.contractModule,
+					options.implementation,
 					{
 						session,
 						serve: Services.endpoints(contract.inject),

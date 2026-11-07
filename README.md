@@ -6,13 +6,21 @@
 
 English | [简体中文](README.zh-CN.md) | [繁體中文](README.zh-TW.md)
 
-Software is not built. It is grown.
+[![npm](https://img.shields.io/npm/v/@graftland/graft)](https://www.npmjs.com/package/@graftland/graft)
+[![CI](https://github.com/graftland/graft/actions/workflows/ci.yml/badge.svg)](https://github.com/graftland/graft/actions/workflows/ci.yml)
+[![License](https://img.shields.io/github/license/graftland/graft)](LICENSE)
 
-Graft is a plugin framework for [Effect](https://effect.website). Your
-application is a tree of plugins. Each plugin is grafted onto a scope, draws on
-the services around it, and publishes services of its own. You can load,
-reconfigure, replace and unload any branch while the process keeps running. Cut
-anywhere, and the rest of the tree carries on.
+Graft is an [Effect](https://effect.website)-native plugin runtime for
+long-running TypeScript applications. Each capability is a plugin with explicit
+dependencies and its own lifecycle, so you can change one capability with a
+controlled blast radius. Edit a plugin and `graft start --watch` swaps only the
+plugins your change affects, inside the running process.
+
+Software is not built. It is grown. Your application is a tree of plugins. Each
+plugin is grafted onto a scope, draws on the services around it, and publishes
+services of its own. You can load, reconfigure, replace and unload any branch
+while the process keeps running. Cut anywhere, and the rest of the tree carries
+on.
 
 ```ts
 import { Context, Effect, Schema } from "effect"
@@ -26,7 +34,7 @@ class Greeter extends Context.Service<
 
 // Publishes a Greeter while it is loaded.
 const greeter = Plugin.make({
-	name: "greeter",
+	name: "app/greeter",
 	config: Schema.Struct({ greeting: Schema.String }),
 	apply: ({ greeting }) =>
 		Graft.provide(Greeter, {
@@ -36,7 +44,7 @@ const greeter = Plugin.make({
 
 // Starts once a Greeter exists, and stops before it goes away.
 const hello = Plugin.make({
-	name: "hello",
+	name: "app/hello",
 	inject: [Greeter],
 	apply: () => Effect.flatMap(Greeter, (greeter) => greeter.greet("world")),
 })
@@ -44,17 +52,23 @@ const hello = Plugin.make({
 
 ## Why Graft
 
-- **Rootstock.** Services are Effect `Context` keys, provided by `Layer`s or by
-  other plugins. A plugin declares what it needs in `inject`, and the compiler
-  checks it.
-- **Pruning.** Every plugin runs in its own `Scope`, and every fiber it starts
-  has an owner. When a plugin goes away, the plugins that depend on it stop
-  first. Then its finalizers run. Nothing is left behind, and a failure keeps
-  its full `Cause`.
-- **Top-working.** Change the variety without felling the tree.
+- **Hot swap.** Change the variety without felling the tree.
   `graft start --watch` reimports only what your change affects and swaps the
-  affected plugins in one transaction. If the new code fails, the old plugins
-  keep running.
+  affected plugins in one transaction. If the new code fails to import or to
+  start, Graft restores the old plugins and reports whether they came back.
+- **Clean teardown.** Every plugin runs in its own `Scope`, and every fiber it
+  starts has an owner. When a plugin goes away, the plugins that depend on it
+  stop first. Then its finalizers run. A failure, including one during cleanup,
+  keeps its full `Cause`.
+- **Live upgrades.** Replace a plugin running in a Worker or a child process
+  while the plugins that use it keep running. The candidate starts from an
+  immutable artifact and must pass its probes. New calls reach it while old
+  calls drain, then the old unit is terminated. Every upgrade ends as
+  `Accepted`, `Aborted`, `Recovered`, `RecoveryFailed` or `Stuck`. See
+  [transitions](https://graftland.github.io/graft/transitions/).
+- **Checked dependencies.** Services are Effect `Context` keys, provided by
+  `Layer`s or by other plugins. A plugin declares what it needs in `inject`, and
+  the compiler checks it.
 
 When one branch needs ground of its own,
 [Remote](https://graftland.github.io/graft/remote/overview/) runs that plugin in
@@ -94,26 +108,41 @@ into another process.
 
 After those, larger applications show what Graft is for:
 
+- a [WebSocket integration gateway](samples/integration-gateway) that upgrades a
+  plugin while keeping its session
 - a chat bot built from plugins, with its weather integration in a child process
 - a checkout that swaps its pricing engine and database under load
 - an HTTP gateway driven by `graft.yml`
+- an MCP server whose tools are plugins that reload while a client is connected
 - a multi-tenant service
 - a market data pipeline that survives a flaky upstream
 
 ## Packages
 
-| Package                                                  | What it does                                                                                |
-| -------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| [`@graftland/graft`](packages/core)                      | A plugin framework built on Effect: plugins, forks, services, isolation, events and logs.   |
-| [`@graftland/loader`](packages/loader)                   | Loads plugins from a list of entries or a YAML config file.                                 |
-| [`@graftland/hmr`](packages/hmr)                         | Reloads plugin modules on Node.js without restarting the process.                           |
-| [`@graftland/cli`](packages/cli)                         | The `graft` command: `start`, `create`, `add` and `remove`.                                 |
-| [`@graftland/create`](packages/create)                   | Generates a new Graft project: `npm create @graftland` and `graft create`.                  |
-| [`@graftland/package-manager`](packages/package-manager) | Installs dependencies with npm, pnpm or Yarn, and rolls back on failure.                    |
-| [`@graftland/plugin-remote`](packages/plugin-remote)     | Runs a plugin in a child process, a worker or on another machine; `graft start runner.yml`. |
+| Package                                                      | What it does                                                                                |
+| ------------------------------------------------------------ | ------------------------------------------------------------------------------------------- |
+| [`@graftland/graft`](packages/core)                          | A plugin framework built on Effect: plugins, forks, services, isolation, events and logs.   |
+| [`@graftland/loader`](packages/loader)                       | Loads plugins from a list of entries or a YAML config file.                                 |
+| [`@graftland/hmr`](packages/hmr)                             | Reloads plugin modules on Node.js without restarting the process.                           |
+| [`@graftland/cli`](packages/cli)                             | The `graft` command: `start`, `create`, `add` and `remove`.                                 |
+| [`@graftland/create`](packages/create)                       | Generates a new Graft project: `npm create @graftland` and `graft create`.                  |
+| [`@graftland/package-manager`](packages/package-manager)     | Installs dependencies with npm, pnpm or Yarn, and rolls back on failure.                    |
+| [`@graftland/plugin-remote`](packages/plugin-remote)         | Runs a plugin in a child process, a worker or on another machine; `graft start runner.yml`. |
+| [`@graftland/plugin-otlp`](packages/plugin-otlp)             | Exports the spans of a subtree of plugins to an OpenTelemetry collector.                    |
+| [`@graftland/plugin-http`](packages/plugin-http)             | Shared HTTP server; routes and streams follow plugin lifetimes.                             |
+| [`@graftland/plugin-http-api`](packages/plugin-http-api)     | Live Effect HttpApi groups, typed clients and OpenAPI documentation.                        |
+| [`@graftland/plugin-mcp-server`](packages/plugin-mcp-server) | Serves the tools of plugins to MCP clients; tools reload without reconnecting.              |
 
 All packages are released together with the same version. They all need `effect`
 4.1.x.
+
+## Direction
+
+Live upgrades work today for plugins in Workers and child processes; runner
+placements, state handoff and release management come next. The design is
+public: the [value definition](design/value.md) and the
+[target architecture](design/upgrades.md), both in Chinese. This README
+describes only what is implemented.
 
 ## Contributing
 

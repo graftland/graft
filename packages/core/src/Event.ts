@@ -63,11 +63,38 @@ export const middleware = <I, O, E = never>(key: string): Middleware<I, O, E> =>
 	make(key)
 
 export interface HandlerOptions {
+	/** Lower orders run first and outermost. Equal orders retain registration/prepend order. */
+	readonly order?: number | undefined
 	/** Runs before handlers registered earlier. */
 	readonly prepend?: boolean | undefined
 	/** Receives dispatches from every realm, bypassing isolation and filters. */
 	readonly global?: boolean | undefined
 }
+
+declare const OriginTypeId: unique symbol
+
+/** An opaque identity for a dispatch origin. Created only by makeOrigin. */
+export type Origin = symbol & { readonly [OriginTypeId]: true }
+
+/** Creates a fresh token. Possession permits marking and querying this origin. */
+export const makeOrigin = (): Origin => Symbol() as Origin
+
+// Carry only a membership predicate: no caller context and no enumerable token collection.
+const Origins = Context.Reference<(origin: Origin) => boolean>(
+	"@graftland/graft/Event/Origins",
+	{ defaultValue: () => () => false },
+)
+
+/** Marks an effect and its nested dispatches without exposing the caller's services. */
+export const within = (origin: Origin) =>
+	Effect.updateService(
+		Origins,
+		(parent) => (candidate) => candidate === origin || parent(candidate),
+	)
+
+/** Whether this fiber belongs to a dispatch chain marked with this exact token. */
+export const isWithin = (origin: Origin): Effect.Effect<boolean> =>
+	Effect.map(Origins, (contains) => contains(origin))
 
 /**
  * Narrows which handlers a dispatch reaches. The filter sees the context the
@@ -146,6 +173,7 @@ const register = Effect.fnUntraced(function* <
 	const entry: Handler<Args, Out, E> = {
 		realm: realmOf(realms, event.key),
 		global: options.global === true,
+		order: options.order ?? 0,
 		once: options.once,
 		context,
 		fibers,
@@ -156,7 +184,8 @@ const register = Effect.fnUntraced(function* <
 			Effect.updateContext(
 				// Restore services first; the invocation then supplies its own Scope.
 				Release.scoped(Effect.suspend(() => handler(...args))),
-				(_: Context.Context<never>) => context,
+				(caller: Context.Context<never>) =>
+					Context.add(context, Origins, Context.get(caller, Origins)),
 			),
 	}
 	const update = (
@@ -171,9 +200,13 @@ const register = Effect.fnUntraced(function* <
 		)
 	yield* Effect.acquireRelease(
 		update((handlers) =>
-			options.prepend === true
-				? Array.prepend(handlers, entry)
-				: Array.append(handlers, entry),
+			Array.sort(
+				options.prepend === true
+					? Array.prepend(handlers, entry)
+					: Array.append(handlers, entry),
+				(a: Handler, b: Handler) =>
+					a.order < b.order ? -1 : a.order > b.order ? 1 : 0,
+			),
 		),
 		// Deactivating first means no dispatch can claim a handler that is leaving.
 		() =>
@@ -238,10 +271,11 @@ const skipped = Effect.succeedNone
  * Settles an invocation that did not succeed. Only interruption by the owner's
  * teardown skips the handler; every other cause, including a release failure, propagates.
  */
-const settle = Effect.fnUntraced(function* <Out, E>(
+const settleFailure = Effect.fnUntraced(function* <Out, E>(
 	handler: Handler<never, Out, E>,
 	started: Deferred.Deferred<void>,
 	cause: Cause.Cause<E>,
+	onStopped: Effect.Effect<Out, E> | undefined,
 ) {
 	if (
 		Cause.hasInterruptsOnly(cause) &&
@@ -258,7 +292,9 @@ const settle = Effect.fnUntraced(function* <Out, E>(
 				(reason) => reason._tag === "Interrupt" && reason.fiberId === closer,
 			)
 		)
-			return Option.none<Out>()
+			return onStopped === undefined
+				? Option.none<Out>()
+				: yield* Effect.asSome(onStopped)
 	}
 	return yield* Effect.failCause(cause)
 })
@@ -277,12 +313,13 @@ const cancel = <Out, E>(fiber: Fiber.Fiber<Out, E>) =>
 /**
  * Runs one handler in its owner's fiber set. Resolves to `None` if the
  * handler was unregistered before it could run, or its owner was torn down
- * while it ran.
+ * while it ran. Middleware supplies onStopped to interrupt without losing downstream failures.
  */
 // Runs once per handler per dispatch: the success path chains combinators instead of generators.
 const invoke = <Args extends ReadonlyArray<unknown>, Out, E>(
 	handler: Handler<Args, Out, E>,
 	args: Args,
+	onStopped?: Effect.Effect<Out, E>,
 ): Effect.Effect<Option.Option<Out>, E> =>
 	Effect.uninterruptibleMask((restore) =>
 		Effect.flatMap(handler.claim, (claimed) => {
@@ -314,7 +351,7 @@ const invoke = <Args extends ReadonlyArray<unknown>, Out, E>(
 							(exit) =>
 								Exit.isSuccess(exit)
 									? Effect.succeedSome(exit.value)
-									: settle(handler, started, exit.cause),
+									: settleFailure(handler, started, exit.cause, onStopped),
 						),
 				),
 			)
@@ -380,6 +417,65 @@ const dispatchParallel = Effect.fnUntraced(function* <
 	)
 }, Release.scoped)
 
+/**
+ * Calls every handler concurrently and returns the outcome of each one that
+ * ran, in handler order; a handler removed before it ran has none. A failing
+ * handler does not fail the dispatch, so one plugin's bug cannot stop the
+ * others from answering. Cancelling the dispatch cancels the handlers, as
+ * `parallel` does, and logs their failures.
+ */
+export const settle = <Args extends ReadonlyArray<unknown>, Out, E>(
+	event: Event<Args, Out, E>,
+	...args: Args
+): Effect.Effect<ReadonlyArray<Exit.Exit<Out, E>>, never, Graft> =>
+	dispatchSettle(event, args)
+
+const dispatchSettle = Effect.fnUntraced(function* <
+	Args extends ReadonlyArray<unknown>,
+	Out,
+	E,
+>(event: Event<Args, Out, E>, args: Args) {
+	const handlers = yield* handlersFor(event)
+	return yield* Effect.acquireUseRelease(
+		Effect.forEach(handlers, (handler) =>
+			Effect.forkScoped(invoke(handler, args)),
+		),
+		(fibers) =>
+			Effect.forEach(fibers, Fiber.await).pipe(
+				// A handler that stopped answering before it ran has no outcome.
+				Effect.map((exits) =>
+					Array.flatMap(exits, (exit): ReadonlyArray<Exit.Exit<Out, E>> =>
+						Exit.isFailure(exit)
+							? [Exit.failCause(exit.cause)]
+							: Option.match(exit.value, {
+									onNone: () => [],
+									onSome: (value) => [Exit.succeed(value)],
+								}),
+					),
+				),
+			),
+		(fibers, used) =>
+			Effect.gen(function* () {
+				yield* Fiber.interruptAll(fibers)
+				const exits = yield* Effect.forEach(fibers, Fiber.await)
+				// The outcomes were returned; only a cancelled dispatch reports failures here.
+				if (Exit.isSuccess(used)) return
+				const empty: Cause.Cause<E> = Cause.empty
+				const cause = Array.reduce(exits, empty, (cause, exit) =>
+					Exit.isFailure(exit) && !Cause.hasInterruptsOnly(exit.cause)
+						? Cause.combine(cause, exit.cause)
+						: cause,
+				)
+				// The dispatch has no error channel; keep the whole cause in the log.
+				if (cause.reasons.length > 0)
+					yield* Effect.logError(
+						"Event handlers failed while their dispatch was cancelled",
+						cause,
+					)
+			}),
+	)
+}, Release.scoped)
+
 /** Calls handlers in order until one returns `Some`. */
 export const bail = <Args extends ReadonlyArray<unknown>, A, E>(
 	event: Event<Args, Option.Option<A>, E>,
@@ -401,29 +497,56 @@ const dispatchBail = Effect.fnUntraced(function* <
 })
 
 /** Shares the first execution, including its failure or interruption, with all callers. */
+interface SharedNext<I, O, E> {
+	readonly next: Next<I, O, E>
+	/** Settles an interrupted middleware without losing a downstream failure. */
+	readonly stopped: Effect.Effect<O, E>
+}
+
 // Built per handler per waterfall dispatch, so it chains combinators instead of generators.
-const shareNext = <I, O, E>(run: Next<I, O, E>): Effect.Effect<Next<I, O, E>> =>
+const shareNext = <I, O, E>(
+	run: Next<I, O, E>,
+): Effect.Effect<SharedNext<I, O, E>> =>
 	Effect.flatMap(Deferred.make<void>(), (started) =>
-		Effect.map(
-			Deferred.make<O, E>(),
-			(result) =>
-				(input: I): Effect.Effect<O, E> =>
-					Effect.uninterruptibleMask((restore) =>
-						Effect.flatMap(Deferred.succeed(started, undefined), (first) =>
-							first
-								? Effect.andThen(
-										Deferred.complete(
-											result,
-											restore(Effect.suspend(() => run(input))),
-										),
-										// Completion guarantees this cannot suspend. Observe its full
-										// Cause before a pending interrupt can replace it.
-										Deferred.await(result),
-									)
-								: restore(Deferred.await(result)),
-						),
+		Effect.map(Deferred.make<O, E>(), (result) => ({
+			next: (input: I): Effect.Effect<O, E> =>
+				Effect.uninterruptibleMask((restore) =>
+					Effect.flatMap(Deferred.succeed(started, undefined), (first) =>
+						first
+							? Effect.andThen(
+									Deferred.complete(
+										result,
+										restore(Effect.suspend(() => run(input))),
+									),
+									// Completion guarantees this cannot suspend. Observe its full
+									// Cause before a pending interrupt can replace it.
+									Deferred.await(result),
+								)
+							: restore(Deferred.await(result)),
 					),
-		),
+				),
+			stopped: Effect.flatMap(Deferred.isDone(started), (ran) =>
+				ran
+					? Deferred.poll(result).pipe(
+							// Preserve an already completed cause under the caller's mask. Only a pending wait is cancellable.
+							Effect.flatMap(
+								Option.getOrElse(() =>
+									Effect.interruptible(Deferred.await(result)),
+								),
+							),
+							Effect.matchCauseEffect({
+								onFailure: (cause) =>
+									Effect.withFiber((fiber) =>
+										Effect.failCause(
+											Cause.combine(cause, Cause.interrupt(fiber.id)),
+										),
+									),
+								onSuccess: () => Effect.interrupt,
+							}),
+						)
+					: Effect.interrupt,
+			),
+		})),
 	)
 
 /**
@@ -434,6 +557,11 @@ const shareNext = <I, O, E>(run: Next<I, O, E>): Effect.Effect<Next<I, O, E>> =>
  * Each handler's `next` runs the downstream chain once. The first execution
  * selects its input; later executions share the same success, failure, or
  * interruption. Cancelling that first execution does not retry downstream.
+ * Unloading a running middleware interrupts the chain, before or after next.
+ * Downstream failures are preserved; a downstream success cannot bypass post-processing.
+ * A handler removed before it is claimed is skipped.
+ * The dispatcher can cancel a wait for next running in an independently owned fiber;
+ * that fiber remains its external owner's responsibility.
  */
 export const waterfall: <I, O, E, R>(
 	event: Middleware<I, O, E>,
@@ -452,12 +580,14 @@ export const waterfall: <I, O, E, R>(
 			if (handler === undefined)
 				return Effect.suspend(() => last(input)).pipe(
 					Release.scoped,
-					Effect.updateContext<never, Exclude<R, Scope.Scope>>(() => context),
+					Effect.updateContext<never, Exclude<R, Scope.Scope>>((caller) =>
+						Context.add(context, Origins, Context.get(caller, Origins)),
+					),
 				)
 			return Effect.flatMap(
 				shareNext((input: I) => step(index + 1, input)),
-				(next) =>
-					Effect.flatMap(invoke(handler, [input, next]), (result) =>
+				({ next, stopped }) =>
+					Effect.flatMap(invoke(handler, [input, next], stopped), (result) =>
 						Option.isSome(result) ? Effect.succeed(result.value) : next(input),
 					),
 			)

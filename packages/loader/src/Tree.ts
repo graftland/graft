@@ -14,7 +14,8 @@ import {
 	Schema,
 } from "effect"
 
-import { Entry } from "./Entry"
+import { Entry, NewEntry } from "./Entry"
+import { assignIds, validateIds as checkIds } from "./internal/entryIds"
 import { isSnapshot, snapshot } from "./internal/snapshot"
 import { groups, structures, trees } from "./internal/validated"
 
@@ -136,19 +137,12 @@ export const validateStructure = (
 
 /** Check one list of ids, optionally continuing a whole-tree uniqueness check. */
 export const validateIds = (
-	entries: ReadonlyArray<Pick<Entry, "id">>,
+	entries: ReadonlyArray<{ readonly id?: string | undefined }>,
 	seen: HashSet.HashSet<string> = HashSet.empty(),
-): Result.Result<HashSet.HashSet<string>, InvalidOperation> => {
-	let unique = seen
-	for (const entry of entries) {
-		if (HashSet.has(unique, entry.id))
-			return Result.fail(
-				InvalidOperation.make({ reason: `Duplicate entry id "${entry.id}"` }),
-			)
-		unique = HashSet.add(unique, entry.id)
-	}
-	return Result.succeed(unique)
-}
+): Result.Result<HashSet.HashSet<string>, InvalidOperation> =>
+	Result.mapError(checkIds(entries, seen), (reason) =>
+		InvalidOperation.make({ reason }),
+	)
 
 /** The schema and identity boundary of a single group, without inspecting descendants. */
 export const GroupEntries = Schema.Array(Entry).check(
@@ -186,21 +180,35 @@ const ownTree = (entries: ReadonlyArray<Entry>): ReadonlyArray<Entry> => {
 }
 
 /** Check topology, then decode only this group; descendants own their schema failures. */
-export const validateGroup = (value: unknown) => {
+export const validateGroup = (
+	value: unknown,
+	parent: Option.Option<string>,
+) => {
 	if (Array.isArray(value) && groups.has(value) && structures.has(value))
 		return Result.succeed(value as ReadonlyArray<Entry>)
 	return Result.flatMap(validateStructure(value), () =>
-		Result.map(decodeGroup(value), (entries) => {
-			const owned = snapshot(
-				Array.map(entries, (entry) =>
-					entry.group === true && entry.config === undefined
-						? { ...entry, config: [] }
-						: entry,
-				),
-			)
-			groups.add(owned)
-			return owned
-		}),
+		Result.flatMap(
+			Result.mapError(
+				Schema.decodeUnknownResult(Schema.Array(NewEntry))(value),
+				(cause) =>
+					InvalidOperation.make({
+						reason: "Expected an array of valid entries",
+						cause,
+					}),
+			),
+			(input) =>
+				Result.map(decodeGroup(assignIds(input, parent)), (entries) => {
+					const owned = snapshot(
+						Array.map(entries, (entry) =>
+							entry.group === true && entry.config === undefined
+								? { ...entry, config: [] }
+								: entry,
+						),
+					)
+					groups.add(owned)
+					return owned
+				}),
+		),
 	)
 }
 

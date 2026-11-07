@@ -5,16 +5,16 @@ carry over line by line. The work is in names, keys and `!!js` tags.
 
 ## Entry fields
 
-| Field       | cordis                          | Graft                                                                                                                                              |
-| ----------- | ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `id`        | Entry id                        | Same. Keep existing ids so identity survives edits.                                                                                                |
-| `name`      | Plugin module                   | Plugin module: `./path`, `/abs/path`, `@scope/pkg`, or a short name tried as written, then `@graftland/plugin-<name>`, then `graft-plugin-<name>`. |
-| `config`    | Plugin config                   | Plugin input, decoded by the plugin's Effect `Schema`. Adapt to the Graft plugin's schema.                                                         |
-| `disabled`  | Boolean or `!!js` expression    | Boolean only.                                                                                                                                      |
-| `group`     | Group of entries                | Same; children go in `config`.                                                                                                                     |
-| `inject`    | Service names to wait for       | Service **key strings** to wait for.                                                                                                               |
-| `isolate`   | `{ name: true \| label }`       | `{ "<key string>": true \| label }`.                                                                                                               |
-| `intercept` | `{ name: config }`, any service | Only references the host registered. `graft start` registers `effect/References/CurrentLogAnnotations` and `effect/References/MinimumLogLevel`.    |
+| Field       | cordis                          | Graft                                                                                                                                                                                                 |
+| ----------- | ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`        | Entry id                        | Same. Keep existing ids so identity survives edits.                                                                                                                                                   |
+| `name`      | Plugin module                   | Plugin module: `./path`, `/abs/path`, `@scope/pkg`, or a short name tried as written, then as `@graftland/plugin-<name>` and `graft-plugin-<name>` (both installed fails with `AmbiguousPluginName`). |
+| `config`    | Plugin config                   | Plugin input, decoded by the plugin's Effect `Schema`. Adapt to the Graft plugin's schema.                                                                                                            |
+| `disabled`  | Boolean or `!!js` expression    | Boolean only.                                                                                                                                                                                         |
+| `group`     | Group of entries                | Same; children go in `config`.                                                                                                                                                                        |
+| `inject`    | Service names to wait for       | Service **key strings** to wait for.                                                                                                                                                                  |
+| `isolate`   | `{ name: true \| label }`       | `{ "<key string>": true \| label }`.                                                                                                                                                                  |
+| `intercept` | `{ name: config }`, any service | Only references the host registered. `graft start` registers `effect/References/CurrentLogAnnotations` and `effect/References/MinimumLogLevel`.                                                       |
 
 Fields Graft does not know (such as `note`) are kept as metadata.
 
@@ -60,11 +60,12 @@ change.
 
 ## Editor support
 
-Put the schema comment on the first line, with the project's `@graftland/cli`
-version:
+Run `graft schema` in the project to write `graft.schema.json`, which checks
+entry fields and the config of every installed plugin that exports `./schema`.
+Put the schema comment on the first line, and commit the file:
 
 ```yaml
-# yaml-language-server: $schema=https://cdn.jsdelivr.net/npm/@graftland/cli@<version>/schema.json
+# yaml-language-server: $schema=./graft.schema.json
 ```
 
 For VS Code, declare the tag: `{ "yaml.customTags": ["!env scalar"] }`.

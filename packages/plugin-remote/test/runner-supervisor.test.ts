@@ -142,7 +142,7 @@ const orphan: SessionRecord = {
 		pid: 123,
 		start: { born: "original-process-start" },
 	},
-	load: { specifier: "fixture" },
+	load: { contract: "fixture-contract", implementation: "fixture" },
 	code,
 }
 
@@ -177,7 +177,10 @@ layer(SecureRandom.layerWebCrypto)("runner session supervisor", (it) => {
 					key,
 					requestId: "early-notice",
 				})
-				yield* supervisor.load(record.handle, { specifier: "fixture" })
+				yield* supervisor.load(record.handle, {
+					contract: "fixture-contract",
+					implementation: "fixture",
+				})
 				const child = yield* Queue.take(spawned)
 				const exit: ExitStatus = {
 					code: 73,
@@ -202,7 +205,10 @@ layer(SecureRandom.layerWebCrypto)("runner session supervisor", (it) => {
 			Effect.gen(function* () {
 				const { supervisor, spawned } = yield* setup()
 				const record = yield* supervisor.open({ key, requestId: "notice" })
-				yield* supervisor.load(record.handle, { specifier: "fixture" })
+				yield* supervisor.load(record.handle, {
+					contract: "fixture-contract",
+					implementation: "fixture",
+				})
 				const child = yield* Queue.take(spawned)
 				const waiting = yield* Effect.forkScoped(
 					supervisor.terminated!(record.handle),
@@ -248,7 +254,10 @@ layer(SecureRandom.layerWebCrypto)("runner session supervisor", (it) => {
 						}),
 					)
 					const first = yield* supervisor.open({ key, requestId: "first" })
-					yield* supervisor.load(first.handle, { specifier: "fixture" })
+					yield* supervisor.load(first.handle, {
+						contract: "fixture-contract",
+						implementation: "fixture",
+					})
 					const next = yield* supervisor.open({
 						key,
 						requestId: "second",
@@ -289,7 +298,10 @@ layer(SecureRandom.layerWebCrypto)("runner session supervisor", (it) => {
 				const initialGeneration = yield* supervisor.highWater(key)
 				assert.isNull(initialGeneration)
 				const first = yield* supervisor.open({ key, requestId: "first" })
-				yield* supervisor.load(first.handle, { specifier: "fixture" })
+				yield* supervisor.load(first.handle, {
+					contract: "fixture-contract",
+					implementation: "fixture",
+				})
 				const unit = yield* Queue.take(spawned)
 				const stale = yield* Effect.exit(
 					supervisor.open({ key, requestId: "wrong", expectedGeneration: 2 }),
@@ -379,7 +391,10 @@ layer(SecureRandom.layerWebCrypto)("runner session supervisor", (it) => {
 				}
 				{
 					const exit = yield* Effect.exit(
-						supervisor.load(first.handle, { specifier: "fixture" }),
+						supervisor.load(first.handle, {
+							contract: "fixture-contract",
+							implementation: "fixture",
+						}),
 					)
 					reason(exit, "StaleSession")
 				}
@@ -393,11 +408,17 @@ layer(SecureRandom.layerWebCrypto)("runner session supervisor", (it) => {
 				const { supervisor, spawned, count } = yield* setup({ gate })
 				const record = yield* supervisor.open({ key, requestId: "first" })
 				const first = yield* Effect.forkScoped(
-					supervisor.load(record.handle, { specifier: "fixture" }),
+					supervisor.load(record.handle, {
+						contract: "fixture-contract",
+						implementation: "fixture",
+					}),
 				)
 				yield* Queue.take(spawned)
 				const second = yield* Effect.forkScoped(
-					supervisor.load(record.handle, { specifier: "fixture" }),
+					supervisor.load(record.handle, {
+						contract: "fixture-contract",
+						implementation: "fixture",
+					}),
 				)
 				const status = yield* supervisor.status(record.handle)
 				assert.equal(status.phase, "Loading")
@@ -407,7 +428,24 @@ layer(SecureRandom.layerWebCrypto)("runner session supervisor", (it) => {
 				})
 				{
 					const exit = yield* Effect.exit(
-						supervisor.load(record.handle, { specifier: "different" }),
+						supervisor.load(record.handle, {
+							contract: "fixture-contract",
+							implementation: "different",
+						}),
+					)
+					reason(exit, "SessionConflict")
+				}
+
+				for (const request of [
+					{ contract: "different-contract", implementation: "fixture" },
+					{
+						contract: "fixture-contract",
+						implementation: "fixture",
+						digest: true,
+					},
+				]) {
+					const exit = yield* Effect.exit(
+						supervisor.load(record.handle, request),
 					)
 					reason(exit, "SessionConflict")
 				}
@@ -429,7 +467,10 @@ layer(SecureRandom.layerWebCrypto)("runner session supervisor", (it) => {
 			Effect.gen(function* () {
 				const { supervisor, spawned } = yield* setup({ graceful: false })
 				const record = yield* supervisor.open({ key, requestId: "first" })
-				yield* supervisor.load(record.handle, { specifier: "fixture" })
+				yield* supervisor.load(record.handle, {
+					contract: "fixture-contract",
+					implementation: "fixture",
+				})
 				const unit = yield* Queue.take(spawned)
 				yield* TestClock.adjust("10 seconds")
 				yield* supervisor.renew(record.handle)
@@ -454,7 +495,10 @@ layer(SecureRandom.layerWebCrypto)("runner session supervisor", (it) => {
 			Effect.gen(function* () {
 				const { supervisor, spawned } = yield* setup({ graceful: false })
 				const first = yield* supervisor.open({ key, requestId: "first" })
-				yield* supervisor.load(first.handle, { specifier: "fixture" })
+				yield* supervisor.load(first.handle, {
+					contract: "fixture-contract",
+					implementation: "fixture",
+				})
 				const unit = yield* Queue.take(spawned)
 				const replacing = yield* Effect.forkScoped(
 					supervisor.open({
@@ -483,7 +527,10 @@ layer(SecureRandom.layerWebCrypto)("runner session supervisor", (it) => {
 				const { supervisor, spawned } = yield* setup({ gate })
 				const record = yield* supervisor.open({ key, requestId: "first" })
 				const loading = yield* Effect.forkScoped(
-					supervisor.load(record.handle, { specifier: "fixture" }),
+					supervisor.load(record.handle, {
+						contract: "fixture-contract",
+						implementation: "fixture",
+					}),
 				)
 				const unit = yield* Queue.take(spawned)
 				yield* TestClock.adjust("15 seconds")
@@ -600,7 +647,10 @@ layer(SecureRandom.layerWebCrypto)("runner session supervisor", (it) => {
 						Effect.provideService(Execution, execution.driver),
 					)
 					const record = yield* supervisor.open({ key, requestId: "first" })
-					yield* supervisor.load(record.handle, { specifier: "fixture" })
+					yield* supervisor.load(record.handle, {
+						contract: "fixture-contract",
+						implementation: "fixture",
+					})
 				}),
 			)
 			const unit = yield* Queue.take(execution.spawned)
@@ -629,7 +679,10 @@ layer(SecureRandom.layerWebCrypto)("runner session supervisor", (it) => {
 								Effect.provideService(Execution, execution.driver),
 							)
 							const record = yield* supervisor.open({ key, requestId: "first" })
-							yield* supervisor.load(record.handle, { specifier: "fixture" })
+							yield* supervisor.load(record.handle, {
+								contract: "fixture-contract",
+								implementation: "fixture",
+							})
 							const unit = yield* Queue.take(execution.spawned)
 							const stopping = yield* Effect.forkScoped(
 								supervisor.dispose(record.handle),
@@ -711,7 +764,10 @@ layer(SecureRandom.layerWebCrypto)("runner session supervisor", (it) => {
 			Effect.gen(function* () {
 				const { supervisor, spawned } = yield* setup()
 				const record = yield* supervisor.open({ key, requestId: "first" })
-				yield* supervisor.load(record.handle, { specifier: "fixture" })
+				yield* supervisor.load(record.handle, {
+					contract: "fixture-contract",
+					implementation: "fixture",
+				})
 				const unit = yield* Queue.take(spawned)
 				yield* Deferred.succeed(unit.exit, { code: 23, signal: null })
 				yield* TestClock.adjust("0 millis")
@@ -765,7 +821,10 @@ layer(SecureRandom.layerWebCrypto)("runner session supervisor", (it) => {
 							)
 							const record = yield* supervisor.open({ key, requestId: "first" })
 							const result = yield* Effect.exit(
-								supervisor.load(record.handle, { specifier: "fixture" }),
+								supervisor.load(record.handle, {
+									contract: "fixture-contract",
+									implementation: "fixture",
+								}),
 							)
 							assert.isTrue(Exit.isFailure(result))
 							if (Exit.isFailure(result)) {
@@ -812,7 +871,10 @@ layer(SecureRandom.layerWebCrypto)("runner session supervisor", (it) => {
 								Effect.provideService(Execution, driver),
 							)
 							const record = yield* supervisor.open({ key, requestId: "first" })
-							yield* supervisor.load(record.handle, { specifier: "fixture" })
+							yield* supervisor.load(record.handle, {
+								contract: "fixture-contract",
+								implementation: "fixture",
+							})
 							const result = yield* supervisor.dispose(record.handle)
 							assert.equal(result.kind, "Killed")
 							assert.isTrue(

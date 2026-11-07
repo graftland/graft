@@ -23,17 +23,28 @@ import {
 	String,
 } from "effect"
 import { SecureRandom } from "effect/crypto"
+import { HttpClient, HttpClientResponse } from "effect/http"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import { RpcClient } from "effect/rpc"
 import { NodeServices } from "@effect/platform-node"
 import { assert, describe, it } from "@effect/vitest"
 
 import { Graft, Plugin } from "@graftland/graft"
-import { Entry, Include, Loader, ModuleResolver } from "@graftland/loader"
+import {
+	Entry,
+	Group,
+	Include,
+	Loader,
+	ModuleResolver,
+} from "@graftland/loader"
 
 import { inject } from "vitest"
 
+import otlpHttp from "../../plugin-otlp/dist/http.js"
+import otlp from "../../plugin-otlp/dist/index.js"
 import { ProcessExited } from "../src/Errors"
+import mtlsAuth from "../src/host/auth/mtls"
+import websocketTransport from "../src/host/websocket"
 import * as Remote from "../src/index"
 import * as Port from "../src/internal/port"
 import * as Model from "../src/internal/runner/model"
@@ -47,7 +58,12 @@ import {
 	runnerConfig,
 } from "./application"
 import { expectFailure } from "./errors"
-import { ChildApi, contract, HostApi } from "./fixtures/services-contract"
+import {
+	ChildApi,
+	ChildLabel,
+	contract,
+	HostApi,
+} from "./fixtures/services-contract"
 import { tcpProxy } from "./network-proxy"
 import * as Websocket from "./websocket"
 
@@ -202,6 +218,7 @@ const setup = (lease = 15000, partitionable = false) =>
 		const proxy = yield* Graft.plugin(
 			Remote.plugin(contract, {
 				contractModule: "remote-fixture",
+				implementation: "remote-implementation",
 				connect,
 			}),
 			{ directory, fail: false },
@@ -467,6 +484,7 @@ describe("network runner end to end", () => {
 						name: "remote",
 						config: {
 							contract: "remote-fixture",
+							implementation: "remote-implementation",
 							config: { directory, fail: false },
 							connect: {
 								transport: {
@@ -566,7 +584,8 @@ describe("network runner end to end", () => {
 				})
 				yield* first.Load({
 					handle: opened.handle,
-					specifier: "remote-fixture",
+					contract: "remote-fixture",
+					implementation: "remote-implementation",
 				})
 				const loaded = yield* first.Status(opened.handle)
 				const child = Option.getOrThrow(Model.childOf(loaded))
@@ -717,11 +736,11 @@ describe("network runner end to end", () => {
 				const empty = Remote.Contract.make({
 					name: "missing-instance",
 					config: Schema.Struct({}),
-					module: "unused",
 				})
 				const proxy = yield* Graft.plugin(
 					Remote.plugin(empty, {
 						contractModule: "unused",
+						implementation: "unused",
 						connect: {
 							...{
 								url: "wss://127.0.0.1:0",
@@ -953,7 +972,8 @@ describe("network runner end to end", () => {
 				})
 				yield* first.Load({
 					handle: opened.handle,
-					specifier: "remote-fixture",
+					contract: "remote-fixture",
+					implementation: "remote-implementation",
 				})
 				const loaded = yield* first.Status(opened.handle)
 				assert.isTrue(Option.isSome(Model.childOf(loaded)))
@@ -1015,7 +1035,8 @@ describe("network runner end to end", () => {
 				})
 				yield* client.Load({
 					handle: opened.handle,
-					specifier: "remote-fixture",
+					contract: "remote-fixture",
+					implementation: "remote-implementation",
 				})
 				const loaded = yield* client.Status(opened.handle)
 				const identity = Option.getOrThrow(Model.childOf(loaded))
@@ -1094,6 +1115,7 @@ describe("network runner end to end", () => {
 					const proxy = yield* Graft.plugin(
 						Remote.plugin(contract, {
 							contractModule: "remote-fixture",
+							implementation: "remote-implementation",
 							connect: {
 								instance: expect === undefined ? "" : "pin-" + index,
 								...{
@@ -1130,3 +1152,91 @@ describe("network runner end to end", () => {
 		90_000,
 	)
 })
+
+it.live(
+	"gives remote instances in separate anonymous OTLP lists distinct names",
+	() =>
+		Effect.gen(function* () {
+			const fs = yield* FileSystem.FileSystem
+			const directory = yield* fs.makeTempDirectoryScoped()
+			const daemon = yield* startRunner(directory + "/state")
+			const certificate = yield* credentials("client")
+			const remote = Remote.plugin(contract, {
+				contractModule: "remote-fixture",
+				implementation: "remote-implementation",
+				connect: {
+					url: `wss://127.0.0.1:${daemon.port}`,
+					ca: inject("remoteTls") + "/ca.crt",
+					servername: certificate.servername,
+					auth: { mtls: Effect.succeed(certificate) },
+				},
+			})
+			const replies = yield* Queue.unbounded<string>()
+			const probe = Plugin.make({
+				name: "probe",
+				inject: [ChildApi],
+				apply: () =>
+					Effect.gen(function* () {
+						const api = yield* ChildApi
+						const reply = yield* api.call(20)
+						yield* Queue.offer(replies, reply.id)
+					}),
+			})
+			yield* Graft.provide(HostApi, { double: (n) => Effect.succeed(n * 2) })
+			yield* Graft.provide(
+				HttpClient.HttpClient,
+				HttpClient.make((request) =>
+					Effect.succeed(
+						HttpClientResponse.fromWeb(
+							request,
+							new Response(null, { status: 200 }),
+						),
+					),
+				),
+			)
+			const resolver = yield* ModuleResolver.make({
+				base: ".",
+				importer: (specifier) =>
+					Effect.succeed({
+						default: (
+							{
+								otlp,
+								"@graftland/plugin-otlp/http": otlpHttp,
+								remote,
+								probe,
+								"@graftland/plugin-remote/host/websocket": websocketTransport,
+								"@graftland/plugin-remote/host/auth/mtls": mtlsAuth,
+							} as Readonly<Record<string, Plugin.Plugin>>
+						)[specifier],
+					}),
+			})
+			yield* Graft.provide(ModuleResolver.ModuleResolver, resolver)
+			const hosts = yield* Graft.plugin(
+				Group.Group,
+				Array.map(["one", "two"], (id) => ({
+					id,
+					name: "otlp",
+					isolate: { [ChildApi.key]: true, [ChildLabel.key]: true },
+					config: {
+						url: "http://collector.test/v1/traces",
+						serviceName: id,
+						plugins: [
+							{ name: "remote", config: { directory, fail: false } },
+							{ name: "probe" },
+						],
+					},
+				})),
+			)
+			yield* hosts.stable
+			const first = yield* Queue.take(replies).pipe(
+				Effect.timeout("30 seconds"),
+			)
+			const second = yield* Queue.take(replies).pipe(
+				Effect.timeout("30 seconds"),
+			)
+			assert.match(first, /^[0-9a-f]{8}$/)
+			assert.match(second, /^[0-9a-f]{8}$/)
+			assert.notEqual(first, second)
+		}).pipe(Effect.scoped, Effect.provide(runtime)),
+	60_000,
+)

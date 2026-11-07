@@ -77,15 +77,9 @@ importers:
       "@graftland/create":
         specifier: workspace:*
         version: link:../create
-      "@graftland/graft":
-        specifier: workspace:*
-        version: link:../core
       "@graftland/hmr":
         specifier: workspace:*
         version: link:../hmr
-      "@graftland/loader":
-        specifier: workspace:*
-        version: link:../loader
       "@graftland/package-manager":
         specifier: workspace:*
         version: link:../package-manager
@@ -96,6 +90,12 @@ importers:
       "@effect/vitest":
         specifier: 4.1.2
         version: 4.1.2(effect@4.1.2)(vitest@5.1.0(@types/node@26.6.6)(vite@8.3.5(@types/node@26.6.6)(yaml@2.9.1)))
+      "@graftland/graft":
+        specifier: workspace:*
+        version: link:../core
+      "@graftland/loader":
+        specifier: workspace:*
+        version: link:../loader
       effect:
         specifier: 4.1.2
         version: 4.1.2
@@ -148,6 +148,9 @@ importers:
       "@astrojs/starlight":
         specifier: 0.42.6
         version: 0.42.6(astro@7.4.1(@types/node@26.6.6)(yaml@2.9.1))(typescript@5.9.3)
+      "@graftland/plugin-http-api":
+        specifier: workspace:*
+        version: link:../plugin-http-api
       astro:
         specifier: 7.4.1
         version: 7.4.1(@types/node@26.6.6)(yaml@2.9.1)
@@ -176,6 +179,18 @@ importers:
       "@graftland/loader":
         specifier: workspace:*
         version: link:../loader
+      "@graftland/plugin-http":
+        specifier: workspace:*
+        version: link:../plugin-http
+      "@graftland/plugin-mcp-server":
+        specifier: workspace:*
+        version: link:../plugin-mcp-server
+      "@graftland/plugin-otlp":
+        specifier: workspace:*
+        version: link:../plugin-otlp
+      "@graftland/plugin-release":
+        specifier: workspace:*
+        version: link:../plugin-release
       "@graftland/plugin-remote":
         specifier: workspace:*
         version: link:../plugin-remote
@@ -208,10 +223,6 @@ importers:
         version: 5.1.0(@types/node@26.6.6)(vite@8.3.5(@types/node@26.6.6)(yaml@2.9.1))
 
   packages/hmr:
-    dependencies:
-      "@graftland/graft":
-        specifier: workspace:*
-        version: link:../core
     devDependencies:
       "@effect/platform-node":
         specifier: 4.1.2
@@ -219,6 +230,9 @@ importers:
       "@effect/vitest":
         specifier: 4.1.2
         version: 4.1.2(effect@4.1.2)(vitest@5.1.0(@types/node@26.6.6)(vite@8.3.5(@types/node@26.6.6)(yaml@2.9.1)))
+      "@graftland/graft":
+        specifier: workspace:*
+        version: link:../core
       effect:
         specifier: 4.1.2
         version: 4.1.2
@@ -228,9 +242,6 @@ importers:
 
   packages/loader:
     dependencies:
-      "@graftland/graft":
-        specifier: workspace:*
-        version: link:../core
       yaml:
         specifier: 2.9.1
         version: 2.9.1
@@ -241,6 +252,9 @@ importers:
       "@effect/vitest":
         specifier: 4.1.2
         version: 4.1.2(effect@4.1.2)(vitest@5.1.0(@types/node@26.6.6)(vite@8.3.5(@types/node@26.6.6)(yaml@2.9.1)))
+      "@graftland/graft":
+        specifier: workspace:*
+        version: link:../core
       effect:
         specifier: 4.1.2
         version: 4.1.2
@@ -263,11 +277,63 @@ importers:
         specifier: 5.1.0
         version: 5.1.0(@types/node@26.6.6)(vite@8.3.5(@types/node@26.6.6)(yaml@2.9.1))
 
-  packages/plugin-remote:
+  packages/plugin-http:
     dependencies:
       "@effect/platform-node":
         specifier: 4.1.2
         version: 4.1.2(effect@4.1.2)(redis@6.3.1)
+    devDependencies:
+      "@effect/vitest":
+        specifier: 4.1.2
+        version: 4.1.2(effect@4.1.2)(vitest@5.1.0(@types/node@26.6.6)(vite@8.3.5(@types/node@26.6.6)(yaml@2.9.1)))
+      "@graftland/graft":
+        specifier: workspace:*
+        version: link:../core
+      "@graftland/loader":
+        specifier: workspace:*
+        version: link:../loader
+      effect:
+        specifier: 4.1.2
+        version: 4.1.2
+      vitest:
+        specifier: 5.1.0
+        version: 5.1.0(@types/node@26.6.6)(vite@8.3.5(@types/node@26.6.6)(yaml@2.9.1))
+
+  packages/plugin-http-api:
+    devDependencies:
+      "@effect/platform-node":
+        specifier: 4.1.2
+        version: 4.1.2(effect@4.1.2)(redis@6.3.1)
+      "@effect/vitest":
+        specifier: 4.1.2
+        version: 4.1.2(effect@4.1.2)(vitest@5.1.0(@types/node@26.6.6)(vite@8.3.5(@types/node@26.6.6)(yaml@2.9.1)))
+      "@graftland/graft":
+        specifier: workspace:*
+        version: link:../core
+      "@graftland/loader":
+        specifier: workspace:*
+        version: link:../loader
+      "@graftland/plugin-http":
+        specifier: workspace:*
+        version: link:../plugin-http
+      effect:
+        specifier: 4.1.2
+        version: 4.1.2
+      vitest:
+        specifier: 5.1.0
+        version: 5.1.0(@types/node@26.6.6)(vite@8.3.5(@types/node@26.6.6)(yaml@2.9.1))
+      yaml:
+        specifier: 2.9.1
+        version: 2.9.1
+
+  packages/plugin-mcp-server:
+    devDependencies:
+      "@effect/platform-node":
+        specifier: 4.1.2
+        version: 4.1.2(effect@4.1.2)(redis@6.3.1)
+      "@effect/vitest":
+        specifier: 4.1.2
+        version: 4.1.2(effect@4.1.2)(vitest@5.1.0(@types/node@26.6.6)(vite@8.3.5(@types/node@26.6.6)(yaml@2.9.1)))
       "@graftland/cli":
         specifier: workspace:*
         version: link:../cli
@@ -277,6 +343,76 @@ importers:
       "@graftland/loader":
         specifier: workspace:*
         version: link:../loader
+      "@graftland/plugin-http":
+        specifier: workspace:*
+        version: link:../plugin-http
+      "@graftland/plugin-remote":
+        specifier: workspace:*
+        version: link:../plugin-remote
+      effect:
+        specifier: 4.1.2
+        version: 4.1.2
+      vitest:
+        specifier: 5.1.0
+        version: 5.1.0(@types/node@26.6.6)(vite@8.3.5(@types/node@26.6.6)(yaml@2.9.1))
+
+  packages/plugin-otlp:
+    devDependencies:
+      "@effect/platform-node":
+        specifier: 4.1.2
+        version: 4.1.2(effect@4.1.2)(redis@6.3.1)
+      "@effect/vitest":
+        specifier: 4.1.2
+        version: 4.1.2(effect@4.1.2)(vitest@5.1.0(@types/node@26.6.6)(vite@8.3.5(@types/node@26.6.6)(yaml@2.9.1)))
+      "@graftland/graft":
+        specifier: workspace:*
+        version: link:../core
+      "@graftland/loader":
+        specifier: workspace:*
+        version: link:../loader
+      effect:
+        specifier: 4.1.2
+        version: 4.1.2
+      vitest:
+        specifier: 5.1.0
+        version: 5.1.0(@types/node@26.6.6)(vite@8.3.5(@types/node@26.6.6)(yaml@2.9.1))
+
+  packages/plugin-release:
+    dependencies:
+      yaml:
+        specifier: 2.9.1
+        version: 2.9.1
+    devDependencies:
+      "@effect/platform-node":
+        specifier: 4.1.2
+        version: 4.1.2(effect@4.1.2)(redis@6.3.1)
+      "@effect/vitest":
+        specifier: 4.1.2
+        version: 4.1.2(effect@4.1.2)(vitest@5.1.0(@types/node@26.6.6)(vite@8.3.5(@types/node@26.6.6)(yaml@2.9.1)))
+      "@graftland/cli":
+        specifier: workspace:*
+        version: link:../cli
+      "@graftland/graft":
+        specifier: workspace:*
+        version: link:../core
+      "@graftland/loader":
+        specifier: workspace:*
+        version: link:../loader
+      "@graftland/plugin-remote":
+        specifier: workspace:*
+        version: link:../plugin-remote
+      effect:
+        specifier: 4.1.2
+        version: 4.1.2
+      vitest:
+        specifier: 5.1.0
+        version: 5.1.0(@types/node@26.6.6)(vite@8.3.5(@types/node@26.6.6)(yaml@2.9.1))
+
+  packages/plugin-remote:
+    dependencies:
+      "@effect/platform-node":
+        specifier: 4.1.2
+        version: 4.1.2(effect@4.1.2)(redis@6.3.1)
       asn1js:
         specifier: 4.0.0
         version: 4.0.0
@@ -290,9 +426,18 @@ importers:
       "@effect/vitest":
         specifier: 4.1.2
         version: 4.1.2(effect@4.1.2)(vitest@5.1.0(@types/node@26.6.6)(vite@8.3.5(@types/node@26.6.6)(yaml@2.9.1)))
+      "@graftland/cli":
+        specifier: workspace:*
+        version: link:../cli
+      "@graftland/graft":
+        specifier: workspace:*
+        version: link:../core
       "@graftland/hmr":
         specifier: workspace:*
         version: link:../hmr
+      "@graftland/loader":
+        specifier: workspace:*
+        version: link:../loader
       "@types/ws":
         specifier: 8.18.2
         version: 8.18.2
@@ -487,6 +632,12 @@ importers:
       "@graftland/loader":
         specifier: workspace:*
         version: link:../../packages/loader
+      "@graftland/plugin-http":
+        specifier: workspace:*
+        version: link:../../packages/plugin-http
+      "@graftland/plugin-http-api":
+        specifier: workspace:*
+        version: link:../../packages/plugin-http-api
       effect:
         specifier: 4.1.2
         version: 4.1.2
@@ -497,6 +648,30 @@ importers:
       vitest:
         specifier: 5.1.0
         version: 5.1.0(@types/node@26.6.6)(vite@8.3.5(@types/node@26.6.6)(yaml@2.9.1))
+
+  samples/integration-gateway:
+    dependencies:
+      "@graftland/cli":
+        specifier: workspace:*
+        version: link:../../packages/cli
+      "@graftland/graft":
+        specifier: workspace:*
+        version: link:../../packages/core
+      "@graftland/loader":
+        specifier: workspace:*
+        version: link:../../packages/loader
+      "@graftland/plugin-http":
+        specifier: workspace:*
+        version: link:../../packages/plugin-http
+      "@graftland/plugin-mcp-server":
+        specifier: workspace:*
+        version: link:../../packages/plugin-mcp-server
+      "@graftland/plugin-release":
+        specifier: workspace:*
+        version: link:../../packages/plugin-release
+      "@graftland/plugin-remote":
+        specifier: workspace:*
+        version: link:../../packages/plugin-remote
 
   samples/market-feed:
     dependencies:
@@ -516,6 +691,40 @@ importers:
       vitest:
         specifier: 5.1.0
         version: 5.1.0(@types/node@26.6.6)(vite@8.3.5(@types/node@26.6.6)(yaml@2.9.1))
+
+  samples/mcp-tools:
+    dependencies:
+      "@graftland/cli":
+        specifier: workspace:*
+        version: link:../../packages/cli
+      "@graftland/graft":
+        specifier: workspace:*
+        version: link:../../packages/core
+      "@graftland/plugin-http":
+        specifier: workspace:*
+        version: link:../../packages/plugin-http
+      "@graftland/plugin-mcp-server":
+        specifier: workspace:*
+        version: link:../../packages/plugin-mcp-server
+      effect:
+        specifier: 4.1.2
+        version: 4.1.2
+    devDependencies:
+      "@effect/platform-node":
+        specifier: 4.1.2
+        version: 4.1.2(effect@4.1.2)(redis@6.3.1)
+      "@effect/vitest":
+        specifier: 4.1.2
+        version: 4.1.2(effect@4.1.2)(vitest@5.1.0(@types/node@26.6.6)(vite@8.3.5(@types/node@26.6.6)(yaml@2.9.1)))
+      "@graftland/loader":
+        specifier: workspace:*
+        version: link:../../packages/loader
+      vitest:
+        specifier: 5.1.0
+        version: 5.1.0(@types/node@26.6.6)(vite@8.3.5(@types/node@26.6.6)(yaml@2.9.1))
+      yaml:
+        specifier: 2.9.1
+        version: 2.9.1
 
   samples/saas-tenants:
     dependencies:

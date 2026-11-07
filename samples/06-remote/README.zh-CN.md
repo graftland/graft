@@ -41,6 +41,7 @@ devenv shell -- pnpm start
   name: remote
   config:
     contract: "@graftland/sample-remote/contract"
+    implementation: "@graftland/sample-remote/greeter"
     connect:
       local: {}
     config:
@@ -57,7 +58,10 @@ devenv shell -- pnpm start
 
 插件进程不使用宿主的 TypeScript 加载器，所以
 [`tsdown.config.ts`](tsdown.config.ts) 把两者构建到
-`dist/`。修改其中任何一个后，用 `devenv shell -- pnpm build` 重新构建。
+`dist/`。修改其中任何一个后，用 `devenv shell -- pnpm build`
+重新构建。构建还会运行
+[`graft schema`](../../packages/docs/content/docs/zh-cn/cli.md#graft-schema)，让编辑器检查两个 YAML 文件中的
+`remote` 条目。
 
 1. 把 `greeting: Hello` 改成 `greeting: Hi` 并保存。提供者重启后，welcome 打印
    `Hi, Alice!`。

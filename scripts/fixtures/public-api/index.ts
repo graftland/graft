@@ -47,27 +47,44 @@ export const middleware = Event.middleware<string, string>(
 )
 export const descriptor = Remote.Contract.service(
 	Greeter,
-	RpcGroup.make(Rpc.make("Read", { success: Schema.String })),
+	RpcGroup.make(
+		Remote.Contract.operation(
+			"@app/greeter/Read",
+			1,
+			Rpc.make("Read", { success: Schema.String }),
+		),
+	),
 	{
 		toHandlers: (value) => ({ Read: () => value.read }),
 		fromClient: (client) => ({ read: Effect.orDie(client.Read()) }),
 	},
 )
+export const declaration: Plugin.ProvidedContract = descriptor
+export const operationCheck: Remote.Contract.OperationComparison =
+	Remote.Contract.compareOperations(
+		descriptor.operations,
+		descriptor.operations,
+	)
+export const implementation = Plugin.make({
+	name: "implementation",
+	provides: [declaration],
+	overlap: true,
+	apply: () => Graft.provide(Greeter, { read: Effect.succeed("hello") }),
+})
 export const contract = Remote.Contract.make({
 	name: "greeter",
 	config,
-	module: "./greeter.js",
 	provides: [descriptor],
 })
 export const declaredError = Remote.Contract.make({
 	name: "fallible",
 	config,
 	error: Schema.Literal("unavailable"),
-	module: "./greeter.js",
 })
 export const remote = Remote.plugin(contract, {
 	connect: { local: {} },
 	contractModule: "./contract.js",
+	implementation: "./greeter.js",
 })
 export const loader = Loader.plugin
 export const include = Include.Include
@@ -128,4 +145,14 @@ export const commands = Plugin.make({
 		Effect.flatMap(Commands, (commands) =>
 			commands.register(Command.make("example", {}, () => Effect.void)),
 		),
+})
+
+export const capture = Remote.Artifact.capture({
+	directory: "./built-plugin",
+	entry: "index.js",
+	store: "./artifacts",
+})
+export const probePlugin = Plugin.make({
+	name: "public-probe",
+	apply: () => Plugin.probe("health", Effect.void),
 })

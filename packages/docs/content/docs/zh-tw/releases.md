@@ -178,14 +178,55 @@ devenv shell -- pnpm packages:publish npm
 
 ## 文件網站
 
-工作流程 `.github/workflows/docs.yml` 在每次推送到 `main` 時，從 `packages/docs`
-建置本網站，並部署到 GitHub
-Pages：[graftland.github.io/graft](https://graftland.github.io/graft/)。你也可以從 Actions 分頁手動啟動它。同一時間只會有一個部署在執行。
+工作流程 `.github/workflows/docs.yml` 從 `packages/docs`
+建置本網站，並部署到Cloudflare
+Pages：[graft-docs-ekb.pages.dev](https://graft-docs-ekb.pages.dev/)。`main`
+上的每個 commit 和每個發佈 tag 都會保留當時的文件。
 
-| 任務           | 做法                                                |
-| -------------- | --------------------------------------------------- |
-| Pages 來源     | 將版本庫的 Pages 來源設為 **GitHub Actions**。      |
-| 在本機處理網站 | `devenv shell -- pnpm --filter @graftland/docs dev` |
+| 位址                                                      | 內容                                                |
+| --------------------------------------------------------- | --------------------------------------------------- |
+| `https://graft-docs-ekb.pages.dev/`                       | **預設版本**：有文件的最新穩定 tag，例如 `v1.2.3`。 |
+| `https://<hash 前 12 碼>.graft-docs-ekb.pages.dev/`       | 該 commit，永久保留。                               |
+| `https://versions.graft-docs-ekb.pages.dev/versions.json` | 所有已部署的 commit，及其日期、標題和 tag。         |
+| `https://graftland.github.io/graft/<path>`                | 重新導向到預設版本的 `<path>`。                     |
+
+### 每次執行做什麼
+
+| 觸發方式                         | 建置                                                                | 之後                                                  |
+| -------------------------------- | ------------------------------------------------------------------- | ----------------------------------------------------- |
+| 推送到 `main`                    | 推送的 commit。                                                     | 加入清單。                                            |
+| 推送 `v1.2.3` 這類 tag           | tag 指向的 commit，僅在它還沒有文件時。                             | 為該 commit 標上 tag。較新的穩定 tag 會成為預設版本。 |
+| 在 Actions 分頁勾選 **backfill** | 文件網站出現以來 `main` 上的每個 commit 和每個 tag 中還沒有文件的。 | 加入清單。                                            |
+| 在 Actions 分頁填寫 **rebuild**  | 填寫的 commit，即使它們已有文件。                                   | 取代它們的部署並更新清單。                            |
+
+- **每個 commit 只建置一次。**
+  使用該 commit 自己的 lockfile 與工具鏈建置，上傳後不再取代。正式位址直接提供預設版本自己的部署，所以切換預設版本不會上傳任何建置。
+- **預設版本。** 與 npm 相同，`v1.2.3-beta.0`
+  這類預發佈版本不會成為預設版本。最後一次發佈之後 `main`
+  上的 commit 會出現在清單中，但不是預設版本。
+- **順序。**
+  各次執行逐一更新清單。預設版本一律是有文件的最高穩定版本，較晚完成的執行不會讓它倒退。
+- **失敗。**
+  已經無法建置的 commit 會被略過，其他 commit 照常部署。讀取線上清單失敗時，執行會停止，而不是建立新的清單。
+- **上限。** 一次 backfill 最多建置 256 個 commit，其餘的再執行一次。
+
+### 切換版本
+
+每個已部署的頁面都從版本位址載入下拉選單，所以在它出現之前建置的版本也有。
+
+- **下拉選單。**
+  在主題選單旁邊。由新到舊列出所有已部署的 commit，顯示 tag 或短 hash，並標出預設版本。選取後開啟同一頁面在該版本中的位址；當時還不存在的頁面會顯示該版本的 404 頁。
+- **提示。** 其他 commit 的頁面頂端會說明這一點，並連結到預設版本中的同一頁面。
+
+### 設定
+
+| 任務                 | 做法                                                                                                                                                                        |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Cloudflare 專案      | 執行一次 `npx wrangler pages project create graft-docs --production-branch main`，再把 Cloudflare 分配的 `*.pages.dev` 名稱填入工作流程的 `DOCS_PAGES_HOST` 和 `DOCS_URL`。 |
+| `docs` 環境的 secret | `CLOUDFLARE_API_TOKEN`（需要 **Cloudflare Pages: Edit** 權限）和 `CLOUDFLARE_ACCOUNT_ID`。                                                                                  |
+| 舊位址               | 將版本庫的 Pages 來源設為 **GitHub Actions**。                                                                                                                              |
+| 補齊以前的文件       | 在 Actions 分頁對 `main` 手動執行該工作流程，並勾選 **backfill**。                                                                                                          |
+| 在本機處理網站       | `devenv shell -- pnpm --filter @graftland/docs dev`；下拉選單只出現在已部署的頁面上。                                                                                       |
 
 ### 撰寫頁面
 

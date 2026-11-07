@@ -42,7 +42,7 @@ The caller applies it to a subtree:
 
 ```ts
 const crawlers = Plugin.make({
-	name: "crawlers",
+	name: "app/crawlers",
 	apply: () =>
 		Graft.plugin(crawler, input, {
 			intercept: [

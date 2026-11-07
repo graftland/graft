@@ -5,7 +5,7 @@ export default defineProject({
 	ssr: { resolve: { conditions: ["source"] } },
 	test: {
 		name: "benchmarks",
-		globalSetup: ["./test/setup.mjs"],
+		globalSetup: ["../../scripts/isolated-home.mjs", "./test/setup.mjs"],
 		include: ["test/**/*.test.ts"],
 		testTimeout: 15000,
 	},

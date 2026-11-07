@@ -6,12 +6,14 @@ description: graft 命令及其子命令。
 `@graftland/cli` 包提供 `graft` 命令。它需要 Node.js 22.19 或更高版本，与 Effect
 Node 适配器的要求一致。
 
-| 命令                        | 作用                       | 章节                          |
-| --------------------------- | -------------------------- | ----------------------------- |
-| `graft start [config]`      | 运行配置文件所描述的应用。 | [graft start](#graft-start)   |
-| `graft create [directory]`  | 创建新项目。               | [graft create](#graft-create) |
-| `graft add <package...>`    | 添加依赖并安装。           | [graft add](#graft-add)       |
-| `graft remove <package...>` | 移除依赖。                 | [graft remove](#graft-remove) |
+| 命令                        | 作用                               | 章节                          |
+| --------------------------- | ---------------------------------- | ----------------------------- |
+| `graft start [config]`      | 运行配置文件所描述的应用。         | [graft start](#graft-start)   |
+| `graft create [directory]`  | 创建新项目。                       | [graft create](#graft-create) |
+| `graft add <package...>`    | 添加依赖并安装。                   | [graft add](#graft-add)       |
+| `graft remove <package...>` | 移除依赖。                         | [graft remove](#graft-remove) |
+| `graft schema`              | 写入 `graft.yml` 的编辑器 Schema。 | [graft schema](#graft-schema) |
+| `graft check [file]`        | 检查清单是否符合宿主要求。         | [graft check](#graft-check)   |
 
 `graft start` 同时支持 [remote 宿主](../remote/hosts/)和
 [runner](../remote/runners/)。命令插件可以添加 `graft remote certificates`
@@ -25,8 +27,9 @@ graft remote certificates --out ./certs --server localhost
 graft add --plugin remote --global
 ```
 
-`add --plugin` 安装 `@graftland/plugin-<name>`，并启用它的 `/cli`
-条目。第三方包可以写完整包名。`--global`
+`add --plugin` 安装插件包，并启用它的 `/cli`
+条目。短名称会变成 registry 中存在的那一个：`@graftland/plugin-<name>` 或
+`graft-plugin-<name>`；两者都存在时，请写完整包名。`--global`
 将包和条目放进[用户级配置](../config-file/#命令插件)。
 
 已启用的命令会出现在 `--help` 和 `--completions bash`
@@ -49,7 +52,8 @@ graft start [config] [--watch] [--env-file <path>] [--env-dir <path>] [--stdio]
 ### 协议输出
 
 只有一个 stdio listener 的 runner 使用
-`graft start runner.yml --stdio`。加载插件、处理帮助和版本参数之前，stdout 就已保留给协议字节。日志、Console 输出（包括 worker 输出）、帮助、版本和错误都写入 stderr；此模式不提供交互向导和补全输出。runner 会拒绝不匹配的 listener 配置。stdin
+`graft start runner.yml --stdio`，[MCP 服务器](../mcp-server/overview/)使用
+`graft start --stdio`。加载插件、处理帮助和版本参数之前，stdout 就已保留给协议字节。日志、Console 输出（包括 worker 输出）、帮助、版本和错误都写入 stderr；此模式不提供交互向导和补全输出。runner 会拒绝不匹配的 listener 配置。stdin
 EOF 后，runner 停止执行单元，确认退出后结束进程；启动或清理失败时返回非零退出码。
 
 ### 选项
@@ -118,8 +122,11 @@ secrets 或 Kubernetes Secret 卷。
 CLI 如何驱动重载：
 
 1. 它使用带模块文件过滤的 `hmr.watch`。
-2. 每次重载尝试返回 `Reloaded` 或 `Skipped` 后，它会调用
-   `loader.retry`，重试失败项并刷新 `!env` 值。
+2. 每次重载尝试返回 `Reloaded`、`RolledBack`、`RecoveryFailed` 或 `Skipped`
+   后，它会调用 `loader.retry`，重试失败项并刷新 `!env` 值。`RolledBack`
+   会为每个启动失败或超时的插件记录一条警告，带有 `graft.fork` 和
+   `graft.plugin`；启动失败时还带有其 `Cause`。 `RecoveryFailed`
+   会将替换及恢复失败都记录为错误，带有相同注解和完整 cause，并明确指出旧代码重启失败。
 3. 重载和 retry 的失败会记录完整 `Cause`，监听继续。
 
 YAML 和模块 watcher 使用原生文件系统通知，不做轮询。YAML
@@ -157,6 +164,9 @@ CLI 为配置项的 `intercept` 设置登记了两个 Reference，对该项及�
 [配置文件页面](../config-file/#配置文件中的-intercept)列出了合法值和示例。非法值让该项以
 `InvalidIntercept` 失败。CLI 不登记其他 Reference。
 
+共享 HTTP 监听器使用普通的 `graft start` 加载 [HTTP 服务器](../http/)，不需要
+`--stdio`。
+
 ## graft create
 
 ```sh
@@ -186,15 +196,16 @@ graft create [directory] [options]
 | `--plugin`          | 接受 `name` 或 `name@range`，短名称的映射与 `graft add --plugin` 相同。该包写入 `dependencies`，并在 `graft.yml` 中得到一个 `- name:` 配置项。未指定范围时，Graft 自己的插件使用 Graft 的版本，其他插件使用 `latest`。 |
 | `--package-manager` | 带版本时（如 `pnpm@9.15.9`）写入 `package.json` 的 `packageManager` 字段。                                                                                                                                             |
 | Git                 | 只运行 `git init`，不创建首次提交。项目位于某个仓库内或未安装 git 时跳过，并说明原因。                                                                                                                                 |
-| 完成之后            | 输出接下来要运行的命令，如 `cd my-app` 和 `pnpm dev`，其中包括被跳过或失败的安装和 `git init`。安装或 `git init` 失败时保留项目，并以非零状态退出。                                                                    |
+| Schema              | 安装完成后，由项目自己的 `@graftland/cli` 运行 [`graft schema`](#graft-schema)。                                                                                                                                       |
+| 完成之后            | 输出接下来要运行的命令，如 `cd my-app` 和 `pnpm dev`，其中包括被跳过或失败的安装、`graft schema` 和 `git init`。任一步骤失败时保留项目，并以非零状态退出。                                                             |
 
 ### 模板
 
-| 模板      | 用途                                                     | 除 `package.json` 和 `graft.yml` 外的文件                                                                                          |
-| --------- | -------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| `app`     | 应用。`graft.yml` 加载示例插件。                         | `src/hello.ts`、`tsconfig.json`、`README.md`、`.vscode/extensions.json`、`.gitignore`                                              |
-| `plugin`  | 要[发布](../plugins/#发布插件)的插件包。                 | `src/index.ts`、`test/index.test.ts`、`tsconfig.json`、`tsconfig.build.json`、`README.md`、`.vscode/extensions.json`、`.gitignore` |
-| `minimal` | 只有配置文件，除 `--plugin` 添加的配置项外没有其他条目。 | `.gitignore`                                                                                                                       |
+| 模板      | 用途                                                                          | 除 `package.json` 和 `graft.yml` 外的文件                                                                                          |
+| --------- | ----------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `app`     | 应用。`graft.yml` 加载示例插件：`hello`，以及使用 `greeter` 服务的 `ticker`。 | `src/hello.ts`、`src/greeter.ts`、`src/ticker.ts`、`tsconfig.json`、`README.md`、`.vscode/extensions.json`、`.gitignore`           |
+| `plugin`  | 要[发布](../plugins/#发布插件)的插件包。                                      | `src/index.ts`、`test/index.test.ts`、`tsconfig.json`、`tsconfig.build.json`、`README.md`、`.vscode/extensions.json`、`.gitignore` |
+| `minimal` | 只有配置文件，除 `--plugin` 添加的配置项外没有其他条目。                      | `.gitignore`                                                                                                                       |
 
 | 脚本        | `app`                 | `plugin`                                   | `minimal`             |
 | ----------- | --------------------- | ------------------------------------------ | --------------------- |
@@ -204,8 +215,8 @@ graft create [directory] [options]
 | `typecheck` | `effect-tsgo tsc`     | `effect-tsgo tsc`                          |                       |
 | `build`     |                       | 把 `src` 编译到 `dist`                     |                       |
 
-- 每个项目依赖的 Graft 版本与该命令相同，`graft.yml` 指向该版本的
-  [schema](../config-file/#编辑器支持)。
+- 每个项目依赖的 Graft 版本与该命令相同，`graft.yml`
+  指向项目的[编辑器 Schema](../config-file/#编辑器支持) `./graft.schema.json`。
 - Node 直接运行 `app` 的 TypeScript，因此没有构建步骤。`plugin`
   包需要构建，因为 Node 不会剥离 `node_modules` 中的类型。
 - `.vscode/extensions.json` 推荐 YAML 扩展，它根据 schema 补全
@@ -228,6 +239,27 @@ graft remove <package...>
 ```
 
 从当前目录中的项目移除依赖。
+
+## graft schema
+
+```sh
+graft schema [--output <file>]
+```
+
+为当前目录中的项目写入 `graft.schema.json`，即 `graft.yml`
+的[编辑器 Schema](../config-file/#编辑器支持)。除了随版本发布的 Schema 检查的内容，它还检查每个已安装且登记了配置的插件的
+`config`。
+
+| 情况             | 行为                                                                                                                                                                       |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 哪些包           | `dependencies`、`devDependencies` 和 `optionalDependencies` 中，把 `@graftland/graft` 列为依赖或 peer，并导出 [`./schema`](../best-practices/packaging/#编辑器补全) 的包。 |
+| 导入什么         | 只导入它们的 `./schema` 模块，不加载任何插件。                                                                                                                             |
+| 依赖未安装       | 输出警告，其配置保持开放。                                                                                                                                                 |
+| `./schema` 无效  | `SchemaRegistrationError` 指出是哪个包，不写入文件。                                                                                                                       |
+| 保持更新         | 项目已有 `graft.schema.json` 时，`graft add` 和 `graft remove` 在安装后重写它，失败则以非零状态退出。`graft create` 会写入它。                                             |
+| `--output`、`-o` | 写入的路径，默认为 `graft.schema.json`。                                                                                                                                   |
+
+直接用包管理器安装或升级包之后，自己运行它。
 
 ## 包管理器
 
@@ -268,3 +300,50 @@ graft remove <package...>
 Windows 按现状提供（as is）：进程树清理与回滚保证未经验证，不作承诺。
 
 :::
+
+## 托管升级
+
+`graft start` 与嵌入式宿主使用相同的公开 Loader 和驱动 API，加载
+[托管 Remote 条目](../config-file/#托管集成)。由应用提供操作端点，使用条目 id 调用
+`Graft.transition`。CLI 没有内置 transition 子命令。 `--watch`
+不升级托管单元：HMR 跳过含托管实例的运行时，Loader 在改变目标前拒绝托管树的刷新。
+
+## graft check
+
+```sh
+graft --no-plugins check graft.check.json
+```
+
+加载前将已发布清单与显式宿主描述进行比较。路径相对于预检文件，默认文件名为
+`graft.check.json`。
+[兼容性检查](../ecosystem/compatibility/)说明文件格式和诊断。检查不安装包，也不改变应用配置。
+
+## graft remote manifest
+
+```sh
+graft remote manifest ./release
+graft remote manifest ./release --check --provenance ./provenance.json
+```
+
+由已启用的 `remote/cli` 命令插件提供。从已构建声明生成或验证 `graft`
+字段，并可记录包来源。发布流程见[插件清单](../ecosystem/manifest/)。
+
+## 应用发布
+
+启用 `@graftland/plugin-release/cli` 后可使用 `graft release build`、`plan`、
+`apply`、`rollback`、`history` 和 `status`。命令必须提供 `--socket`； `apply` 和
+`rollback` 还必须提供 `--expected`。CI 输出使用
+`--json`。拒绝和不成功的切换结果返回非零退出码。源格式、撤销和持久化启动选择见
+[应用发布](../application-releases/)。
+
+## graft approve
+
+启用 `@graftland/plugin-release/approve-cli` 后，使用
+`graft approve statement.json --who operator@example --socket /app/control.sock --json`。发布命令需要另行启用
+`@graftland/plugin-release/cli`。`graft release approvals`
+返回可审阅声明；`graft release revoke GRANT --who operator@example`
+记录撤销并终止相关单元。两个 release 命令都需要
+`--socket`。拒绝时退出码非零。参见[信任与隔离](../trust/)。
+
+`graft add` 对所有包禁用生命周期脚本，恢复安装也一样。这也适用于
+`add --plugin`；启用 CLI 扩展仍会允许其在主机执行。

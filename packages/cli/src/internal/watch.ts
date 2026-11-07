@@ -1,5 +1,6 @@
 import { Array, Cause, Effect, Exit, Stream, String } from "effect"
 
+import type { Graft } from "@graftland/graft"
 import type * as Hmr from "@graftland/hmr"
 
 import { observeShutdown } from "./observeShutdown"
@@ -11,16 +12,59 @@ export const isModule = (path: string) =>
 	!Array.contains(String.split(/[/\\]/)(path), "node_modules") &&
 	Array.some(moduleExtensions, (extension) => String.endsWith(extension)(path))
 
+/** One message per failed or timed-out plugin; failures retain their full cause. */
+const logFailures = (
+	failures: ReadonlyArray<Graft.ReplacementFailure>,
+	message: string,
+	log: typeof Effect.logWarning,
+) =>
+	Effect.forEach(
+		failures,
+		(failure) =>
+			(failure._tag === "Failed"
+				? log(
+						`${message}: plugin "${failure.plugin}" failed to start`,
+						failure.cause,
+					)
+				: log(`${message}: plugin "${failure.plugin}" did not start in time`)
+			).pipe(
+				Effect.annotateLogs({
+					"graft.fork": failure.fork,
+					"graft.plugin": failure.plugin,
+				}),
+			),
+		{ discard: true },
+	)
+
 const describe = (result: Hmr.ReloadResult) =>
 	result._tag === "Reloaded"
 		? Effect.logInfo(`Reloaded ${result.entries.length} plugin module(s)`)
-		: Effect.logWarning(
-				result.reason === "ambiguous-exports"
-					? `Restart required: shared plugin exports diverged in ${Array.join(result.modules, ", ")}`
-					: result.reason === "identity-conflict"
-						? `Restart required: plugin replacement identities conflict in ${Array.join(result.modules, ", ")}`
-						: `Restart required to pick up ${Array.join(result.modules, ", ")}`,
-			)
+		: result._tag === "RolledBack"
+			? logFailures(
+					result.failures,
+					"Kept the previous code",
+					Effect.logWarning,
+				)
+			: result._tag === "RecoveryFailed"
+				? Effect.andThen(
+						logFailures(
+							result.failures,
+							"Replacement abandoned",
+							Effect.logError,
+						),
+						logFailures(
+							result.recovery,
+							"Previous code failed to restart",
+							Effect.logError,
+						),
+					)
+				: Effect.logWarning(
+						result.reason === "ambiguous-exports"
+							? `Restart required: shared plugin exports diverged in ${Array.join(result.modules, ", ")}`
+							: result.reason === "identity-conflict"
+								? `Restart required: plugin replacement identities conflict in ${Array.join(result.modules, ", ")}`
+								: `Restart required to pick up ${Array.join(result.modules, ", ")}`,
+					)
 
 /** Owns the HMR stream and retries failed loader entries after each reload. */
 export const watchModules = <E, R>(

@@ -1,8 +1,8 @@
-import { Array, Effect, Exit, Schema } from "effect"
+import { Array, Cause, Effect, Exit, Schema, Stream, String } from "effect"
 import { assert, describe, it } from "@effect/vitest"
 
 import { Graft, Plugin } from "../src/index.ts"
-import { reach, run } from "./utils.ts"
+import { run } from "./utils.ts"
 
 const quiet = Plugin.make({ name: "quiet", apply: () => Effect.void })
 const failing = Plugin.make({
@@ -105,16 +105,25 @@ describe("replacement contracts", () => {
 				const original = Plugin.make({
 					name: "original",
 					apply: (): Effect.Effect<void, "old failure" | "new failure"> =>
-						Effect.void,
+						Effect.fail("old failure"),
 				})
 				const replacement = Plugin.make({
 					name: "replacement",
 					apply: () => Effect.fail("new failure" as const),
 				})
+				// A fork that had already failed keeps the replacement even when it fails.
 				const fork = yield* Graft.plugin(original)
-				yield* fork.await
-				yield* Graft.replace([[original, replacement]])
-				yield* reach(fork, "Failed")
+				yield* Effect.exit(fork.await)
+				const replaced = yield* Graft.replace([[original, replacement]])
+				assert.strictEqual(replaced._tag, "Replaced")
+				yield* fork.state.pipe(
+					Stream.filter(
+						(state) =>
+							state._tag === "Failed" &&
+							String.includes("new failure")(Cause.pretty(state.cause)),
+					),
+					Stream.runHead,
+				)
 				const result = yield* Effect.exit(fork.await)
 				assert.isTrue(Exit.isFailure(result))
 				if (Exit.isFailure(result)) {

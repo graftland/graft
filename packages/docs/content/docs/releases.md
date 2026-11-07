@@ -211,14 +211,60 @@ devenv shell -- pnpm packages:publish npm
 ## Docs site
 
 The workflow `.github/workflows/docs.yml` builds this site from `packages/docs`
-on every push to `main` and deploys it to GitHub Pages at
-[graftland.github.io/graft](https://graftland.github.io/graft/). You can also
-start it by hand from the Actions tab. Only one deploy runs at a time.
+and deploys it to Cloudflare Pages at
+[graft-docs-ekb.pages.dev](https://graft-docs-ekb.pages.dev/). Every commit on
+`main` and every release tag keeps the docs as they were at that commit.
 
-| Task                     | How                                                      |
-| ------------------------ | -------------------------------------------------------- |
-| Pages source             | Set the repository's Pages source to **GitHub Actions**. |
-| Work on the site locally | `devenv shell -- pnpm --filter @graftland/docs dev`      |
+| Address                                                        | Shows                                                                            |
+| -------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| `https://graft-docs-ekb.pages.dev/`                            | The **default release**: the newest stable tag, such as `v1.2.3`, that has docs. |
+| `https://<first 12 hash characters>.graft-docs-ekb.pages.dev/` | That commit, forever.                                                            |
+| `https://versions.graft-docs-ekb.pages.dev/versions.json`      | Every deployed commit, its date, subject and tags.                               |
+| `https://graftland.github.io/graft/<path>`                     | Redirects to `<path>` on the default release.                                    |
+
+### What a run does
+
+| Started by                         | Builds                                                                                   | Then                                                                    |
+| ---------------------------------- | ---------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| A push to `main`                   | The pushed commit.                                                                       | Adds it to the list.                                                    |
+| A tag like `v1.2.3`                | The tagged commit, only if it has no docs yet.                                           | Labels the commit with the tag. A newer stable tag becomes the default. |
+| Actions tab, **backfill** selected | Every commit on `main` since the docs site existed, and every tag, that has no docs yet. | Adds them to the list.                                                  |
+| Actions tab, **rebuild** filled in | The named commits, even if they have docs.                                               | Replaces their deployments and updates the list.                        |
+
+- **Once per commit.** A commit is built once, with its own lockfile and
+  toolchain, and its upload is never replaced. The production address serves the
+  default release's own deployment, so changing the default uploads no build.
+- **Default.** Prereleases such as `v1.2.3-beta.0` never become the default, as
+  on npm. Commits on `main` after the last release are listed but are not the
+  default.
+- **Order.** Runs update the list one at a time. The default is always the
+  highest stable version that has docs, so a late run never moves it back.
+- **Failures.** A commit that no longer builds is left out; the others still
+  deploy. If the live list cannot be read, the run stops rather than start a new
+  one.
+- **Limit.** One backfill builds at most 256 commits. Run it again for the rest.
+
+### Switching versions
+
+Every deployed page loads the select from the versions address, so builds made
+before the select existed get it too.
+
+- **Select.** Next to the theme select. It lists every deployed commit, newest
+  first, by its tag or short hash, and marks the default release. It opens the
+  same page in the chosen version; a page that did not exist yet shows that
+  version's 404 page.
+- **Notice.** A page of any other commit says so at the top, with a link to the
+  same page in the default release.
+
+### Set up
+
+| Task                       | How                                                                                                                                                                                |
+| -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Cloudflare project         | `npx wrangler pages project create graft-docs --production-branch main`, once. Put the `*.pages.dev` name Cloudflare gives it in `DOCS_PAGES_HOST` and `DOCS_URL` of the workflow. |
+| `docs` environment secrets | `CLOUDFLARE_API_TOKEN`, with the **Cloudflare Pages: Edit** permission, and `CLOUDFLARE_ACCOUNT_ID`.                                                                               |
+| Old address                | Set the repository's Pages source to **GitHub Actions**.                                                                                                                           |
+| Docs of earlier commits    | Start the workflow on `main` from the Actions tab with **backfill** selected.                                                                                                      |
+| Work on the site locally   | `devenv shell -- pnpm --filter @graftland/docs dev`; the select appears only on deployed pages.                                                                                    |
 
 ### Writing pages
 

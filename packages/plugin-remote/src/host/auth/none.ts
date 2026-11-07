@@ -5,7 +5,7 @@ import { Graft, Plugin } from "@graftland/graft"
 import { Credentials } from "../../Auth"
 
 export default Plugin.make({
-	name: "remote-none-credentials",
+	name: "@graftland/plugin-remote/host/auth/none",
 	config: Schema.Struct({}),
 	apply: () =>
 		Graft.provide(Credentials, {

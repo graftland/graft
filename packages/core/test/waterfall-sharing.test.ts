@@ -85,7 +85,9 @@ describe("waterfall sharing", () => {
 				yield* Deferred.await(observed)
 				yield* Scope.close(owner, Exit.void)
 				const result = yield* Fiber.await(dispatch)
-				assert.isTrue(Exit.isFailure(result))
+				assert.isTrue(
+					Exit.isFailure(result) && Cause.hasInterrupts(result.cause),
+				)
 				if (Exit.isFailure(result))
 					assert.include(Cause.pretty(result.cause), "downstream failure")
 				yield* journal.expect(["failed once"])
@@ -143,3 +145,41 @@ describe("waterfall sharing", () => {
 		}).pipe(run),
 	)
 })
+
+it.effect(
+	"dispatcher cancellation stops waiting for externally owned next without bypassing middleware",
+	() =>
+		Effect.gen(function* () {
+			const event = Event.middleware<string, string>("externally-owned-next")
+			const owner = yield* Scope.make()
+			const external = yield* Effect.scope
+			const entered = yield* Deferred.make<void>()
+			const release = yield* Deferred.make<void>()
+			const finished = yield* Deferred.make<void>()
+			yield* Event.on(event, (input, next) =>
+				Effect.gen(function* () {
+					yield* next(input).pipe(
+						Effect.ensuring(Deferred.succeed(finished, undefined)),
+						Effect.forkIn(external),
+					)
+					yield* Deferred.await(entered)
+					return yield* Effect.never
+				}),
+			).pipe(Scope.provide(owner))
+			const dispatch = yield* Event.waterfall(event, "secret", (input) =>
+				Deferred.succeed(entered, undefined).pipe(
+					Effect.andThen(Deferred.await(release)),
+					Effect.as(input),
+				),
+			).pipe(Effect.forkScoped)
+			yield* Deferred.await(entered)
+			yield* Scope.close(owner, Exit.void)
+			yield* Fiber.interrupt(dispatch)
+			const exit = yield* Fiber.await(dispatch)
+			assert.isTrue(Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause))
+			const finishedEarly = yield* Deferred.isDone(finished)
+			assert.isFalse(finishedEarly)
+			yield* Deferred.succeed(release, undefined)
+			yield* Deferred.await(finished)
+		}).pipe(run),
+)

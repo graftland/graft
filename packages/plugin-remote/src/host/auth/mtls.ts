@@ -9,7 +9,7 @@ import { Certificate as Config } from "../../internal/auth/config"
 
 export { Config }
 export default Plugin.make({
-	name: "remote-certificate-credentials",
+	name: "@graftland/plugin-remote/host/auth/mtls",
 	config: Config,
 	inject: [FileSystem.FileSystem, Path.Path],
 	apply: Effect.fnUntraced(function* (config) {

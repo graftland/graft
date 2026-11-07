@@ -9,11 +9,13 @@ import {
 	Logger,
 	Queue,
 	Ref,
+	References,
 	Stream,
 } from "effect"
 import { TestClock } from "effect/testing"
 import { assert, describe, it } from "@effect/vitest"
 
+import { Graft } from "@graftland/graft"
 import { WatchResult } from "@graftland/hmr"
 
 import { isModule, watchModules } from "../src/internal/watch.ts"
@@ -63,6 +65,149 @@ describe("module watching", () => {
 				assert.deepStrictEqual(entry.message, [
 					"Restart required: plugin replacement identities conflict in file:///app/a.mjs, file:///app/b.mjs",
 				])
+				yield* Fiber.interrupt(watching)
+			}).pipe(Effect.scoped, Effect.provide(FileSystem.layerNoop({}))),
+	)
+
+	it.effect(
+		"warns once per plugin that failed to start, with its cause and identity",
+		() =>
+			Effect.gen(function* () {
+				// Annotations belong to the fiber at the time of the log call.
+				const logged = yield* Queue.unbounded<{
+					readonly level: string
+					readonly message: unknown
+					readonly cause: Cause.Cause<unknown>
+					readonly annotations: Readonly<Record<string, unknown>>
+				}>()
+				const layer = Logger.layer([
+					Logger.make((options) => {
+						Queue.offerUnsafe(logged, {
+							level: options.logLevel,
+							message: options.message,
+							cause: options.cause,
+							annotations: options.fiber.getRef(
+								References.CurrentLogAnnotations,
+							),
+						})
+					}),
+				])
+				const retried = yield* Deferred.make<void>()
+				const cause = Cause.fail("broken")
+				const hmr = {
+					watch: () =>
+						Stream.make(
+							WatchResult.RolledBack({
+								entries: ["file:///app/a.mjs"],
+								failures: [
+									Graft.ReplacementFailure.Failed({
+										fork: 7,
+										plugin: "a",
+										cause,
+									}),
+									Graft.ReplacementFailure.TimedOut({ fork: 8, plugin: "b" }),
+								],
+							}),
+						),
+				}
+				const watching = yield* watchModules(
+					hmr,
+					"/app",
+					Deferred.succeed(retried, undefined).pipe(Effect.asVoid),
+				).pipe(Effect.provide(layer), Effect.forkScoped)
+				yield* Deferred.await(retried)
+				const failed = yield* Queue.take(logged)
+				const late = yield* Queue.take(logged)
+				assert.deepStrictEqual(
+					[failed.level, failed.message, late.level, late.message],
+					[
+						"Warn",
+						['Kept the previous code: plugin "a" failed to start'],
+						"Warn",
+						['Kept the previous code: plugin "b" did not start in time'],
+					],
+				)
+				assert.isTrue(Cause.hasFails(failed.cause))
+				assert.deepStrictEqual(late.cause, Cause.empty)
+				assert.deepInclude(late.annotations, {
+					"graft.fork": 8,
+					"graft.plugin": "b",
+				})
+				assert.deepInclude(failed.annotations, {
+					"graft.fork": 7,
+					"graft.plugin": "a",
+				})
+				yield* Fiber.interrupt(watching)
+			}).pipe(Effect.scoped, Effect.provide(FileSystem.layerNoop({}))),
+	)
+
+	it.effect(
+		"reports recovery failure as errors with both full causes and retries",
+		() =>
+			Effect.gen(function* () {
+				const { logged, layer } = yield* logging
+				const retried = yield* Deferred.make<void>()
+				const replacement = Cause.combine(
+					Cause.fail("replacement failed"),
+					Cause.die("replacement defect"),
+				)
+				const recovery = Cause.combine(
+					Cause.fail("recovery failed"),
+					Cause.die("recovery defect"),
+				)
+				const hmr = {
+					watch: () =>
+						Stream.make(
+							WatchResult.RecoveryFailed({
+								entries: ["file:///app/a.mjs"],
+								failures: [
+									Graft.ReplacementFailure.Failed({
+										fork: 7,
+										plugin: "new",
+										cause: replacement,
+									}),
+									Graft.ReplacementFailure.TimedOut({
+										fork: 8,
+										plugin: "slow",
+									}),
+								],
+								recovery: [
+									Graft.ReplacementFailure.Failed({
+										fork: 7,
+										plugin: "old",
+										cause: recovery,
+									}),
+								],
+							}),
+						),
+				}
+				const watching = yield* watchModules(
+					hmr,
+					"/app",
+					Deferred.succeed(retried, undefined).pipe(Effect.asVoid),
+				).pipe(Effect.provide(layer), Effect.forkScoped)
+				yield* Deferred.await(retried)
+				const logs = yield* Queue.takeAll(logged)
+				assert.deepStrictEqual(
+					Array.map(logs, (log) => [log.logLevel, log.message, log.cause]),
+					[
+						[
+							"Error",
+							['Replacement abandoned: plugin "new" failed to start'],
+							replacement,
+						],
+						[
+							"Error",
+							['Replacement abandoned: plugin "slow" did not start in time'],
+							Cause.empty,
+						],
+						[
+							"Error",
+							['Previous code failed to restart: plugin "old" failed to start'],
+							recovery,
+						],
+					],
+				)
 				yield* Fiber.interrupt(watching)
 			}).pipe(Effect.scoped, Effect.provide(FileSystem.layerNoop({}))),
 	)

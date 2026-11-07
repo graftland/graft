@@ -22,7 +22,10 @@ import {
 	Schema,
 	Scope,
 	Stream,
+	TxPubSub,
+	TxQueue,
 	TxRef,
+	TxSubscriptionRef,
 } from "effect"
 
 import { CleanupError, ForkState, type Fork, type ForkTree } from "./Fork"
@@ -31,6 +34,8 @@ import * as Aliases from "./internal/aliases"
 import { inheritContext } from "./internal/context"
 import { publicationCycle, resolutionChanged } from "./internal/dependencies"
 import * as ForkStatus from "./internal/forkState"
+import * as Probes from "./internal/probes"
+import * as Replacement from "./internal/replacement"
 import {
 	GraftKey,
 	realmKey,
@@ -53,7 +58,10 @@ import { RuntimeContext } from "./internal/runtimeContext"
 import { ownedScope } from "./internal/scope"
 import * as Slots from "./internal/slots"
 import * as Snapshots from "./internal/snapshot"
+import * as Coordinator from "./internal/transition"
+import * as TrustState from "./internal/trust"
 import type { ErrorOf, InputOf, Plugin } from "./Plugin"
+import type * as Transition from "./Transition"
 
 /** Identifies the current runtime. Use the module's operations to access it; its state is private. */
 export class Graft extends Context.Service<Graft, unknown>()(GraftKey) {}
@@ -157,6 +165,10 @@ const runtimeLayer = Layer.effect(
 		const ambient = yield* Effect.context<never>()
 		const forks = yield* Snapshots.make(HashMap.empty<number, ForkEntry>())
 		const runtime: Runtime = {
+			mutations: yield* TxRef.make(0),
+			trust: yield* TxRef.make(TrustState.empty),
+			transitionBusy: yield* TxRef.make(false),
+			transitionStuck: yield* TxRef.make(false),
 			ambient,
 			slots: yield* TxRef.make(HashMap.empty<ServiceKey, Slot>()),
 			forks,
@@ -259,14 +271,21 @@ const isolation =
  * updated in place, or begun restarting. A later change also counts.
  */
 const accept = Effect.fnUntraced(function* (
+	runtime: Runtime,
+	id: number,
 	status: ForkStatusHandle,
 	spec: TxRef.TxRef<Spec>,
 	f: (current: Spec) => Spec,
 ) {
-	const next = yield* TxRef.modify(spec, (current) => {
-		const next = f(current)
-		return [next, next]
-	})
+	const next = yield* Effect.tx(
+		Effect.gen(function* () {
+			yield* Coordinator.check(runtime, id)
+			return yield* TxRef.modify(spec, (current) => {
+				const next = f(current)
+				return [next, next]
+			})
+		}),
+	)
 	yield* Effect.tx(
 		Effect.gen(function* () {
 			const snapshot = yield* Snapshots.get(status.snapshot)
@@ -279,6 +298,7 @@ const accept = Effect.fnUntraced(function* (
 })
 
 const makeFork = <I, E>(
+	runtime: Runtime,
 	status: ForkStatusHandle,
 	id: number,
 	spec: TxRef.TxRef<Spec>,
@@ -294,13 +314,26 @@ const makeFork = <I, E>(
 	const state = Snapshots.changesStream(snapshot).pipe(
 		// The definition's error bound is retained under compatible replacements.
 		Stream.map(
-			(snapshot) => (snapshot as LocalSnapshot<E | Schema.SchemaError>).state,
+			(snapshot) =>
+				(
+					snapshot as LocalSnapshot<
+						E | Schema.SchemaError | Transition.ManagedFork
+					>
+				).state,
 		),
 		Stream.changes,
 		Stream.takeUntil(ForkState.$is("Disposed")),
 	)
 	return {
 		id,
+		generations: TxSubscriptionRef.changesStream(status.generations),
+		generationEvents: Stream.unwrap(
+			Effect.map(TxPubSub.subscribe(status.generationEvents), (queue) =>
+				Stream.fromEffectRepeat(TxQueue.take(queue)),
+			),
+		),
+		probes: Probes.names(status.probes),
+		probe: (name) => Probes.run(status.probes, name),
 		state,
 		await: Effect.flatMap(Snapshots.get(snapshot), (current) =>
 			current.state._tag === "Loading"
@@ -315,8 +348,8 @@ const makeFork = <I, E>(
 		),
 		stable: ForkStatus.stable(status),
 		update: (input) =>
-			accept(status, spec, (current) => ({ ...current, input })),
-		restart: accept(status, spec, (current) => ({
+			accept(runtime, id, status, spec, (current) => ({ ...current, input })),
+		restart: accept(runtime, id, status, spec, (current) => ({
 			...current,
 			revision: current.revision + 1,
 		})),
@@ -360,6 +393,7 @@ export const plugin: <P extends Plugin>(
 							const resolved = yield* Aliases.resolve(runtime.aliases, plugin)
 							const spec = TxRef.makeUnsafe<Spec>({
 								plugin: resolved,
+								requested: plugin,
 								input,
 								revision: 0,
 							})
@@ -377,6 +411,8 @@ export const plugin: <P extends Plugin>(
 								initialSpec,
 							)
 							const entry: ForkEntry = {
+								initialRevision: initialSpec.revision,
+								scope: forkScope,
 								id,
 								node,
 								status,
@@ -507,6 +543,7 @@ export const plugin: <P extends Plugin>(
 						}),
 				).pipe(Scope.provide(forkScope))
 				return makeFork<InputOf<P>, ErrorOf<P>>(
+					runtime,
 					status,
 					id,
 					spec,
@@ -516,13 +553,12 @@ export const plugin: <P extends Plugin>(
 		)
 	})
 
-/** The requested identities cannot be represented by the runtime's flat aliases. */
-export class ReplacementConflict extends Schema.TaggedError<
+export {
 	ReplacementConflict,
-	{ readonly brand: unique symbol }
->()("ReplacementConflict", {
-	indices: Schema.Array(Schema.Int),
-}) {}
+	ReplacementFailure,
+	ReplaceResult,
+	type ReplaceOptions,
+} from "./internal/replacement"
 
 /** A plugin and the replacement `replace` swaps in for it. */
 export type ReplacementPair = readonly [from: Plugin, to: Plugin]
@@ -562,33 +598,40 @@ export type CompatibleReplacements<
  * Swaps plugins for new versions. Every fork of an old plugin restarts with
  * its replacement, and loading the old plugin later loads the new one.
  * Each pair keeps the same input type and can only narrow the source's error bound.
+ *
+ * Then it waits for the forks running a replacement. If one fails, or
+ * `timeout` passes first, forks still owned by this replacement go back to
+ * the old plugins. After recovery settles, the result is `RolledBack` if no
+ * counted restored fork failed, or `RecoveryFailed` otherwise. Both carry the
+ * replacement `failures`; `RecoveryFailed.recovery` carries one `Failed` per
+ * failed restored fork, with its full cause. Disposed forks and forks taken over by a later replacement or
+ * restart no longer count. A `Pending` fork waiting for a dependency counts as
+ * started or restored. Recovery is not bounded by `timeout`.
+ * Interrupting the replacement wait keeps the swap.
  */
 export const replace: <const Pairs extends ReadonlyArray<ReplacementPair>>(
 	pairs: Pairs & CompatibleReplacements<NoInfer<Pairs>>,
-) => Effect.Effect<void, ReplacementConflict, Graft> = Effect.fnUntraced(
-	function* (pairs: ReadonlyArray<ReplacementPair>) {
-		const { runtime } = yield* RuntimeContext
-		yield* Effect.tx(
-			Effect.gen(function* () {
-				const conflicts = yield* Aliases.replace(runtime.aliases, pairs)
-				if (conflicts.length > 0)
-					return yield* ReplacementConflict.make({ indices: conflicts })
-				const forks = yield* Snapshots.get(runtime.forks)
-				for (const entry of HashMap.values(forks)) {
-					const spec = yield* TxRef.get(entry.spec)
-					const next = yield* Aliases.resolve(runtime.aliases, spec.plugin)
-					if (next !== spec.plugin) {
-						yield* TxRef.set(entry.spec, {
-							...spec,
-							plugin: next,
-							revision: spec.revision + 1,
-						})
-					}
-				}
-			}),
-		)
-	},
-)
+	options?: Replacement.ReplaceOptions,
+) => Effect.Effect<
+	Replacement.ReplaceResult,
+	Replacement.ReplacementConflict,
+	Graft
+> = Effect.fnUntraced(function* (
+	pairs: ReadonlyArray<ReplacementPair>,
+	options?: Replacement.ReplaceOptions,
+) {
+	const { runtime } = yield* RuntimeContext
+	return yield* Replacement.replace(runtime, pairs, options)
+})
+
+/**
+ * The plugin that loading `plugin` loads now: the plugin itself, or the one
+ * that replacements have put in its place.
+ */
+export const resolve = (plugin: Plugin): Effect.Effect<Plugin, never, Graft> =>
+	Effect.flatMap(RuntimeContext, ({ runtime }) =>
+		Effect.tx(Aliases.resolve(runtime.aliases, plugin)),
+	)
 
 const byId = Order.mapInput(Order.Number, (entry: ForkEntry) => entry.id)
 
@@ -634,3 +677,9 @@ export const forks: Stream.Stream<
 export const logs: Stream.Stream<LogEntry, never, Graft> = Stream.unwrap(
 	Effect.map(RuntimeContext, ({ runtime }) => Stream.fromPubSub(runtime.logs)),
 )
+
+/** Runs one coordinator-owned transition. Unsupported targets return Aborted. */
+export const transition: (
+	request: Transition.Request,
+) => Effect.Effect<Transition.Outcome, never, Graft> = (request) =>
+	Coordinator.transition(request)

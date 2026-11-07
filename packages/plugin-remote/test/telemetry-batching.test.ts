@@ -324,8 +324,16 @@ describe("batched log forwarding", () => {
 					},
 				)
 				const handlers = yield* prepared.control.toHandlers({
-					Load: () => Effect.void,
-					Dispose: () => Effect.void,
+					Describe: () =>
+						Effect.succeed({
+							name: descriptor.name,
+							overlap: false,
+							provides: [],
+						}),
+					Ready: () => Effect.succeed([]),
+					Probe: () => Effect.void,
+					Serve: () => Effect.void,
+					Stop: () => Effect.void,
 					Events: () => Stream.never,
 					Logs: () => telemetry.logStream,
 				})

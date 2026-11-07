@@ -5,7 +5,7 @@ import { Event, Plugin } from "@graftland/graft"
 import { NoteRequest, NoteStore, Quota, type Reply } from "./services.ts"
 
 export const notes = Plugin.make({
-	name: "notes",
+	name: "@graftland/sample-saas-tenants/notes",
 	inject: [NoteStore, Quota],
 	apply: Effect.fn("notes.apply")(function* () {
 		const store = yield* NoteStore

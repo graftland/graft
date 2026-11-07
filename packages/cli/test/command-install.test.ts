@@ -1,4 +1,5 @@
 import {
+	Array,
 	ConfigProvider,
 	Effect,
 	FileSystem,
@@ -9,6 +10,7 @@ import {
 	Stream,
 	String,
 } from "effect"
+import { SecureRandom } from "effect/crypto"
 import { ChildProcessSpawner } from "effect/process"
 import { NodeServices } from "@effect/platform-node"
 import { assert, it } from "@effect/vitest"
@@ -17,19 +19,34 @@ import { parse } from "yaml"
 
 import * as Manage from "../src/Manage"
 
+/** The registry has `@graftland/plugin-remote` and no `graft-plugin-remote`. */
+const viewed = (args: ReadonlyArray<string>) =>
+	args[0] === "view" && args[1] !== "@graftland/plugin-remote"
 const manager = (code: number, calls: MutableList.MutableList<string>) =>
 	ChildProcessSpawner.make((command) =>
 		Effect.sync(() => {
-			MutableList.append(calls, command._tag)
+			const args =
+				command._tag === "StandardCommand"
+					? Array.map(command.args, (word) => `${word}`)
+					: []
+			const view = args[0] === "view"
+			if (!view) MutableList.append(calls, command._tag)
+			const missing = viewed(args)
 			return ChildProcessSpawner.makeHandle({
 				pid: ChildProcessSpawner.ProcessId(2147483647),
-				exitCode: Effect.succeed(ChildProcessSpawner.ExitCode(code)),
+				exitCode: Effect.succeed(
+					ChildProcessSpawner.ExitCode(view ? (missing ? 1 : 0) : code),
+				),
 				isRunning: Effect.succeed(false),
 				kill: () => Effect.void,
 				stdin: Sink.drain,
 				stdout: Stream.empty,
 				stderr: Stream.empty,
-				all: Stream.empty,
+				all: Stream.make(
+					new TextEncoder().encode(
+						missing ? "npm error code E404" : view ? `"${args[1] ?? ""}"` : "",
+					),
+				),
 				getInputFd: () => Sink.drain,
 				getOutputFd: () => Stream.empty,
 				unref: Effect.succeed(Effect.void),
@@ -96,7 +113,10 @@ for (const global of [false, true]) {
 				assert.deepEqual(entries, [
 					{ name: "@graftland/plugin-remote/cli", cli: true },
 				])
-			}).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+			}).pipe(
+				Effect.scoped,
+				Effect.provide([NodeServices.layer, SecureRandom.layerWebCrypto]),
+			),
 	)
 }
 
@@ -122,5 +142,8 @@ it.live("does not enable a command plugin when installation fails", () =>
 		assert.equal(result._tag, "Failure")
 		const unchanged = yield* fs.readFileString(directory + "/graft.yml")
 		assert.equal(unchanged, original)
-	}).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+	}).pipe(
+		Effect.scoped,
+		Effect.provide([NodeServices.layer, SecureRandom.layerWebCrypto]),
+	),
 )

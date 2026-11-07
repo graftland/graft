@@ -1,4 +1,4 @@
-import { Array, Effect, HashMap, Option, TxRef } from "effect"
+import { Array, Effect, HashMap, HashSet, Option, TxRef } from "effect"
 
 import type { Plugin } from "../Plugin"
 
@@ -56,6 +56,22 @@ export const replace = Effect.fnUntraced(function* (
 ) {
 	let cells = HashMap.empty<Cell, Group>()
 	let groups = HashMap.empty<Group, GroupState>()
+	// Which pairs staged each write, so that a rollback can undo pairs separately.
+	let cellPairs = HashMap.empty<Cell, HashSet.HashSet<number>>()
+	let groupPairs = HashMap.empty<Group, HashSet.HashSet<number>>()
+	const touch = <K>(
+		owners: HashMap.HashMap<K, HashSet.HashSet<number>>,
+		key: K,
+		index: number,
+	) =>
+		HashMap.set(
+			owners,
+			key,
+			HashSet.add(
+				Option.getOrElse(HashMap.get(owners, key), HashSet.empty<number>),
+				index,
+			),
+		)
 	const readCell = (cell: Cell) =>
 		Option.match(HashMap.get(cells, cell), {
 			onNone: () => TxRef.get(cell),
@@ -77,13 +93,14 @@ export const replace = Effect.fnUntraced(function* (
 	const current = yield* Effect.forEach(pairs, ([from]) =>
 		resolve(aliases, from),
 	)
-	for (const [from, to] of pairs) {
+	for (const [index, [from, to]] of pairs.entries()) {
 		const targetCell = identity(aliases, to)
 		let target = yield* root(targetCell)
 		// An old version can become a target again without redirecting its former family.
 		if (target.state.target !== to) {
 			const group = makeGroup(to)
 			cells = HashMap.set(cells, targetCell, group)
+			cellPairs = touch(cellPairs, targetCell, index)
 			target = yield* root(targetCell)
 		}
 		if (from === to) continue
@@ -92,6 +109,7 @@ export const replace = Effect.fnUntraced(function* (
 		if (source.state.target !== from) {
 			// A stale source changes only its own identity, just like the flat alias map.
 			cells = HashMap.set(cells, sourceCell, target.group)
+			cellPairs = touch(cellPairs, sourceCell, index)
 		} else if (source.group !== target.group) {
 			const winner = source.state.rank > target.state.rank ? source : target
 			const loser = winner === source ? target : source
@@ -105,6 +123,11 @@ export const replace = Effect.fnUntraced(function* (
 				rank:
 					winner.state.rank + (source.state.rank === target.state.rank ? 1 : 0),
 			})
+			groupPairs = touch(
+				touch(groupPairs, loser.group, index),
+				winner.group,
+				index,
+			)
 		}
 	}
 	const checks = yield* Effect.forEach(pairs, ([from, to], index) =>
@@ -128,8 +151,82 @@ export const replace = Effect.fnUntraced(function* (
 		}),
 	)
 	const conflicts = Array.getSomes(checks)
-	if (conflicts.length > 0) return conflicts
-	for (const [cell, group] of cells) yield* TxRef.set(cell, group)
-	for (const [group, state] of groups) yield* TxRef.set(group.state, state)
-	return conflicts
+	if (conflicts.length > 0) return { conflicts, undo: [] }
+	const pairsOf = <K>(
+		owners: HashMap.HashMap<K, HashSet.HashSet<number>>,
+		key: K,
+	) => Option.getOrElse(HashMap.get(owners, key), HashSet.empty<number>)
+	const cellWrites = yield* Effect.forEach(cells, ([cell, group]) =>
+		TxRef.modify(cell, (previous) => [
+			write(cell, group, previous, pairsOf(cellPairs, cell)),
+			group,
+		]),
+	)
+	const groupWrites = yield* Effect.forEach(groups, ([group, state]) =>
+		TxRef.modify(group.state, (previous) => [
+			write(group.state, state, previous, pairsOf(groupPairs, group)),
+			state,
+		]),
+	)
+	return { conflicts, undo: [...cellWrites, ...groupWrites] }
+})
+
+/** One alias write, with the value it replaced and the pairs that made it. */
+export interface Write {
+	readonly pairs: HashSet.HashSet<number>
+	/** Whether the reference still holds what this write put there. */
+	readonly unchanged: Effect.Effect<boolean>
+	readonly revert: Effect.Effect<void>
+}
+
+const write = <A>(
+	ref: TxRef.TxRef<A>,
+	written: A,
+	previous: A,
+	pairs: HashSet.HashSet<number>,
+): Write => ({
+	pairs,
+	unchanged: Effect.map(TxRef.get(ref), (current) => current === written),
+	revert: TxRef.set(ref, previous),
+})
+
+/**
+ * Undoes a replacement's alias writes. Pairs whose writes a later replacement
+ * has changed, and pairs that share writes with them, keep the later aliases;
+ * every other pair goes back. Run it in a transaction.
+ */
+export const restore = Effect.fnUntraced(function* (
+	undo: ReadonlyArray<Write>,
+) {
+	const unchanged = yield* Effect.forEach(undo, (entry) => entry.unchanged)
+	let kept = Array.reduce(
+		undo,
+		HashSet.empty<number>(),
+		(kept, entry, index) =>
+			unchanged[index] === true ? kept : HashSet.union(kept, entry.pairs),
+	)
+	// Pairs that share a write are undone together or not at all.
+	while (true) {
+		const grown = Array.reduce(undo, kept, (kept, entry) =>
+			Array.some(Array.fromIterable(entry.pairs), (pair) =>
+				HashSet.has(kept, pair),
+			)
+				? HashSet.union(kept, entry.pairs)
+				: kept,
+		)
+		if (HashSet.size(grown) === HashSet.size(kept)) break
+		kept = grown
+	}
+	yield* Effect.forEach(
+		Array.reverse(
+			Array.filter(undo, (entry) =>
+				Array.every(
+					Array.fromIterable(entry.pairs),
+					(pair) => !HashSet.has(kept, pair),
+				),
+			),
+		),
+		(entry) => entry.revert,
+		{ discard: true },
+	)
 })

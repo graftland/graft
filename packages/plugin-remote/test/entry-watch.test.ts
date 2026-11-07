@@ -28,7 +28,7 @@ import * as Hmr from "@graftland/hmr"
 import { Loader, ModuleResolver } from "@graftland/loader"
 
 import * as Contract from "../src/Contract"
-import { host } from "../src/internal/entry"
+import host from "../src/host/index"
 
 it.effect(
 	"keeps entry observations through failed execution and restarts on a change",
@@ -40,7 +40,6 @@ it.effect(
 			const contract = Contract.make({
 				name: "watched",
 				config: Schema.Finite,
-				module: "file:///implementation.mjs",
 			})
 			const resolver = {
 				resolve: (name: string) =>
@@ -73,6 +72,7 @@ it.effect(
 					name: "remote",
 					config: {
 						contract: "file:///contract.mjs",
+						implementation: "file:///implementation.mjs",
 						config: 1,
 						connect: { local: {} },
 					},
@@ -121,7 +121,6 @@ it.effect(
 			const contract = Contract.make({
 				name: "watched",
 				config: Schema.Finite,
-				module: pathToFileURL(implementation).href,
 			})
 			const resolver = {
 				resolve: (name: string) =>
@@ -199,6 +198,7 @@ it.effect(
 					name: "remote",
 					config: {
 						contract: pathToFileURL(contractFile).href,
+						implementation: pathToFileURL(implementation).href,
 						config: 1,
 						connect: { local: {} },
 					},

@@ -14,12 +14,15 @@ npm run dev
 `-t plugin` creates a plugin package to publish, `-t minimal` only the config;
 `--plugin <name>` adds plugins to either, and `--yes` skips the questions.
 `graft add <package>` installs a plugin package with the project's package
-manager and rolls back on failure; then add an entry for it.
+manager and rolls back on failure; then add an entry for it. `graft schema`
+writes `graft.schema.json`, the editor schema with the config of every installed
+plugin that exports `./schema`; `graft create`, `graft add` and `graft remove`
+keep it current. Commit it.
 
 ## `graft.yml`
 
 ```yaml
-# yaml-language-server: $schema=https://cdn.jsdelivr.net/npm/@graftland/cli@<version>/schema.json
+# yaml-language-server: $schema=./graft.schema.json
 - id: database
   name: "@acme/graft-plugin-postgres"
   config:
@@ -81,7 +84,7 @@ plugin process.
 
 ```ts
 const admin = Plugin.make({
-	name: "admin",
+	name: "app/admin",
 	inject: [Loader.Loader],
 	apply: () =>
 		Effect.gen(function* () {

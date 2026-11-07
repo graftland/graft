@@ -1,87 +1,65 @@
 # HTTP 网关
 
-[English](README.md) | 简体中文 | [繁體中文](README.zh-TW.md)
+[English](README.md) | [简体中文](README.zh-CN.md) | [繁體中文](README.zh-TW.md)
 
-一个真实的 HTTP 服务器，它的路由来自 `graft.yml`
-中列出的插件。编辑该文件就能添加、移除和重新配置路由，保存代码就能修改路由的代码。进程全程保持运行。
+路由是 `@graftland/plugin-http`
+上的挂载。每个路由插件拥有自己的请求与流；插件加载、卸载或热替换时，共享服务器继续监听。
 
-## 问题
-
-长期运行的 HTTP 服务通常在启动时一次性设置好路由。想改变它提供的内容，有两种选择。一种是重启，这会丢掉连接和内存中的状态。另一种是手写一个管理层来修改路由器，而这个管理层还必须记得关闭每个功能打开的所有资源。依赖某个存储的功能需要启动顺序，关闭这个存储则需要为使用它的路由制定处理方案。
-
-## Graft 的做法
-
-- **服务器对路由一无所知。** `server` 负责监听，并用 `Event.bail` 把每个请求交给
-  `Route` 事件。路由就是插件内部的一个 `Event.on`
-  处理器，所以只要该插件还在加载，路由就存在。
-- **配置文件是唯一的事实来源。** `graft start --watch`
-  在每次保存时，让运行中的树与 `graft.yml`
-  保持一致。只有发生变化的条目会被触碰。如果禁用
-  `todo-store`，服务器仍会继续监听。如果修改服务器的
-  `port`，服务器会重启，而不会触碰任何路由。
-- **依赖是显式的。** `todos` 注入 `TodoStore`。存储被禁用时，`todos` 处于
-  `Pending`，它的路由返回 404。重新启用存储，路由就会回来。`todos`
-  中没有任何代码检查存储是否存在。
-- **代码原地重载。**
-  保存插件模块时，Graft 会导入新版本，并用它替换正在运行的插件。进程不会重启。正如[热重载文档](../../packages/docs/content/docs/zh-cn/hot-reload.md)所说明的，一次代码变更会重启从该模块加载的每个插件，包括服务器。
-- **你能看到这棵树。** `GET /_graft` 会打印实时的 fork 树和每个插件的状态，包括
-  `Pending` 插件正在等待什么。
+Todos 使用 Effect HttpApi 契约和类型化客户端测试。组合插件在 `/openapi.json`
+提供实时文档；同级 Scalar 插件提供 `/docs`。
 
 ## 运行
 
-在仓库根目录执行：
-
 ```sh
 devenv shell -- pnpm build
-cd samples/http-gateway
-devenv shell -- pnpm start
+devenv shell -- bash -c "cd samples/http-gateway && pnpm start"
 ```
 
-服务器监听 3000 端口。在另一个终端中：
+服务器绑定 `127.0.0.1:3000`。在另一终端运行：
 
 ```sh
-curl localhost:3000/health
+curl 127.0.0.1:3000/openapi.json
+curl 127.0.0.1:3000/docs
+curl 127.0.0.1:3000/health
+curl 127.0.0.1:3000/todos
+curl -X POST 127.0.0.1:3000/todos -H 'content-type: application/json' -d '{"title": "Write docs"}'
+curl -X DELETE 127.0.0.1:3000/todos/1
+curl 127.0.0.1:3000/_graft
 ```
+
+## 编辑
+
+1. 在 `graft.yml` 中为 `todo-store` 设置 `disabled: true`。`/todos`
+   返回 404，`/_graft` 显示 `todos` 为 `Pending`。移除设置后路由恢复。
+2. 修改 `src/plugins/health.ts` 的响应文本。日志显示
+   `Reloaded 1 plugin module(s)`，`/health` 返回新文本；不会出现新的
+   `Listening on` 日志。
+3. 运行 `curl -N 127.0.0.1:3000/events`，再禁用 `events`。流关闭，`/health`
+   仍可用。
+4. 把服务器端口改为 3001。日志显示 `Stopped listening on http://127.0.0.1:3000`
+   和 `Listening on http://127.0.0.1:3001`；路由插件保留状态。
+5. 在 `src/plugins/todos.ts` 中把创建待办的标题改为
+   `payload.title + " (edited)"`。日志显示
+   `Reloaded 1 plugin module(s)`。POST 新待办的标题包含
+   `(edited)`，GET 仍返回已有待办。不会新增 `Listening on` 日志；`/openapi.json`
+   与 `/docs` 仍可用。
+
+待办存储位于内存中，插件重启后重置。`DELETE /todos/:id`
+删除成功返回 204，id 不存在时返回 404。
 
 ```sh
-curl localhost:3000/todos
+devenv shell -- pnpm --filter @graftland/sample-http-gateway test
 ```
-
-```sh
-curl -X POST localhost:3000/todos -d '{"title": "Write docs"}'
-```
-
-```sh
-curl localhost:3000/_graft
-```
-
-然后，在它运行的同时：
-
-1. 在 `todo-store` 条目中添加 `disabled: true` 并保存。日志只显示
-   `Todo store closed`，没有其他内容。`/todos` 返回 404，`/_graft` 把 `todos`
-   显示为 `Pending (waiting for .../TodoStore)`。再把这一行删掉，`/todos`
-   就恢复了。
-2. 把服务器的 `port` 改为 `3001` 并保存。日志显示
-   `Stopped listening on http://localhost:3000` 和
-   `Listening on http://localhost:3001`。存储保留着它的 todo。
-3. 修改 `src/plugins/health.ts` 中的文本并保存。日志显示
-   `Reloaded 5 plugin module(s)`，`/health` 返回新的文本。
-
-todo 存储在内存中，所以每次重启它时，其中的 todo 都会被重置。
-
-`devenv shell -- pnpm --filter @graftland/sample-http-gateway test`
-会在空闲端口上启动服务器，并通过 HTTP 检查路由和配置的行为。
 
 ## 文件
 
-| 文件                        | 说明                                          |
-| --------------------------- | --------------------------------------------- |
-| `graft.yml`                 | `graft start` 加载的条目。                    |
-| `src/Gateway.ts`            | `Route` 事件、`route()` 和 `Gateway` 地址键。 |
-| `src/TodoStore.ts`          | `TodoStore` 服务键。                          |
-| `src/plugins/server.ts`     | HTTP 服务器。                                 |
-| `src/plugins/health.ts`     | `GET /health`。                               |
-| `src/plugins/inspector.ts`  | `GET /_graft`，实时的 fork 树。               |
-| `src/plugins/todo-store.ts` | 内存中的 `TodoStore`。                        |
-| `src/plugins/todos.ts`      | `GET /todos` 和 `POST /todos`。               |
-| `test/http-gateway.test.ts` | 通过真实 HTTP 进行的测试。                    |
+| 文件                                            | 用途                                                             |
+| ----------------------------------------------- | ---------------------------------------------------------------- |
+| `graft.yml`                                     | 路由核心、监听器、各路由插件、HttpApi 组合插件及其 Scalar 页面。 |
+| `src/plugins/health.ts`                         | 健康检查挂载。                                                   |
+| `src/plugins/inspector.ts`                      | 显示实时插件树的挂载。                                           |
+| `src/TodoStore.ts`, `src/plugins/todo-store.ts` | 待办路由所需的依赖。                                             |
+| `src/api/Todos.ts`                              | 共享 HttpApi 契约和类型化错误。                                  |
+| `src/plugins/todos.ts`                          | 同一挂载中的 GET、POST 和 DELETE 路由。                          |
+| `src/plugins/events.ts`                         | 卸载时中断的 SSE 挂载。                                          |
+| `test/http-gateway.test.ts`                     | 在系统分配的端口上运行真实 HTTP 测试。                           |

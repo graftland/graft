@@ -103,7 +103,16 @@ it.effect(
 								() => Effect.fail(missing()),
 								() => Ref.set(released, true),
 							)
-						: Effect.succeed({ default: plugin }),
+						: name === "graft-plugin-demo"
+							? Effect.fail(
+									Object.assign(
+										new Error(
+											"Cannot find package 'graft-plugin-demo' imported from /app/index.js",
+										),
+										{ code: "ERR_MODULE_NOT_FOUND" },
+									),
+								)
+							: Effect.succeed({ default: plugin }),
 			})
 			const resolved = yield* resolver.resolve("demo")
 			const cleaned = yield* Ref.get(released)

@@ -16,7 +16,10 @@
 			{
 				"name": "@effect/language-service",
 				// Effect 4 marks many modules unstable, including @effect/vitest.
-				"diagnosticSeverity": { "unstableApiUsage": "off" }
+				"diagnosticSeverity": {
+					"unstableApiUsage": "off",
+					"deterministicKeys": "warning"
+				}
 			}
 		]
 	},

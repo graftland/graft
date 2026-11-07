@@ -69,7 +69,7 @@ const setup = Effect.fnUntraced(function* (
 		...record,
 		phase: "Loaded",
 		child: { pid: 42, start: { born: "fixture" } },
-		load: { specifier: "fixture" },
+		load: { contract: "fixture-contract", implementation: "fixture" },
 		code,
 	}
 	const mux = yield* Multiplex.make({
@@ -129,6 +129,7 @@ const setup = Effect.fnUntraced(function* (
 	const processScope = yield* Scope.fork(scope)
 	const connection = yield* Runner.connect(
 		{ _tag: "Connector", instance: "worker" },
+		"fixture-contract",
 		"fixture",
 		{ session: "request", serve: {}, call: {} },
 		resources,

@@ -4,20 +4,28 @@ import {
 	Deferred,
 	Effect,
 	Layer,
+	Record,
 	Stream,
 	String,
+	SubscriptionRef,
 	type Scope,
 } from "effect"
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/http"
+import { HttpApiClient } from "effect/http-api"
 import { assert, describe, it } from "@effect/vitest"
 
 import { Graft, Plugin } from "@graftland/graft"
 import { Loader, ModuleResolver } from "@graftland/loader"
+import server from "@graftland/plugin-http"
+import composer from "@graftland/plugin-http-api"
+import { Document } from "@graftland/plugin-http-api/HttpApis"
+import scalar from "@graftland/plugin-http-api/scalar"
+import * as Http from "@graftland/plugin-http/Http"
+import router from "@graftland/plugin-http/router"
 
-import { Gateway } from "../src/Gateway.ts"
+import { Api } from "../src/api/Todos.ts"
 import health from "../src/plugins/health.ts"
 import inspector from "../src/plugins/inspector.ts"
-import server from "../src/plugins/server.ts"
 import todoStore from "../src/plugins/todo-store.ts"
 import todos from "../src/plugins/todos.ts"
 
@@ -40,7 +48,10 @@ const run = <A, E>(
 				Layer.mergeAll(
 					FetchHttpClient.layer,
 					ModuleResolver.fromRecord({
-						"./src/plugins/server.ts": server,
+						"@graftland/plugin-http": server,
+						"@graftland/plugin-http/router": router,
+						"@graftland/plugin-http-api": composer,
+						"@graftland/plugin-http-api/scalar": scalar,
 						"./src/plugins/health.ts": health,
 						"./src/plugins/inspector.ts": inspector,
 						"./src/plugins/todo-store.ts": todoStore,
@@ -68,13 +79,12 @@ const capture = Effect.fn("capture")(function* <I, S>(key: Context.Key<I, S>) {
 })
 
 const request = Effect.fn("request")(function* (
-	method: "GET" | "POST",
+	method: "GET" | "POST" | "DELETE",
 	url: string,
 	body?: unknown,
 ) {
 	const client = yield* HttpClient.HttpClient
-	const base =
-		method === "GET" ? HttpClientRequest.get(url) : HttpClientRequest.post(url)
+	const base = HttpClientRequest.make(method)(url)
 	const response = yield* client.execute(
 		body === undefined ? base : HttpClientRequest.bodyJsonUnsafe(base, body),
 	)
@@ -101,8 +111,9 @@ const logged = Effect.fn("logged")(function* (message: string) {
 describe("http-gateway", () => {
 	it.live("adds and removes routes without restarting the server", () =>
 		Effect.gen(function* () {
+			yield* (yield* Graft.plugin(router)).await
 			yield* Graft.plugin(server, { port: 0 })
-			const { url } = yield* capture(Gateway)
+			const { url } = yield* capture(Http.Server)
 			const healthFork = yield* Graft.plugin(health)
 			yield* healthFork.await
 			const ok = yield* request("GET", `${url}/health`)
@@ -118,8 +129,9 @@ describe("http-gateway", () => {
 
 	it.live("serves /todos only while a store is loaded", () =>
 		Effect.gen(function* () {
+			yield* (yield* Graft.plugin(router)).await
 			yield* Graft.plugin(server, { port: 0 })
-			const { url } = yield* capture(Gateway)
+			const { url } = yield* capture(Http.Server)
 			const todosFork = yield* Graft.plugin(todos)
 			yield* todosFork.await
 			const pending = yield* request("GET", `${url}/todos`)
@@ -132,13 +144,16 @@ describe("http-gateway", () => {
 				),
 				() => Effect.void,
 			)
-			const created = yield* request("POST", `${url}/todos`, {
-				title: "Write docs",
+			const client = yield* HttpApiClient.make(Api, { baseUrl: url })
+			const created = yield* client.todos.create({
+				payload: { title: "Write docs" },
 			})
-			assert.deepStrictEqual(created, {
-				status: 201,
-				text: '{"id":2,"title":"Write docs"}',
-			})
+			assert.strictEqual(created.id, 2)
+			assert.strictEqual(created.title, "Write docs")
+			const fetched = yield* client.todos.get({ params: { id: 2 } })
+			assert.deepStrictEqual(fetched, created)
+			const typedList = yield* client.todos.list()
+			assert.lengthOf(typedList, 2)
 			const invalid = yield* request("POST", `${url}/todos`, { name: 1 })
 			assert.strictEqual(invalid.status, 400)
 			const list = yield* request("GET", `${url}/todos`)
@@ -146,6 +161,13 @@ describe("http-gateway", () => {
 				list.text,
 				'[{"id":1,"title":"Ship it"},{"id":2,"title":"Write docs"}]',
 			)
+
+			const removed = yield* request("DELETE", `${url}/todos/1`)
+			assert.strictEqual(removed.status, 204)
+			const missing = yield* request("DELETE", `${url}/todos/1`)
+			assert.strictEqual(missing.status, 404)
+			const remaining = yield* request("GET", `${url}/todos`)
+			assert.strictEqual(remaining.text, '[{"id":2,"title":"Write docs"}]')
 
 			yield* store.dispose
 			const after = yield* request("GET", `${url}/todos`)
@@ -155,9 +177,11 @@ describe("http-gateway", () => {
 
 	it.live("matches routes on the request path, whatever its shape", () =>
 		Effect.gen(function* () {
+			yield* (yield* Graft.plugin(router)).await
 			yield* Graft.plugin(server, { port: 0 })
-			const { url } = yield* capture(Gateway)
-			yield* Graft.plugin(todoStore, { seed: ["Ship it"] })
+			const { url } = yield* capture(Http.Server)
+			const store = yield* Graft.plugin(todoStore, { seed: ["Ship it"] })
+			yield* store.await
 			const todosFork = yield* Graft.plugin(todos)
 			yield* todosFork.await
 			const ok = yield* request("GET", `${url}/todos`)
@@ -174,7 +198,10 @@ describe("http-gateway", () => {
 	it.live("follows edits to the entries, like edits to graft.yml", () =>
 		Effect.gen(function* () {
 			yield* Graft.plugin(Loader.plugin, [
-				{ id: "server", name: "./src/plugins/server.ts", config: { port: 0 } },
+				{ id: "router", name: "@graftland/plugin-http/router" },
+				{ id: "api", name: "@graftland/plugin-http-api" },
+				{ id: "ui", name: "@graftland/plugin-http-api/scalar" },
+				{ id: "server", name: "@graftland/plugin-http", config: { port: 0 } },
 				{ id: "inspector", name: "./src/plugins/inspector.ts" },
 				{
 					id: "todo-store",
@@ -185,7 +212,21 @@ describe("http-gateway", () => {
 			])
 			const loader = yield* capture(Loader.Loader)
 			yield* loader.ready
-			const { url } = yield* capture(Gateway)
+			const { url } = yield* capture(Http.Server)
+			const document = yield* capture(Document)
+			yield* Stream.runHead(
+				Stream.filter(SubscriptionRef.changes(document), ({ spec }) =>
+					Record.has(spec.paths, "/todos"),
+				),
+			)
+			assert.include(
+				(yield* request("GET", url + "/openapi.json")).text,
+				"/todos",
+			)
+			assert.strictEqual((yield* request("GET", url + "/docs")).status, 200)
+			const client = yield* HttpApiClient.make(Api, { baseUrl: url })
+			const typed = yield* client.todos.list()
+			assert.lengthOf(typed, 1)
 			const before = yield* request("GET", `${url}/todos`)
 			assert.strictEqual(before.status, 200)
 
@@ -193,10 +234,20 @@ describe("http-gateway", () => {
 			yield* loader.ready
 			const after = yield* request("GET", `${url}/todos`)
 			assert.strictEqual(after.status, 404)
+			yield* Stream.runHead(
+				Stream.filter(
+					SubscriptionRef.changes(document),
+					({ spec }) => !Record.has(spec.paths, "/todos"),
+				),
+			)
+			assert.notInclude(
+				(yield* request("GET", url + "/openapi.json")).text,
+				"/todos",
+			)
 			const tree = yield* request("GET", `${url}/_graft`)
 			assert.match(
 				tree.text,
-				/ todos #\d+: Pending \(waiting for @graftland\/sample-http-gateway\/TodoStore\)/,
+				/ @graftland\/sample-http-gateway\/plugins\/todos #\d+: Pending \(waiting for @graftland\/sample-http-gateway\/TodoStore\)/,
 			)
 			// The server entry did not change, so it kept running.
 			const listens = yield* logged("Listening on")

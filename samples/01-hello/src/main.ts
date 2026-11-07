@@ -10,7 +10,7 @@ import { NodeRuntime } from "@effect/platform-node"
 import { Graft, Plugin } from "@graftland/graft"
 
 export const greeter = Plugin.make({
-	name: "greeter",
+	name: "@graftland/sample-hello/main/greeter",
 	// The plugin's config. Graft checks every config against this schema.
 	config: Schema.Struct({ name: Schema.String }),
 	// Runs when the plugin starts. `acquireRelease` pairs a start action with

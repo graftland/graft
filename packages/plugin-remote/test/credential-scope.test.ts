@@ -4,7 +4,7 @@ import { assert, it } from "@effect/vitest"
 import { Graft, Plugin } from "@graftland/graft"
 
 import { Credentials } from "../src/Auth"
-import { invocation } from "../src/internal/credentials"
+import { invocation } from "../src/host/credentials"
 
 class Token extends Context.Service<Token, string>()(
 	"@graftland/plugin-remote/test/credential-scope.test/Token",

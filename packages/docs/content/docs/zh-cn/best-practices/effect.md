@@ -32,7 +32,7 @@ declare const createPool: (url: string) => Pool
 class Database extends Context.Service<Database, Pool>()("app/Database") {}
 
 export default Plugin.make({
-	name: "database",
+	name: "app/database",
 	config: Schema.Struct({ url: Schema.String }),
 	apply: ({ url }) =>
 		Effect.gen(function* () {
@@ -173,7 +173,7 @@ declare const connect: Effect.Effect<Session, Error, Scope.Scope>
 declare const publish: (item: string) => Effect.Effect<void>
 
 const feed = Plugin.make({
-	name: "feed",
+	name: "app/feed",
 	retry: Schedule.spaced("10 seconds"),
 	apply: () =>
 		Effect.gen(function* () {
@@ -225,7 +225,7 @@ class Mailer extends Context.Service<
 >()("app/Mailer") {}
 
 const mailer = Plugin.make({
-	name: "mailer",
+	name: "app/mailer",
 	apply: () =>
 		Effect.gen(function* () {
 			const outbox = yield* Queue.bounded<Mail>(100)

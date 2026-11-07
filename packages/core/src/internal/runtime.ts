@@ -10,7 +10,9 @@ import {
 	type LogLevel,
 	type PubSub,
 	type Scope,
+	type TxPubSub,
 	type TxRef,
+	type TxSubscriptionRef,
 } from "effect"
 
 import type { ForkState } from "../Fork"
@@ -72,6 +74,8 @@ export interface ActiveResolution {
 
 export interface Spec {
 	readonly plugin: Plugin
+	/** The plugin the fork was loaded with, before aliases; a rollback resolves it again. */
+	readonly requested: Plugin
 	readonly input: unknown
 	readonly revision: number
 }
@@ -88,11 +92,22 @@ export interface LocalSnapshot<out E = unknown> {
 /** Loading counts include the fork itself and its live descendants. */
 export interface ForkStatus {
 	readonly snapshot: Snapshot<LocalSnapshot>
+	readonly probes: import("./probes").Registry
+	readonly managed: TxRef.TxRef<Option.Option<import("./transition").Managed>>
+	readonly generationEvents: TxPubSub.TxPubSub<
+		import("../Transition").GenerationEvent
+	>
+	readonly generations: TxSubscriptionRef.TxSubscriptionRef<
+		ReadonlyArray<import("../Transition").Generation>
+	>
 	readonly loading: TxRef.TxRef<number>
 	readonly parent: ForkStatus | undefined
 }
 
 export interface ForkEntry<out E = unknown> {
+	/** The revision owned by the creating activation, before any restart or replacement. */
+	readonly initialRevision: number
+	readonly scope: Scope.Closeable
 	readonly status: ForkStatus
 	readonly id: number
 	readonly node: GraphNode
@@ -120,6 +135,7 @@ export interface Handler<
 	out E = any,
 > {
 	readonly realm: string
+	readonly order: number
 	readonly global: boolean
 	readonly once: boolean
 	readonly context: Context.Context<never>
@@ -134,6 +150,10 @@ export interface Handler<
 }
 
 export interface Runtime {
+	readonly trust: TxRef.TxRef<import("./trust").State>
+	readonly mutations: TxRef.TxRef<number>
+	readonly transitionBusy: TxRef.TxRef<boolean>
+	readonly transitionStuck: TxRef.TxRef<boolean>
 	/** Services from the environment `Graft.layer` was built in; they satisfy `inject` too. */
 	readonly ambient: Context.Context<never>
 	readonly slots: TxRef.TxRef<HashMap.HashMap<ServiceKey, Slot>>

@@ -10,6 +10,7 @@ describe("built CLI command loading", () => {
 	for (const args of [
 		["--help"],
 		["start", "--help"],
+		["schema", "--help"],
 		["add", "invalid!"],
 		["remove", "invalid!"],
 		["create", "project", "--no-install", "--no-git"],

@@ -4,7 +4,7 @@ export default defineProject({
 	resolve: { conditions: ["source"] },
 	ssr: { resolve: { conditions: ["source"] } },
 	test: {
-		globalSetup: ["./test/setup.mjs"],
+		globalSetup: ["../../scripts/isolated-home.mjs", "./test/setup.mjs"],
 		include: ["test/**/*.test.ts"],
 	},
 })

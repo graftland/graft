@@ -1,5 +1,7 @@
 import { Schema } from "effect"
 
+import { ProbeError } from "@graftland/graft/Fork"
+
 export class AlreadyLoaded extends Schema.TaggedError<
 	AlreadyLoaded,
 	{ readonly brand: unique symbol }
@@ -36,6 +38,7 @@ export class ActivationFailed extends Schema.TaggedError<
 	}
 }
 export const ChildFailure = Schema.Union([
+	ProbeError,
 	AlreadyLoaded,
 	ContractNotFound,
 	ModuleImportFailed,

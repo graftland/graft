@@ -24,6 +24,14 @@ export const observe = Effect.fnUntraced(function* (
 	return {
 		pid: Option.some(child.pid),
 		exited: Fiber.join(exited),
+		terminate: Effect.gen(function* () {
+			if (yield* child.isRunning) yield* child.kill({ killSignal: "SIGKILL" })
+			return yield* Fiber.join(exited)
+		}).pipe(
+			Effect.catchTag("PlatformError", (error) =>
+				TransportError.make({ cause: Cause.fail(error) }),
+			),
+		),
 		failure: observation.failure.pipe(
 			Effect.mapError((error) =>
 				TransportError.make({ cause: Cause.fail(error) }),

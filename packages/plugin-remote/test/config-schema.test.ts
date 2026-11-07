@@ -1,18 +1,28 @@
-import { Effect, FileSystem, Schema } from "effect"
-import { NodeServices } from "@effect/platform-node"
+import { Array, Effect, Schema } from "effect"
 import { assert, describe, it } from "@effect/vitest"
+
+import { ConfigSchema } from "@graftland/loader"
 
 import * as Config from "../src/Config"
 import { Jwt } from "../src/internal/auth/config"
 import { authentication } from "../src/internal/entryConfig"
+import { entries } from "../src/schema"
 
 const valid = Schema.is(Schema.toEncoded(Config.Host))
 const host = (connect: unknown) => ({
 	contract: "./contract.js",
+	implementation: "./plugin.js",
 	connect,
 	config: {},
 })
 describe("remote editor schemas", () => {
+	it("requires implementation location in deployment configuration", () => {
+		assert.isFalse(
+			valid({ contract: "./contract.js", connect: { local: {} }, config: {} }),
+		)
+		assert.isFalse(valid({ ...host({ local: {} }), implementation: "" }))
+		assert.isTrue(valid(host({ local: {} })))
+	})
 	it("checks built-in credentials and mutually exclusive connection forms", () => {
 		assert.isTrue(valid(host({ local: {} })))
 		assert.isTrue(valid(host({ worker: { execArgv: [] } })))
@@ -108,18 +118,18 @@ describe("remote editor schemas", () => {
 				yield* Schema.decodeUnknownEffect(Jwt)(reference.config)
 			}),
 	)
-	it.effect(
-		"ships the same editor definitions that the public schemas generate",
-		() =>
-			Effect.gen(function* () {
-				const fs = yield* FileSystem.FileSystem
-				const text = yield* fs.readFileString(
-					new URL("../schema.json", import.meta.url).pathname,
-				)
-				const saved = yield* Schema.decodeEffect(
-					Schema.fromJsonString(Schema.Unknown),
-				)(text)
-				assert.deepEqual(saved, Config.entries())
-			}).pipe(Effect.provide(NodeServices.layer)),
-	)
+	it("composes its editor registrations into the config file schema", () => {
+		const document = ConfigSchema.make({ entries: entries() })
+		assert.deepEqual(
+			Array.map(
+				document.definitions.Entry.allOf ?? [],
+				(constraint) => constraint.if.properties.name.enum,
+			),
+			[
+				["remote", "@graftland/plugin-remote"],
+				["remote/runner", "@graftland/plugin-remote/runner"],
+				["remote/cli", "@graftland/plugin-remote/cli"],
+			],
+		)
+	})
 })

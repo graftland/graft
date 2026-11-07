@@ -106,6 +106,7 @@ describe("local remote hardening", () => {
 					const fork = yield* Graft.plugin(
 						Remote.plugin(contract, {
 							contractModule,
+							implementation: new URL("plugin.js", contractModule).href,
 							connect: { local: {} },
 						}),
 						{ directory: "unused", mode: "normal", value: 1 },
@@ -143,6 +144,7 @@ describe("local remote hardening", () => {
 					const fork = yield* Graft.plugin(
 						Remote.plugin(refined, {
 							contractModule,
+							implementation: new URL("plugin.js", contractModule).href,
 							connect: { local: {} },
 						}),
 						"-1",
@@ -205,6 +207,10 @@ describe("local remote hardening", () => {
 							"../.cache/integration/default-contract.js",
 							import.meta.url,
 						).href,
+						implementation: new URL(
+							"../.cache/integration/plugin.js",
+							import.meta.url,
+						).href,
 						connect: { local: {} },
 					}),
 					{ directory, mode: "normal", value: 3 },
@@ -226,6 +232,7 @@ describe("local remote hardening", () => {
 				const fork = yield* Graft.plugin(
 					Remote.plugin(contract, {
 						contractModule: "node:path",
+						implementation: "node:path",
 						connect: { local: {} },
 					}),
 					{ directory, mode: "normal", value: 1 },
@@ -256,6 +263,7 @@ describe("local remote hardening", () => {
 				const fork = yield* Graft.plugin(
 					Remote.plugin(contract, {
 						contractModule,
+						implementation: new URL("plugin.js", contractModule).href,
 						connect: { local: {} },
 					}),
 					{ directory, mode: "flood", value: 1 },
@@ -296,6 +304,7 @@ describe("local remote hardening", () => {
 									new URL("../dist/internal/childMain.js", import.meta.url),
 								),
 								contractModule,
+								new URL("plugin.js", contractModule).href,
 							],
 							{
 								stdin: "pipe",
@@ -357,12 +366,13 @@ describe("local remote hardening", () => {
 					),
 					Effect.forkScoped,
 				)
-				const loaded = yield* client.Load({
+				const loaded = yield* client.Serve({
 					input: { directory, mode: "flood", value: 2 },
 				})
 				assert.isUndefined(loaded)
+				yield* client.Ready()
 				const duplicate = yield* Effect.flip(
-					client.Load({ input: { directory, mode: "flood", value: 2 } }),
+					client.Serve({ input: { directory, mode: "flood", value: 2 } }),
 				)
 				assert.isTrue(
 					Cause.isCause(duplicate) &&
@@ -385,9 +395,7 @@ describe("local remote hardening", () => {
 							reason._tag === "Fail" && Schema.is(Rejected)(reason.error),
 					),
 				)
-				const disposed = yield* client
-					.Dispose()
-					.pipe(Effect.timeout("2 seconds"))
+				const disposed = yield* client.Stop().pipe(Effect.timeout("2 seconds"))
 				assert.isUndefined(disposed)
 				yield* Deferred.await(stopped).pipe(Effect.timeout("2 seconds"))
 				assert.isTrue(logFiber.pollUnsafe() === undefined)

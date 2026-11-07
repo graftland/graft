@@ -13,13 +13,13 @@ import { Effect, Schema } from "effect"
 import { Graft, Plugin } from "@graftland/graft"
 
 const greeter = Plugin.make({
-	name: "greeter",
+	name: "app/greeter",
 	config: Schema.Struct({ greeting: Schema.String }),
 	apply: ({ greeting }) => Effect.log(`${greeting}, world`),
 })
 
 export const app = Plugin.make({
-	name: "app",
+	name: "app/app",
 	apply: () =>
 		Effect.gen(function* () {
 			const fork = yield* Graft.plugin(greeter, { greeting: "Hello" })
@@ -121,7 +121,7 @@ const trees = await Effect.runPromise(
 	}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
 )
 
-trees // => Option.some([{ id: 1, name: "app", input: undefined, state: Fork.ForkState.Active(), children: [{ id: 2, name: "greeter", input: { greeting: "Hello" }, state: Fork.ForkState.Active(), children: [] }] }])
+trees // => Option.some([{ id: 1, name: "app/app", input: undefined, state: Fork.ForkState.Active(), children: [{ id: 2, name: "app/greeter", input: { greeting: "Hello" }, state: Fork.ForkState.Active(), children: [] }] }])
 ```
 
 ### 日志

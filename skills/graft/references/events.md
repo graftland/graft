@@ -21,7 +21,7 @@ Export tokens from a shared module; emitters and handlers both import them.
 
 ```ts
 const logger = Plugin.make({
-	name: "logger",
+	name: "app/logger",
 	apply: () => Event.on(Message, (text) => Effect.log(text)),
 })
 ```

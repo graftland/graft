@@ -47,7 +47,7 @@ apply: () =>
 
 ```ts
 const prices = Plugin.make({
-	name: "prices",
+	name: "app/prices",
 	apply: () =>
 		fetchPrices.pipe(
 			Effect.catch((error) => Effect.logWarning("poll failed", error)),

@@ -12,6 +12,7 @@ another machine through a runner. The plugins that use it keep injecting its
   name: remote
   config:
     contract: ./dist/contract.js
+    implementation: ./dist/greeter.js
     connect: { local: {} }
     config: { greeting: Hello }
 ```

@@ -106,7 +106,10 @@ export const telemetry = Effect.fnUntraced(function* (
 })
 type Telemetry = Effect.Success<ReturnType<typeof telemetry>>
 interface Running {
-	readonly fork: Pick<Fork.Fork<never, unknown>, "dispose" | "state">
+	readonly fork: Pick<
+		Fork.Fork<never, unknown>,
+		"dispose" | "state" | "probes" | "probe"
+	>
 	readonly bridge: Pick<Fork.Fork<never, never>, "dispose" | "state">
 	readonly observation: Fiber.Fiber<void>
 	readonly observedFailure: Ref.Ref<Cause.Cause<unknown>>
@@ -153,11 +156,37 @@ const cleanup = Effect.fnUntraced(function* (
 
 export const lifecycle = Effect.fnUntraced(function* (
 	contract: RunnerContract,
+	implementation: string,
 	peer: Peer,
 	identity: typeof Identity.Type,
 	telemetry: Telemetry,
 ) {
 	const scope = yield* Effect.scope
+	const definition = yield* Effect.cached(
+		Effect.gen(function* () {
+			const module = yield* loadModule(implementation)
+			const plugin = Plugin.fromModule(module)
+			if (Option.isNone(plugin))
+				return yield* ActivationFailed.make({
+					detail: "The implementation module exports no plugin",
+				})
+			return plugin.value
+		}),
+	)
+	const describe = definition.pipe(
+		Effect.mapBoth({
+			onSuccess: (plugin) => ({
+				name: plugin.name,
+				overlap: plugin.overlap,
+				provides: Array.map(plugin.provides, (provided) =>
+					"operations" in provided
+						? { key: provided.key.key, operations: provided.operations }
+						: { key: provided.key, operations: [] },
+				),
+			}),
+			onFailure: (error) => contract.normalizeCause(Cause.fail(error)),
+		}),
+	)
 	const instanceScope = yield* Scope.fork(scope)
 	const releaseExports = yield* Deferred.make<void>()
 	const state = yield* SynchronizedRef.make<Lifecycle>(Lifecycle.Idle())
@@ -206,7 +235,7 @@ export const lifecycle = Effect.fnUntraced(function* (
 	).pipe(Scope.provide(instanceScope))
 
 	const start = Effect.fnUntraced(function* (input: Schema.Json) {
-		// Imported clients outlive Load and remain available during plugin cleanup.
+		// Imported clients outlive serving startup and remain available during plugin cleanup.
 		for (const service of contract.inject)
 			yield* service.publish(peer).pipe(
 				Scope.provide(scope),
@@ -217,14 +246,9 @@ export const lifecycle = Effect.fnUntraced(function* (
 					}),
 				),
 			)
-		const module = yield* loadModule(contract.module)
-		const plugin = Plugin.fromModule(module)
-		if (Option.isNone(plugin))
-			return yield* ActivationFailed.make({
-				detail: "The implementation module exports no plugin",
-			})
+		const plugin = yield* definition
 		const fork = yield* Graft.plugin(
-			{ ...plugin.value, retry: undefined },
+			{ ...plugin, retry: undefined },
 			input,
 		).pipe(
 			Effect.provideService(Instance, identity),
@@ -234,7 +258,14 @@ export const lifecycle = Effect.fnUntraced(function* (
 		const observation = yield* fork.state.pipe(
 			Stream.runForEach((state) =>
 				state._tag === "Failed"
-					? Ref.set(observedFailure, state.cause)
+					? Ref.set(observedFailure, state.cause).pipe(
+							Effect.andThen(
+								Queue.offer(
+									telemetry.events,
+									ChildEvent.Failed({ cause: state.cause }),
+								),
+							),
+						)
 					: Effect.void,
 			),
 			Effect.forkIn(instanceScope),
@@ -258,17 +289,6 @@ export const lifecycle = Effect.fnUntraced(function* (
 				detail:
 					"The remote plugin did not become active; check its declared dependencies",
 			})
-		yield* running.fork.state.pipe(
-			Stream.runForEach((state) =>
-				state._tag === "Failed"
-					? Queue.offer(
-							telemetry.events,
-							ChildEvent.Failed({ cause: state.cause }),
-						)
-					: Effect.void,
-			),
-			Effect.forkIn(instanceScope),
-		)
 		const exported = yield* running.bridge.state.pipe(
 			Stream.filter(
 				(state) =>
@@ -288,7 +308,7 @@ export const lifecycle = Effect.fnUntraced(function* (
 				detail: "The remote export bridge stopped during startup",
 			})
 	})
-	const load = Effect.fnUntraced(
+	const serve = Effect.fnUntraced(
 		function* (input: Schema.Json) {
 			yield* SynchronizedRef.updateEffect(state, (current) =>
 				current._tag === "Idle"
@@ -305,28 +325,27 @@ export const lifecycle = Effect.fnUntraced(function* (
 							? [true, Lifecycle.Disposing({ running: Option.some(running) })]
 							: [false, Lifecycle.Running({ running })],
 			)
-			// Dispose saw Loading and found nothing to stop; this load owns the cleanup.
+			// Stop saw startup in progress and found nothing to stop; serving owns the cleanup.
 			if (disposed) {
 				const cause = yield* cleanup(running, false)
 				return yield* Effect.fail(
 					Cause.combine(
 						Cause.fail(
 							ActivationFailed.make({
-								detail: "The execution was disposed during load",
+								detail: "The execution was stopped during startup",
 							}),
 						),
 						cause,
 					),
 				)
 			}
-			yield* awaitActive(running)
 		},
 		Effect.mapError((error) =>
 			contract.normalizeCause(Cause.isCause(error) ? error : Cause.fail(error)),
 		),
 	)
 	const dispose = Effect.gen(function* () {
-		// One transition, so a concurrent Load or export withdrawal cannot slip between read and write.
+		// One transition, so concurrent serving startup or export withdrawal cannot slip between read and write.
 		const previous = yield* SynchronizedRef.getAndUpdate(state, disposing)
 		yield* Deferred.succeed(releaseExports, undefined)
 		const current = runningOf(previous)
@@ -339,5 +358,46 @@ export const lifecycle = Effect.fnUntraced(function* (
 		if (cause.reasons.length > 0)
 			return yield* Effect.fail(contract.normalizeCause(cause))
 	})
-	return { load, dispose, release }
+	const current = Effect.gen(function* () {
+		const current = yield* SynchronizedRef.get(state)
+		if (current._tag !== "Running")
+			return yield* Effect.fail(
+				contract.normalizeCause(
+					Cause.fail(
+						ActivationFailed.make({ detail: "The execution is not serving" }),
+					),
+				),
+			)
+		return current.running
+	})
+	const ready = current.pipe(
+		Effect.flatMap((running) =>
+			awaitActive(running).pipe(
+				Effect.andThen(running.fork.probes),
+				Effect.mapError((error) =>
+					contract.normalizeCause(
+						Cause.isCause(error) ? error : Cause.fail(error),
+					),
+				),
+			),
+		),
+	)
+	const probe = (name: string) =>
+		current.pipe(
+			Effect.flatMap((running) =>
+				running.fork
+					.probe(name)
+					.pipe(
+						Effect.catchTag("ProbeError", (error) =>
+							Effect.fail(error.cause ?? Cause.fail(error)),
+						),
+					),
+			),
+			Effect.mapError((error) =>
+				contract.normalizeCause(
+					Cause.isCause(error) ? error : Cause.fail(error),
+				),
+			),
+		)
+	return { describe, serve, ready, probe, stop: dispose, release }
 })

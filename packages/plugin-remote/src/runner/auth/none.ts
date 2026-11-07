@@ -5,7 +5,7 @@ import { Graft, Plugin } from "@graftland/graft"
 import { Authenticator } from "../../Auth"
 
 export default Plugin.make({
-	name: "remote-none-authenticator",
+	name: "@graftland/plugin-remote/runner/auth/none",
 	config: Schema.Struct({
 		identity: Schema.String.pipe(
 			Schema.withDecodingDefaultKey(Effect.succeed("anonymous")),

@@ -1,5 +1,5 @@
-import { Console, Effect } from "effect"
-import { CliError, Command, Flag } from "effect/cli"
+import { Console, Effect, Option } from "effect"
+import { Argument, CliError, Command, Flag } from "effect/cli"
 
 import { platform } from "@graftland/cli/Application"
 import { Commands } from "@graftland/cli/Commands"
@@ -48,12 +48,48 @@ const certificates = Command.make(
 		),
 )
 
+const manifest = Command.make(
+	"manifest",
+	{
+		directory: Argument.String("directory").pipe(Argument.withDefault(".")),
+		check: Flag.Boolean("check").pipe(Flag.withDefault(false)),
+		provenance: Flag.String("provenance").pipe(Flag.optional),
+	},
+	({ directory, check, provenance }) =>
+		Effect.promise(() => import("./Publication")).pipe(
+			Effect.uninterruptible,
+			Effect.flatMap((Publication) =>
+				(check
+					? Publication.verify(directory)
+					: Publication.write(directory)
+				).pipe(
+					Effect.tap(() =>
+						Option.isSome(provenance)
+							? Publication.record(directory, provenance.value)
+							: Effect.void,
+					),
+				),
+			),
+			Effect.andThen(
+				Console.log(
+					check ? "Manifest agrees with code" : "Generated graft manifest",
+				),
+			),
+			Effect.mapError((cause) =>
+				CliError.UserError.make({ cause, userMessage: cause.message }),
+			),
+		),
+).pipe(
+	Command.withDescription("Generate or verify the graft field from built code"),
+	Command.provide(platform),
+)
+
 const command = Command.make("remote").pipe(
-	Command.withSubcommands([certificates]),
+	Command.withSubcommands([certificates, manifest]),
 	Command.provide(platform),
 )
 export default Plugin.make({
-	name: "remote-commands",
+	name: "@graftland/plugin-remote/cli",
 	inject: [Commands],
 	apply: () =>
 		Effect.flatMap(Commands, (commands) => commands.register(command)),

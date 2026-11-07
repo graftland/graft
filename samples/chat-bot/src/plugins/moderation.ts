@@ -9,7 +9,7 @@ import { Inbound } from "../Chat.ts"
  * A new word list is applied in place: the filter keeps running.
  */
 export default Plugin.make({
-	name: "moderation",
+	name: "@graftland/sample-chat-bot/plugins/moderation",
 	config: Schema.Struct({ banned: Schema.Array(Schema.String) }),
 	apply: Effect.fn("moderation.apply")(function* (config) {
 		const banned = yield* Ref.make(config.banned)

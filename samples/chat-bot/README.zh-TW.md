@@ -67,7 +67,7 @@ devenv shell -- pnpm --filter @graftland/sample-chat-bot start
 ## 給天氣整合一個獨立行程
 
 第 3 步用
-`Graft.plugin(Remote.plugin(contract, { contractModule, connect: { local: {} } }), config)`
+`Graft.plugin(Remote.plugin(contract, { contractModule, implementation, connect: { local: {} } }), config)`
 載入一般的 forecasts 外掛。天氣 SDK 阻塞或退出時，只影響它自己的行程；骰子和審核仍在宿主裡執行。天氣指令照常注入
 `Forecasts`；RPC 失敗會轉成
 `ForecastUnavailable`，指令回覆一句暫時無法使用。撤回提供者時，只移除依賴它的指令。

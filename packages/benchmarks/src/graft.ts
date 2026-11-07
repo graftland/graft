@@ -11,7 +11,13 @@ import {
 	String,
 } from "effect"
 
-import { Event, Graft, Plugin, type Fork } from "@graftland/graft"
+import {
+	Event,
+	Graft,
+	Plugin,
+	type Fork,
+	type Transition,
+} from "@graftland/graft"
 
 import {
 	audit,
@@ -113,12 +119,16 @@ export const make = Effect.fnUntraced(function* (
 		| Schema.SchemaError
 		| Graft.ServiceConflict
 		| Fork.CleanupError
-		| Graft.ReplacementConflict,
+		| Graft.ReplacementConflict
+		| Transition.ManagedFork,
 		Graft.Graft | Scope.Scope
 	> = Effect.succeed(0)
 	let prepare: Effect.Effect<
 		unknown,
-		Schema.SchemaError | Graft.ServiceConflict | Fork.CleanupError,
+		| Schema.SchemaError
+		| Graft.ServiceConflict
+		| Fork.CleanupError
+		| Transition.ManagedFork,
 		Graft.Graft | Scope.Scope
 	> = Effect.void
 	if (
@@ -264,7 +274,8 @@ export const make = Effect.fnUntraced(function* (
 			yield* Effect.forEach(forks, active)
 		})
 		run = Effect.gen(function* () {
-			yield* Graft.replace(pairs)
+			const result = yield* Graft.replace(pairs)
+			if (result._tag !== "Replaced") return yield* Effect.die(result)
 			yield* Graft.forks.pipe(
 				Stream.filter(
 					(tree) =>

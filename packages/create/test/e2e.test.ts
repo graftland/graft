@@ -95,14 +95,24 @@ const run = <A, E>(
 
 describe("generated projects", () => {
 	it.live(
-		"app type-checks and starts its example plugin",
+		"app type-checks, writes its editor schema and starts its example plugin",
 		() =>
 			Effect.gen(function* () {
+				const fs = yield* FileSystem.FileSystem
 				const directory = yield* generate("app")
 				const checked = yield* exec(bin.tsc, ["-p", "."], directory)
 				assert.strictEqual(checked.code, 0, checked.output)
-				const log = yield* start(directory, "Hello from Graft!")
-				assert.include(log, "Hello from Graft!")
+				const schema = yield* exec(
+					process.execPath,
+					[bin.graft, "schema"],
+					directory,
+				)
+				assert.strictEqual(schema.code, 0, schema.output)
+				const written = yield* fs.exists(`${directory}/graft.schema.json`)
+				assert.isTrue(written)
+				// The ticker greets once the greeter publishes its service.
+				const log = yield* start(directory, "Hello, Graft!")
+				assert.include(log, "Hello, Graft!")
 			}).pipe(run),
 		120_000,
 	)

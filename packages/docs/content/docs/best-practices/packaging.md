@@ -47,7 +47,7 @@ declare const openPool: (
 }>
 
 export default Plugin.make({
-	name: "postgres",
+	name: "graft-plugin-postgres",
 	config: Config,
 	apply: ({ url, poolSize }) =>
 		Effect.gen(function* () {
@@ -67,15 +67,15 @@ Expose each part as its own entry point:
 | `.`          | The plugin, as the default export or as an export named `plugin`.      | The loader, for `name:` in `graft.yml`.                                                        |
 | `./tokens`   | Service keys, events, references, tagged errors and the config schema. | Consumer plugins, tests, and other packages that implement the same service.                   |
 | `./<plugin>` | A further plugin, one per module.                                      | Entries such as `name: postgres/migrations`.                                                   |
-| `./contract` | A [Remote contract](../../remote/hosts/#define-a-contract).            | Hosts and [runners](../../remote/runners/#set-up-a-runner), when the plugin can run elsewhere. |
-| `./schema`   | The [editor registration](#editor-completion) of the config.           | The application's editor schema.                                                               |
+| `./contract` | A [Remote contract](../../remote/contracts/).                          | Hosts and [runners](../../remote/runners/#set-up-a-runner), when the plugin can run elsewhere. |
+| `./schema`   | The [editor registration](#editor-completion) of the config.           | [`graft schema`](../../cli/#graft-schema), for the application's editor schema.                |
 | `./cli`      | A command plugin that adds `graft` subcommands.                        | [`graft add --plugin <package>`](../../cli/#command-plugins), which enables `<package>/cli`.   |
 
-| Rule                                                 | Pitfall it avoids                                                                                                                       |
-| ---------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| `./tokens` imports no implementation.                | A plugin that only injects `Database`, or a test that fakes it, would load your driver and its dependencies.                            |
-| One plugin per module.                               | The loader takes one plugin from a module: the default export, or else `plugin`. Other exported plugins cannot be named in `graft.yml`. |
-| A contract names the implementation by `module` URL. | Importing the implementation from the contract would load it on the host too, not only in the plugin process.                           |
+| Rule                                                    | Pitfall it avoids                                                                                                                       |
+| ------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `./tokens` imports no implementation.                   | A plugin that only injects `Database`, or a test that fakes it, would load your driver and its dependencies.                            |
+| One plugin per module.                                  | The loader takes one plugin from a module: the default export, or else `plugin`. Other exported plugins cannot be named in `graft.yml`. |
+| Deployment configuration identifies the implementation. | Contracts contain protocol declarations only.                                                                                           |
 
 ## Declare dependencies
 
@@ -164,15 +164,37 @@ Short names in `graft.yml` find unscoped packages named `graft-plugin-<name>`:
 - An application resolves [plugin names](../../config-file/#plugin-names) from
   its own directory, so it must depend on your package, for example through
   `graft add`.
-- A short name is tried as written first, and Graft moves on to the next
-  candidate only when one does not exist. If the application can resolve a
-  package named `postgres`, such as your driver, `name: postgres` and
-  `name: postgres/migrations` fail with `ModuleInvalid`.
+- A short name is tried as written first. Graft moves on to the conventions when
+  that module does not exist, or when it imports but exports no plugin, such as
+  Node's `http` or your `postgres` driver. Any other import failure stops
+  resolution with `ModuleInvalid`.
 - Show the full package name in your README's `graft.yml` example. It cannot
   resolve to another package.
-- `graft add --plugin` keeps a name that starts with `@` or `graft-plugin-`, and
-  turns any other name into `@graftland/plugin-<name>`. A package with a `./cli`
-  export needs one of those two forms.
+- `graft add --plugin` keeps a name that starts with `@` or `graft-plugin-`. It
+  turns any other name into whichever of `@graftland/plugin-<name>` and
+  `graft-plugin-<name>` the registry has, and fails if it has both. A package
+  with a `./cli` export needs one of those forms.
+
+## Name the plugin
+
+The plugin's `name` labels it in logs, spans and the fork tree. Build it the way
+Effect's `deterministicKeys` diagnostic builds service keys, so the name says
+which module defines the plugin:
+
+| Part | Value                                                                                                                       |
+| ---- | --------------------------------------------------------------------------------------------------------------------------- |
+| 1    | The package name.                                                                                                           |
+| 2    | The module's path under `src/`, without the extension. `index` is left out.                                                 |
+| 3    | The binding that holds the plugin. Left out for the default export, an export named `plugin`, or one named like the module. |
+
+| Plugin                                    | `name`                                    |
+| ----------------------------------------- | ----------------------------------------- |
+| The default export of `src/index.ts`      | `graft-plugin-postgres`                   |
+| The default export of `src/migrations.ts` | `graft-plugin-postgres/migrations`        |
+| `const warmup` in `src/migrations.ts`     | `graft-plugin-postgres/migrations/warmup` |
+
+Graft does not check the name. An application names its own plugins the same
+way, from its `package.json` name.
 
 ## Editor completion
 
@@ -205,8 +227,8 @@ export const entries = () => [
 | `required` | `true` when the config has required fields, so an entry without `config` is flagged.                                                                                                                                          |
 
 Import only the tokens module here: generating a schema must not load the
-plugin. Applications pass the registrations to `ConfigSchema.make`; see
-[Editor support](../../config-file/#editor-support).
+plugin. [`graft schema`](../../cli/#graft-schema) finds the module through the
+`./schema` export and the `@graftland/graft` peer dependency.
 
 ## Support Graft versions
 
@@ -236,3 +258,30 @@ and `@graftland/graft` from its own `node_modules`, where your `devDependencies`
 live, so the application gets a second copy of each.
 
 :::
+
+## Author an independent integration
+
+| Package        | Public declarations                                                                                 |
+| -------------- | --------------------------------------------------------------------------------------------------- |
+| Contract       | Service key, RPC schemas and `Contract.operation(name, version, rpc)`; no implementation locations. |
+| Implementation | `Plugin.make({ provides, overlap })`, ordinary `apply`, and `Plugin.probe("health", effect)`.       |
+| Host           | Installs the contract, captures the built implementation, and supplies deployment configuration.    |
+
+Declare Effect and shared Graft packages as peers. Probes run only when
+requested in a serving attempt. Capture the built package directory before
+deployment; external runtime dependencies are not captured or pinned. The
+[integration-gateway sample](https://github.com/graftland/graft/tree/main/samples/integration-gateway)
+packs and installs separate contract and implementation packages.
+
+## Publish a manifest
+
+Generate the [plugin manifest](../../ecosystem/manifest/) from the built
+package, then verify it before packing. Service identities come from `inject`,
+`provides` and contract descriptors; runtime ranges come from package metadata.
+Keep placement capabilities explicit and trust in operator policy.
+
+Run the [conformance kit](../../ecosystem/conformance/) on the installed tarball
+and the [compatibility check](../../ecosystem/compatibility/) against each host
+you claim to support. First-party packages follow the same checks. The
+[plugin author fixtures](https://github.com/graftland/graft/tree/main/samples/plugin-authors)
+exercise this workflow without workspace aliases or private imports.

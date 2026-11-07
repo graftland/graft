@@ -19,6 +19,7 @@ import {
 	Queue,
 	Record,
 	Ref,
+	Result,
 	Schema,
 	Stream,
 	SubscriptionRef,
@@ -42,9 +43,11 @@ import {
 } from "yaml"
 
 import { ConfigDirectory } from "./ConfigDirectory"
-import { Entry, Env } from "./Entry"
+import { Entry, Env, NewEntry } from "./Entry"
 import { atomicWrite, WriteConflict } from "./internal/atomicWrite"
 import { makeFingerprint } from "./internal/configFingerprint"
+import { assignIds } from "./internal/entryIds"
+import type { Lists, Locator } from "./internal/entryLists"
 import { equalConfig } from "./internal/equalConfig"
 import { fileTarget } from "./internal/fileTarget"
 import { isOnlyFailure } from "./internal/recovery"
@@ -321,6 +324,75 @@ const planIds = Effect.fnUntraced(function* (
 	return { target, assignments: Chunk.toReadonlyArray(assignments) }
 })
 
+/** Plan hosted lists top-down, using exactly the identities decoded by Group. */
+const planHosted = (entries: ReadonlyArray<Entry>, lists: Lists) => {
+	let assignments = Chunk.empty<{
+		readonly id: string
+		readonly path: EntryPath
+	}>()
+	// YAML may share objects. Only a back edge, not a repeated value, ends traversal.
+	const active = new WeakSet<object>()
+	const decode = Schema.decodeUnknownResult(Schema.Array(NewEntry))
+	const hosted = (value: unknown, parent: string, path: EntryPath): unknown => {
+		const decoded = decode(value)
+		if (Result.isFailure(decoded)) return value
+		const assigned = assignIds(decoded.success, Option.some(parent))
+		Array.forEach(assigned, (entry, index) => {
+			if (decoded.success[index]?.id === undefined)
+				assignments = Chunk.append(assignments, {
+					id: entry.id,
+					path: [...path, index],
+				})
+		})
+		return visit(assigned, path)
+	}
+	const locate = (
+		value: unknown,
+		locator: Locator,
+		parent: string,
+		path: EntryPath,
+	): unknown => {
+		if (locator.length === 0) return hosted(value, parent, path)
+		const [segment, ...rest] = locator
+		if (Array.isArray(value))
+			return segment === "*"
+				? Array.map(value, (child, index) =>
+						locate(child, rest, parent, [...path, index]),
+					)
+				: value
+		if (typeof value !== "object" || value === null) return value
+		const fields = value as Readonly<Record<string, unknown>>
+		return Record.map(fields, (child, key) =>
+			segment === "*" || key === segment
+				? locate(child, rest, parent, [...path, key])
+				: child,
+		)
+	}
+	const visit = (
+		entries: ReadonlyArray<Entry>,
+		path: EntryPath,
+	): ReadonlyArray<Entry> =>
+		Array.map(entries, (entry, index) => {
+			const config = entry.config
+			if (typeof config !== "object" || config === null || active.has(config))
+				return entry
+			active.add(config)
+			const configPath = [...path, index, "config"]
+			let next: unknown = config
+			if (entry.group === true) next = hosted(config, entry.id, configPath)
+			else
+				for (const locator of Option.getOrElse(
+					HashMap.get(lists, entry.name),
+					() => [],
+				))
+					next = locate(next, locator, entry.id, configPath)
+			active.delete(config)
+			return { ...entry, config: next }
+		})
+	const target = visit(entries, [])
+	return { target, assignments: Chunk.toReadonlyArray(assignments) }
+}
+
 /** Materialize all affected references against the original graph before any mutation. */
 const protectAliases = (
 	document: Document,
@@ -501,6 +573,7 @@ const retryWrite = <A, E, R>(
 const prepare = Effect.fnUntraced(function* (
 	text: string,
 	previous: ReadonlyArray<Entry>,
+	lists: Lists,
 ) {
 	const document = yield* parse(text)
 	const raw = yield* yaml(() => document.toJS())
@@ -511,20 +584,33 @@ const prepare = Effect.fnUntraced(function* (
 		normalized ? yield* yaml(() => document.toJS()) : raw,
 		previous,
 	)
-	const target = yield* decodeEntries(plan.target ?? [])
+	const identified = yield* decodeEntries(plan.target ?? [])
+	const hosted = planHosted(identified, lists)
+	const target = hosted.target
+	const assignments = [...plan.assignments, ...hosted.assignments]
 	yield* yaml(() => {
 		const affected = new WeakSet<Node>()
-		for (const { path } of plan.assignments) {
+		// An entry list reached through an alias owns a local copy before ids are inserted.
+		for (const { path } of assignments) {
+			for (let length = 0; length <= path.length; length++) {
+				const prefix = path.slice(0, length)
+				const node = document.getIn(prefix, true)
+				if (isAlias(node)) document.setIn(prefix, copyAlias(document, node))
+			}
+		}
+		for (const { path } of assignments) {
 			for (let length = 0; length <= path.length; length++) {
 				const node = document.getIn(path.slice(0, length), true)
 				if (isNode(node)) affected.add(node)
 			}
 		}
 		protectAliases(document, affected)
-		for (const { map, id } of plan.assignments)
-			map.items.unshift(document.createPair("id", id))
+		for (const { path, id } of assignments) {
+			const map = document.getIn(path, true)
+			if (isMap(map)) map.items.unshift(document.createPair("id", id))
+		}
 	})
-	const changed = plan.assignments.length > 0 || normalized
+	const changed = assignments.length > 0 || normalized
 	if (!changed) return { text, entries: target } satisfies Synced
 	const synced = yield* yaml(() => document.toString())
 	const verified = yield* parse(synced)
@@ -550,7 +636,7 @@ const Config = Schema.Struct({
 export type Config = typeof Config.Type
 
 export const Include = Plugin.make({
-	name: "include",
+	name: "@graftland/loader/Include",
 	config: Config,
 	inject: [FileSystem.FileSystem, Path.Path],
 	apply: Effect.fnUntraced(function* ({ path: file, watch, initial }) {
@@ -563,6 +649,7 @@ export const Include = Plugin.make({
 			file,
 		)
 		const watchedTarget = yield* SubscriptionRef.make(entry)
+		const lists = yield* Ref.make<Lists>(HashMap.empty())
 		const resolveTarget = fileTarget(entry).pipe(
 			Effect.provideService(FileSystem.FileSystem, fs),
 			Effect.provideService(Path.Path, path),
@@ -590,7 +677,8 @@ export const Include = Plugin.make({
 			text: string,
 			previous: ReadonlyArray<Entry>,
 		) {
-			const prepared = yield* prepare(text, previous)
+			const known = yield* Ref.get(lists)
+			const prepared = yield* prepare(text, previous, known)
 			if (prepared.text !== text)
 				yield* write(target, prepared.text, Option.some(text))
 			return { ...prepared, target } satisfies Loaded
@@ -603,7 +691,8 @@ export const Include = Plugin.make({
 					const text = yield* yaml(() =>
 						new Document(initial ?? [], { customTags: [envTag] }).toString(),
 					)
-					const prepared = yield* prepare(text, [])
+					const known = yield* Ref.get(lists)
+					const prepared = yield* prepare(text, [], known)
 					yield* write(target, prepared.text, Option.none())
 					return Option.some({ ...prepared, target })
 				}
@@ -685,12 +774,14 @@ export const Include = Plugin.make({
 								"Serialized entries do not match the edited target",
 							),
 						})
-					yield* write(current.target, text, Option.some(current.text))
+					const known = yield* Ref.get(lists)
+					const prepared = yield* prepare(text, decoded, known)
+					yield* write(current.target, prepared.text, Option.some(current.text))
 					yield* Ref.set(
 						synced,
-						Option.some({ target: current.target, text, entries: decoded }),
+						Option.some({ target: current.target, ...prepared }),
 					)
-					return decoded
+					return prepared.entries
 				}),
 			)
 		})
@@ -751,6 +842,26 @@ export const Include = Plugin.make({
 
 		yield* start({
 			initial: entriesOf(initialSynced),
+			identify: (known) =>
+				Effect.gen(function* () {
+					yield* Ref.set(lists, known)
+					return yield* retryWrite(
+						Effect.gen(function* () {
+							const previous = yield* Ref.get(synced)
+							const target = yield* resolveTarget
+							const disk = yield* fs.readFileString(target)
+							const current = yield* read(target, disk, entriesOf(previous))
+							if (
+								Option.isSome(previous) &&
+								current.text === previous.value.text &&
+								current.target === previous.value.target
+							)
+								return Option.none<ReadonlyArray<Entry>>()
+							yield* Ref.set(synced, Option.some(current))
+							return Option.some(current.entries)
+						}),
+					)
+				}),
 			apply: applyOp,
 			refresh,
 			external,

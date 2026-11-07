@@ -18,7 +18,7 @@ import { Listener, type Accept } from "../Transport"
 
 export const Config = Schema.Struct({ auth: Schema.optionalKey(Schema.Never) })
 export default Plugin.make({
-	name: "remote-stdio-listener",
+	name: "@graftland/plugin-remote/runner/stdio",
 	config: Config,
 	inject: [Stdio.Stdio],
 	apply: Effect.fnUntraced(function* () {

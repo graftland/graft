@@ -40,6 +40,23 @@ export class ModuleNotFound extends Schema.TaggedError<
 	}
 }
 
+/**
+ * A short name matched more than one installed package. Short names never
+ * prefer one naming convention over another, so the entry must name the
+ * package in full.
+ */
+export class AmbiguousPluginName extends Schema.TaggedError<
+	AmbiguousPluginName,
+	{ readonly brand: unique symbol }
+>()("AmbiguousPluginName", {
+	plugin: Schema.String,
+	packages: Schema.Array(Schema.String),
+}) {
+	override get message(): string {
+		return `"${this.plugin}" matches ${Array.join(this.packages, " and ")}; name the package in full`
+	}
+}
+
 /** A module could not be imported, or plugin resolution found no plugin export. */
 export class ModuleInvalid extends Schema.TaggedError<
 	ModuleInvalid,
@@ -62,16 +79,23 @@ export class ModuleResolver extends Context.Service<
 			options?: ImportOptions,
 		) => Effect.Effect<
 			Plugin.Plugin,
-			ModuleNotFound | ModuleInvalid,
+			ModuleNotFound | ModuleInvalid | AmbiguousPluginName,
 			Scope.Scope
 		>
 	}
 >()("@graftland/loader/ModuleResolver") {}
 
+/** Why a module that imported is not a plugin. */
+const exportsNoPlugin = "it exports no plugin"
+
 const isPath = (name: string) =>
 	String.startsWith(".")(name) || String.startsWith("/")(name)
 
-/** The specifiers tried for a name, in order: as written, then the naming conventions for short names. */
+/**
+ * The specifiers tried for a name: as written, then the naming conventions for
+ * short names. A name as written wins if it is a plugin; the conventions rank
+ * equally, so a short name that matches both is ambiguous.
+ */
 export const candidates = (name: string): ReadonlyArray<string> =>
 	isPath(name) || String.includes(":")(name) || String.startsWith("@")(name)
 		? [name]
@@ -324,7 +348,7 @@ export const make: <E>(
 				),
 			)
 		})
-		/** Only a missing candidate permits short-name fallback. */
+		/** Only a missing candidate, or a short name as written that is no plugin, permits fallback. */
 		const attempt = Effect.fnUntraced(function* (
 			candidate: Candidate,
 			observationScope: Scope.Scope,
@@ -333,7 +357,7 @@ export const make: <E>(
 			return yield* load(specifier, candidate, observationScope).pipe(
 				Effect.flatMap((module) =>
 					Effect.fromOption(Plugin.fromModule(module), () =>
-						ModuleInvalid.make({ specifier, cause: "it exports no plugin" }),
+						ModuleInvalid.make({ specifier, cause: exportsNoPlugin }),
 					),
 				),
 				inCandidateScope,
@@ -382,13 +406,59 @@ export const make: <E>(
 								),
 							),
 					)
-				const selected = yield* plan(name)
-				for (const candidate of selected) {
-					if (!(yield* Effect.fromResult(candidate.exists))) continue
-					const plugin = yield* attempt(candidate, observationScope)
-					if (Option.isSome(plugin)) return plugin.value
-				}
-				return yield* ModuleNotFound.make({ plugin: name, tried })
+				const [written, ...conventions] = yield* plan(name)
+				const load = (
+					candidate: Candidate,
+				): Effect.Effect<
+					Option.Option<Plugin.Plugin>,
+					ModuleInvalid,
+					Scope.Scope
+				> =>
+					Effect.flatMap(Effect.fromResult(candidate.exists), (exists) =>
+						exists ? attempt(candidate, observationScope) : Effect.succeedNone,
+					)
+				// A short name as written may be a module that is no plugin, such as
+				// Node's `http`; the conventions are tried before reporting it.
+				const notPlugin = (cause: Cause.Cause<ModuleInvalid>) =>
+					conventions.length > 0 &&
+					isOnlyFailure(cause, (error) => error.cause === exportsNoPlugin)
+				const asWritten: Result.Result<
+					Option.Option<Plugin.Plugin>,
+					ModuleInvalid
+				> = written === undefined
+					? Result.succeed(Option.none())
+					: yield* load(written).pipe(
+							Effect.map(Result.succeed),
+							Effect.catchCauseIf(notPlugin, (cause) =>
+								Result.match(Cause.findError(cause), {
+									onSuccess: (error) => Effect.succeed(Result.fail(error)),
+									onFailure: () => Effect.failCause(cause),
+								}),
+							),
+						)
+				if (Result.isSuccess(asWritten) && Option.isSome(asWritten.success))
+					return asWritten.success.value
+				const loaded = yield* Effect.forEach(conventions, (candidate) =>
+					Effect.map(
+						load(candidate),
+						Option.map((plugin) => ({
+							specifier: candidate.specifier,
+							plugin,
+						})),
+					),
+				)
+				const found = Array.getSomes(loaded)
+				const [only, ...others] = found
+				if (only === undefined)
+					return yield* Result.isFailure(asWritten)
+						? Effect.fail(asWritten.failure)
+						: ModuleNotFound.make({ plugin: name, tried })
+				if (others.length > 0)
+					return yield* AmbiguousPluginName.make({
+						plugin: name,
+						packages: Array.map(found, (match) => match.specifier),
+					})
+				return only.plugin
 			}),
 		}
 	})

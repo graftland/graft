@@ -3,11 +3,15 @@ import { defineConfig } from "astro/config"
 import starlightLlmsTxt from "starlight-llms-txt"
 
 import { referenceLinkCheck } from "./check-links.mjs"
+import { hoverTypes } from "./hover-types.mjs"
 import { reference } from "./reference.mjs"
 
-// DOCS_URL is the public address of the site, such as
-// https://graftland.github.io/graft/. Its path becomes the base of every page.
-const url = new URL(process.env["DOCS_URL"] ?? "http://localhost:4321/")
+// DOCS_URL is the public address of the site. Its path becomes the base of
+// every page. The default is the deployed address, so a local build checks
+// links against the same base as the deployed site.
+const url = new URL(
+	process.env["DOCS_URL"] ?? "https://graftland.github.io/graft/",
+)
 
 export default defineConfig({
 	site: url.origin,
@@ -22,6 +26,7 @@ export default defineConfig({
 			favicon: "/favicon.svg",
 			logo: { src: "./src/assets/graft-mark.svg" },
 			customCss: ["./src/styles/garden.css"],
+			expressiveCode: { plugins: [hoverTypes()] },
 			head: [
 				{
 					tag: "link",
@@ -75,17 +80,46 @@ export default defineConfig({
 				{
 					label: "Build plugins",
 					translations: { "zh-CN": "编写插件", "zh-TW": "編寫插件" },
-					items: ["plugins", "services", "events"],
+					items: ["plugins", "probes", "services", "events"],
 				},
 				{
 					label: "Structure",
 					translations: { "zh-CN": "组织与变更", "zh-TW": "組織與變更" },
-					items: ["lifecycle", "isolation", "intercepts", "replace"],
+					items: [
+						"lifecycle",
+						"isolation",
+						"intercepts",
+						"replace",
+						"transitions",
+						"application-releases",
+						"trust",
+					],
 				},
 				{
 					label: "Applications",
 					translations: { "zh-CN": "应用", "zh-TW": "應用" },
-					items: ["config-file", "cli", "hot-reload", "embedding"],
+					items: [
+						"config-file",
+						"cli",
+						"hot-reload",
+						"embedding",
+						"http",
+						"http-api",
+						"http-authorization",
+						"mcp-server/overview",
+						"mcp-server/contributing",
+						"mcp-server/projection",
+						"mcp-server/extending",
+					],
+				},
+				{
+					label: "Ecosystem",
+					translations: { "zh-CN": "生态", "zh-TW": "生態" },
+					items: [
+						"ecosystem/manifest",
+						"ecosystem/compatibility",
+						"ecosystem/conformance",
+					],
 				},
 				{
 					label: "Remote",
@@ -93,6 +127,8 @@ export default defineConfig({
 					items: [
 						"remote/overview",
 						"remote/hosts",
+						"remote/contracts",
+						"remote/artifacts",
 						"remote/runners",
 						"remote/transport-auth",
 						"remote/lifecycle",

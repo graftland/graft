@@ -20,7 +20,7 @@ import { Effect, References, Schema, Stream } from "effect"
 import { Graft, Plugin } from "@graftland/graft"
 
 const tenant = Plugin.make({
-	name: "tenant",
+	name: "app/tenant",
 	config: Schema.Struct({ name: Schema.String }),
 	apply: () => Effect.log("ready"),
 })
@@ -74,7 +74,7 @@ class Greeter extends Context.Service<
 >()("app/Greeter") {}
 
 const greeter = Plugin.make({
-	name: "greeter",
+	name: "app/greeter",
 	apply: () =>
 		Graft.provide(Greeter, {
 			greet: (name) =>
@@ -85,7 +85,7 @@ const greeter = Plugin.make({
 })
 
 const hello = Plugin.make({
-	name: "hello",
+	name: "app/hello",
 	inject: [Greeter],
 	apply: () => Effect.flatMap(Greeter, (greeter) => greeter.greet("Ada")),
 })
@@ -154,7 +154,7 @@ const references = Intercept.layer([
 ])
 
 const show = Plugin.make({
-	name: "show",
+	name: "app/show",
 	apply: () => Effect.flatMap(Settings, Effect.log),
 })
 

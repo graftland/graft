@@ -59,13 +59,13 @@ export class Greeter extends Context.Service<
 >()("app/Greeter") {}
 
 export const greeter = Plugin.make({
-	name: "greeter",
+	name: "app/greeter",
 	config: Schema.Struct({ greeting: Schema.String }),
 	apply: (config) => Graft.provide(Greeter, config),
 })
 
 export const hello = Plugin.make({
-	name: "hello",
+	name: "app/hello",
 	inject: [Greeter],
 	apply: () =>
 		Effect.flatMap(Greeter, ({ greeting }) =>
@@ -108,6 +108,10 @@ await Effect.runPromise(
 	),
 ) // => Option.some(["Hello, world!"])
 ```
+
+`Group.Group` also accepts entries without ids. It derives stable ids for
+different-name insertions; use explicit ids when inserting or moving same-name
+siblings. See [Host entries](../plugins/#host-entries).
 
 ### Choosing a resolver
 
@@ -217,6 +221,7 @@ declare const contract: Remote.Contract.Contract<
 
 const greeter = Remote.plugin(contract, {
 	contractModule: new URL("./contract.js", import.meta.url).href,
+	implementation: new URL("./greeter.js", import.meta.url).href,
 	connect: { local: {} },
 })
 

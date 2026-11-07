@@ -29,7 +29,7 @@ export class Mailer extends Context.Service<
 >()("app/Mailer") {}
 
 export const welcome = Plugin.make({
-	name: "welcome",
+	name: "app/welcome",
 	config: Schema.Struct({ to: Schema.String }),
 	inject: [Mailer],
 	retry: Schedule.spaced("1 second"),
@@ -153,7 +153,7 @@ it.effect("restarts on a new config", () =>
 		const journal = yield* Ref.make<ReadonlyArray<string>>([])
 		const record = (event: string) => Ref.update(journal, Array.append(event))
 		const echo = Plugin.make({
-			name: "echo",
+			name: "app/echo",
 			config: Schema.Struct({ text: Schema.String }),
 			apply: ({ text }) =>
 				Effect.acquireRelease(record(`start ${text}`), () =>
@@ -284,7 +284,7 @@ const messages = Effect.gen(function* () {
 })
 
 const greeter = Plugin.make({
-	name: "greeter",
+	name: "app/greeter",
 	apply: () => Effect.log("hello"),
 })
 
@@ -352,3 +352,23 @@ plugin: test it in process, as above. The tests of the
 [06 · Remote](https://github.com/graftland/graft/tree/main/samples/06-remote/test)
 sample cross the boundary: a `globalSetup` builds it to JavaScript for Node, and
 an `it.live` test runs it over `local` and `worker`.
+
+## Test the installed integration
+
+Pack the contract and implementation, install their tarballs into an isolated
+consumer, then compile and run against published exports. Do not use workspace
+source aliases or private imports.
+
+| Check                     | Evidence                                                                                               |
+| ------------------------- | ------------------------------------------------------------------------------------------------------ |
+| Healthy upgrade           | One upstream login, unchanged session and activation counts, new responses, old-unit exit, `Accepted`. |
+| Failed probe              | `Aborted` with the probe cause; the previous implementation still serves.                              |
+| Failed trial and recovery | `Recovered` or `RecoveryFailed`, with the upstream session preserved.                                  |
+| Calls during cutover      | An admitted slow call returns the old implementation's response.                                       |
+| Repeated upgrades         | Every retired execution unit has exit evidence.                                                        |
+| Rejected Loader edit      | Neither the file nor the accepted target changes.                                                      |
+
+Run both direct placements. The
+[integration-gateway sample](https://github.com/graftland/graft/tree/main/samples/integration-gateway)
+uses a local WebSocket bot server and also exercises `graft start` from the
+installed consumer.

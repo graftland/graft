@@ -48,8 +48,10 @@ Plugins loaded from an entry can read `yield* Entry.CurrentId`, importing
 `Entry` from `@graftland/loader`. This `Context.Reference<Option<string>>` holds
 that entry's id, including inside nested groups, and defaults to `None` outside
 entry loading. Child plugins forked by the plugin inherit it; it is not a new id
-for every fork. Include persists generated ids in YAML, so they survive host
-restarts.
+for every fork. Include persists generated ids in YAML, including plugin entry
+lists, so they survive host restarts. Outside a file, missing ids derive from
+the parent id, the plugin name and its occurrence among same-name entries
+without ids.
 
 ## Command plugins
 
@@ -81,28 +83,32 @@ enable one.
 
 ## Entry fields
 
-| Field       | What it does                                                                                  |
-| ----------- | --------------------------------------------------------------------------------------------- |
-| `id`        | Identifies the entry. If an entry has none, Graft adds one and writes it to the file.         |
-| `name`      | The plugin's module: a relative path, a package name, or a short name. Groups ignore it.      |
-| `config`    | The plugin's input. For a group, its list of entries.                                         |
-| `disabled`  | `true` unloads the entry but keeps it in the file.                                            |
-| `group`     | `true` makes the entry a group of other entries.                                              |
-| `inject`    | Service keys to wait for before loading the plugin, in addition to its own `inject`.          |
-| `isolate`   | Keys to [isolate](../isolation/): `true` for a private realm, or a label for a shared one.    |
-| `intercept` | Schema-checked patches for registered references, applying to this entry and its descendants. |
+| Field       | What it does                                                                                                                   |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `id`        | Identifies the entry. If an entry has none, Graft adds one and writes it to the file, including inside a plugin's entry lists. |
+| `name`      | The plugin's module: a relative path, a package name, or a short name. Groups ignore it.                                       |
+| `config`    | The plugin's input. For a group, its list of entries.                                                                          |
+| `disabled`  | `true` unloads the entry but keeps it in the file.                                                                             |
+| `group`     | `true` makes the entry a group of other entries.                                                                               |
+| `inject`    | Service keys to wait for before loading the plugin, in addition to its own `inject`.                                           |
+| `isolate`   | Keys to [isolate](../isolation/): `true` for a private realm, or a label for a shared one.                                     |
+| `intercept` | Schema-checked patches for registered references, applying to this entry and its descendants.                                  |
 
 ### Rules
 
-| Rule                    | Detail                                                                                                                                                                  |
-| ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Unique IDs**          | IDs must be unique across the entire Loader/Include tree, including disabled entries. Directly embedded `Group.Group` instances require uniqueness only among siblings. |
-| **Same at every level** | Entry fields are decoded the same way at every nesting level.                                                                                                           |
-| **Extra fields**        | Fields such as `note` are kept as metadata, also when you edit through the API. They do not skip the checks on declared fields.                                         |
-| **Empty groups**        | A group without `config` is an empty group (`config: []`). A group's `config` cannot be an explicit `null`.                                                             |
-| **Keys**                | Service and reference keys are the strings their classes were created with, such as `app/Database` for `Context.Service<...>()("app/Database")`.                        |
+| Rule                    | Detail                                                                                                                                                                                         |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Unique IDs**          | IDs must be unique across the entire Loader/Include tree, including disabled entries. Plugin entry lists and directly embedded `Group.Group` instances require uniqueness only among siblings. |
+| **Same at every level** | Entry fields are decoded the same way at every nesting level.                                                                                                                                  |
+| **Extra fields**        | Fields such as `note` are kept as metadata, also when you edit through the API. They do not skip the checks on declared fields.                                                                |
+| **Empty groups**        | A group without `config` is an empty group (`config: []`). A group's `config` cannot be an explicit `null`.                                                                                    |
+| **Keys**                | Service and reference keys are the strings their classes were created with, such as `app/Database` for `Context.Service<...>()("app/Database")`.                                               |
 
 ### Keeping identity across edits
+
+Plugin entry lists keep their written ids when entries are inserted or
+reordered. Outside a file, use explicit ids before inserting or moving same-name
+siblings.
 
 If you rewrite an anonymous tree and nothing changed, it keeps its assigned IDs
 and its running plugin instances.
@@ -157,12 +163,12 @@ provides one at bootstrap.
 
 How `name` is resolved:
 
-| `name` looks like                | Meaning                                                                              |
-| -------------------------------- | ------------------------------------------------------------------------------------ |
-| Starts with `.`                  | A path relative to the config file.                                                  |
-| Starts with `/`                  | An absolute path.                                                                    |
-| Starts with `@`, or contains `:` | Used as it is.                                                                       |
-| Anything else (such as `review`) | Tried as written, then as `@graftland/plugin-<name>`, then as `graft-plugin-<name>`. |
+| `name` looks like                | Meaning                                                                                                                                                                                                                                                                                                                                                             |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Starts with `.`                  | A path relative to the config file.                                                                                                                                                                                                                                                                                                                                 |
+| Starts with `/`                  | An absolute path.                                                                                                                                                                                                                                                                                                                                                   |
+| Starts with `@`, or contains `:` | Used as it is.                                                                                                                                                                                                                                                                                                                                                      |
+| Anything else (such as `review`) | Tried as written, then as `@graftland/plugin-<name>` and `graft-plugin-<name>`; a module as written that exports no plugin, such as Node's `http`, is skipped. The two conventions rank equally: if both are installed, the entry fails with `AmbiguousPluginName`. Both are imported to decide, so if the second fails to import, the entry fails with that error. |
 
 Packages are resolved from the application directory. For example,
 `name: remote` finds `@graftland/plugin-remote`, and `name: remote/runner` finds
@@ -233,7 +239,7 @@ const readSettings = (input: unknown) =>
 	Settings.parse(ConfigProvider.fromUnknown(input))
 
 export default Plugin.make({
-	name: "server",
+	name: "app/server",
 	config: Schema.Record(Schema.String, Schema.Unknown),
 	apply: (input) =>
 		Effect.gen(function* () {
@@ -296,30 +302,29 @@ Environment resolution treats other class instances as opaque.
 
 ## Editor support
 
-Every Graft release includes a JSON Schema for this file, with the same version
-as the release. Point the YAML language server to it with a comment on the first
-line, and editors such as VS Code (with the YAML extension) can complete and
-check the entry fields:
+[`graft schema`](../cli/#graft-schema) writes `graft.schema.json`, the JSON
+Schema of this file for the plugins your project installs. Point the YAML
+language server to it with a comment on the first line, and editors such as VS
+Code (with the YAML extension) can complete and check the entries:
 
 ```yaml title="graft.yml"
-# yaml-language-server: $schema=https://cdn.jsdelivr.net/npm/@graftland/cli@1.2.3/schema.json
+# yaml-language-server: $schema=./graft.schema.json
 - id: api
   name: ./plugins/api.mjs
 ```
 
-- Replace `1.2.3` with the version of `@graftland/cli` in your project, and
-  update it when you upgrade Graft. `graft create` writes this line with its own
-  version.
-- The schema is also in the package as `@graftland/cli/schema.json`.
-- It checks entry fields, registered intercepts, and the config of `remote`,
-  `remote/runner` and `remote/cli`, including entries nested in groups. Business
-  config and custom capability config remain open; their own schemas check them
-  at startup.
+| Schema                                                    | Checks                                                                                                                                                                        | Kept current by                                                                     |
+| --------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| `graft.schema.json`                                       | Entry fields, registered intercepts, and the `config` of every installed plugin that exports a [registration](../best-practices/packaging/#editor-completion), in groups too. | `graft create`, and `graft add` and `graft remove` when the file exists.            |
+| `@graftland/cli/schema.json`, released with every version | Entry fields and registered intercepts. The `config` of every plugin, Graft's own included, stays open.                                                                       | Its version, as in `https://cdn.jsdelivr.net/npm/@graftland/cli@1.2.3/schema.json`. |
 
-For an application's editor schema, combine explicit plugin registrations with
-`ConfigSchema.make` from `@graftland/loader`. Remote publishes its registrations
-through `@graftland/plugin-remote/Config`. Generating a schema does not load
-plugins.
+- `graft create` points `graft.yml` to `./graft.schema.json`, and writes the
+  file once dependencies are installed.
+- Commit `graft.schema.json`, so editors check entries right after a clone.
+- Run `graft schema` yourself after installing or upgrading packages with the
+  package manager directly.
+- Config without a registration stays open; its plugin's schema checks it at
+  startup.
 
 The language server may flag `!env`. Declare the tag in the editor settings. For
 VS Code:
@@ -412,3 +417,43 @@ window as in the [Loader API](../loader-api/#concurrent-saves). It is not a
 multi-file transaction.
 
 :::
+
+## Managed integrations
+
+A managed Remote entry uses `artifact` and `target` instead of `implementation`
+and `connect`:
+
+```yaml
+- id: forecasts
+  name: "@graftland/plugin-remote"
+  config:
+    contract: "@example/forecast-contract"
+    artifact:
+      directory: ./artifacts/sha256-v1-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      identity:
+        version: 1
+        algorithm: sha256
+        digest: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+        entry: dist/index.js
+    target:
+      _tag: Worker
+    probes: [health]
+    maxInFlight: 16
+    config: {}
+```
+
+Replace the example artifact with the directory and identity returned by
+[Artifact.capture](../remote/artifacts/). The artifact directory and relative
+contract locations resolve from the configuration file's directory. Use
+`target: { _tag: Local }` for a child process.
+
+The entry id is the managed instance name: request
+`Graft.transition({ target: "forecasts", candidate })`. Instance names must be
+unique in the runtime, including nested loaders. A child registration inherits
+its entry's identity.
+
+Loader edits to a managed tree fail with `ManagedFork` before writing the file
+or changing its accepted target. Hand-written file changes cannot be prevented;
+watch refresh rejects them and retains the previous target. A transition changes
+the live generation only; it does not rewrite `graft.yml`. Keep persisted
+deployment intent separate from [transition outcomes](../transitions/).

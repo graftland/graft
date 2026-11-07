@@ -178,14 +178,55 @@ devenv shell -- pnpm packages:publish npm
 
 ## 文档站
 
-工作流 `.github/workflows/docs.yml` 在每次推送到 `main` 时，从 `packages/docs`
-构建本站，并部署到 GitHub
-Pages：[graftland.github.io/graft](https://graftland.github.io/graft/)。也可以从 Actions 页面手动触发。同一时间只会进行一次部署。
+工作流 `.github/workflows/docs.yml` 从 `packages/docs`
+构建本站，并部署到Cloudflare
+Pages：[graft-docs-ekb.pages.dev](https://graft-docs-ekb.pages.dev/)。`main`
+上的每个 commit 和每个发布 tag 都保留当时的文档。
 
-| 任务           | 方法                                                |
-| -------------- | --------------------------------------------------- |
-| Pages 发布源   | 将仓库的 Pages 发布源设为 **GitHub Actions**。      |
-| 本地开发文档站 | `devenv shell -- pnpm --filter @graftland/docs dev` |
+| 地址                                                      | 内容                                                |
+| --------------------------------------------------------- | --------------------------------------------------- |
+| `https://graft-docs-ekb.pages.dev/`                       | **默认版本**：有文档的最新稳定 tag，例如 `v1.2.3`。 |
+| `https://<hash 前 12 位>.graft-docs-ekb.pages.dev/`       | 该 commit，永久保留。                               |
+| `https://versions.graft-docs-ekb.pages.dev/versions.json` | 所有已部署的 commit，及其日期、标题和 tag。         |
+| `https://graftland.github.io/graft/<path>`                | 重定向到默认版本的 `<path>`。                       |
+
+### 每次运行做什么
+
+| 触发方式                         | 构建                                                              | 之后                                                  |
+| -------------------------------- | ----------------------------------------------------------------- | ----------------------------------------------------- |
+| 推送到 `main`                    | 推送的 commit。                                                   | 加入列表。                                            |
+| 推送 `v1.2.3` 这样的 tag         | tag 指向的 commit，仅当它还没有文档时。                           | 给该 commit 标上 tag。更新的稳定 tag 会成为默认版本。 |
+| 在 Actions 页面勾选 **backfill** | 文档站出现以来 `main` 上的每个 commit 和每个 tag 中还没有文档的。 | 加入列表。                                            |
+| 在 Actions 页面填写 **rebuild**  | 填写的 commit，即使它们已有文档。                                 | 替换它们的部署并更新列表。                            |
+
+- **每个 commit 只构建一次。**
+  使用该 commit 自己的 lockfile 和工具链构建，上传后不再替换。正式地址直接提供默认版本自己的部署，所以切换默认版本不会上传任何构建。
+- **默认版本。** 与 npm 一样，`v1.2.3-beta.0`
+  这样的预发布版本不会成为默认版本。最后一次发布之后 `main`
+  上的 commit 会出现在列表中，但不是默认版本。
+- **顺序。**
+  各次运行逐个更新列表。默认版本始终是有文档的最高稳定版本，晚到的运行不会让它回退。
+- **失败。**
+  已经无法构建的 commit 会被跳过，其他 commit 照常部署。读取线上列表失败时，运行会停止，而不是新建一份列表。
+- **上限。** 一次 backfill 最多构建 256 个 commit，剩下的再运行一次。
+
+### 切换版本
+
+每个已部署的页面都从版本地址加载下拉框，所以在它出现之前构建的版本也有。
+
+- **下拉框。**
+  在主题选择器旁边。按从新到旧列出所有已部署的 commit，显示 tag 或短 hash，并标出默认版本。选中后打开同一页面在该版本中的地址；那时还不存在的页面会显示该版本的 404 页。
+- **提示。** 其他 commit 的页面顶部会说明这一点，并链接到默认版本中的同一页面。
+
+### 配置
+
+| 任务                 | 方法                                                                                                                                                                      |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Cloudflare 项目      | 执行一次 `npx wrangler pages project create graft-docs --production-branch main`，再把 Cloudflare 分配的 `*.pages.dev` 名称填入工作流的 `DOCS_PAGES_HOST` 和 `DOCS_URL`。 |
+| `docs` 环境的 secret | `CLOUDFLARE_API_TOKEN`（需要 **Cloudflare Pages: Edit** 权限）和 `CLOUDFLARE_ACCOUNT_ID`。                                                                                |
+| 旧地址               | 将仓库的 Pages 发布源设为 **GitHub Actions**。                                                                                                                            |
+| 补齐以前的文档       | 在 Actions 页面对 `main` 手动运行该工作流，并勾选 **backfill**。                                                                                                          |
+| 本地开发文档站       | `devenv shell -- pnpm --filter @graftland/docs dev`；下拉框只出现在已部署的页面上。                                                                                       |
 
 ### 编写页面
 

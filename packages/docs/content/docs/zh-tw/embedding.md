@@ -55,13 +55,13 @@ export class Greeter extends Context.Service<
 >()("app/Greeter") {}
 
 export const greeter = Plugin.make({
-	name: "greeter",
+	name: "app/greeter",
 	config: Schema.Struct({ greeting: Schema.String }),
 	apply: (config) => Graft.provide(Greeter, config),
 })
 
 export const hello = Plugin.make({
-	name: "hello",
+	name: "app/hello",
 	inject: [Greeter],
 	apply: () =>
 		Effect.flatMap(Greeter, ({ greeting }) =>
@@ -104,6 +104,9 @@ await Effect.runPromise(
 	),
 ) // => Option.some(["Hello, world!"])
 ```
+
+`Group.Group`
+也接受沒有 id 的項目。插入不同名稱的項目不會改變既有項目的衍生 id；插入或移動同名項目時，請明確指定 id。見[託管項目](../plugins/#託管項目)。
 
 ### 選擇解析器
 
@@ -207,6 +210,7 @@ declare const contract: Remote.Contract.Contract<
 
 const greeter = Remote.plugin(contract, {
 	contractModule: new URL("./contract.js", import.meta.url).href,
+	implementation: new URL("./greeter.js", import.meta.url).href,
 	connect: { local: {} },
 })
 

@@ -45,7 +45,7 @@ description: 用 graft.yml 描述應用程式，並在執行期間修改設定�
 從項目載入的外掛可從 `@graftland/loader` 匯入 `Entry`，讀取
 `yield* Entry.CurrentId`。它是
 `Context.Reference<Option<string>>`，值為目前項目的 id，巢狀 group 中也一樣；不經過項目載入時預設為
-`None`。外掛內部 fork 的子外掛會繼承它，不會為每個 fork 產生新 id。Include 會把產生的 id 儲存到 YAML，供宿主重新啟動後繼續使用。
+`None`。外掛內部 fork 的子外掛會繼承它，不會為每個 fork 產生新 id。Include 會把產生的 id 儲存到 YAML，包括外掛的項目清單，供宿主重新啟動後繼續使用。不使用檔案時，缺少的 id 由父項目 id、外掛名稱及其在未指定 id 的同名項目中的次序決定。
 
 ## 命令外掛
 
@@ -74,28 +74,30 @@ description: 用 graft.yml 描述應用程式，並在執行期間修改設定�
 
 ## 設定項目欄位
 
-| 欄位        | 作用                                                                            |
-| ----------- | ------------------------------------------------------------------------------- |
-| `id`        | 識別設定項目。如果項目沒有 `id`，Graft 會產生一個並寫回檔案。                   |
-| `name`      | 外掛的模組，可以是相對路徑、套件名稱或短名稱。群組會忽略此欄位。                |
-| `config`    | 外掛的輸入；對群組來說，則是其設定項目清單。                                    |
-| `disabled`  | 設為 `true` 時會卸載該項目，但仍保留在檔案中。                                  |
-| `group`     | 設為 `true` 時，該項目成為包含其他項目的群組。                                  |
-| `inject`    | 載入外掛前需要等待的服務鍵，作為外掛自身 `inject` 宣告的補充。                  |
-| `isolate`   | 需要[隔離](../isolation/)的鍵。`true` 表示私有領域（realm），標籤表示共用領域。 |
-| `intercept` | 經過 Schema 驗證、針對已登記 Reference 的修補內容，對該項目及其所有後代生效。   |
+| 欄位        | 作用                                                                                  |
+| ----------- | ------------------------------------------------------------------------------------- |
+| `id`        | 識別設定項目。如果項目沒有 `id`，Graft 會產生一個並寫回檔案，外掛內的項目清單也一樣。 |
+| `name`      | 外掛的模組，可以是相對路徑、套件名稱或短名稱。群組會忽略此欄位。                      |
+| `config`    | 外掛的輸入；對群組來說，則是其設定項目清單。                                          |
+| `disabled`  | 設為 `true` 時會卸載該項目，但仍保留在檔案中。                                        |
+| `group`     | 設為 `true` 時，該項目成為包含其他項目的群組。                                        |
+| `inject`    | 載入外掛前需要等待的服務鍵，作為外掛自身 `inject` 宣告的補充。                        |
+| `isolate`   | 需要[隔離](../isolation/)的鍵。`true` 表示私有領域（realm），標籤表示共用領域。       |
+| `intercept` | 經過 Schema 驗證、針對已登記 Reference 的修補內容，對該項目及其所有後代生效。         |
 
 ### 規則
 
-| 規則             | 說明                                                                                                                         |
-| ---------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| **ID 唯一**      | ID 在整個 Loader/Include 樹中必須唯一，包括已停用的項目。直接嵌入的 `Group.Group` 實例只要求同層項目之間唯一。               |
-| **每一層都相同** | 每一層巢狀的設定項目，欄位的解碼方式都相同。                                                                                 |
-| **額外欄位**     | `note` 這類額外欄位會當作中繼資料保留，透過 API 編輯時也是如此；它們不會繞過對已宣告欄位的驗證。                             |
-| **空群組**       | 沒有 `config` 的群組是空群組（`config: []`）。群組的 `config` 不能明確設為 `null`。                                          |
-| **鍵**           | 服務鍵和 Reference 鍵就是建立它們時使用的字串。例如 `Context.Service<...>()("app/Database")` 對應的服務鍵是 `app/Database`。 |
+| 規則             | 說明                                                                                                                           |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| **ID 唯一**      | ID 在整個 Loader/Include 樹中必須唯一，包括已停用的項目。外掛的項目清單和直接嵌入的 `Group.Group` 實例只要求同層項目之間唯一。 |
+| **每一層都相同** | 每一層巢狀的設定項目，欄位的解碼方式都相同。                                                                                   |
+| **額外欄位**     | `note` 這類額外欄位會當作中繼資料保留，透過 API 編輯時也是如此；它們不會繞過對已宣告欄位的驗證。                               |
+| **空群組**       | 沒有 `config` 的群組是空群組（`config: []`）。群組的 `config` 不能明確設為 `null`。                                            |
+| **鍵**           | 服務鍵和 Reference 鍵就是建立它們時使用的字串。例如 `Context.Service<...>()("app/Database")` 對應的服務鍵是 `app/Database`。   |
 
 ### 跨編輯保留身分
+
+外掛的項目清單在插入或重新排列項目時保留已寫入的 id。不使用檔案時，插入或移動同名項目前請明確指定 id。
 
 如果重新寫入一棵匿名樹，而內容沒有變化，它會保留已分配的 ID 和執行中的外掛實例。
 
@@ -144,12 +146,12 @@ description: 用 graft.yml 描述應用程式，並在執行期間修改設定�
 
 `name` 的解析方式：
 
-| `name` 的樣式           | 含義                                                                          |
-| ----------------------- | ----------------------------------------------------------------------------- |
-| 以 `.` 開頭             | 相對於設定檔的路徑。                                                          |
-| 以 `/` 開頭             | 絕對路徑。                                                                    |
-| 以 `@` 開頭，或包含 `:` | 原樣使用。                                                                    |
-| 其他（例如 `review`）   | 先照原樣嘗試，再試 `@graftland/plugin-<name>`，最後試 `graft-plugin-<name>`。 |
+| `name` 的樣式           | 含義                                                                                                                                                                                                                                                                                 |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 以 `.` 開頭             | 相對於設定檔的路徑。                                                                                                                                                                                                                                                                 |
+| 以 `/` 開頭             | 絕對路徑。                                                                                                                                                                                                                                                                           |
+| 以 `@` 開頭，或包含 `:` | 原樣使用。                                                                                                                                                                                                                                                                           |
+| 其他（例如 `review`）   | 先照原樣嘗試，再試 `@graftland/plugin-<name>` 和 `graft-plugin-<name>`；原名稱對應的模組若沒有匯出外掛（例如 Node 的 `http`），會被略過。兩種命名慣例地位相同：兩者都已安裝時，該項目以 `AmbiguousPluginName` 失敗。判斷時兩者都會被匯入，因此第二個匯入失敗時，該項目以該錯誤失敗。 |
 
 套件從應用程式目錄解析。例如，`name: remote` 會找到
 `@graftland/plugin-remote`，`name: remote/runner` 會找到它的 `runner` 匯出。
@@ -214,7 +216,7 @@ const readSettings = (input: unknown) =>
 	Settings.parse(ConfigProvider.fromUnknown(input))
 
 export default Plugin.make({
-	name: "server",
+	name: "app/server",
 	config: Schema.Record(Schema.String, Schema.Unknown),
 	apply: (input) =>
 		Effect.gen(function* () {
@@ -268,26 +270,27 @@ Effect.runSync(readSettings({})) // => { port: 8080 }
 
 ## 編輯器支援
 
-每個 Graft 版本都附帶這份檔案的 JSON
-Schema，版本號與該版本相同。在第一行用註解把 YAML language server 指向它，VS
-Code（搭配 YAML 擴充功能）等編輯器就能自動補全並檢查設定項目欄位：
+[`graft schema`](../cli/#graft-schema) 會寫入
+`graft.schema.json`，也就是針對專案所安裝外掛的這份檔案的 JSON
+Schema。在第一行用註解把 YAML language server 指向它，VS
+Code（搭配 YAML 擴充功能）等編輯器就能自動補全並檢查設定項目：
 
 ```yaml title="graft.yml"
-# yaml-language-server: $schema=https://cdn.jsdelivr.net/npm/@graftland/cli@1.2.3/schema.json
+# yaml-language-server: $schema=./graft.schema.json
 - id: api
   name: ./plugins/api.mjs
 ```
 
-- 請把 `1.2.3` 換成專案中 `@graftland/cli`
-  的版本，並在升級 Graft 時一併更新。`graft create` 會以自己的版本寫入這一行。
-- Schema 也包含在套件中，路徑為 `@graftland/cli/schema.json`。
-- 它檢查設定項目欄位、已登記的 intercept，以及 `remote`、`remote/runner` 與
-  `remote/cli`
-  的設定，包括 group 內的項目。業務設定與自訂能力的設定保持開放，在啟動時由各自的 schema 檢查。
+| Schema                                       | 檢查內容                                                                                                                                   | 保持最新的方式                                                                     |
+| -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------- |
+| `graft.schema.json`                          | 項目欄位、已登記的 intercept，以及每個匯出[登記項目](../best-practices/packaging/#編輯器自動補全)的已安裝外掛的 `config`，group 內也一樣。 | `graft create`；檔案存在時還有 `graft add` 與 `graft remove`。                     |
+| `@graftland/cli/schema.json`，隨每個版本發布 | 項目欄位和已登記的 intercept。所有外掛的 `config` 都保持開放，包括 Graft 自己的外掛。                                                      | 依版本固定，例如 `https://cdn.jsdelivr.net/npm/@graftland/cli@1.2.3/schema.json`。 |
 
-要產生應用程式自己的編輯器 Schema，用 `@graftland/loader` 的 `ConfigSchema.make`
-組合明確登記的外掛設定。Remote 透過 `@graftland/plugin-remote/Config`
-發布自己的登記項目。產生 Schema 不會載入外掛。
+- `graft create` 會讓 `graft.yml` 指向
+  `./graft.schema.json`，並在相依套件安裝完成後寫入這個檔案。
+- 請把 `graft.schema.json` 提交到版本庫，複製專案後編輯器就能檢查設定項目。
+- 直接用套件管理器安裝或升級套件後，請自行執行 `graft schema`。
+- 沒有登記項目的設定保持開放，在啟動時由外掛自己的 schema 檢查。
 
 language server 可能會標記 `!env`。請在編輯器設定中宣告這個標籤。以 VS
 Code 為例：
@@ -365,3 +368,39 @@ Include 會保留符號連結。每次磁碟操作都會解析設定的路徑，
 中的並行儲存是同一個視窗。它不是多檔案交易。
 
 :::
+
+## 受管理的整合
+
+受管理的 Remote 項目使用 `artifact` 和 `target`，取代 `implementation` 和
+`connect`：
+
+```yaml
+- id: forecasts
+  name: "@graftland/plugin-remote"
+  config:
+    contract: "@example/forecast-contract"
+    artifact:
+      directory: ./artifacts/sha256-v1-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      identity:
+        version: 1
+        algorithm: sha256
+        digest: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+        entry: dist/index.js
+    target:
+      _tag: Worker
+    probes: [health]
+    maxInFlight: 16
+    config: {}
+```
+
+將範例中的產物換成 [Artifact.capture](../remote/artifacts/)
+回傳的目錄和識別。產物目錄和相對契約路徑以設定檔所在目錄為準。子行程使用
+`target: { _tag: Local }`。
+
+項目 id 就是受管理的實例名稱：透過
+`Graft.transition({ target: "forecasts", candidate })`
+發起升級。實例名稱在整個執行環境中必須唯一，包括巢狀 Loader。子註冊繼承所屬項目的識別。
+
+Loader 在寫入檔案或變更已接受目標前，以 `ManagedFork`
+拒絕受管理樹的編輯。無法阻止外部手動改寫檔案；監看更新會拒絕這些修改並保留原目標。transition 只改變正在執行的世代，不會重寫
+`graft.yml`。持久化部署意圖與[升級結果](../transitions/) 分開記錄。

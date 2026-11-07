@@ -34,8 +34,8 @@ describe("runtime", () => {
 				const v2 = version(2)
 				const fork = yield* Graft.plugin(v1)
 				yield* fork.await
-				yield* Graft.replace([[v1, v2]])
-				yield* reach(fork, "Loading")
+				const result = yield* Graft.replace([[v1, v2]])
+				assert.strictEqual(result._tag, "Replaced")
 				yield* reach(fork, "Active")
 				const later = yield* Graft.plugin(v1)
 				yield* later.await

@@ -8,21 +8,32 @@ import {
 } from "effect"
 import type { Rpc, RpcClient, RpcGroup, RpcServer } from "effect/rpc"
 
-import type { Graft } from "@graftland/graft"
+import type { Graft, Plugin, Transition } from "@graftland/graft"
 
 import * as Control from "./internal/control"
 
 export { service } from "./internal/services"
+export { operation, identity } from "./internal/operations"
+export { compareOperations } from "@graftland/graft/Plugin"
+export type { OperationComparison } from "@graftland/graft/Plugin"
 
-const TypeId = "~@graftland/plugin-remote/Contract"
+/** Brands a remote contract descriptor. */
+export const TypeId = "~@graftland/plugin-remote/Contract"
 
 /** RPC types stay inside the descriptor; Graft supplies its dynamic activation context. */
-export interface Service<R = never, ClientR = never> {
+export interface Service<R = never, ClientR = never>
+	extends Plugin.ProvidedContract {
 	readonly key: Context.Key<unknown, unknown>
 	readonly group: Pick<RpcGroup.RpcGroup<Rpc.Any>, "requests">
 	readonly serve: (port: {
 		readonly serverProtocol: (endpoint: string) => RpcServer.Protocol["Service"]
 	}) => Effect.Effect<never, never, R>
+	/** Private clients and a fork-owned facade for unary transitions. */
+	readonly facade: Transition.Facade
+	readonly unary: boolean
+	readonly clients: (port: {
+		readonly clientProtocol: (endpoint: string) => RpcClient.Protocol["Service"]
+	}) => Effect.Effect<Context.Context<never>, never, Scope.Scope | ClientR>
 	readonly publish: (port: {
 		readonly clientProtocol: (endpoint: string) => RpcClient.Protocol["Service"]
 	}) => Effect.Effect<
@@ -52,7 +63,6 @@ export interface Contract<
 	readonly name: string
 	readonly config: S
 	readonly error: E
-	readonly module: string
 	readonly inject: ReadonlyArray<Service>
 	readonly provides: ReadonlyArray<Service>
 	readonly [TypeId]: typeof TypeId
@@ -62,7 +72,6 @@ export interface Options<S extends ConfigSchema, E extends ErrorSchema> {
 	readonly name: string
 	readonly config: S
 	readonly error?: E
-	readonly module: string
 	readonly inject?: ReadonlyArray<Service>
 	readonly provides?: ReadonlyArray<Service>
 }

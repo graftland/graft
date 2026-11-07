@@ -10,8 +10,12 @@ import type { ProcessExited, TransportError } from "../Errors"
 import type { Channel } from "../Transport"
 
 export interface LocalOptions {
+	readonly clearEnvironment?: boolean
+	readonly sandbox?: import("../Sandbox").Launch
 	readonly command?: readonly [string, ...string[]]
 	readonly contractModule: string
+	/** Implementation module selected by deployment, independently of the contract. */
+	readonly implementation: string
 	readonly session: string
 }
 export interface Execution {
@@ -19,6 +23,7 @@ export interface Execution {
 	readonly pid: Option.Option<number>
 	readonly threadId?: number
 	readonly exited: Effect.Effect<ProcessExited, TransportError>
+	readonly terminate: Effect.Effect<ProcessExited, TransportError>
 	readonly failure: Effect.Effect<never, TransportError>
 }
 export class LocalTransport extends Context.Service<
@@ -26,13 +31,17 @@ export class LocalTransport extends Context.Service<
 	{
 		readonly start: (
 			options: LocalOptions,
+			onSpawn?: Effect.Effect<void>,
 		) => Effect.Effect<Execution, PlatformError.PlatformError, Scope.Scope>
 	}
 >()("@graftland/plugin-remote/internal/directTransport/LocalTransport") {}
 
 export interface WorkerOptions {
+	readonly clearEnvironment?: boolean
 	readonly execArgv?: ReadonlyArray<string>
 	readonly contractModule: string
+	/** Implementation module selected by deployment, independently of the contract. */
+	readonly implementation: string
 	readonly session: string
 }
 export class WorkerTransport extends Context.Service<
@@ -40,6 +49,7 @@ export class WorkerTransport extends Context.Service<
 	{
 		readonly start: (
 			options: WorkerOptions,
+			onSpawn?: Effect.Effect<void>,
 		) => Effect.Effect<Execution, TransportError, Scope.Scope>
 	}
 >()("@graftland/plugin-remote/internal/directTransport/WorkerTransport") {}

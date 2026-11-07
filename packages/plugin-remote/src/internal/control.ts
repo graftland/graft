@@ -1,6 +1,8 @@
 import { Schema } from "effect"
 import { Rpc, RpcGroup } from "effect/rpc"
 
+import { Plugin } from "@graftland/graft"
+
 import { Priority } from "./port"
 
 export const Log = Schema.Struct({
@@ -30,15 +32,31 @@ export const LogEvent = Schema.Union([
 	Schema.TaggedStruct("Log", { entry: Log, dropped: Schema.Int }),
 	Schema.TaggedStruct("LogsEnded", { dropped: Schema.Int }),
 ])
+export const Description = Schema.Struct({
+	name: Schema.String,
+	overlap: Schema.Boolean,
+	provides: Schema.Array(
+		Schema.Struct({
+			key: Schema.String,
+			operations: Schema.Array(Plugin.OperationIdentity),
+		}),
+	),
+})
 export const endpoint = "@graftland/plugin-remote/control"
 export const make = <C extends Schema.Top>(cause: C) =>
 	RpcGroup.make(
-		Rpc.make("Load", {
+		Rpc.make("Describe", { success: Description, error: cause }),
+		Rpc.make("Ready", { success: Schema.Array(Schema.String), error: cause }),
+		Rpc.make("Probe", {
+			payload: { name: Schema.NonEmptyString },
+			error: cause,
+		}),
+		Rpc.make("Serve", {
 			payload: { input: Schema.Json },
 			error: cause,
 		}),
 		Rpc.make("Events", { success: Event, stream: true }),
-		Rpc.make("Dispose", { error: cause }),
+		Rpc.make("Stop", { error: cause }),
 	)
 		.annotateRpcs(Priority, "control")
 		.add(

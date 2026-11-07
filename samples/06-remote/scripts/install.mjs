@@ -17,7 +17,10 @@ async function install() {
 			name: "@graftland/sample-remote",
 			version: "0.0.0",
 			type: "module",
-			exports: { "./contract": "./dist/contract.js" },
+			exports: {
+				"./contract": "./dist/contract.js",
+				"./greeter": "./dist/greeter.js",
+			},
 		}),
 	)
 }

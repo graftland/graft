@@ -25,5 +25,9 @@
   service 的诊断规则不得为省事关闭；确需保留原生写法时只对单行关闭，并在 `--`
   后写明原因。
 - 导入模块不得触发任何 I/O。
+- 公开签名中出现的每个类型（包括用作属性键的常量）都必须从公开入口导出。文档构建会运行 TypeDoc 校验，任何「referenced
+  but not included」警告都会让构建失败；本地用 `pnpm build` 即可检查。
+- 文档内容中的站内链接一律用相对路径，不写以 `/`
+  开头的链接（`check-links.test.mjs` 会检查）。
 - 每个 fiber 都有归属：scope、`FiberSet` 或 `FiberMap`。
 - 不丢弃失败的 cause。

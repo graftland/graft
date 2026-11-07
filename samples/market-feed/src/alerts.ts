@@ -5,7 +5,7 @@ import { Plugin } from "@graftland/graft"
 import { Candles, Notifier } from "./services.ts"
 
 export const alerts = Plugin.make({
-	name: "alerts",
+	name: "@graftland/sample-market-feed/alerts",
 	inject: [Candles, Plugin.optional(Notifier)],
 	apply: Effect.fn("alerts.apply")(function* () {
 		const candles = yield* Candles

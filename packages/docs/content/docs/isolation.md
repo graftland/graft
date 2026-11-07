@@ -35,14 +35,14 @@ class Database extends Context.Service<Database, { readonly url: string }>()(
 ) {}
 
 const app = Plugin.make({
-	name: "app",
+	name: "app/app",
 	inject: [Database],
 	apply: () =>
 		Effect.flatMap(Database, (db) => Effect.log(`app uses ${db.url}`)),
 })
 
 const tenant = Plugin.make({
-	name: "tenant",
+	name: "app/tenant",
 	config: Schema.Struct({ name: Schema.String }),
 	apply: ({ name }) =>
 		Effect.gen(function* () {
@@ -52,7 +52,7 @@ const tenant = Plugin.make({
 })
 
 const tenants = Plugin.make({
-	name: "tenants",
+	name: "app/tenants",
 	apply: () =>
 		Effect.gen(function* () {
 			yield* Graft.plugin(tenant, { name: "a" }, { isolate: [Database] })
@@ -102,14 +102,14 @@ const database = Plugin.service(
 )
 
 const api = Plugin.make({
-	name: "api",
+	name: "app/api",
 	inject: [Database],
 	apply: () =>
 		Effect.flatMap(Database, (db) => Effect.log(`api uses ${db.url}`)),
 })
 
 const worker = Plugin.make({
-	name: "worker",
+	name: "app/worker",
 	inject: [Database],
 	apply: () =>
 		Effect.flatMap(Database, (db) => Effect.log(`worker uses ${db.url}`)),

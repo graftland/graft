@@ -1,0 +1,4 @@
+# Every deployed build reads these from another host.
+/*
+  Access-Control-Allow-Origin: *
+  Cache-Control: no-cache

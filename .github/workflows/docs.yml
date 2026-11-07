@@ -3,22 +3,78 @@ name: Docs
 on:
   push:
     branches: [main]
+    tags: ["v*"]
   workflow_dispatch:
-
-# Only one deploy runs at a time. A new push waits, so a deploy never stops halfway.
-concurrency:
-  group: docs-pages
-  cancel-in-progress: false
+    inputs:
+      backfill:
+        description:
+          Build every commit on main and every tag that has no docs yet
+        type: boolean
+        default: false
+      rebuild:
+        description:
+          Commits to build again even if they have docs, separated by spaces
+        type: string
+        default: ""
 
 permissions:
   contents: read
 
+env:
+  # The production site, which serves the newest stable release. Every commit
+  # on main and every tag also keeps its own deployment at
+  # https://<first 12 characters of the hash>.<pages host>/, and
+  # https://versions.<pages host>/ serves the commit list and the select.
+  DOCS_URL: https://graft-docs-ekb.pages.dev/
+  DOCS_PROJECT: graft-docs
+  # The project's pages.dev name, which Cloudflare chose when it was created.
+  DOCS_PAGES_HOST: graft-docs-ekb.pages.dev
+  # The old address, which now only redirects to DOCS_URL.
+  DOCS_OLD_URL: https://graftland.github.io/graft/
+
 jobs:
-  build:
-    name: Build the docs site
+  plan:
+    name: Choose the commits to build
+    # Production follows main: a run started by hand on another branch does
+    # nothing.
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
+    outputs:
+      commits: ${{ steps.plan.outputs.commits }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+      - id: plan
+        run: node packages/docs/publish.mjs plan
+        env:
+          DOCS_MODE:
+            ${{ inputs.backfill && 'backfill' || startsWith(github.ref,
+            'refs/tags/') && 'tag' || 'main' }}
+          DOCS_REBUILD: ${{ inputs.rebuild }}
+
+  build:
+    name: Build ${{ matrix.commit }}
+    needs: plan
+    if: needs.plan.outputs.commits != '[]'
+    runs-on: ubuntu-latest
+    # Holds the Cloudflare secrets.
+    environment: docs
+    strategy:
+      # One commit that no longer builds does not stop the others.
+      fail-fast: false
+      max-parallel: 8
+      matrix:
+        commit: ${{ fromJSON(needs.plan.outputs.commits) }}
+    steps:
+      # The publishing tools come from this run's commit; the site from the
+      # commit being built, with that commit's own toolchain and lockfile.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ matrix.commit }}
+          path: commit-site
       - uses: DeterminateSystems/nix-installer-action@3138316df39ed29be04236d7ffc686fa525866aa # v23
         with:
           # Download prebuilt devenv packages instead of building them.
@@ -34,33 +90,87 @@ jobs:
         run: nix profile add github:cachix/devenv/v2.4.0
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: .cache/pnpm
-          key: pnpm-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+          path: commit-site/.cache/pnpm
+          key:
+            pnpm-${{ runner.os }}-${{ hashFiles('commit-site/pnpm-lock.yaml') }}
           restore-keys: pnpm-${{ runner.os }}-
       - name: Install dependencies
+        working-directory: commit-site
         run:
           devenv shell -- env CI=true pnpm install --frozen-lockfile
           --config.confirmModulesPurge=false --store-dir .cache/pnpm
       - name: Test docs tooling
+        if: matrix.commit == github.sha
+        working-directory: commit-site
         run: devenv shell -- pnpm --filter @graftland/docs test
       - name: Build
+        working-directory: commit-site
         run: devenv shell -- pnpm --filter @graftland/docs build
+      - name: Deploy the commit's own docs
+        run:
+          node packages/docs/publish.mjs commit commit-site/packages/docs/dist
+          ${{ matrix.commit }}
         env:
-          DOCS_URL: https://graftland.github.io/graft/
-      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      - name: Record the deployment
+        run: mkdir -p deployed && touch deployed/${{ matrix.commit }}
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          path: packages/docs/dist
+          name: deployed-${{ matrix.commit }}
+          path: deployed
 
-  deploy:
-    name: Deploy to GitHub Pages
-    needs: build
+  list:
+    name: Update the commit list and the default release
+    needs: [plan, build]
+    # Runs after a partial backfill too, and for a tag that needs no build.
+    if: always() && needs.plan.result == 'success'
+    runs-on: ubuntu-latest
+    environment:
+      name: docs
+      url: ${{ env.DOCS_URL }}
+    # Every run reads and writes the live list, so they go one at a time, in
+    # order, and none is dropped.
+    concurrency:
+      group: docs-list
+      cancel-in-progress: false
+      queue: max
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          pattern: deployed-*
+          path: deployed
+          merge-multiple: true
+      - name: Publish the list
+        run: node packages/docs/publish.mjs list deployed
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+  redirect:
+    name: Redirect the old GitHub Pages address
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:
+      contents: read
       pages: write
       id-token: write
+    concurrency:
+      group: docs-pages
+      cancel-in-progress: false
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Write the redirect pages
+        run: node packages/docs/publish.mjs redirect redirect-site
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: redirect-site
       - id: deployment
         uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1

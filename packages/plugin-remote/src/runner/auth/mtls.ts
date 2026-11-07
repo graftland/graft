@@ -30,7 +30,7 @@ export const make = (
 		identityFromSubjectAltName(Option.getOrUndefined(peer.subjectAltName)),
 })
 export default Plugin.make({
-	name: "remote-certificate-authenticator",
+	name: "@graftland/plugin-remote/runner/auth/mtls",
 	config: Config,
 	inject: [FileSystem.FileSystem, Path.Path],
 	apply: ({ ca }) =>

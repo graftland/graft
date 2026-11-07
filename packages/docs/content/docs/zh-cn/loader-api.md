@@ -13,7 +13,7 @@ import { Graft, Plugin } from "@graftland/graft"
 import { Entry, Loader, ModuleResolver } from "@graftland/loader"
 
 const admin = Plugin.make({
-	name: "admin",
+	name: "app/admin",
 	inject: [Loader.Loader],
 	apply: () =>
 		Effect.gen(function* () {
@@ -24,8 +24,8 @@ const admin = Plugin.make({
 		}),
 })
 
-const cron = Plugin.make({ name: "cron", apply: () => Effect.void })
-const api = Plugin.make({ name: "api", apply: () => Effect.void })
+const cron = Plugin.make({ name: "app/cron", apply: () => Effect.void })
+const api = Plugin.make({ name: "app/api", apply: () => Effect.void })
 const resolver = ModuleResolver.fromRecord({ "./plugins/cron.mjs": cron, api })
 
 const entries = await Effect.runPromise(
@@ -38,7 +38,7 @@ const entries = await Effect.runPromise(
 		yield* fork.await
 		const read = yield* Deferred.make<ReadonlyArray<Entry.Entry>>()
 		const probe = Plugin.make({
-			name: "probe",
+			name: "app/probe",
 			inject: [Loader.Loader],
 			apply: () =>
 				Loader.Loader.pipe(
@@ -57,6 +57,8 @@ const entries = await Effect.runPromise(
 entries[0]?.disabled // => true
 entries[1]?.config // => { every: "5 minutes" }
 ```
+
+树中存在受管理 fork 时，Loader 在调用存储修改之前拒绝编辑、刷新和重试。绕过保护见[执行转换](../transitions/)。
 
 ## 通过代码编辑配置项
 
@@ -177,3 +179,12 @@ Graft 会重新解析序列化后的 YAML，确认它与计划目标一致；不
 内容核对与 rename 是两个独立的文件系统操作。外部编辑器仍可能在两者之间保存，这次保存仍可能被覆盖。原子替换保证文件不会只写一半，但无法与任意编辑器形成事务。如果不能接受这个剩余风险，请避免同时在编辑器中保存文件和通过 API 写入。
 
 :::
+
+## 定位托管条目
+
+将条目 id 作为 `Graft.transition` 的 `target`；也支持数字 fork
+id。Loader 在条目注册驱动前绑定名称。嵌入式注册必须显式提供
+`instance`；名称冲突或重复注册会在启动执行单元前失败。
+
+`update`、`remove`、`create`、刷新和重试仍属于绕过协调器的操作：只要存在托管后代，就会在调用 store 前拒绝。文件边界见[托管配置](../config-file/#托管集成)。已接受的 transition 不改变
+`loader.entries`；它表示持久化配置，而非当前运行的代。

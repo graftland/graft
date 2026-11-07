@@ -67,3 +67,41 @@ h1#_top,
 .graft-manifesto strong {
 	color: var(--sl-color-text-accent);
 }
+
+/* A name in a TypeScript example shows its type on hover. */
+.expressive-code .graft-type {
+	cursor: help;
+}
+
+.expressive-code .graft-type:hover {
+	text-decoration: underline dotted var(--sl-color-gray-3);
+	text-underline-offset: 0.2em;
+}
+
+.graft-type-tip {
+	position: fixed;
+	z-index: 100;
+	max-width: min(40rem, calc(100vw - 1rem));
+	max-height: 50vh;
+	overflow: auto;
+	padding: 0.5rem 0.75rem;
+	border: 1px solid var(--sl-color-gray-5);
+	border-radius: 0.375rem;
+	background: var(--sl-color-gray-6);
+	color: var(--sl-color-white);
+	box-shadow: var(--sl-shadow-md);
+	font-size: var(--sl-text-xs);
+}
+
+.graft-type-tip pre {
+	margin: 0;
+	font-family: var(--__sl-font-mono);
+	white-space: pre-wrap;
+}
+
+.graft-type-tip p {
+	margin: 0.5rem 0 0;
+	padding-top: 0.5rem;
+	border-top: 1px solid var(--sl-color-gray-5);
+	color: var(--sl-color-gray-2);
+}

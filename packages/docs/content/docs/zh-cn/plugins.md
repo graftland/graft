@@ -21,7 +21,7 @@ import { Duration, Effect, Option, Schedule, Schema, Stream } from "effect"
 import { Fork, Graft, Plugin } from "@graftland/graft"
 
 const ticker = Plugin.make({
-	name: "ticker",
+	name: "app/ticker",
 	config: Schema.Struct({ every: Schema.Duration }),
 	apply: ({ every }) =>
 		Effect.log("tick").pipe(
@@ -42,13 +42,17 @@ await Effect.runPromise(
 
 ### 选项
 
-| 选项     | 作用                                                                   |
-| -------- | ---------------------------------------------------------------------- |
-| `name`   | 用于日志和 fork 树的名称。                                             |
-| `config` | Effect `Schema`，用于在运行 `apply` 前解码输入。不需要配置时可以省略。 |
-| `inject` | 插件需要的服务。参见[依赖](#依赖)。                                    |
-| `apply`  | 启动插件，在 fork 的 `Scope` 内运行。                                  |
-| `retry`  | 在 `apply` 或受监督任务失败后重启插件的 `Schedule`。                   |
+| 选项       | 作用                                                                                              |
+| ---------- | ------------------------------------------------------------------------------------------------- |
+| `name`     | 用于日志和 fork 树的名称，[按 Effect 服务键的方式构造](../best-practices/packaging/#为插件命名)。 |
+| `config`   | Effect `Schema`，用于在运行 `apply` 前解码输入。不需要配置时可以省略。                            |
+| `inject`   | 插件需要的服务。参见[依赖](#依赖)。                                                               |
+| `provides` | 声明本地服务键或结构化契约描述，不会发布服务。                                                    |
+| `overlap`  | 声明重叠运行安全性，默认 `false`。仅为元数据，不改变重启行为。                                    |
+| `apply`    | 启动插件，在 fork 的 `Scope` 内运行。                                                             |
+| `retry`    | 在 `apply` 或受监督任务失败后重启插件的 `Schedule`。                                              |
+
+通过 [Plugin.probe](../probes/) 注册属于当前服务尝试的健康检查。
 
 ### 在 `apply` 内使用什么
 
@@ -139,7 +143,7 @@ class Cache extends Context.Service<
 >()("app/Cache") {}
 
 const report = Plugin.make({
-	name: "report",
+	name: "app/report",
 	inject: [Database, Plugin.optional(Cache)],
 	apply: () =>
 		Effect.gen(function* () {
@@ -202,7 +206,7 @@ const startServer = (port: number, banner: Ref.Ref<string>) =>
 	Ref.update(starts, Array.append(port))
 
 const server = Plugin.make({
-	name: "server",
+	name: "app/server",
 	config: Schema.Struct({ port: Schema.Int, banner: Schema.String }),
 	apply: (config) =>
 		Effect.gen(function* () {
@@ -273,7 +277,7 @@ const connect = Effect.flatMap(
 )
 
 const client = Plugin.make({
-	name: "client",
+	name: "app/client",
 	retry: Schedule.exponential("1 second"),
 	apply: () => connect,
 })
@@ -316,7 +320,7 @@ const openDatabase = Effect.acquireRelease(
 )
 
 export const database = Plugin.service(Database, openDatabase, {
-	name: "database",
+	name: "app/database",
 })
 ```
 
@@ -350,14 +354,14 @@ const StorageLive = Layer.mergeAll(
 )
 
 const storage = Plugin.layer(StorageLive, {
-	name: "storage",
+	name: "app/storage",
 	inject: [Database],
 	provides: [Storage, StorageAdmin],
 })
 
 // Starts only once both services are published.
 const files = Plugin.make({
-	name: "files",
+	name: "app/files",
 	inject: [Storage, StorageAdmin],
 	apply: () => Effect.void,
 })
@@ -402,3 +406,27 @@ npm create @graftland@latest review -- --template plugin
 | 发布 JavaScript                                  | Node 不会剥离 `node_modules` 中的类型。`npm publish` 会先运行 `build`，把 `src` 编译到 `dist`。                                                            |
 
 发布包需要注意的其他事项见[插件包](../best-practices/packaging/)。
+
+## 托管条目
+
+把条目列表字段声明为 `Entry.Entries`，并传给 `Group.Group`。
+
+```ts
+import { Effect, Schema } from "effect"
+
+import { Graft, Plugin } from "@graftland/graft"
+import { Entry, Group } from "@graftland/loader"
+
+export const host = Plugin.make({
+	name: "host",
+	config: Schema.Struct({ plugins: Entry.Entries }),
+	apply: Effect.fnUntraced(function* ({ plugins }) {
+		const subtree = yield* Graft.plugin(Group.Group, plugins)
+		return (next) => subtree.update(next.plugins).pipe(Effect.as(true))
+	}),
+})
+```
+
+Graft 会补全缺失的 id，将它们写回配置文件，并用每个子插件自己的配置 Schema 校验其配置。组合后的编辑器 Schema 也会对这些列表应用已注册的子插件 Schema。
+
+像上例一样返回更新函数，可在 Graft 首次写回 id 时保持子插件运行。没有更新函数的宿主会在这次写入后重启。身份规则见[配置项字段](../config-file/#配置项字段)。

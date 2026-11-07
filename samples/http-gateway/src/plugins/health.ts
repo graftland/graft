@@ -1,15 +1,14 @@
 import { Effect } from "effect"
-import { HttpServerResponse } from "effect/http"
+import { HttpRouter, HttpServerResponse } from "effect/http"
 
 import { Plugin } from "@graftland/graft"
+import * as Http from "@graftland/plugin-http/Http"
 
-import { route } from "../Gateway.ts"
-
-/** `GET /health`. */
+/** GET /health, available for this plugin's lifetime. */
 export default Plugin.make({
-	name: "health",
+	name: "@graftland/sample-http-gateway/plugins/health",
 	apply: () =>
-		route("GET", "/health", () =>
-			Effect.succeed(HttpServerResponse.text("ok\n")),
-		),
+		Http.mount(
+			HttpRouter.add("GET", "/health", HttpServerResponse.text("ok\n")),
+		).pipe(Effect.asVoid),
 })

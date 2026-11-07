@@ -6,12 +6,14 @@ description: graft 命令及其子命令。
 `@graftland/cli` 套件提供 `graft` 命令。它需要 Node.js
 22.19 或更新版本，與其 Effect Node 轉接器的要求一致。
 
-| 命令                        | 作用                         | 章節                          |
-| --------------------------- | ---------------------------- | ----------------------------- |
-| `graft start [config]`      | 執行設定檔所描述的應用程式。 | [graft start](#graft-start)   |
-| `graft create [directory]`  | 建立新專案。                 | [graft create](#graft-create) |
-| `graft add <package...>`    | 新增相依套件並安裝。         | [graft add](#graft-add)       |
-| `graft remove <package...>` | 移除相依套件。               | [graft remove](#graft-remove) |
+| 命令                        | 作用                               | 章節                          |
+| --------------------------- | ---------------------------------- | ----------------------------- |
+| `graft start [config]`      | 執行設定檔所描述的應用程式。       | [graft start](#graft-start)   |
+| `graft create [directory]`  | 建立新專案。                       | [graft create](#graft-create) |
+| `graft add <package...>`    | 新增相依套件並安裝。               | [graft add](#graft-add)       |
+| `graft remove <package...>` | 移除相依套件。                     | [graft remove](#graft-remove) |
+| `graft schema`              | 寫入 `graft.yml` 的編輯器 Schema。 | [graft schema](#graft-schema) |
+| `graft check [file]`        | 檢查清單是否符合宿主要求。         | [graft check](#graft-check)   |
 
 `graft start` 同時支援 [remote 宿主](../remote/hosts/)與
 [runner](../remote/runners/)。命令外掛可以加入 `graft remote certificates`
@@ -25,8 +27,9 @@ graft remote certificates --out ./certs --server localhost
 graft add --plugin remote --global
 ```
 
-`add --plugin` 安裝 `@graftland/plugin-<name>`，並啟用它的 `/cli`
-項目。第三方套件可以寫完整名稱。`--global`
+`add --plugin` 安裝外掛套件，並啟用它的 `/cli`
+項目。短名稱會改寫成 registry 中存在的那一個：`@graftland/plugin-<name>` 或
+`graft-plugin-<name>`；兩者都存在時，請寫完整名稱。`--global`
 將套件與項目放進[使用者設定](../config-file/#命令外掛)。
 
 已啟用的命令會出現在 `--help` 與 `--completions bash`
@@ -49,7 +52,8 @@ graft start [config] [--watch] [--env-file <path>] [--env-dir <path>] [--stdio]
 ### 協定輸出
 
 只有一個 stdio listener 的 runner 使用
-`graft start runner.yml --stdio`。載入外掛、處理說明與版本參數之前，stdout 就已保留給協定位元組。日誌、Console 輸出（包括 worker 輸出）、說明、版本與錯誤都寫入 stderr；此模式不提供互動精靈與補全輸出。runner 會拒絕不相符的 listener 設定。stdin
+`graft start runner.yml --stdio`，[MCP 伺服器](../mcp-server/overview/)使用
+`graft start --stdio`。載入外掛、處理說明與版本參數之前，stdout 就已保留給協定位元組。日誌、Console 輸出（包括 worker 輸出）、說明、版本與錯誤都寫入 stderr；此模式不提供互動精靈與補全輸出。runner 會拒絕不相符的 listener 設定。stdin
 EOF 後，runner 停止執行單元，確認結束後退出行程；啟動或清理失敗時回傳非零結束碼。
 
 ### 選項
@@ -118,8 +122,11 @@ secrets 或 Kubernetes Secret 卷冊。
 CLI 驅動重載的方式：
 
 1. 它以模組檔案過濾器呼叫 `hmr.watch`。
-2. 每次嘗試以 `Reloaded` 或 `Skipped` 結束後，它會呼叫
-   `loader.retry`，以重試失敗的項目並重新整理 `!env` 值。
+2. 每次嘗試以 `Reloaded`、`RolledBack`、`RecoveryFailed` 或 `Skipped`
+   結束後，它會呼叫 `loader.retry`，以重試失敗的項目並重新整理 `!env`
+   值。`RolledBack` 會為每個啟動失敗或逾時的外掛記錄一則警告，帶有 `graft.fork`
+   和 `graft.plugin`；啟動失敗時還帶有其 `Cause`。 `RecoveryFailed`
+   會將取代及恢復失敗都記錄為錯誤，帶有相同註記和完整 cause，並明確指出舊程式碼重新啟動失敗。
 3. 重載和重試的失敗會連同完整的 `Cause` 一併記錄，監看繼續進行。
 
 YAML 和模組監看器使用原生檔案系統通知，不做輪詢。YAML 監看器安裝後會重新讀取檔案，以捕捉安裝期間的變更。任一監看器的後端失敗時，只記錄錯誤，不會重新安裝該監看器。
@@ -156,6 +163,9 @@ CLI 為項目的 `intercept` 設定登記了兩個 Reference，對該項目及�
 可接受的值和範例列在[設定檔頁面](../config-file/#設定檔中的-intercept)。無效的值會讓該項目以
 `InvalidIntercept` 失敗。CLI 不會登記其他 Reference。
 
+共用 HTTP 監聽器使用一般的 `graft start` 載入 [HTTP 伺服器](../http/)，不需要
+`--stdio`。
+
 ## graft create
 
 ```sh
@@ -185,15 +195,16 @@ graft create [directory] [options]
 | `--plugin`          | 接受 `name` 或 `name@range`；短名稱的對應方式與 `graft add --plugin` 相同。套件加入 `dependencies`，並在 `graft.yml` 中得到一個 `- name:` 項目。未指定範圍時，Graft 自己的外掛使用 Graft 的版本，其他外掛使用 `latest`。 |
 | `--package-manager` | 帶版本時（例如 `pnpm@9.15.9`），版本會寫入 `package.json` 的 `packageManager` 欄位。                                                                                                                                     |
 | Git                 | 只執行 `git init`，不建立第一個 commit。專案位於儲存庫內或未安裝 git 時會略過，並說明原因。                                                                                                                              |
-| 完成之後            | 輸出接下來要執行的命令，例如 `cd my-app` 和 `pnpm dev`，包括被略過或失敗的安裝或 `git init`。安裝或 `git init` 失敗時會保留專案，並以非零狀態碼結束。                                                                    |
+| Schema              | 安裝完成後，由專案自己的 `@graftland/cli` 執行 [`graft schema`](#graft-schema)。                                                                                                                                         |
+| 完成之後            | 輸出接下來要執行的命令，例如 `cd my-app` 和 `pnpm dev`，包括被略過或失敗的安裝、`graft schema` 或 `git init`。任一步驟失敗時會保留專案，並以非零狀態碼結束。                                                             |
 
 ### 範本
 
-| 範本      | 用途                                                     | `package.json` 與 `graft.yml` 以外的檔案                                                                                           |
-| --------- | -------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| `app`     | 應用程式。`graft.yml` 載入範例外掛。                     | `src/hello.ts`、`tsconfig.json`、`README.md`、`.vscode/extensions.json`、`.gitignore`                                              |
-| `plugin`  | 要[發布](../plugins/#發布外掛)的外掛套件。               | `src/index.ts`、`test/index.test.ts`、`tsconfig.json`、`tsconfig.build.json`、`README.md`、`.vscode/extensions.json`、`.gitignore` |
-| `minimal` | 只有設定檔，除了 `--plugin` 加入的項目之外沒有其他項目。 | `.gitignore`                                                                                                                       |
+| 範本      | 用途                                                                              | `package.json` 與 `graft.yml` 以外的檔案                                                                                           |
+| --------- | --------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `app`     | 應用程式。`graft.yml` 載入範例外掛：`hello`，以及使用 `greeter` 服務的 `ticker`。 | `src/hello.ts`、`src/greeter.ts`、`src/ticker.ts`、`tsconfig.json`、`README.md`、`.vscode/extensions.json`、`.gitignore`           |
+| `plugin`  | 要[發布](../plugins/#發布外掛)的外掛套件。                                        | `src/index.ts`、`test/index.test.ts`、`tsconfig.json`、`tsconfig.build.json`、`README.md`、`.vscode/extensions.json`、`.gitignore` |
+| `minimal` | 只有設定檔，除了 `--plugin` 加入的項目之外沒有其他項目。                          | `.gitignore`                                                                                                                       |
 
 | 指令碼      | `app`                 | `plugin`                                   | `minimal`             |
 | ----------- | --------------------- | ------------------------------------------ | --------------------- |
@@ -203,8 +214,9 @@ graft create [directory] [options]
 | `typecheck` | `effect-tsgo tsc`     | `effect-tsgo tsc`                          |                       |
 | `build`     |                       | 將 `src` 編譯到 `dist`                     |                       |
 
-- 每個專案相依的 Graft 版本都與此命令相同，`graft.yml` 也指向該版本的
-  [Schema](../config-file/#編輯器支援)。
+- 每個專案相依的 Graft 版本都與此命令相同，`graft.yml`
+  也指向專案的[編輯器 Schema](../config-file/#編輯器支援)
+  `./graft.schema.json`。
 - Node 直接執行 `app` 的 TypeScript，因此沒有建置步驟。`plugin`
   套件需要建置，因為 Node 不會移除 `node_modules` 內檔案的型別。
 - `.vscode/extensions.json` 推薦 YAML 擴充功能，它會依 Schema 補全
@@ -227,6 +239,27 @@ graft remove <package...>
 ```
 
 從目前目錄的專案中移除相依套件。
+
+## graft schema
+
+```sh
+graft schema [--output <file>]
+```
+
+為目前目錄的專案寫入 `graft.schema.json`，也就是 `graft.yml`
+的[編輯器 Schema](../config-file/#編輯器支援)。除了隨版本發布的 Schema 檢查的內容，它還會檢查每個已安裝且登記了設定的外掛的
+`config`。
+
+| 情況             | 行為                                                                                                                                                                             |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 哪些套件         | `dependencies`、`devDependencies` 與 `optionalDependencies` 中，把 `@graftland/graft` 列為相依或 peer，並匯出 [`./schema`](../best-practices/packaging/#編輯器自動補全) 的套件。 |
+| 匯入什麼         | 只匯入它們的 `./schema` 模組，不載入任何外掛。                                                                                                                                   |
+| 相依套件未安裝   | 輸出警告，其設定保持開放。                                                                                                                                                       |
+| `./schema` 無效  | `SchemaRegistrationError` 指出是哪個套件，不寫入檔案。                                                                                                                           |
+| 保持最新         | 專案已有 `graft.schema.json` 時，`graft add` 與 `graft remove` 會在安裝後重寫它，失敗則以非零狀態碼結束。`graft create` 會寫入它。                                               |
+| `--output`、`-o` | 寫入的路徑，預設為 `graft.schema.json`。                                                                                                                                         |
+
+直接用套件管理器安裝或升級套件後，請自行執行。
 
 ## 套件管理器
 
@@ -267,3 +300,50 @@ graft remove <package...>
 Windows 以現狀提供：行程樹清理和還原未經驗證，Graft 不作保證。
 
 :::
+
+## 受管理的升級
+
+`graft start` 與嵌入式宿主使用相同的公開 Loader 和驅動 API，載入
+[受管理的 Remote 項目](../config-file/#受管理的整合)。由應用程式提供操作端點，使用項目 id 呼叫
+`Graft.transition`。CLI 沒有內建 transition 子命令。 `--watch`
+不升級受管理的單元：HMR 跳過含受管理實例的執行環境，Loader 在改變目標前拒絕受管理樹的更新。
+
+## graft check
+
+```sh
+graft --no-plugins check graft.check.json
+```
+
+載入前將已發布清單與明確宿主描述進行比較。路徑相對於預檢檔，預設檔名為
+`graft.check.json`。
+[相容性檢查](../ecosystem/compatibility/)說明檔案格式與診斷。檢查不安裝套件，也不改變應用程式設定。
+
+## graft remote manifest
+
+```sh
+graft remote manifest ./release
+graft remote manifest ./release --check --provenance ./provenance.json
+```
+
+由已啟用的 `remote/cli` 命令外掛提供。從已建置宣告產生或驗證 `graft`
+欄位，並可記錄套件來源。發布流程見[外掛清單](../ecosystem/manifest/)。
+
+## 應用程式發佈
+
+啟用 `@graftland/plugin-release/cli` 後可使用 `graft release build`、`plan`、
+`apply`、`rollback`、`history` 和 `status`。命令必須提供 `--socket`； `apply` 和
+`rollback` 還必須提供 `--expected`。CI 輸出使用
+`--json`。拒絕和不成功的切換結果傳回非零結束代碼。來源格式、撤銷和持久化啟動選擇見
+[應用程式發佈](../application-releases/)。
+
+## graft approve
+
+啟用 `@graftland/plugin-release/approve-cli` 後，使用
+`graft approve statement.json --who operator@example --socket /app/control.sock --json`。發行命令需要另外啟用
+`@graftland/plugin-release/cli`。`graft release approvals`
+回傳可檢視聲明；`graft release revoke GRANT --who operator@example`
+記錄撤銷並終止相關單元。兩個 release 命令都需要
+`--socket`。拒絕時結束碼非零。參見[信任與隔離](../trust/)。
+
+`graft add` 對所有套件停用生命週期腳本，恢復安裝也一樣。這也適用於
+`add --plugin`；啟用 CLI 擴充仍會允許其在主機執行。

@@ -1,0 +1,9 @@
+{
+	"extends": "../../tsconfig.base.json",
+	"compilerOptions": {
+		"outDir": ".cache/types",
+		"tsBuildInfoFile": ".cache/tsbuildinfo",
+		"allowImportingTsExtensions": true
+	},
+	"include": ["src", "test"]
+}

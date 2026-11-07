@@ -24,7 +24,7 @@ export class Clock extends Context.Service<
 >()("app/Clock") {}
 
 export const clock = Plugin.make({
-	name: "clock",
+	name: "app/clock",
 	apply: () =>
 		Graft.provide(Clock, {
 			now: Effect.map(DateTime.now, DateTime.toEpochMillis),
@@ -52,7 +52,7 @@ import { Fork, Graft, Plugin } from "@graftland/graft"
 import { Clock, clock } from "./clock.ts"
 
 const uptime = Plugin.make({
-	name: "uptime",
+	name: "app/uptime",
 	inject: [Clock],
 	apply: () =>
 		Effect.gen(function* () {
@@ -155,7 +155,7 @@ import { Fork, Graft, Plugin } from "@graftland/graft"
 const layer = Layer.provideMerge(Graft.layer, NodeServices.layer)
 
 const files = Plugin.make({
-	name: "files",
+	name: "app/files",
 	inject: [FileSystem.FileSystem, Path.Path],
 	apply: () => Effect.void,
 })

@@ -54,6 +54,7 @@ export const prepareRemote = async () => {
 	)
 	const digest = createHash("sha256")
 	for (const content of contents) digest.update(content)
+	digest.update("package-exports-v2")
 	const root = resolve(
 		directory,
 		`.cache/remote-install-${digest.digest("hex")}`,
@@ -78,7 +79,10 @@ export const prepareRemote = async () => {
 				name: "benchmark-remote",
 				version: "1.0.0",
 				type: "module",
-				exports: "./remote-contract.js",
+				exports: {
+					".": "./remote-contract.js",
+					"./implementation": "./remote-implementation.js",
+				},
 			}),
 		)
 		await writeFile(resolve(stage, "ready"), "complete")
@@ -232,6 +236,9 @@ export const makeRemote = async (connection, probe, hooks = {}) => {
 		let contractModule = fileURLToPath(
 			new URL("./dist/remote-contract.js", import.meta.url),
 		)
+		let implementationModule = fileURLToPath(
+			new URL("./dist/remote-implementation.js", import.meta.url),
+		)
 		if (connection === "remote-unix" || connection === "remote-ws") {
 			const root = await prepareRemote()
 			folder = await mkdtemp(resolve(directory, ".cache/remote-run-"))
@@ -277,6 +284,7 @@ export const makeRemote = async (connection, probe, hooks = {}) => {
 				}
 			}
 			contractModule = "benchmark-remote"
+			implementationModule = "benchmark-remote/implementation"
 		}
 		return {
 			observer,
@@ -290,6 +298,7 @@ export const makeRemote = async (connection, probe, hooks = {}) => {
 						? implementation
 						: Remote.plugin(contract, {
 								contractModule,
+								implementation: implementationModule,
 								connect:
 									connection === "remote-unix" || connection === "remote-ws"
 										? { ...connect, instance: `benchmark-${entries.length}` }

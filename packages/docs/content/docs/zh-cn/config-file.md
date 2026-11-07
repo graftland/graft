@@ -45,7 +45,7 @@ description: 用 graft.yml 描述应用，并在运行期间修改配置。
 从条目加载的插件可从 `@graftland/loader` 导入 `Entry`，读取
 `yield* Entry.CurrentId`。它是
 `Context.Reference<Option<string>>`，值为当前条目的 id，嵌套 group 中也一样；不经过条目加载时默认为
-`None`。插件内部 fork 的子插件会继承它，不会为每个 fork 生成新 id。Include 会把生成的 id 保存到 YAML，供宿主重启后继续使用。
+`None`。插件内部 fork 的子插件会继承它，不会为每个 fork 生成新 id。Include 会把生成的 id 保存到 YAML，包括插件的条目列表，供宿主重启后继续使用。不使用文件时，缺失的 id 由父项 id、插件名称及其在未指定 id 的同名条目中的次序决定。
 
 ## 命令插件
 
@@ -76,7 +76,7 @@ description: 用 graft.yml 描述应用，并在运行期间修改配置。
 
 | 字段        | 作用                                                                            |
 | ----------- | ------------------------------------------------------------------------------- |
-| `id`        | 标识配置项。如果未指定，Graft 会生成一个并写回文件。                            |
+| `id`        | 标识配置项。如果未指定，Graft 会生成一个并写回文件，插件内的条目列表也一样。    |
 | `name`      | 插件模块，可以是相对路径、包名或短名称。分组会忽略此字段。                      |
 | `config`    | 插件的输入；对于分组，则是其配置项列表。                                        |
 | `disabled`  | 设为 `true` 时卸载该项，但保留在文件中。                                        |
@@ -89,13 +89,15 @@ description: 用 graft.yml 描述应用，并在运行期间修改配置。
 
 | 规则           | 说明                                                                                                                          |
 | -------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| **ID 唯一**    | Loader/Include 要求整棵条目树的 ID 唯一，包括禁用项。直接嵌入的 `Group.Group` 则只要求同层兄弟项 ID 唯一。                    |
+| **ID 唯一**    | Loader/Include 要求整棵条目树的 ID 唯一，包括禁用项。插件的条目列表和直接嵌入的 `Group.Group` 则只要求同层兄弟项 ID 唯一。    |
 | **各层级相同** | 所有嵌套层级的配置项字段都遵循相同的解码规则。                                                                                |
 | **额外字段**   | `note` 等额外字段作为元数据保留，API 编辑时也是如此。它们不会绕过对已声明字段的校验。                                         |
 | **空分组**     | 分组省略 `config` 时，按空分组（`config: []`）处理；分组的 `config` 不能显式设为 `null`。                                     |
 | **键**         | 服务键和 Reference 键是创建它们时使用的字符串。例如，`Context.Service<...>()("app/Database")` 对应的服务键是 `app/Database`。 |
 
 ### 跨编辑保持身份
+
+插件的条目列表在插入或重排条目时保留已写入的 id。不使用文件时，插入或移动同名条目前请显式指定 id。
 
 重新写入未变化的匿名配置树时，已分配的 ID 和运行中的插件实例保持不变。
 
@@ -144,12 +146,12 @@ description: 用 graft.yml 描述应用，并在运行期间修改配置。
 
 `name` 的解析方式：
 
-| `name` 的形式           | 含义                                                                  |
-| ----------------------- | --------------------------------------------------------------------- |
-| 以 `.` 开头             | 相对于配置文件的路径。                                                |
-| 以 `/` 开头             | 绝对路径。                                                            |
-| 以 `@` 开头，或包含 `:` | 直接使用。                                                            |
-| 其他（例如 `review`）   | 依次尝试原名称、`@graftland/plugin-<name>` 和 `graft-plugin-<name>`。 |
+| `name` 的形式           | 含义                                                                                                                                                                                                                                                                                   |
+| ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 以 `.` 开头             | 相对于配置文件的路径。                                                                                                                                                                                                                                                                 |
+| 以 `/` 开头             | 绝对路径。                                                                                                                                                                                                                                                                             |
+| 以 `@` 开头，或包含 `:` | 直接使用。                                                                                                                                                                                                                                                                             |
+| 其他（例如 `review`）   | 先尝试原名称，再尝试 `@graftland/plugin-<name>` 和 `graft-plugin-<name>`；原名称对应的模块若没有导出插件（例如 Node 的 `http`），会被跳过。两种命名约定地位相同：两者都已安装时，该条目以 `AmbiguousPluginName` 失败。判断时两者都会被导入，因此第二个导入失败时，该条目以该错误失败。 |
 
 包从应用目录解析。例如，`name: remote` 会找到
 `@graftland/plugin-remote`，`name: remote/runner` 会找到它的 `runner` 导出。
@@ -214,7 +216,7 @@ const readSettings = (input: unknown) =>
 	Settings.parse(ConfigProvider.fromUnknown(input))
 
 export default Plugin.make({
-	name: "server",
+	name: "app/server",
 	config: Schema.Record(Schema.String, Schema.Unknown),
 	apply: (input) =>
 		Effect.gen(function* () {
@@ -268,26 +270,27 @@ Effect.runSync(readSettings({})) // => { port: 8080 }
 
 ## 编辑器支持
 
-每个 Graft 版本都附带这个文件的 JSON
-Schema，版本号与该版本相同。在文件第一行用注释把 YAML language server 指向它，VS
-Code（装有 YAML 扩展）等编辑器就能补全和检查配置项字段：
+[`graft schema`](../cli/#graft-schema) 写入
+`graft.schema.json`，即针对项目所安装插件的这个文件的 JSON
+Schema。在文件第一行用注释把 YAML language server 指向它，VS
+Code（装有 YAML 扩展）等编辑器就能补全和检查配置项：
 
 ```yaml title="graft.yml"
-# yaml-language-server: $schema=https://cdn.jsdelivr.net/npm/@graftland/cli@1.2.3/schema.json
+# yaml-language-server: $schema=./graft.schema.json
 - id: api
   name: ./plugins/api.mjs
 ```
 
-- 把 `1.2.3` 换成项目中 `@graftland/cli`
-  的版本，升级 Graft 时一并更新。`graft create` 会用自己的版本写入这一行。
-- 包里也带有这个 Schema，路径为 `@graftland/cli/schema.json`。
-- 它检查配置项字段、已登记的 intercept，以及 `remote`、`remote/runner` 和
-  `remote/cli`
-  的配置，包括 group 内的条目。业务配置和自定义能力的配置保持开放，在启动时由各自的 schema 检查。
+| Schema                                       | 检查内容                                                                                                                               | 保持更新的方式                                                                   |
+| -------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| `graft.schema.json`                          | 配置项字段、已登记的 intercept，以及每个导出[登记项](../best-practices/packaging/#编辑器补全)的已安装插件的 `config`，group 内也一样。 | `graft create`；文件存在时还有 `graft add` 和 `graft remove`。                   |
+| `@graftland/cli/schema.json`，随每个版本发布 | 配置项字段和已登记的 intercept。所有插件的 `config` 都保持开放，包括 Graft 自己的插件。                                                | 按版本固定，如 `https://cdn.jsdelivr.net/npm/@graftland/cli@1.2.3/schema.json`。 |
 
-要生成应用自己的编辑器 Schema，用 `@graftland/loader` 的 `ConfigSchema.make`
-组合明确登记的插件配置。Remote 通过 `@graftland/plugin-remote/Config`
-发布自己的登记项。生成 Schema 不会加载插件。
+- `graft create` 让 `graft.yml` 指向
+  `./graft.schema.json`，并在依赖安装完成后写入该文件。
+- 把 `graft.schema.json` 提交到仓库，克隆后编辑器即可检查配置项。
+- 直接用包管理器安装或升级包之后，自己运行 `graft schema`。
+- 没有登记项的配置保持开放，在启动时由插件自己的 schema 检查。
 
 language server 可能会把 `!env` 标为错误。需要在编辑器设置中声明这个标签，以 VS
 Code 为例：
@@ -363,3 +366,39 @@ Include 会保留符号链接。每次磁盘操作先解析配置路径的真实
 [Loader API](../loader-api/#并发保存) 中的并发保存窗口相同，不构成跨文件事务。
 
 :::
+
+## 托管集成
+
+托管 Remote 条目使用 `artifact` 和 `target`，代替 `implementation` 和
+`connect`：
+
+```yaml
+- id: forecasts
+  name: "@graftland/plugin-remote"
+  config:
+    contract: "@example/forecast-contract"
+    artifact:
+      directory: ./artifacts/sha256-v1-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      identity:
+        version: 1
+        algorithm: sha256
+        digest: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+        entry: dist/index.js
+    target:
+      _tag: Worker
+    probes: [health]
+    maxInFlight: 16
+    config: {}
+```
+
+将示例中的制品替换为 [Artifact.capture](../remote/artifacts/)
+返回的目录和标识。制品目录和相对契约路径以配置文件所在目录为基准。子进程使用
+`target: { _tag: Local }`。
+
+条目 id 就是托管实例名称：通过
+`Graft.transition({ target: "forecasts", candidate })`
+发起升级。实例名称在整个运行时中必须唯一，包括嵌套 Loader。子注册继承所属条目的标识。
+
+Loader 在写入文件或更改已接受目标前，以 `ManagedFork`
+拒绝托管树的编辑。无法阻止外部手动改写文件；监听刷新会拒绝这些修改并保留原目标。transition 只改变正在运行的代，不会重写
+`graft.yml`。持久化部署意图与[升级结果](../transitions/) 分开记录。

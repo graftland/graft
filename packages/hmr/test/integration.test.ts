@@ -89,6 +89,8 @@ export default Plugin.make({ name: '${name}-' + value, apply: () => Effect.void 
 		reach,
 		runtimePath,
 		effectPath,
+		runtimeSource,
+		effectSource,
 	}
 })
 
@@ -147,6 +149,186 @@ const watchEvents = Effect.fnUntraced(function* (
 })
 
 describe("native HMR", () => {
+	const starting = (runtimeSource: string, effectSource: string) => `
+import { Plugin } from ${runtimeSource};
+import { Effect } from ${effectSource};
+import { value } from './dependency.mjs';
+export default Plugin.make({
+	name: 'a-' + value,
+	apply: () =>
+		value === 2 ? Effect.fail('broken') : value === 4 ? Effect.never : Effect.void,
+});
+`
+
+	it.live(
+		"keeps the old plugin when the new code fails to start, and retries after a fix",
+		() =>
+			Effect.gen(function* () {
+				const {
+					hmr,
+					write,
+					load,
+					reach,
+					directory,
+					runtimeSource,
+					effectSource,
+				} = yield* setup
+				const source = starting(runtimeSource, effectSource)
+				const url = new URL("a.mjs", `file://${directory}/`).href
+				yield* write("dependency.mjs", "export const value = 1")
+				yield* write("a.mjs", source)
+				const plugin = yield* load("./a.mjs")
+				const fork = yield* Graft.plugin(plugin)
+				yield* fork.await
+				yield* write("dependency.mjs", "export const value = 2")
+				const broken = yield* hmr.reload
+				assert.strictEqual(broken._tag, "RolledBack")
+				if (broken._tag === "RolledBack") {
+					assert.deepStrictEqual(broken.entries, [url])
+					assert.deepStrictEqual(
+						Array.map(broken.failures, (failure) => [
+							failure._tag,
+							failure.plugin,
+						]),
+						[["Failed", "a-2"]],
+					)
+				}
+				yield* reach(["a-1"])
+				yield* write("dependency.mjs", "export const value = 3")
+				const fixed = yield* hmr.reload
+				assert.deepStrictEqual(
+					fixed,
+					Hmr.WatchResult.Reloaded({ entries: [url] }),
+				)
+				yield* reach(["a-3"])
+			}).pipe(run),
+	)
+
+	it.live.each(["reload", "watch"] as const)(
+		"reports recovery failure through %s and retries the retained generation",
+		(mode) =>
+			Effect.gen(function* () {
+				const {
+					hmr,
+					fs,
+					directory,
+					write,
+					load,
+					reach,
+					runtimeSource,
+					effectSource,
+				} = yield* setup
+				yield* write(
+					"a.mjs",
+					`
+import { Plugin } from ${runtimeSource};
+import { Cause, Effect, Ref } from ${effectSource};
+export default Plugin.make({
+  name: 'old',
+  apply: (() => {
+    const runs = Ref.makeUnsafe(0);
+    return () => Effect.gen(function* () {
+      if ((yield* Ref.updateAndGet(runs, n => n + 1)) > 1)
+        return yield* Effect.failCause(Cause.combine(Cause.fail('recovery failed'), Cause.die('recovery defect')));
+    });
+  })(),
+});
+`,
+				)
+				const plugin = yield* load("./a.mjs")
+				const fork = yield* Graft.plugin(plugin)
+				yield* fork.await
+				const reload =
+					mode === "watch"
+						? (yield* watchEvents(hmr, directory, fs)).changed("a.mjs")
+						: hmr.reload
+				yield* write(
+					"a.mjs",
+					`
+import { Plugin } from ${runtimeSource};
+import { Cause, Effect } from ${effectSource};
+export default Plugin.make({ name: 'new', apply: () =>
+  Effect.failCause(Cause.combine(Cause.fail('replacement failed'), Cause.die('replacement defect'))) });
+`,
+				)
+				const result = yield* reload
+				assert(result._tag === "RecoveryFailed")
+				assert.deepStrictEqual(result.entries, [
+					new URL("a.mjs", `file://${directory}/`).href,
+				])
+				for (const [failures, name, phase] of [
+					[result.failures, "new", "replacement"],
+					[result.recovery, "old", "recovery"],
+				] as const) {
+					assert.strictEqual(failures.length, 1)
+					const [failure] = failures
+					assert(failure?._tag === "Failed")
+					assert.strictEqual(failure.fork, fork.id)
+					assert.strictEqual(failure.plugin, name)
+					assert.strictEqual(failure.cause.reasons.length, 2)
+					assert.deepInclude(failure.cause.reasons[0], {
+						_tag: "Fail",
+						error: `${phase} failed`,
+					})
+					assert.deepInclude(failure.cause.reasons[1], {
+						_tag: "Die",
+						defect: `${phase} defect`,
+					})
+				}
+				const snapshot = yield* Stream.runHead(fork.state)
+				const state = Option.getOrThrow(snapshot)
+				assert(state._tag === "Failed")
+				assert.deepStrictEqual(result.recovery, [
+					Graft.ReplacementFailure.Failed({
+						fork: fork.id,
+						plugin: "old",
+						cause: state.cause,
+					}),
+				])
+				yield* reach(["old"])
+				const resolved = yield* Graft.resolve(plugin)
+				assert.strictEqual(resolved, plugin)
+				yield* write(
+					"a.mjs",
+					`
+import { Plugin } from ${runtimeSource};
+import { Effect } from ${effectSource};
+export default Plugin.make({ name: 'fixed', apply: () => Effect.void });
+`,
+				)
+				assert.strictEqual((yield* reload)._tag, "Reloaded")
+				yield* reach(["fixed"])
+			}).pipe(run),
+	)
+
+	it.live("rolls back plugins that do not start within activationTimeout", () =>
+		Effect.gen(function* () {
+			const { write, base, runtimeSource, effectSource } = yield* setup
+			const hmr = yield* Hmr.make({
+				base,
+				include: String.startsWith(new URL(".", base).href),
+				activationTimeout: "100 millis",
+			})
+			const source = starting(runtimeSource, effectSource)
+			yield* write("dependency.mjs", "export const value = 1")
+			yield* write("a.mjs", source)
+			const namespace = yield* Effect.promise(() => hmr.importer("./a.mjs"))
+			assert(Predicate.hasProperty(namespace, "default"))
+			const fork = yield* Graft.plugin(
+				namespace.default as PluginType.Plugin<void, void, never>,
+			)
+			yield* fork.await
+			yield* write("dependency.mjs", "export const value = 4")
+			const result = yield* hmr.reload
+			assert.strictEqual(result._tag, "RolledBack")
+			if (result._tag === "RolledBack")
+				assert.deepStrictEqual(
+					Array.map(result.failures, (failure) => failure._tag),
+					["TimedOut"],
+				)
+		}).pipe(run),
+	)
+
 	it.live("reports pure interruption from a native watcher finalizer", () =>
 		Effect.gen(function* () {
 			const { fs, directory, hmr, write, entry, load } = yield* setup
@@ -650,12 +832,14 @@ describe("native HMR", () => {
 			yield* fork.await
 			const { changed } = yield* watchEvents(hmr, directory, fs)
 			yield* write("dependency.mjs", "export const value = 2")
-			const result = yield* changed("dependency.mjs")
-			assert.strictEqual(result._tag, "Reloaded")
+			// The reload waits for the new plugin, which starts after the old cleanup.
+			const reloading = yield* Effect.forkChild(changed("dependency.mjs"))
 			yield* Deferred.await(entered)
 			release.resolve()
 			const value = yield* Deferred.await(imported)
 			assert.strictEqual(value, 1)
+			const result = yield* Fiber.join(reloading)
+			assert.strictEqual(result._tag, "Reloaded")
 			yield* reach(["cleanup-2"])
 		}).pipe(run),
 	)

@@ -90,8 +90,14 @@ describe("market feed", () => {
 				assert.deepStrictEqual(
 					Array.map(waiting, (node) => [node.name, node.state]),
 					[
-						["candles", { _tag: "Pending", missing: [Quotes.key] }],
-						["alerts", { _tag: "Pending", missing: [Candles.key] }],
+						[
+							"@graftland/sample-market-feed/candles",
+							{ _tag: "Pending", missing: [Quotes.key] },
+						],
+						[
+							"@graftland/sample-market-feed/alerts",
+							{ _tag: "Pending", missing: [Candles.key] },
+						],
 					],
 				)
 				const before = yield* readLogs("Before exchange registration")
@@ -198,9 +204,9 @@ describe("market feed", () => {
 				assert.deepStrictEqual(
 					Array.map(withdrawnTree, (node) => [node.name, node.state._tag]),
 					[
-						["candles", "Pending"],
-						["alerts", "Pending"],
-						["exchange", "Failed"],
+						["@graftland/sample-market-feed/candles", "Pending"],
+						["@graftland/sample-market-feed/alerts", "Pending"],
+						["@graftland/sample-market-feed/exchange", "Failed"],
 					],
 				)
 				const stopped = yield* readLogs("Failure cleanup completed")
@@ -220,7 +226,10 @@ describe("market feed", () => {
 					),
 				)
 				assert.strictEqual(failureLog.annotations["graft.fork"], feed.id)
-				assert.strictEqual(failureLog.annotations["graft.plugin"], "exchange")
+				assert.strictEqual(
+					failureLog.annotations["graft.plugin"],
+					"@graftland/sample-market-feed/exchange",
+				)
 				if (failed._tag === "Failed")
 					assert.isTrue(Equal.equals(failureLog.cause, failed.cause))
 
@@ -405,8 +414,8 @@ describe("market feed", () => {
 				assert.deepStrictEqual(
 					Array.map(remainingTree, (node) => [node.name, node.state._tag]),
 					[
-						["candles", "Pending"],
-						["alerts", "Pending"],
+						["@graftland/sample-market-feed/candles", "Pending"],
+						["@graftland/sample-market-feed/alerts", "Pending"],
 					],
 				)
 			}).pipe(run),

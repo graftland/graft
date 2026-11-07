@@ -6,3 +6,8 @@ export * as Event from "./Event"
 export * as Fork from "./Fork"
 export * as Plugin from "./Plugin"
 export * as Release from "./Release"
+export * as Transition from "./Transition"
+
+export * as Manifest from "./Manifest"
+
+export * as Trust from "./Trust"

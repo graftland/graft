@@ -12,6 +12,8 @@ The `@graftland/cli` package provides the `graft` command. It needs Node.js
 | `graft create [directory]`  | Creates a new project.                        | [graft create](#graft-create) |
 | `graft add <package...>`    | Adds dependencies and installs them.          | [graft add](#graft-add)       |
 | `graft remove <package...>` | Removes dependencies.                         | [graft remove](#graft-remove) |
+| `graft schema`              | Writes the editor schema of `graft.yml`.      | [graft schema](#graft-schema) |
+| `graft check [file]`        | Checks manifests against a host.              | [graft check](#graft-check)   |
 
 `graft start` runs both [remote hosts](../remote/hosts/) and
 [runners](../remote/runners/). Command plugins add subcommands such as
@@ -25,9 +27,10 @@ graft remote certificates --out ./certs --server localhost
 graft add --plugin remote --global
 ```
 
-`add --plugin` installs `@graftland/plugin-<name>` and enables its `/cli` entry.
-Use a full package name for third-party packages. `--global` installs and
-enables it in the [user configuration](../config-file/#command-plugins).
+`add --plugin` installs the plugin package and enables its `/cli` entry. A short
+name becomes whichever of `@graftland/plugin-<name>` and `graft-plugin-<name>`
+the registry has; if it has both, name the package in full. `--global` installs
+and enables it in the [user configuration](../config-file/#command-plugins).
 
 Enabled commands appear in `--help` and `--completions bash`. Built-in command
 names and aliases are reserved; duplicates stop startup. Commands are loaded
@@ -51,13 +54,14 @@ order.
 
 ### Protocol output
 
-Use `graft start runner.yml --stdio` for a runner with one stdio listener. The
-flag reserves stdout for protocol bytes before loading plugins or parsing help
-and version flags. Logs, Console output (including worker output), help, version
-and errors go to stderr; interactive wizard and completion output are
-unavailable in this mode. The runner rejects a mismatched listener
-configuration. At stdin EOF it stops its execution units, confirms termination
-and exits; startup or cleanup failure gives a nonzero exit.
+Use `graft start runner.yml --stdio` for a runner with one stdio listener, and
+`graft start --stdio` for an [MCP server](../mcp-server/overview/). The flag
+reserves stdout for protocol bytes before loading plugins or parsing help and
+version flags. Logs, Console output (including worker output), help, version and
+errors go to stderr; interactive wizard and completion output are unavailable in
+this mode. The runner rejects a mismatched listener configuration. At stdin EOF
+it stops its execution units, confirms termination and exits; startup or cleanup
+failure gives a nonzero exit.
 
 ### Options
 
@@ -131,8 +135,13 @@ How the two interact:
 How the CLI drives reload:
 
 1. It calls `hmr.watch` with a module-file filter.
-2. After each attempt that ends with `Reloaded` or `Skipped`, it calls
-   `loader.retry`, to retry failed entries and refresh `!env` values.
+2. After each attempt that ends with `Reloaded`, `RolledBack`, `RecoveryFailed`
+   or `Skipped`, it calls `loader.retry`, to retry failed entries and refresh
+   `!env` values. `RolledBack` logs one warning per plugin that failed to start
+   or timed out, with `graft.fork` and `graft.plugin`, and the `Cause` of a
+   failure. `RecoveryFailed` logs errors for both the replacement and recovery
+   failures, with the same annotations and full causes. It says that the
+   previous code failed to restart.
 3. Reload and retry failures are logged with their complete `Cause`, and
    watching goes on.
 
@@ -181,6 +190,9 @@ The [config file page](../config-file/#intercepts-in-a-config-file) lists
 accepted values and an example. Invalid values fail the entry with
 `InvalidIntercept`. The CLI does not register other references.
 
+For a shared HTTP listener, load [HTTP server](../http/) with ordinary
+`graft start`; it does not need `--stdio`.
+
 ## graft create
 
 ```sh
@@ -211,15 +223,16 @@ With `--yes`, or when stdin or stdout is not a terminal, it asks nothing and
 | `--plugin`          | Takes `name` or `name@range`; short names map as in `graft add --plugin`. The package goes into `dependencies` and gets a `- name:` entry in `graft.yml`. Without a range, Graft's own plugins use Graft's version and others `latest`. |
 | `--package-manager` | A version, as in `pnpm@9.15.9`, is written to the `packageManager` field of `package.json`.                                                                                                                                             |
 | Git                 | `git init` only, without a first commit. Skipped, with the reason, when the project is inside a repository or git is not installed.                                                                                                     |
-| Afterwards          | Prints the commands to run next, such as `cd my-app` and `pnpm dev`, including an install or `git init` that was skipped or failed. A failed install or `git init` keeps the project and exits with a nonzero status.                   |
+| Schema              | After installing, the project's own `@graftland/cli` runs [`graft schema`](#graft-schema).                                                                                                                                              |
+| Afterwards          | Prints the commands to run next, such as `cd my-app` and `pnpm dev`, including an install, `graft schema` or `git init` that was skipped or failed. A failed step keeps the project and exits with a nonzero status.                    |
 
 ### Templates
 
-| Template  | For                                                                  | Files besides `package.json` and `graft.yml`                                                                                       |
-| --------- | -------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| `app`     | An application. `graft.yml` loads the example plugin.                | `src/hello.ts`, `tsconfig.json`, `README.md`, `.vscode/extensions.json`, `.gitignore`                                              |
-| `plugin`  | A plugin package to [publish](../plugins/#publish-a-plugin).         | `src/index.ts`, `test/index.test.ts`, `tsconfig.json`, `tsconfig.build.json`, `README.md`, `.vscode/extensions.json`, `.gitignore` |
-| `minimal` | Only the config file, with no entries besides those from `--plugin`. | `.gitignore`                                                                                                                       |
+| Template  | For                                                                                                          | Files besides `package.json` and `graft.yml`                                                                                       |
+| --------- | ------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `app`     | An application. `graft.yml` loads the example plugins: `hello`, and `ticker` using the service of `greeter`. | `src/hello.ts`, `src/greeter.ts`, `src/ticker.ts`, `tsconfig.json`, `README.md`, `.vscode/extensions.json`, `.gitignore`           |
+| `plugin`  | A plugin package to [publish](../plugins/#publish-a-plugin).                                                 | `src/index.ts`, `test/index.test.ts`, `tsconfig.json`, `tsconfig.build.json`, `README.md`, `.vscode/extensions.json`, `.gitignore` |
+| `minimal` | Only the config file, with no entries besides those from `--plugin`.                                         | `.gitignore`                                                                                                                       |
 
 | Script      | `app`                 | `plugin`                                      | `minimal`             |
 | ----------- | --------------------- | --------------------------------------------- | --------------------- |
@@ -230,8 +243,8 @@ With `--yes`, or when stdin or stdout is not a terminal, it asks nothing and
 | `build`     |                       | Compiles `src` to `dist`                      |                       |
 
 - Every project depends on the same Graft version as the command, and
-  `graft.yml` points to the [schema](../config-file/#editor-support) of that
-  version.
+  `graft.yml` points to its [editor schema](../config-file/#editor-support),
+  `./graft.schema.json`.
 - Node runs the TypeScript of `app` directly, so it has no build step. A
   `plugin` package is built, because Node does not strip types inside
   `node_modules`.
@@ -257,6 +270,29 @@ graft remove <package...>
 ```
 
 Removes dependencies from the project in the current directory.
+
+## graft schema
+
+```sh
+graft schema [--output <file>]
+```
+
+Writes `graft.schema.json`, the [editor schema](../config-file/#editor-support)
+of `graft.yml`, for the project in the current directory. Besides what the
+released schema checks, it checks the `config` of every installed plugin that
+registers one.
+
+| Case                          | Behavior                                                                                                                                                                                            |
+| ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Which packages                | Those in `dependencies`, `devDependencies` and `optionalDependencies` that list `@graftland/graft` as a dependency or peer and export [`./schema`](../best-practices/packaging/#editor-completion). |
+| What is imported              | Only their `./schema` modules. No plugin is loaded.                                                                                                                                                 |
+| A dependency is not installed | A warning. Its config stays open.                                                                                                                                                                   |
+| A `./schema` is not valid     | `SchemaRegistrationError` names the package, and no file is written.                                                                                                                                |
+| Kept current                  | `graft add` and `graft remove` rewrite `graft.schema.json` after installing when the project has one, and exit with a nonzero status if that fails. `graft create` writes it.                       |
+| `--output`, `-o`              | The path to write. Defaults to `graft.schema.json`.                                                                                                                                                 |
+
+Run it yourself after installing or upgrading packages with the package manager
+directly.
 
 ## Package managers
 
@@ -302,3 +338,59 @@ Windows is provided as is: process-tree cleanup and rollback are not verified,
 and Graft does not promise them.
 
 :::
+
+## Managed upgrades
+
+`graft start` loads
+[managed Remote entries](../config-file/#managed-integrations) through the same
+public Loader and driver APIs as an embedded host. Use an application-owned
+operator endpoint that calls `Graft.transition` with the entry id. There is no
+built-in transition subcommand. `--watch` does not upgrade managed units: HMR
+skips managed runtimes and Loader rejects managed-tree refreshes before changing
+its target.
+
+## graft check
+
+```sh
+graft --no-plugins check graft.check.json
+```
+
+Checks published manifests against an explicit host before loading. Paths are
+relative to the preflight file, which defaults to `graft.check.json`.
+[Compatibility checks](../ecosystem/compatibility/) define the file and
+diagnostics. The check does not install packages or alter the application's
+configuration.
+
+## graft remote manifest
+
+```sh
+graft remote manifest ./release
+graft remote manifest ./release --check --provenance ./provenance.json
+```
+
+Provided by the enabled `remote/cli` command plugin. Generates or verifies the
+`graft` field from built declarations and optionally records package provenance.
+See [Plugin manifests](../ecosystem/manifest/) for the publication workflow.
+
+## Application releases
+
+Enable `@graftland/plugin-release/cli` to use `graft release build`, `plan`,
+`apply`, `rollback`, `history` and `status`. Commands require `--socket`;
+`apply` and `rollback` also require `--expected`. Use `--json` for CI output.
+Rejections and unsuccessful transition outcomes exit nonzero. See
+[Application releases](../application-releases/) for the source format,
+revocations and durable startup selection.
+
+## graft approve
+
+Enable `@graftland/plugin-release/approve-cli` to use
+`graft approve statement.json --who operator@example --socket /app/control.sock --json`.
+Enable `@graftland/plugin-release/cli` for the release commands.
+`graft release approvals` returns reviewable statements;
+`graft release revoke GRANT --who operator@example` records revocation and
+terminates affected units. Both release commands require `--socket`. Rejections
+exit nonzero. See [trust and isolation](../trust/).
+
+`graft add` disables lifecycle scripts for all packages, including recovery
+installs. This also applies to `add --plugin`; enabling a CLI extension still
+grants it execution in the host.

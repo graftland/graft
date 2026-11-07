@@ -58,6 +58,13 @@ function packageReferences() {
 					name: manifest.name,
 					basePath: join(directory, "src"),
 					alwaysCreateEntryPointModule: true,
+					// Every type a public signature mentions must be exported and documented.
+					validation: {
+						notExported: true,
+						invalidLink: true,
+						rewrittenLink: true,
+					},
+					treatWarningsAsErrors: true,
 					excludeInternal: true,
 					excludePrivate: true,
 					excludeProtected: true,

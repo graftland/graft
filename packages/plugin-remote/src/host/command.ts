@@ -114,7 +114,7 @@ export const Config = Schema.Struct({
 	env: Schema.optionalKey(Schema.Record(Schema.String, Schema.String)),
 })
 export default Plugin.make({
-	name: "remote-command-connector",
+	name: "@graftland/plugin-remote/host/command",
 	config: Config,
 	inject: [ChildProcessSpawner.ChildProcessSpawner, Path.Path],
 	apply: Effect.fnUntraced(function* (config) {

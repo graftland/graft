@@ -2,7 +2,7 @@ import { Effect, Option, Record, String } from "effect"
 
 import { Graft, Plugin } from "@graftland/graft"
 
-import { config } from "../forecastContract.ts"
+import { config, contract } from "../forecastContract.ts"
 import { Forecasts } from "../Forecasts.ts"
 
 // Stands in for a weather API client; a real one would open its HTTP client here.
@@ -17,8 +17,10 @@ const table: Record<
 
 /** Publishes `Forecasts`. Every plugin that injects it waits for this one. */
 export default Plugin.make({
-	name: "forecasts",
+	name: "@graftland/sample-chat-bot/plugins/forecasts",
 	config,
+	provides: contract.provides,
+	overlap: true,
 	apply: Effect.fn("forecasts.apply")(function* ({ units }) {
 		yield* Effect.acquireRelease(
 			Effect.log(`Connected to the weather service (${units})`),

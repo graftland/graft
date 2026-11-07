@@ -1,8 +1,14 @@
-import { mkdirSync, writeFileSync } from "node:fs"
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 
-import { Comment, Converter, ReflectionKind } from "typedoc"
+import {
+	Comment,
+	Converter,
+	LogLevel,
+	ReflectionKind,
+	RendererEvent,
+} from "typedoc"
 
 import { referenceEntries } from "../../scripts/reference.mjs"
 
@@ -101,6 +107,37 @@ export function load(app) {
 		writeFileSync(
 			new URL(`${packageName.replace("@graftland/", "")}.json`, output),
 			JSON.stringify({ coverage, undocumented }, null, 2) + "\n",
+		)
+	})
+	// Starlight's TypeDoc integration converts and renders without validating,
+	// and it swallows errors thrown from plugins. Run TypeDoc's own validation
+	// here and record its warnings in the package report; verifyReference
+	// fails the build on any of them. A type that a public signature mentions
+	// but no entry exports is one such warning.
+	app.renderer.on(RendererEvent.BEGIN, ({ project }) => {
+		const warnings = []
+		const log = app.logger.log
+		app.logger.log = (message, level) => {
+			if (level >= LogLevel.Warn) warnings.push(String(message))
+			log.call(app.logger, message, level)
+		}
+		try {
+			app.validate(project)
+		} finally {
+			app.logger.log = log
+		}
+		const packageName = app.options.getValue("name")
+		const report = new URL(
+			`./.cache/reference/${packageName.replace("@graftland/", "")}.json`,
+			import.meta.url,
+		)
+		writeFileSync(
+			report,
+			JSON.stringify(
+				{ ...JSON.parse(readFileSync(report, "utf8")), invalid: warnings },
+				null,
+				2,
+			) + "\n",
 		)
 	})
 }

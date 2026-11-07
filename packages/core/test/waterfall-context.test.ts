@@ -1,4 +1,13 @@
-import { Context, Deferred, Effect, Exit, Fiber, Option, Scope } from "effect"
+import {
+	Cause,
+	Context,
+	Deferred,
+	Effect,
+	Exit,
+	Fiber,
+	Option,
+	Scope,
+} from "effect"
 import { assert, describe, it } from "@effect/vitest"
 
 import { Event } from "../src/index.ts"
@@ -68,10 +77,12 @@ describe("waterfall callback context", () => {
 	)
 
 	it.effect(
-		"uses dispatcher context when a skipped middleware continues the chain",
+		"interrupts the chain when a running middleware closes before next",
 		() =>
 			Effect.gen(function* () {
-				const event = Event.middleware<string, string>("skipped-last-context")
+				const event = Event.middleware<string, string>(
+					"interrupted-before-next",
+				)
 				const owner = yield* Scope.make()
 				const entered = yield* Deferred.make<void>()
 				yield* Event.once(event, () =>
@@ -89,8 +100,58 @@ describe("waterfall callback context", () => {
 				).pipe(Effect.provideService(Tenant, "dispatcher"), Effect.forkScoped)
 				yield* Deferred.await(entered)
 				yield* Scope.close(owner, Exit.void)
-				const result = yield* Fiber.join(dispatch)
+				const result = yield* Fiber.await(dispatch)
+				assert.isTrue(
+					Exit.isFailure(result) && Cause.hasInterruptsOnly(result.cause),
+				)
+			}).pipe(run),
+	)
+	it.effect(
+		"keeps the dispatcher context when an unclaimed middleware is removed",
+		() =>
+			Effect.gen(function* () {
+				const event = Event.middleware<string, string>("unclaimed-context")
+				const owner = yield* Scope.make()
+				yield* Event.on(event, (input, next) =>
+					Scope.close(owner, Exit.void).pipe(Effect.andThen(next(input))),
+				).pipe(Effect.provideService(Tenant, "outer"))
+				yield* Event.on(event, () => Effect.die("Removed handler ran")).pipe(
+					Scope.provide(owner),
+					Effect.provideService(Tenant, "removed"),
+				)
+				const result = yield* Event.waterfall(
+					event,
+					"input",
+					() => Tenant,
+				).pipe(Effect.provideService(Tenant, "dispatcher"))
 				assert.strictEqual(result, "dispatcher")
+			}).pipe(run),
+	)
+
+	it.effect(
+		"interrupts during post-processing instead of returning the downstream success",
+		() =>
+			Effect.gen(function* () {
+				const event = Event.middleware<string, string>("post-processing")
+				const owner = yield* Scope.make()
+				const entered = yield* Deferred.make<void>()
+				yield* Event.on(event, (input, next) =>
+					next(input).pipe(
+						Effect.andThen(Deferred.succeed(entered, undefined)),
+						Effect.andThen(Effect.never),
+					),
+				).pipe(Scope.provide(owner))
+				const dispatch = yield* Event.waterfall(
+					event,
+					"raw secret",
+					Effect.succeed,
+				).pipe(Effect.forkScoped)
+				yield* Deferred.await(entered)
+				yield* Scope.close(owner, Exit.void)
+				const result = yield* Fiber.await(dispatch)
+				assert.isTrue(
+					Exit.isFailure(result) && Cause.hasInterruptsOnly(result.cause),
+				)
 			}).pipe(run),
 	)
 })

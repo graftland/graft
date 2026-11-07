@@ -24,16 +24,19 @@ import {
 	type Config,
 } from "effect"
 
-import { Fork, Graft, Plugin } from "@graftland/graft"
+import { Fork, Graft, Plugin, Transition } from "@graftland/graft"
 
 import {
 	CurrentId,
+	Entries,
 	Entry,
 	resolveEnv,
 	Select,
 	type CyclicConfig,
+	type NewEntry,
 } from "./Entry"
 import * as Intercept from "./Intercept"
+import { entryLists, EntryLists } from "./internal/entryLists"
 import { equalConfig } from "./internal/equalConfig"
 import { CurrentObservation } from "./internal/observation"
 import { PendingRefreshes, track } from "./internal/pending"
@@ -46,7 +49,7 @@ import {
 import { snapshot } from "./internal/snapshot"
 import { copyGroup, groups } from "./internal/validated"
 import { ModuleResolver, Watch } from "./ModuleResolver"
-import { GroupEntries, validateGroup, type InvalidOperation } from "./Tree"
+import { validateGroup, type InvalidOperation } from "./Tree"
 
 interface Child {
 	readonly entry: Entry
@@ -61,7 +64,7 @@ type Request =
 	| {
 			readonly _tag: "Reconcile"
 			readonly entries: ReadonlyArray<Entry>
-			readonly reply: Deferred.Deferred<void>
+			readonly reply: Deferred.Deferred<void, Transition.ManagedFork>
 	  }
 	| {
 			readonly _tag: "Refresh"
@@ -69,7 +72,7 @@ type Request =
 			readonly identity: symbol
 			readonly generation: number
 			readonly source: Fork.Fork
-			readonly reply: Deferred.Deferred<void>
+			readonly reply: Deferred.Deferred<void, Transition.ManagedFork>
 	  }
 
 /** Everything about an entry except its configuration: changing any of it means loading it again. */
@@ -82,7 +85,10 @@ const shape = (entry: Entry) => [
 ]
 
 /** Waiters observe state only; the group executor owns every submitted update. */
-const onceActive = (fork: Fork.Fork, request: Effect.Effect<void>) =>
+const onceActive = (
+	fork: Fork.Fork,
+	request: Effect.Effect<void, Transition.ManagedFork>,
+) =>
 	fork.state.pipe(
 		Stream.filter((state) => state._tag !== "Loading"),
 		Stream.runHead,
@@ -98,7 +104,7 @@ const updateTarget = Effect.fnUntraced(function* (
 	fork: Fork.Fork,
 	initial: unknown,
 	forward: boolean,
-	refresh: (source: Fork.Fork) => Effect.Effect<void>,
+	refresh: (source: Fork.Fork) => Effect.Effect<void, Transition.ManagedFork>,
 ) {
 	const previous = yield* Ref.make(initial)
 	return Effect.fnUntraced(function* (next: unknown) {
@@ -130,8 +136,10 @@ const waitingFor = (
 	keys: ReadonlyArray<string>,
 	plugin: Plugin.Plugin,
 	group: boolean,
-	refresh: (source: Fork.Fork) => Effect.Effect<void>,
-	observe: (fork: Fork.Fork) => Effect.Effect<void>,
+	refresh: (source: Fork.Fork) => Effect.Effect<void, Transition.ManagedFork>,
+	observe: (
+		fork: Fork.Fork,
+	) => Effect.Effect<void, never, Graft.Graft | Scope.Scope>,
 ) =>
 	Plugin.make({
 		name: plugin.name,
@@ -160,7 +168,10 @@ const inputOf = (
 > =>
 	entry.group === true
 		? Effect.fromResult(
-				validateGroup(entry.config === undefined ? [] : entry.config),
+				validateGroup(
+					entry.config === undefined ? [] : entry.config,
+					Option.some(entry.id),
+				),
 			).pipe(
 				Effect.map((entries) =>
 					withEpoch(copyGroup(entries), epochOf(entry) ?? nextEpoch()),
@@ -250,8 +261,8 @@ const disposeChild = (child: Child) =>
 	)
 
 const definition = Plugin.make({
-	name: "group",
-	config: GroupEntries,
+	name: "@graftland/loader/Group",
+	config: Entries,
 	inject: [ModuleResolver],
 	apply: Effect.fnUntraced(function* (entries) {
 		const select = yield* Select
@@ -261,6 +272,7 @@ const definition = Plugin.make({
 		const children = yield* Ref.make(HashMap.empty<string, Child>())
 		const settling = yield* FiberMap.make<string>()
 		const pending = yield* PendingRefreshes
+		const report = yield* EntryLists
 
 		const requests = yield* Queue.bounded<Request, Cause.Done>(1)
 		yield* Effect.addFinalizer(() =>
@@ -290,7 +302,7 @@ const definition = Plugin.make({
 			const current = yield* Ref.get(children)
 			const child = HashMap.get(current, id)
 			if (Option.isNone(child) || child.value.identity !== identity) return
-			const reply = yield* Deferred.make<void>()
+			const reply = yield* Deferred.make<void, Transition.ManagedFork>()
 			const request: Request = {
 				_tag: "Refresh",
 				id,
@@ -358,6 +370,27 @@ const definition = Plugin.make({
 						entry.group === true
 							? Group
 							: yield* resolver.resolve(entry.name, { observationScope })
+					const reportConfig = (plugin: Plugin.Plugin) =>
+						entry.group !== true && Option.isSome(report)
+							? report.value(entry.name, entryLists(plugin.config))
+							: Effect.void
+					yield* Graft.resolve(plugin).pipe(Effect.flatMap(reportConfig))
+					// Replacements change the target definition without rerunning this lifecycle.
+					const observe = (fork: Fork.Fork) =>
+						entry.group === true || Option.isNone(report)
+							? Effect.void
+							: fork.state.pipe(
+									Stream.mapEffect(() => Graft.resolve(plugin)),
+									Stream.changesWith(
+										(before, after) => before.config === after.config,
+									),
+									Stream.runForEach(reportConfig),
+									Effect.catchCause((cause) =>
+										Effect.logError("Reporting entry lists failed", cause),
+									),
+									Effect.forkScoped,
+									Effect.asVoid,
+								)
 					// Read the environment once the module is ready. Retry leaves a
 					// loading entry alone, so values read before a long import would
 					// otherwise start the plugin stale.
@@ -368,13 +401,19 @@ const definition = Plugin.make({
 								plugin,
 								entry.group === true,
 								refreshEntry,
-								(fork) => Ref.set(gatedFork, Option.some(fork)),
+								(fork) =>
+									Ref.set(gatedFork, Option.some(fork)).pipe(
+										Effect.andThen(observe(fork)),
+									),
 							)
 						: plugin
 					const fork = yield* Graft.plugin(target, input, {
 						intercept: [
 							...intercept,
 							Graft.intercept(CurrentId, () => Option.some(entry.id)),
+							Graft.intercept(Transition.CurrentInstance, () =>
+								Option.some(entry.id),
+							),
 							Graft.intercept(CurrentObservation, () =>
 								Option.map(source, (observation) => ({
 									observation,
@@ -384,6 +423,12 @@ const definition = Plugin.make({
 						],
 					})
 					yield* Ref.set(targetFork, Option.some(fork))
+					if (
+						target === plugin &&
+						entry.group !== true &&
+						Option.isSome(report)
+					)
+						yield* observe(fork)
 
 					const update = yield* updateTarget(
 						fork,
@@ -568,7 +613,7 @@ const definition = Plugin.make({
 			Effect.forkScoped,
 		)
 		const update = Effect.fnUntraced(function* (entries: ReadonlyArray<Entry>) {
-			const reply = yield* Deferred.make<void>()
+			const reply = yield* Deferred.make<void, Transition.ManagedFork>()
 			yield* submit({
 				_tag: "Reconcile",
 				entries: withEpoch(copyGroup(entries), epochOf(entries) ?? nextEpoch()),
@@ -584,9 +629,9 @@ const definition = Plugin.make({
 /** Public arrays request a full refresh; internal requests retain their explicit epoch. */
 export const Group = Equal.byReference({
 	...definition,
-	decode: preserveEpoch((input: ReadonlyArray<Entry>) =>
+	decode: preserveEpoch((input: ReadonlyArray<NewEntry>) =>
 		groups.has(input)
-			? Effect.succeed(input)
-			: Schema.decodeEffect(GroupEntries)(input),
+			? Effect.succeed(input as ReadonlyArray<Entry>)
+			: Schema.decodeEffect(Entries)(input),
 	),
 })

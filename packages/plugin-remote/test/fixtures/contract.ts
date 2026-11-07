@@ -25,5 +25,4 @@ export const contract = Contract.make({
 	name: "remote-fixture",
 	config,
 	error: Rejected,
-	module: new URL("./plugin.js", import.meta.url).href,
 })

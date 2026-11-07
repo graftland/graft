@@ -205,7 +205,7 @@ class Pager extends Context.Service<
 >()("app/Pager") {}
 
 const alerts = Plugin.make({
-	name: "alerts",
+	name: "app/alerts",
 	inject: [Pager],
 	apply: () =>
 		Effect.gen(function* () {
@@ -263,7 +263,7 @@ import { Graft, Plugin } from "@graftland/graft"
 const connect = (url: string) => Effect.logDebug(`Connecting to ${url}`)
 
 const feed = Plugin.make({
-	name: "feed",
+	name: "app/feed",
 	config: Schema.Struct({ url: Schema.String }),
 	apply: Effect.fn("feed.apply")(function* ({ url }) {
 		yield* connect(url).pipe(
@@ -296,7 +296,7 @@ await Effect.runPromise(
 		Effect.provide(Graft.layer),
 	),
 )
-spans // => ["graft.plugin feed", "graft.plugin feed > feed.apply", "feed.apply > feed.connect"]
+spans // => ["graft.plugin app/feed", "graft.plugin app/feed > feed.apply", "feed.apply > feed.connect"]
 ```
 
 - `graft.plugin <name>` 位於載入該外掛時所在的 span 之下，因此在 `apply`
@@ -306,12 +306,96 @@ spans // => ["graft.plugin feed", "graft.plugin feed > feed.apply", "feed.apply 
 - span 以外掛和操作命名，如範例中的 `Effect.fn("exchange.apply")`。
 - 印出的 cause 會把 span 顯示為一個 frame：`at graft.plugin <name>`。
 
+每個 `graft.plugin <name>` span 都帶有該外掛日誌的身分 `graft.fork` 和
+`graft.plugin`，另外還有 `graft.revision`：
+
+| 屬性             | 值                                                         |
+| ---------------- | ---------------------------------------------------------- |
+| `graft.fork`     | fork 的 `id`。                                             |
+| `graft.plugin`   | 外掛的 `name`。                                            |
+| `graft.revision` | 從 0 開始，`restart`、取代和回滾時遞增；設定更新不改變它。 |
+
 ### 匯出 span
 
-`graft start`
-會建立 span，但不安裝任何 exporter。要把 span 送到收集器，請嵌入 Graft，並在放
-[`Logger` layer](#在宿主中選擇輸出) 的位置提供 tracer layer，例如
-`effect/observability` 中的 OTLP exporter：
+`graft start` 會建立 span，但不安裝任何 exporter。用
+[`@graftland/plugin-otlp`](https://github.com/graftland/graft/tree/main/packages/plugin-otlp)
+外掛匯出它們：這是一個只用公開 Graft API 建構的普通外掛。它自己載入 `plugins`
+中的項目，並把這棵子樹的 span 送到 OTLP/HTTP 收集器：
+
+```yaml title="graft.yml"
+- id: traced
+  name: "@graftland/plugin-otlp"
+  config:
+    url: !env OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
+    serviceName: chat-bot
+    plugins:
+      - id: bot
+        name: ./src/bot.ts
+```
+
+| 修改                       | 效果                                                                                                                                                                                                                              |
+| -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| HTTP exporter 設定         | 新 span 交給新的 exporter；已開始的 span 留在舊 exporter；這些 span 結束後刷新並關閉舊 exporter。等待最長為舊設定的 `shutdownTimeout`；Effect 隨後為刷新單獨提供一個 `shutdownTimeout` 時限（總計最長為兩倍時限）。子樹繼續執行。 |
+| `exporter.config`          | 轉交給 exporter 的更新函式；相容的更新保持子樹執行。                                                                                                                                                                              |
+| `plugins`                  | 像群組一樣協調：未變更的項目繼續執行。exporter 設定未變時，不呼叫其更新函式。                                                                                                                                                     |
+| `exporter.name`            | 使用新的 provider 重新啟動被追蹤的子樹。                                                                                                                                                                                          |
+| 將項目移入或移出 `plugins` | 這些項目會重新啟動，因為父層和 intercept 改變了。                                                                                                                                                                                 |
+| Exporter 失敗              | 子樹等待 `Exporter` 服務；exporter 自身重試成功後，子樹恢復執行，無需修改設定。                                                                                                                                                   |
+| 卸載該項目                 | 先停止子樹，再並行刷新並關閉所有剩餘 exporter。                                                                                                                                                                                   |
+
+`plugins` 之外的外掛不會被追蹤。Graft 會像處理最外層項目一樣，把 `plugins`
+中缺少的 id 寫回檔案，調整順序時保留身分。
+
+HTTP 欄位是一般外掛 `@graftland/plugin-otlp/http` 的簡寫。它支援
+`serialization: json | protobuf`、資源屬性和批次匯出選項；預設值見
+[套件設定](https://github.com/graftland/graft/tree/main/packages/plugin-otlp#readme)。時間以毫秒計；數值欄位接受
+`!env` 字串。HTTP 標頭以 `Redacted` 儲存，憑證透過 `headers` 中的 `!env`
+傳入。缺少 `HttpClient` 時，HTTP 外掛停在 `Pending`。
+
+使用 `exporter` 取代 HTTP 欄位，選擇第三方實作：
+
+```yaml title="graft.yml"
+- id: traced
+  name: "@graftland/plugin-otlp"
+  config:
+    exporter:
+      name: graft-plugin-custom-traces
+      config:
+        destination: !env TRACE_DESTINATION
+    plugins:
+      - id: bot
+        name: ./src/bot.ts
+```
+
+| Exporter 契約 | 規則                                                                                                                                             |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 服務          | 透過 `Graft.provide` 發布 `@graftland/plugin-otlp/Exporter` 中的穩定 `Tracer.Tracer` 服務 `Exporter`，key 為 `@graftland/plugin-otlp/Exporter`。 |
+| 生命週期      | 資源和 fiber 由外掛 scope 管理；更新時保留未完成的 span，關閉時清空，保留失敗的 cause。                                                          |
+| 更新          | 回傳更新函式並保持已發布的 tracer 物件不變。重新啟動會撤回服務並重新啟動使用者。                                                                 |
+| 隔離          | 每個宿主隔離 `Exporter`；實作仍可注入應用服務。簡寫和明確名稱都透過 `ModuleResolver` 解析。                                                      |
+| 驗證          | 為 `Testing.exporter` 提供新的 `Graft.layer` 和收集器；`received` 在關閉後回傳已匯出的 span 名稱。                                               |
+
+```ts
+import { Effect } from "effect"
+
+import type { Plugin } from "@graftland/graft"
+import * as Testing from "@graftland/plugin-otlp/Testing"
+
+declare const exporter: Plugin.Plugin
+declare const received: Effect.Effect<ReadonlyArray<string>>
+
+const conformance = Testing.exporter({
+	plugin: exporter,
+	config: { destination: "test" },
+	nextConfig: { destination: "updated" },
+	received,
+})
+```
+
+Effect 每棵子樹只有一個 tracer，沒有 fan-out 組合器；巢狀宿主會覆蓋外層 tracer。其他傳輸、屬性擴充和廠商 exporter 由第三方實作。本套件不提供日誌和指標匯出；第三方可以實作這些功能。
+
+嵌入 Graft 時，也可以在放 [`Logger` layer](#在宿主中選擇輸出) 的位置提供 tracer
+layer，例如 `effect/observability` 中的 OTLP exporter：
 
 ```ts
 import { Layer } from "effect"
@@ -355,7 +439,7 @@ const unhealthy = (
 	])
 
 const waiting = Plugin.make({
-	name: "waiting",
+	name: "app/waiting",
 	apply: () =>
 		Graft.forks.pipe(
 			Stream.debounce("5 seconds"),
@@ -373,7 +457,7 @@ const waiting = Plugin.make({
 class Database extends Context.Service<Database, {}>()("app/Database") {}
 
 const reports = Plugin.make({
-	name: "reports",
+	name: "app/reports",
 	inject: [Database],
 	apply: () => Effect.void,
 })
@@ -388,7 +472,7 @@ const warning = await Effect.runPromise(
 		return Option.map(entry, (entry) => entry.message)
 	}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
 )
-warning // => Option.some(["Forks not running", ["reports: Pending"]])
+warning // => Option.some(["Forks not running", ["app/reports: Pending"]])
 ```
 
 - `unhealthy`

@@ -80,7 +80,7 @@ const connect = Effect.flatMap(
 )
 
 const client = Plugin.make({
-	name: "client",
+	name: "app/client",
 	retry: Schedule.min([
 		Schedule.exponential("1 second"),
 		Schedule.spaced("1 minute"),
@@ -135,6 +135,7 @@ declare const contract: Remote.Contract.Contract<
 
 export default Remote.plugin(contract, {
 	contractModule: new URL("./contract.js", import.meta.url).href,
+	implementation: new URL("./greeter.js", import.meta.url).href,
 	connect: { local: {} },
 	retry: Schedule.spaced("5 seconds"),
 })
@@ -163,12 +164,12 @@ export default Remote.plugin(contract, {
 
 配置项失败或停在等待中都不会让进程退出，因此只盯着进程的服务管理器会认为应用一切正常。请把 fork 状态发布出来，供健康检查端点使用：
 
-```ts import.meta.vitest name="production: report health"
-import { Array, Context, Effect, Ref, Schema, Stream } from "effect"
+```ts title="health.ts"
+import { Array, Context, Effect, Ref, Stream } from "effect"
 
 import { Fork, Graft, Plugin } from "@graftland/graft"
 
-class Health extends Context.Service<
+export class Health extends Context.Service<
 	Health,
 	{ readonly unhealthy: Effect.Effect<ReadonlyArray<string>> }
 >()("app/Health") {}
@@ -183,8 +184,8 @@ const unhealthy = (
 		...unhealthy(tree.children),
 	])
 
-const health = Plugin.make({
-	name: "health",
+export const health = Plugin.make({
+	name: "app/health",
 	apply: () =>
 		Effect.gen(function* () {
 			const latest = yield* Ref.make<ReadonlyArray<string>>([])
@@ -195,44 +196,41 @@ const health = Plugin.make({
 			yield* Graft.provide(Health, { unhealthy: Ref.get(latest) })
 		}),
 })
-
-class DatabaseDown extends Schema.TaggedError<
-	DatabaseDown,
-	{ readonly brand: unique symbol }
->()("DatabaseDown", {}) {}
-
-const database = Plugin.make({
-	name: "database",
-	apply: () => DatabaseDown.make({}),
-})
-
-// Stands in for the HTTP plugin: it keeps the first report that is not empty.
-const report = Ref.makeUnsafe<ReadonlyArray<string>>([])
-const http = Plugin.make({
-	name: "http",
-	inject: [Health],
-	apply: () =>
-		Health.pipe(
-			Effect.flatMap(({ unhealthy }) => unhealthy),
-			Effect.repeat({ until: Array.isReadonlyArrayNonEmpty }),
-			Effect.flatMap((list) => Ref.set(report, list)),
-		),
-})
-
-await Effect.runPromise(
-	Effect.gen(function* () {
-		const monitor = yield* Graft.plugin(health)
-		yield* monitor.await
-		yield* Graft.plugin(database)
-		const probe = yield* Graft.plugin(http)
-		yield* probe.await
-		yield* Ref.get(report) // => ["database: Failed"]
-	}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
-)
 ```
 
-HTTP 插件注入 `Health`，列表不为空时返回
-`503`。要诊断树中显示的问题，见[故障排查](../troubleshooting/)。
+将健康监控和这个路由插件与 [HTTP 服务器](../../http/)一起加载。挂载注入
+`Health`，列表非空时返回 503：
+
+```ts
+import { Effect } from "effect"
+import { HttpRouter, HttpServerResponse } from "effect/http"
+
+import { Plugin } from "@graftland/graft"
+import * as Http from "@graftland/plugin-http/Http"
+
+import { Health } from "./health.ts"
+
+export default Plugin.make({
+	name: "app/health-route",
+	inject: [Health],
+	apply: () =>
+		Http.mount(
+			HttpRouter.add(
+				"GET",
+				"/health",
+				Effect.gen(function* () {
+					const health = yield* Health
+					const unhealthy = yield* health.unhealthy
+					return HttpServerResponse.empty({
+						status: unhealthy.length === 0 ? 200 : 503,
+					})
+				}),
+			),
+		).pipe(Effect.asVoid),
+})
+```
+
+诊断插件树请参见[故障排查](../troubleshooting/)。
 
 ## 按配置项设置日志级别
 
@@ -323,3 +321,22 @@ const environment = Layer.mergeAll(
 | 把服务器自己的服务放进 `environment`。                         | 插件像注入其他服务一样注入它们，它们的生命周期与程序相同。               |
 | 用 `NodeRuntime.runMain` 运行。                                | 它把 `SIGINT` 和 `SIGTERM` 转换为中断，于是 Scope 关闭，插件按顺序停止。 |
 | 如果加载 `remote` 配置项，添加 `SecureRandom.layerWebCrypto`。 | Remote 需要它；`graft start` 会替你提供。                                |
+
+## 升级时保留网关会话
+
+把上游连接放在宿主拥有的插件中，由独立消费者注入集成契约。集成使用捕获的制品，在直连 Worker 或子进程中运行。
+[执行转换](../../transitions/) 在切换代时保留消费者的服务对象。
+
+报告成功前记录结果和退出证据。`Recovered` 表示旧制品的新单元正在服务；
+`RecoveryFailed` 使集成不可用，但宿主仍可保留会话。`Stuck`
+需要操作人员介入。另行保存下次启动宿主时需要的制品：transition 不持久化 Loader 配置。
+
+## 版本化托管部署
+
+使用[应用发布](../../application-releases/)一起持久化托管集成的产物和编码后的配置。将网关放在发布插件子树之外。保护存储和 Unix
+socket 目录，并让一个应用独占存储。崩溃后日志选择最后完整接受的发布。跨实例发布仍由现有部署工具负责。
+
+## 不可信集成
+
+对不可变受管条目使用[运维信任策略](../../trust/)。主机代码、CLI 扩展和契约模块必须可信。在部署主机上测试 Linux 启动器；隔离不可用时拒绝运行。一起保护策略、日志和控制套接字。`graft add`
+禁用生命周期脚本，需要脚本的包应在独立可信环境中构建。

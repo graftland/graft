@@ -33,13 +33,13 @@ Each row links to the page that explains it.
 
 ## Guarantees
 
-| Guarantee                             | Where it comes from                                             |
-| ------------------------------------- | --------------------------------------------------------------- |
-| Dependencies are declared and checked | `inject` is checked by the compiler.                            |
-| Consumers stop before providers       | [How withdrawal works](../services/#how-withdrawal-works).      |
-| Resources are always released         | Each fork owns a `Scope`; tasks belong to a `FiberSet`.         |
-| Failures keep their full `Cause`      | [Fork states](../lifecycle/#fork-states), [Errors](../errors/). |
-| Replacement is atomic                 | [Replace plugins](../replace/).                                 |
+| Guarantee                                                   | Where it comes from                                             |
+| ----------------------------------------------------------- | --------------------------------------------------------------- |
+| Dependencies are declared and checked                       | `inject` is checked by the compiler.                            |
+| Consumers stop before providers                             | [How withdrawal works](../services/#how-withdrawal-works).      |
+| Resources are always released                               | Each fork owns a `Scope`; tasks belong to a `FiberSet`.         |
+| Failures keep their full `Cause`                            | [Fork states](../lifecycle/#fork-states), [Errors](../errors/). |
+| Replacement is atomic, and rolls back if a new plugin fails | [Replace plugins](../replace/).                                 |
 
 ## Built on Effect
 

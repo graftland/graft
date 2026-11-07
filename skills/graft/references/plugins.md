@@ -8,7 +8,7 @@ import { Effect, Schedule, Schema } from "effect"
 import { Plugin } from "@graftland/graft"
 
 export default Plugin.make({
-	name: "ticker",
+	name: "app/ticker",
 	config: Schema.Struct({ every: Schema.Duration }),
 	apply: ({ every }) =>
 		Effect.log("tick").pipe(
@@ -51,7 +51,7 @@ The schema is the plugin's contract with whoever writes the config file.
 
 ```ts
 const report = Plugin.make({
-	name: "report",
+	name: "app/report",
 	inject: [Database, Plugin.optional(Cache)],
 	apply: () =>
 		Effect.gen(function* () {
@@ -78,7 +78,7 @@ stop when the parent stops or restarts, in reverse order of loading. Options are
 
 ```ts
 const app = Plugin.make({
-	name: "app",
+	name: "app/app",
 	apply: () =>
 		Effect.gen(function* () {
 			const fork = yield* Graft.plugin(greeter, { greeting: "Hello" })
@@ -98,7 +98,7 @@ function from `apply`: `true` means applied, `false` means restart.
 
 ```ts
 const server = Plugin.make({
-	name: "server",
+	name: "app/server",
 	config: Schema.Struct({ port: Schema.Int, banner: Schema.String }),
 	apply: (config) =>
 		Effect.gen(function* () {
@@ -125,7 +125,7 @@ dependencies change, or its `retry` schedule fires:
 
 ```ts
 const client = Plugin.make({
-	name: "client",
+	name: "app/client",
 	retry: Schedule.exponential("1 second"),
 	apply: () => connect,
 })
@@ -145,7 +145,7 @@ helper types, or keep that requirement.
 const database = Plugin.service(Database, openDatabase, { name: "database" })
 
 const storage = Plugin.layer(StorageLive, {
-	name: "storage",
+	name: "app/storage",
 	inject: [Database],
 	provides: [Storage, StorageAdmin],
 })
@@ -171,5 +171,8 @@ plugin. Hot reload uses `replace`.
 - Ship ECMAScript modules; CommonJS and native dependencies block hot reload.
 - List `@graftland/graft` and `effect` under `peerDependencies`, so the app
   keeps one copy of each.
+- Export the config's editor registration as `./schema` (an `entries()`
+  function, importing only the tokens), so `graft schema` checks entries in
+  applications' editors.
 - Document the config schema and the service key strings, since `graft.yml`
   users write them by hand.

@@ -13,7 +13,7 @@ import { Graft, Plugin } from "@graftland/graft"
 import { Entry, Loader, ModuleResolver } from "@graftland/loader"
 
 const admin = Plugin.make({
-	name: "admin",
+	name: "app/admin",
 	inject: [Loader.Loader],
 	apply: () =>
 		Effect.gen(function* () {
@@ -24,8 +24,8 @@ const admin = Plugin.make({
 		}),
 })
 
-const cron = Plugin.make({ name: "cron", apply: () => Effect.void })
-const api = Plugin.make({ name: "api", apply: () => Effect.void })
+const cron = Plugin.make({ name: "app/cron", apply: () => Effect.void })
+const api = Plugin.make({ name: "app/api", apply: () => Effect.void })
 const resolver = ModuleResolver.fromRecord({ "./plugins/cron.mjs": cron, api })
 
 const entries = await Effect.runPromise(
@@ -38,7 +38,7 @@ const entries = await Effect.runPromise(
 		yield* fork.await
 		const read = yield* Deferred.make<ReadonlyArray<Entry.Entry>>()
 		const probe = Plugin.make({
-			name: "probe",
+			name: "app/probe",
 			inject: [Loader.Loader],
 			apply: () =>
 				Loader.Loader.pipe(
@@ -57,6 +57,8 @@ const entries = await Effect.runPromise(
 entries[0]?.disabled // => true
 entries[1]?.config // => { every: "5 minutes" }
 ```
+
+樹中存在受管理 fork 時，Loader 在呼叫儲存修改之前拒絕編輯、重新整理和重試。繞過保護見[執行轉換](../transitions/)。
 
 ## 透過程式碼編輯設定項目
 
@@ -180,3 +182,12 @@ Graft 也會在 rename 已備妥的暫存檔之前，再檢查一次目的地：
 內容檢查和 rename 是兩個獨立的檔案系統操作。外部編輯器可能在兩者之間儲存，而該次儲存仍可能被覆寫。原子取代可防止出現不完整的檔案，但它不是與任意編輯器之間的交易。如果無法接受這個剩餘風險，請不要同時在編輯器中儲存並透過 API 寫入。
 
 :::
+
+## 定位受管理的項目
+
+將項目 id 作為 `Graft.transition` 的 `target`；也支援數字 fork
+id。Loader 在項目註冊驅動前綁定名稱。嵌入式註冊必須明確提供
+`instance`；名稱衝突或重複註冊會在啟動執行單元前失敗。
+
+`update`、`remove`、`create`、更新和重試仍屬於繞過協調器的操作：只要存在受管理的後代，就會在呼叫 store 前拒絕。檔案邊界見[受管理的設定](../config-file/#受管理的整合)。已接受的 transition 不改變
+`loader.entries`；它代表持久化設定，而非目前執行的世代。

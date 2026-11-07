@@ -81,7 +81,7 @@ const connect = Effect.flatMap(
 )
 
 const client = Plugin.make({
-	name: "client",
+	name: "app/client",
 	retry: Schedule.min([
 		Schedule.exponential("1 second"),
 		Schedule.spaced("1 minute"),
@@ -136,6 +136,7 @@ declare const contract: Remote.Contract.Contract<
 
 export default Remote.plugin(contract, {
 	contractModule: new URL("./contract.js", import.meta.url).href,
+	implementation: new URL("./greeter.js", import.meta.url).href,
 	connect: { local: {} },
 	retry: Schedule.spaced("5 seconds"),
 })
@@ -164,12 +165,12 @@ export default Remote.plugin(contract, {
 
 失敗或等待中的設定項目不會讓行程停止，因此只監看行程的服務管理器會以為應用程式一切正常。請把 fork 狀態發布出來，供健康檢查端點使用：
 
-```ts import.meta.vitest name="production: report health"
-import { Array, Context, Effect, Ref, Schema, Stream } from "effect"
+```ts title="health.ts"
+import { Array, Context, Effect, Ref, Stream } from "effect"
 
 import { Fork, Graft, Plugin } from "@graftland/graft"
 
-class Health extends Context.Service<
+export class Health extends Context.Service<
 	Health,
 	{ readonly unhealthy: Effect.Effect<ReadonlyArray<string>> }
 >()("app/Health") {}
@@ -184,8 +185,8 @@ const unhealthy = (
 		...unhealthy(tree.children),
 	])
 
-const health = Plugin.make({
-	name: "health",
+export const health = Plugin.make({
+	name: "app/health",
 	apply: () =>
 		Effect.gen(function* () {
 			const latest = yield* Ref.make<ReadonlyArray<string>>([])
@@ -196,44 +197,41 @@ const health = Plugin.make({
 			yield* Graft.provide(Health, { unhealthy: Ref.get(latest) })
 		}),
 })
-
-class DatabaseDown extends Schema.TaggedError<
-	DatabaseDown,
-	{ readonly brand: unique symbol }
->()("DatabaseDown", {}) {}
-
-const database = Plugin.make({
-	name: "database",
-	apply: () => DatabaseDown.make({}),
-})
-
-// Stands in for the HTTP plugin: it keeps the first report that is not empty.
-const report = Ref.makeUnsafe<ReadonlyArray<string>>([])
-const http = Plugin.make({
-	name: "http",
-	inject: [Health],
-	apply: () =>
-		Health.pipe(
-			Effect.flatMap(({ unhealthy }) => unhealthy),
-			Effect.repeat({ until: Array.isReadonlyArrayNonEmpty }),
-			Effect.flatMap((list) => Ref.set(report, list)),
-		),
-})
-
-await Effect.runPromise(
-	Effect.gen(function* () {
-		const monitor = yield* Graft.plugin(health)
-		yield* monitor.await
-		yield* Graft.plugin(database)
-		const probe = yield* Graft.plugin(http)
-		yield* probe.await
-		yield* Ref.get(report) // => ["database: Failed"]
-	}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
-)
 ```
 
-HTTP 外掛注入 `Health`，清單不為空時回應
-`503`。要診斷樹中顯示的問題，請參閱[疑難排解](../troubleshooting/)。
+將健康監控與這個路由外掛和 [HTTP 伺服器](../../http/)一起載入。掛載注入
+`Health`，清單非空時傳回 503：
+
+```ts
+import { Effect } from "effect"
+import { HttpRouter, HttpServerResponse } from "effect/http"
+
+import { Plugin } from "@graftland/graft"
+import * as Http from "@graftland/plugin-http/Http"
+
+import { Health } from "./health.ts"
+
+export default Plugin.make({
+	name: "app/health-route",
+	inject: [Health],
+	apply: () =>
+		Http.mount(
+			HttpRouter.add(
+				"GET",
+				"/health",
+				Effect.gen(function* () {
+					const health = yield* Health
+					const unhealthy = yield* health.unhealthy
+					return HttpServerResponse.empty({
+						status: unhealthy.length === 0 ? 200 : 503,
+					})
+				}),
+			),
+		).pipe(Effect.asVoid),
+})
+```
+
+診斷外掛樹請參閱[疑難排解](../troubleshooting/)。
 
 ## 依設定項目設定日誌層級
 
@@ -325,3 +323,22 @@ const environment = Layer.mergeAll(
 | 把伺服器自己的服務放進 `environment`。                       | 外掛像注入其他服務一樣注入它們，它們的生命週期與整個程式相同。         |
 | 用 `NodeRuntime.runMain` 執行。                              | 它把 `SIGINT` 和 `SIGTERM` 轉為中斷，因此 scope 會關閉，外掛依序停止。 |
 | 載入 `remote` 設定項目時加入 `SecureRandom.layerWebCrypto`。 | Remote 需要它；`graft start` 會替你提供。                              |
+
+## 升級時保留閘道工作階段
+
+把上游連線放在宿主擁有的外掛中，由獨立消費者注入整合契約。整合使用擷取的產物，在直連 Worker 或子行程中執行。
+[執行轉換](../../transitions/) 在切換世代時保留消費者的服務物件。
+
+回報成功前記錄結果和結束證據。`Recovered` 表示舊產物的新單元正在服務；
+`RecoveryFailed` 使整合無法使用，但宿主仍可保留工作階段。`Stuck`
+需要操作人員介入。另行儲存下次啟動宿主時需要的產物：transition 不持久化 Loader 設定。
+
+## 版本化受管部署
+
+使用[應用程式發佈](../../application-releases/)一起持久化受管整合的產物和編碼後的設定。將閘道放在發佈外掛子樹之外。保護儲存和 Unix
+socket 目錄，並讓一個應用程式獨占儲存。崩潰後日誌選擇最後完整接受的發佈。跨執行個體發佈仍由現有部署工具負責。
+
+## 不可信整合
+
+對不可變受管項目使用[維運信任政策](../../trust/)。主機程式碼、CLI 擴充與契約模組必須可信。在部署主機上測試 Linux 啟動器；隔離不可用時拒絕執行。一起保護政策、日誌與控制 socket。`graft add`
+停用生命週期腳本，需要腳本的套件應在獨立可信環境建構。

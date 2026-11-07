@@ -44,7 +44,7 @@ declare const openPool: (
 }>
 
 export default Plugin.make({
-	name: "postgres",
+	name: "graft-plugin-postgres",
 	config: Config,
 	apply: ({ url, poolSize }) =>
 		Effect.gen(function* () {
@@ -64,15 +64,15 @@ export default Plugin.make({
 | `.`          | 外掛，作為預設匯出或名為 `plugin` 的匯出。            | 載入器，對應 `graft.yml` 中的 `name:`。                                           |
 | `./tokens`   | 服務鍵、事件、Reference、tagged error 和設定 schema。 | 消費者外掛、測試，以及實作同一個服務的其他套件。                                  |
 | `./<plugin>` | 另一個外掛，每個模組一個。                            | 像 `name: postgres/migrations` 這樣的設定項目。                                   |
-| `./contract` | [Remote 契約](../../remote/hosts/#定義契約)。         | 外掛可在別處執行時，由宿主和 [runner](../../remote/runners/#架設-runner) 匯入。   |
-| `./schema`   | 設定的[編輯器登記項目](#編輯器自動補全)。             | 應用程式的編輯器 Schema。                                                         |
+| `./contract` | [Remote 契約](../../remote/contracts/)。              | 外掛可在別處執行時，由宿主和 [runner](../../remote/runners/#架設-runner) 匯入。   |
+| `./schema`   | 設定的[編輯器登記項目](#編輯器自動補全)。             | [`graft schema`](../../cli/#graft-schema)，用於產生應用程式的編輯器 Schema。      |
 | `./cli`      | 為 `graft` 加入子命令的命令外掛。                     | [`graft add --plugin <package>`](../../cli/#命令外掛)，它會啟用 `<package>/cli`。 |
 
-| 規則                           | 避免的問題                                                                                         |
-| ------------------------------ | -------------------------------------------------------------------------------------------------- |
-| `./tokens` 不匯入任何實作。    | 只注入 `Database` 的外掛，或偽造它的測試，都會連帶載入你的驅動程式及其相依套件。                   |
-| 每個模組一個外掛。             | 載入器從一個模組只取一個外掛：預設匯出，否則取 `plugin`。其他匯出的外掛無法在 `graft.yml` 中指名。 |
-| 契約以 `module` URL 指向實作。 | 從契約匯入實作，會讓宿主也載入它，而不只是外掛行程。                                               |
+| 規則                        | 避免的問題                                                                                         |
+| --------------------------- | -------------------------------------------------------------------------------------------------- |
+| `./tokens` 不匯入任何實作。 | 只注入 `Database` 的外掛，或偽造它的測試，都會連帶載入你的驅動程式及其相依套件。                   |
+| 每個模組一個外掛。          | 載入器從一個模組只取一個外掛：預設匯出，否則取 `plugin`。其他匯出的外掛無法在 `graft.yml` 中指名。 |
+| 部署設定指定實作。          | 契約只包含協定宣告。                                                                               |
 
 ## 宣告相依套件
 
@@ -156,13 +156,35 @@ export default Plugin.make({
 
 - 應用程式從自己的目錄解析[外掛名稱](../../config-file/#外掛名稱)，因此它必須相依於你的套件，例如透過
   `graft add` 加入。
-- 短名稱會先照原樣嘗試，只有在某個候選不存在時，Graft 才會改試下一個。如果應用程式能解析到名為
-  `postgres` 的套件（例如你的驅動程式），`name: postgres` 和
-  `name: postgres/migrations` 都會以 `ModuleInvalid` 失敗。
+- 短名稱會先照原樣嘗試。該模組不存在，或能匯入但沒有匯出外掛（例如 Node 的
+  `http` 或你的 `postgres`
+  驅動程式）時，Graft 才會改試命名慣例。其他匯入失敗都會以 `ModuleInvalid`
+  終止解析。
 - README 中的 `graft.yml` 範例請寫完整的套件名稱，它不會解析到別的套件。
 - `graft add --plugin` 會保留以 `@` 或 `graft-plugin-`
-  開頭的名稱，其他名稱則改寫成 `@graftland/plugin-<name>`。帶有 `./cli`
-  匯出的套件，名稱必須是這兩種形式之一。
+  開頭的名稱；其他名稱會改寫成 registry 中存在的那一個：`@graftland/plugin-<name>`
+  或 `graft-plugin-<name>`，兩者都存在時失敗。帶有 `./cli`
+  匯出的套件，名稱必須是這些形式之一。
+
+## 為外掛命名
+
+外掛的 `name` 用於在日誌、span 和 fork 樹中標示它。按 Effect 的
+`deterministicKeys` 診斷產生服務鍵的方式建構它，名稱就能說明外掛由哪個模組定義：
+
+| 部分 | 取值                                                                           |
+| ---- | ------------------------------------------------------------------------------ |
+| 1    | 套件名稱。                                                                     |
+| 2    | 模組在 `src/` 下的路徑，不含副檔名，省略 `index`。                             |
+| 3    | 持有外掛的繫結名稱。預設匯出、名為 `plugin` 的匯出或與模組同名的匯出省略此段。 |
+
+| 外掛                                    | `name`                                    |
+| --------------------------------------- | ----------------------------------------- |
+| `src/index.ts` 的預設匯出               | `graft-plugin-postgres`                   |
+| `src/migrations.ts` 的預設匯出          | `graft-plugin-postgres/migrations`        |
+| `src/migrations.ts` 中的 `const warmup` | `graft-plugin-postgres/migrations/warmup` |
+
+Graft 不檢查名稱。應用程式用自己 `package.json`
+中的套件名稱，以同樣方式為自己的外掛命名。
 
 ## 編輯器自動補全
 
@@ -194,8 +216,8 @@ export const entries = () => [
 | `schema`   | 設定 schema 的編碼端。`referencePolicy: () => undefined` 會把定義內嵌進來，否則它們會遺失。`onExcessProperty: "error"` 會標出未知欄位，否則解碼時它們會被悄悄丟棄。 |
 | `required` | 設定有必要欄位時設為 `true`，這樣沒有 `config` 的設定項目會被標記出來。                                                                                             |
 
-這裡只匯入識別物件模組：產生 Schema 時不得載入外掛。應用程式把這些登記項目傳給
-`ConfigSchema.make`，請參閱[編輯器支援](../../config-file/#編輯器支援)。
+這裡只匯入識別物件模組：產生 Schema 時不得載入外掛。[`graft schema`](../../cli/#graft-schema)
+透過 `./schema` 匯出與對 `@graftland/graft` 的 peer 相依找到這個模組。
 
 ## 支援的 Graft 版本
 
@@ -224,3 +246,27 @@ export const entries = () => [
 所在的位置，因此應用程式會各多出一份。
 
 :::
+
+## 撰寫獨立整合
+
+| 套件 | 公開宣告                                                                                 |
+| ---- | ---------------------------------------------------------------------------------------- |
+| 契約 | 服務 key、RPC schema 和 `Contract.operation(name, version, rpc)`；不含實作位置。         |
+| 實作 | `Plugin.make({ provides, overlap })`、一般 `apply` 和 `Plugin.probe("health", effect)`。 |
+| 宿主 | 安裝契約，擷取建置後的實作，並提供部署設定。                                             |
+
+將 Effect 和共用 Graft 套件宣告為 peer
+dependency。probe 只在服務嘗試中收到請求時執行。部署前擷取建置後的套件目錄；外部執行階段依賴不會被擷取或固定版本。
+[integration-gateway 範例](https://github.com/graftland/graft/tree/main/samples/integration-gateway)
+分別打包並安裝契約套件和實作套件。
+
+## 發布清單
+
+從已建置套件產生[外掛清單](../../ecosystem/manifest/)，封裝前驗證。服務身分來自
+`inject`、`provides`
+與契約描述符，執行環境版本範圍來自套件中繼資料。明確宣告放置能力，信任留給維運策略。
+
+對已安裝的 tarball 執行[一致性測試](../../ecosystem/conformance/)，並對每種宣告支援的宿主執行
+[相容性檢查](../../ecosystem/compatibility/)。第一方套件遵循相同檢查。
+[外掛作者夾具](https://github.com/graftland/graft/tree/main/samples/plugin-authors)
+不使用工作區別名或私有匯入，完整示範此流程。

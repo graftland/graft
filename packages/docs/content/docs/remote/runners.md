@@ -12,8 +12,9 @@ and starts a plugin process for it. Hosts never send code.
 1. **Install** `@graftland/cli`, `@graftland/plugin-remote`, the built plugin
    packages and their dependencies in the `node_modules` of an installation
    directory, on Linux or macOS with Node.js 22.22 or later. Expose each
-   contract through the package's `exports`, such as `my-plugin/contract`, and
-   install the same package on the host.
+   contract and implementation through package `exports`, such as
+   `my-plugin/contract` and `my-plugin`. The host needs the contract package;
+   the runner needs both packages.
 2. **Write** `runner.yml` with one `remote/runner` entry.
 3. **Start** the runner with `graft start runner.yml`.
 4. **Point** the host's `remote` entry at it and run `graft start host.yml`.
@@ -42,6 +43,7 @@ and starts a plugin process for it. Hosts never send code.
   name: remote
   config:
     contract: my-plugin/contract
+    implementation: my-plugin
     connect:
       url: wss://runner.example:7443
       ca: ./certs/ca.crt
@@ -52,13 +54,13 @@ and starts a plugin process for it. Hosts never send code.
       greeting: Hello
 ```
 
-| Field    | Required | Default      | Meaning                                                                    |
-| -------- | -------- | ------------ | -------------------------------------------------------------------------- |
-| `root`   | Yes      | —            | Installation directory. Contract packages resolve from its `node_modules`. |
-| `state`  | Yes      | —            | State directory, created if missing. See the rules below.                  |
-| `lease`  | No       | `15 seconds` | Default [lease](../lifecycle/#leases-and-network-loss) for instances.      |
-| `grace`  | No       | `5 seconds`  | Time between interrupting a plugin process and killing it.                 |
-| `listen` | Yes      | —            | Listeners, one per address. See [`listen` forms](#listen-forms).           |
+| Field    | Required | Default      | Meaning                                                                                       |
+| -------- | -------- | ------------ | --------------------------------------------------------------------------------------------- |
+| `root`   | Yes      | —            | Installation directory. Contract and implementation packages resolve from its `node_modules`. |
+| `state`  | Yes      | —            | State directory, created if missing. See the rules below.                                     |
+| `lease`  | No       | `15 seconds` | Default [lease](../lifecycle/#leases-and-network-loss) for instances.                         |
+| `grace`  | No       | `5 seconds`  | Time between interrupting a plugin process and killing it.                                    |
+| `listen` | Yes      | —            | Listeners, one per address. See [`listen` forms](#listen-forms).                              |
 
 | Rule                       | Detail                                                                                                                        |
 | -------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
@@ -117,7 +119,7 @@ connect:
 
 | Field     | Compared with                                                                                                                 |
 | --------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| `version` | The `version` in the contract package's `package.json` on the runner.                                                         |
+| `version` | The `version` in the implementation package's `package.json` on the runner.                                                   |
 | `digest`  | A SHA-256 hex digest of the package's files, excluding every `node_modules`, so not its dependencies. Computed only when set. |
 
 A mismatch fails with `PackageError`, whose message shows both values.

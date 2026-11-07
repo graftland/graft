@@ -29,6 +29,7 @@ const prepare = Effect.fnUntraced(function* (
 			name: "remote",
 			config: {
 				contract: "./contract.mjs",
+				implementation: new URL("services-plugin.js", module).href,
 				connect,
 				config: config(directory),
 			},

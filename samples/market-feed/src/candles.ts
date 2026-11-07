@@ -5,7 +5,7 @@ import { Graft, Plugin } from "@graftland/graft"
 import { Candles, Quotes, type Candle } from "./services.ts"
 
 export const candles = Plugin.make({
-	name: "candles",
+	name: "@graftland/sample-market-feed/candles",
 	inject: [Quotes],
 	apply: Effect.fn("candles.apply")(function* () {
 		const quotes = yield* Quotes

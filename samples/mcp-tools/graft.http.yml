@@ -1,0 +1,19 @@
+- id: router
+  name: "@graftland/plugin-http/router"
+- id: listener
+  name: "@graftland/plugin-http"
+  config: { port: 8080 }
+- id: mcp
+  name: "@graftland/plugin-mcp-server"
+  config:
+    name: graft-mcp-tools
+- id: http
+  name: "@graftland/plugin-mcp-server/http"
+- id: content
+  name: ./src/plugins/content.ts
+- id: clock
+  name: ./src/plugins/clock.ts
+- id: todo-store
+  name: ./src/plugins/todo-store.ts
+- id: todo
+  name: ./src/plugins/todo.ts

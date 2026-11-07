@@ -230,8 +230,8 @@ describe("regressions", () => {
 				}),
 			)
 			yield* Effect.exit(fork.await)
-			yield* Graft.replace([[oldProvider, newProvider]])
-			yield* reach(provider, "Loading")
+			const result = yield* Graft.replace([[oldProvider, newProvider]])
+			assert.strictEqual(result._tag, "Replaced")
 			yield* reach(provider, "Active")
 			yield* reach(fork, "Active")
 		}).pipe(run),

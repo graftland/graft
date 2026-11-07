@@ -14,6 +14,7 @@ import {
 	type PlatformError,
 } from "effect"
 
+import * as PackageManager from "@graftland/package-manager"
 import { PackageName } from "@graftland/package-manager"
 import { PackageManagerDeclaration } from "@graftland/package-manager/PackageManagerDeclaration"
 
@@ -58,19 +59,21 @@ export interface Options {
 	 */
 	readonly name?: string
 	/**
-	 * Plugin packages to depend on and load, each `name` or `name@range`. Short
-	 * names map as in {@link pluginPackage}.
+	 * Plugin packages to depend on and load, each `name` or `name@range`, named
+	 * in full. {@link pluginSpec} turns a short name into a package name.
 	 */
 	readonly plugins?: ReadonlyArray<string>
 	/** Exact SemVer, optionally with a prerelease and a supported Corepack SHA hash. */
 	readonly packageManager?: string
 	/**
-	 * Graft and its CLI default to this package's own version, since every
-	 * Graft package is released with the same one. Override these for local
-	 * development.
+	 * Graft, its loader and its CLI default to this package's own version,
+	 * since every Graft package is released with the same one. The CLI expects
+	 * the application to provide Graft and the loader, so plugins share one
+	 * copy of each. Override these for local development.
 	 */
 	readonly versions?: {
 		readonly graft?: string
+		readonly loader?: string
 		readonly cli?: string
 		readonly effect?: string
 	}
@@ -124,21 +127,74 @@ const ownVersion = Effect.gen(function* () {
 	return manifest.version
 }).pipe(Effect.orDie)
 
-/**
- * The JSON Schema of graft.yml as released with a version of Graft. Every
- * package shares that version, and npm keeps each release's files unchanged.
- */
-export const schemaUrl = (version: string): string =>
-	`https://cdn.jsdelivr.net/npm/@graftland/cli@${version}/schema.json`
+/** No package matched a short plugin name. */
+export class PluginNotFound extends Schema.TaggedError<
+	PluginNotFound,
+	{ readonly brand: unique symbol }
+>()("PluginNotFound", {
+	plugin: Schema.String,
+	tried: Schema.Array(Schema.String),
+}) {
+	override get message(): string {
+		return `No package found for "${this.plugin}" (tried ${Array.join(this.tried, ", ")})`
+	}
+}
+
+/** A short plugin name matched packages of both naming conventions. */
+export class AmbiguousPluginName extends Schema.TaggedError<
+	AmbiguousPluginName,
+	{ readonly brand: unique symbol }
+>()("AmbiguousPluginName", {
+	plugin: Schema.String,
+	packages: Schema.Array(Schema.String),
+}) {
+	override get message(): string {
+		return `"${this.plugin}" matches ${Array.join(this.packages, " and ")}; name the package in full`
+	}
+}
+
+const isFullName = (name: string) =>
+	String.startsWith("@")(name) || String.startsWith("graft-plugin-")(name)
 
 /**
- * The package a plugin name refers to: `review` is `@graftland/plugin-review`,
- * while scoped and `graft-plugin-*` names stay as they are.
+ * The package a plugin name refers to. Scoped and `graft-plugin-*` names stay
+ * as they are. A short name such as `review` is whichever of
+ * `@graftland/plugin-review` and `graft-plugin-review` the registry has; the
+ * two conventions rank equally, so a name that matches both fails.
  */
-export const pluginPackage = (name: string): string =>
-	String.startsWith("@")(name) || String.startsWith("graft-plugin-")(name)
-		? name
-		: `@graftland/plugin-${name}`
+export const pluginPackage = Effect.fnUntraced(function* (
+	name: string,
+	options: PackageManager.Options,
+) {
+	if (isFullName(name)) return name
+	const tried = [`@graftland/plugin-${name}`, `graft-plugin-${name}`]
+	const found = yield* Effect.filter(
+		tried,
+		(candidate) => PackageManager.published(options, candidate),
+		{ concurrency: "unbounded" },
+	)
+	const [only, ...others] = found
+	if (only === undefined)
+		return yield* PluginNotFound.make({ plugin: name, tried })
+	if (others.length > 0)
+		return yield* AmbiguousPluginName.make({ plugin: name, packages: found })
+	return only
+})
+
+/** {@link pluginPackage} for a `name` or `name@range` spec, keeping the range. */
+export const pluginSpec = Effect.fnUntraced(function* (
+	spec: string,
+	options: PackageManager.Options,
+) {
+	const parsed = yield* Schema.decodeEffect(PluginSpec)(spec).pipe(
+		Effect.mapError((error) =>
+			InvalidName.make({ packageName: spec, message: error.message }),
+		),
+	)
+	if (Predicate.isString(parsed)) return yield* pluginPackage(parsed, options)
+	const name = yield* pluginPackage(parsed[0], options)
+	return `${name}@${parsed[2]}`
+})
 
 /** Whether Graft can load a package by its short name, as `review` loads `@graftland/plugin-review`. */
 export const hasShortName = (name: string): boolean =>
@@ -160,9 +216,7 @@ const decodePlugin = (spec: string, version: string) =>
 			onFailure: (error) =>
 				InvalidName.make({ packageName: spec, message: error.message }),
 			onSuccess: (parsed): PluginDependency => {
-				const name = pluginPackage(
-					Predicate.isString(parsed) ? parsed : parsed[0],
-				)
+				const name = Predicate.isString(parsed) ? parsed : parsed[0]
 				return {
 					name,
 					// Graft's own plugins are released with the same version as Graft.
@@ -244,8 +298,25 @@ const moveEntries = Effect.fnUntraced(function* (
 	)
 }, Effect.scoped)
 
+/** Template text that becomes the package name, so plugin names and keys follow it. */
+const placeholder = "{{package}}"
+const decoder = new TextDecoder()
+const encoder = new TextEncoder()
+
+/** Fills the placeholder; a file without it is copied byte for byte. */
+const fill = (bytes: Uint8Array, packageName: string) => {
+	const text = decoder.decode(bytes)
+	return String.includes(placeholder)(text)
+		? encoder.encode(String.replaceAll(placeholder, packageName)(text))
+		: bytes
+}
+
 /** Copies a template's static files into staging, returning the paths written. */
-const copyFiles = Effect.fnUntraced(function* (from: string, to: string) {
+const copyFiles = Effect.fnUntraced(function* (
+	from: string,
+	to: string,
+	packageName: string,
+) {
 	const fs = yield* FileSystem.FileSystem
 	const path = yield* Path.Path
 	const listed = yield* fs.readDirectory(from, { recursive: true })
@@ -268,7 +339,7 @@ const copyFiles = Effect.fnUntraced(function* (from: string, to: string) {
 					? path.join(path.dirname(entry), ".gitignore")
 					: entry
 			const bytes = yield* fs.readFile(source)
-			yield* fs.writeFile(path.join(to, name), bytes)
+			yield* fs.writeFile(path.join(to, name), fill(bytes, packageName))
 			return [name]
 		}).pipe(
 			// Join accepted native writes before cancellation can remove staging.
@@ -328,10 +399,10 @@ export const create: (
 		packageManager,
 		versions: {
 			graft: options.versions?.graft ?? version,
+			loader: options.versions?.loader ?? version,
 			cli: options.versions?.cli ?? version,
 			effect: options.versions?.effect ?? "4.1.2",
 		},
-		schemaUrl: schemaUrl(version),
 		plugins,
 	}
 	// Strings and plain objects always encode.
@@ -359,7 +430,7 @@ export const create: (
 		{ discard: true },
 	)
 	const files = yield* template.files
-	const copied = yield* copyFiles(files, staging)
+	const copied = yield* copyFiles(files, staging, name)
 	yield* keep
 		? moveEntries(staging, directory)
 		: fs.rename(staging, directory).pipe(Effect.uninterruptible)

@@ -10,6 +10,7 @@ worker，或通过 runner 放到另一台机器上。使用它的插件照常注
   name: remote
   config:
     contract: ./dist/contract.js
+    implementation: ./dist/greeter.js
     connect: { local: {} }
     config: { greeting: Hello }
 ```

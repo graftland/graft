@@ -5,10 +5,11 @@
 	"type": "module",
 	"description": "Move a greeting service without changing its caller",
 	"exports": {
-		"./contract": "./dist/contract.js"
+		"./contract": "./dist/contract.js",
+		"./greeter": "./dist/greeter.js"
 	},
 	"scripts": {
-		"build": "tsdown && node scripts/install.mjs",
+		"build": "tsdown && node scripts/install.mjs && node node_modules/@graftland/cli/dist/bin.js schema",
 		"start": "graft start --watch",
 		"runner": "graft start runner.yml",
 		"test": "vitest run"

@@ -42,6 +42,7 @@ This sample's `graft.yml` replaces just that entry:
   name: remote
   config:
     contract: "@graftland/sample-remote/contract"
+    implementation: "@graftland/sample-remote/greeter"
     connect:
       local: {}
     config:
@@ -58,7 +59,9 @@ greeter is split in two:
 
 The plugin process does not use the host's TypeScript loader, so
 [`tsdown.config.ts`](tsdown.config.ts) builds both to `dist/`. Rebuild with
-`devenv shell -- pnpm build` after changing either.
+`devenv shell -- pnpm build` after changing either. The build also runs
+[`graft schema`](../../packages/docs/content/docs/cli.md#graft-schema), so the
+editor checks the `remote` entries in both YAML files.
 
 1. Change `greeting: Hello` to `greeting: Hi` and save. The provider restarts,
    then welcome prints `Hi, Alice!`.

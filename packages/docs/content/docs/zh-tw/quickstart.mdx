@@ -19,11 +19,13 @@ Node 轉接器要求的版本。該版本也提供熱重載所需的 `module.reg
 
    先從這幾個檔案開始：
 
-   | 檔案            | 用途                                |
-   | --------------- | ----------------------------------- |
-   | `graft.yml`     | 設定檔，指定要載入的外掛及其設定。  |
-   | `src/hello.ts`  | 範例外掛。                          |
-   | `tsconfig.json` | 供 `npm run typecheck` 做型別檢查。 |
+   | 檔案             | 用途                                |
+   | ---------------- | ----------------------------------- |
+   | `graft.yml`      | 設定檔，指定要載入的外掛及其設定。  |
+   | `src/hello.ts`   | 輸出設定中訊息的外掛。              |
+   | `src/greeter.ts` | 發布 `Greeter` 服務的外掛。         |
+   | `src/ticker.ts`  | 注入 `Greeter` 並定時問候的外掛。   |
+   | `tsconfig.json`  | 供 `npm run typecheck` 做型別檢查。 |
 
    [`graft create`](../cli/#graft-create)
    列出了所有問題、其他範本，以及跳過提問的選項。
@@ -34,48 +36,89 @@ Node 轉接器要求的版本。該版本也提供熱重載所需的 `module.reg
    npm run dev
    ```
 
-   `hello` 外掛會輸出 `Hello from Graft!`。行程會持續執行，直到你按下
+   `hello` 輸出 `Hello from Graft!`；`ticker` 透過 `greeter` 發布的
+   `Greeter`，每 3 秒輸出一次 `Hello, Graft!`。行程會持續執行，直到你按下
 
    <kbd>Ctrl</kbd>+<kbd>C</kbd>，此時 Graft 會卸載所有外掛。
 
-3. 在應用程式執行期間修改設定。開啟 `graft.yml`，修改訊息：
+3. 在應用程式執行期間修改設定。開啟 `graft.yml`，修改問候語：
 
    ```yaml
-   - id: hello
-     name: ./src/hello.ts
+   - id: greeter
+     name: ./src/greeter.ts
      config:
-       message: Hello again!
+       greeting: Hi
    ```
 
-   儲存後，Graft 會卸載 `hello`，再用新訊息重新載入。你會先看到
-   `Hello plugin stopped`，然後是 `Hello again!`。
+   儲存後，Graft 先停止使用 `Greeter` 的 `ticker`，再用新問候語重新啟動
+   `greeter`，然後重新啟動 `ticker`。你會看到
+   `Ticker stopped`、`Greeter stopped`，接著是 `Hi, Graft!`。`hello` 不受影響。
 
-4. 在應用程式執行期間修改程式碼。編輯
-   `src/hello.ts`（例如讓訊息輸出兩次）並儲存。Graft 會匯入模組的新版本，並用它取代執行中的外掛。如果新程式碼匯入失敗，舊版本會繼續執行，Graft 並記錄錯誤。
+4. 在應用程式執行期間修改程式碼。把 `src/ticker.ts` 中的 `"3 seconds"` 改成
+   `"1 second"` 並儲存。Graft 匯入新模組，只重新啟動
+   `ticker`。如果新程式碼匯入或啟動失敗，舊版本會繼續執行，Graft 並記錄錯誤。
+
+5. 拿走一個相依項目。在 `greeter` 項目加上 `disabled: true` 並儲存。`ticker`
+   會停止，並以 `Pending` 狀態等待，直到 `Greeter`
+   再次出現。刪除這一行，它就恢復問候。
 
 </Steps>
 
 ## 範例外掛
 
-```ts title="src/hello.ts"
-import { Effect, Schema } from "effect"
+```ts title="src/greeter.ts"
+import { Context, Effect, Schema } from "effect"
 
-import { Plugin } from "@graftland/graft"
+import { Graft, Plugin } from "@graftland/graft"
 
-// Module evaluation only defines the plugin; its activation owns all resources.
+/** Greets by name. Other plugins list it in `inject` to use it. */
+export class Greeter extends Context.Service<
+	Greeter,
+	{ readonly greet: (name: string) => Effect.Effect<void> }
+>()("app/Greeter") {}
+
+// Publishes a Greeter while it is loaded. Plugins that use it stop first.
 export default Plugin.make({
-	name: "hello",
-	config: Schema.Struct({ message: Schema.String }),
-	apply: ({ message }) =>
-		Effect.acquireRelease(Effect.logInfo(message), () =>
-			Effect.logInfo("Hello plugin stopped"),
-		),
+	name: "app/greeter",
+	config: Schema.Struct({ greeting: Schema.String }),
+	apply: ({ greeting }) =>
+		Effect.gen(function* () {
+			yield* Effect.addFinalizer(() => Effect.logInfo("Greeter stopped"))
+			yield* Graft.provide(Greeter, {
+				greet: (name) => Effect.logInfo(`${greeting}, ${name}!`),
+			})
+		}),
 })
 ```
 
-Node 會移除型別後直接執行這個 TypeScript 檔案，因此不需要建置步驟。外掛模組以預設匯出，或以名為
+```ts title="src/ticker.ts"
+import { Effect, Schedule, Schema } from "effect"
+
+import { Plugin } from "@graftland/graft"
+
+import { Greeter } from "./greeter.ts"
+
+// Starts once a Greeter exists and greets on a schedule. The task belongs to
+// the plugin, so it stops when the plugin stops or reloads.
+export default Plugin.make({
+	name: "app/ticker",
+	config: Schema.Struct({ name: Schema.String }),
+	inject: [Greeter],
+	apply: ({ name }) =>
+		Effect.gen(function* () {
+			const greeter = yield* Greeter
+			yield* Plugin.fork(
+				greeter.greet(name).pipe(Effect.repeat(Schedule.spaced("3 seconds"))),
+			)
+			yield* Effect.addFinalizer(() => Effect.logInfo("Ticker stopped"))
+		}),
+})
+```
+
+`inject: [Greeter]` 由編譯器檢查：刪掉它，`npm run typecheck` 就會回報 `apply`
+使用了未宣告的服務。Node 會移除型別後直接執行這些 TypeScript 檔案，因此不需要建置步驟。外掛模組以預設匯出，或以名為
 `plugin` 的匯出來提供它的外掛。匯入模組時不得啟動任何東西。請在 `apply`
-內開啟連線、計時器和伺服器，這樣 Graft 才能釋放它們。請參閱[外掛](../plugins/)。
+內開啟連線、計時器和伺服器，這樣 Graft 才能釋放它們。請參閱[外掛](../plugins/)和[服務](../services/)。
 
 ## 從 npm 新增外掛
 
@@ -86,8 +129,8 @@ npx graft add graft-plugin-review
 `graft add` 使用專案的套件管理器安裝套件。如果安裝失敗，它會把 `package.json`
 和鎖定檔還原成原來的樣子。安裝或復原期間，請不要編輯專案檔案，也不要執行其他安裝程式。還原會覆寫變更，不會合併它們。請參閱[安裝的所有權與還原](../cli/#套件管理器)。接著在
 `graft.yml` 中為該外掛新增一個項目。它的 `name` 可以是短名稱
-`review`，Graft 會依序尋找 `review`、`@graftland/plugin-review` 和
-`graft-plugin-review`。請參閱[設定檔](../config-file/)。
+`review`：Graft 先尋找 `review` 本身，再尋找 `@graftland/plugin-review` 和
+`graft-plugin-review`；後兩者都已安裝時失敗。請參閱[設定檔](../config-file/)。
 
 ## 後續步驟
 

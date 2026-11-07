@@ -1,96 +1,69 @@
 # HTTP gateway
 
-English | [简体中文](README.zh-CN.md) | [繁體中文](README.zh-TW.md)
+[English](README.md) | [简体中文](README.zh-CN.md) | [繁體中文](README.zh-TW.md)
 
-A real HTTP server whose routes come from plugins listed in `graft.yml`. You can
-add, remove, and reconfigure routes by editing that file. You can change their
-code by saving it. The process keeps running the whole time.
+Routes are mounts on `@graftland/plugin-http`. Each route plugin owns its
+requests and streams; the shared server keeps listening while plugins load,
+unload, or hot-swap.
 
-## The problem
-
-A long-running HTTP service usually sets up its routes once at startup. To
-change what it serves, you have two choices. One is a restart, which drops
-connections and in-memory state. The other is a hand-written admin layer that
-changes the router. That layer must also remember to close whatever each feature
-opened. Features that depend on a store need startup ordering. Turning the store
-off needs a plan for the routes that use it.
-
-## What Graft does instead
-
-- **The server knows nothing about routes.** `server` listens and offers each
-  request to the `Route` event with `Event.bail`. A route is an `Event.on`
-  handler inside a plugin, so it exists exactly as long as that plugin is
-  loaded.
-- **The config file is the source of truth.** `graft start --watch` reconciles
-  the running tree with `graft.yml` on every save. Only the entries that changed
-  are touched. If you disable `todo-store`, the server keeps listening. If you
-  change the server's `port`, the server restarts and no route is touched.
-- **Dependencies are explicit.** `todos` injects `TodoStore`. While the store is
-  disabled, `todos` is `Pending` and its routes answer 404. Enable the store
-  again and the routes return. Nothing in `todos` checks for the store.
-- **Code reloads in place.** When you save a plugin module, Graft imports the
-  new version and replaces the running plugins with it. The process does not
-  restart. As the
-  [hot reload docs](../../packages/docs/content/docs/hot-reload.md) explain, a
-  code change restarts every plugin loaded from a module, the server included.
-- **You can see the tree.** `GET /_graft` prints the live fork tree with each
-  plugin's state, including what a `Pending` plugin is waiting for.
+Todos use an Effect HttpApi contract and a typed client test. The composer
+serves live `/openapi.json`; a sibling Scalar plugin serves `/docs`.
 
 ## Run it
 
-From the repository root:
-
 ```sh
 devenv shell -- pnpm build
-cd samples/http-gateway
-devenv shell -- pnpm start
+devenv shell -- bash -c "cd samples/http-gateway && pnpm start"
 ```
 
-The server listens on port 3000. In another terminal:
+The server binds `127.0.0.1:3000`. In another terminal:
 
 ```sh
-curl localhost:3000/health
+curl 127.0.0.1:3000/openapi.json
+curl 127.0.0.1:3000/docs
+curl 127.0.0.1:3000/health
+curl 127.0.0.1:3000/todos
+curl -X POST 127.0.0.1:3000/todos -H 'content-type: application/json' -d '{"title": "Write docs"}'
+curl -X DELETE 127.0.0.1:3000/todos/1
+curl 127.0.0.1:3000/_graft
 ```
+
+## Edit it
+
+1. Set `disabled: true` on `todo-store` in `graft.yml`. `/todos` returns 404 and
+   `/_graft` shows `todos` as `Pending`. Remove the setting to restore the
+   routes.
+2. Change the response text in `src/plugins/health.ts`. The log shows
+   `Reloaded 1 plugin module(s)` and `/health` returns the new text. There is no
+   new `Listening on` line.
+3. Run `curl -N 127.0.0.1:3000/events`, then disable `events`. The stream closes
+   while `/health` still works.
+4. Change the server port to 3001. The log shows
+   `Stopped listening on http://127.0.0.1:3000` and
+   `Listening on http://127.0.0.1:3001`; route plugins keep their state.
+5. In `src/plugins/todos.ts`, change the created todo title to
+   `payload.title + " (edited)"`. The log shows `Reloaded 1 plugin module(s)`.
+   POST a todo: its title includes `(edited)`, and GET still lists earlier
+   todos. There is no new `Listening on` line; `/openapi.json` and `/docs` stay
+   available.
+
+The todo store is in memory and resets when its plugin restarts.
+`DELETE /todos/:id` returns 204 when it removes a todo and 404 when the id is
+absent.
 
 ```sh
-curl localhost:3000/todos
+devenv shell -- pnpm --filter @graftland/sample-http-gateway test
 ```
-
-```sh
-curl -X POST localhost:3000/todos -d '{"title": "Write docs"}'
-```
-
-```sh
-curl localhost:3000/_graft
-```
-
-Then, while it runs:
-
-1. Add `disabled: true` to the `todo-store` entry and save. The log shows
-   `Todo store closed` and nothing else. `/todos` answers 404, and `/_graft`
-   shows `todos` as `Pending (waiting for .../TodoStore)`. Remove the line again
-   and `/todos` is back.
-2. Change the server's `port` to `3001` and save. The log shows
-   `Stopped listening on http://localhost:3000` and
-   `Listening on http://localhost:3001`. The store keeps its todos.
-3. Change the text in `src/plugins/health.ts` and save. The log shows
-   `Reloaded 5 plugin module(s)` and `/health` answers with the new text.
-
-The todo store is in memory, so its todos are reset whenever it restarts.
-
-`devenv shell -- pnpm --filter @graftland/sample-http-gateway test` starts the
-server on a free port and checks the route and config behavior over HTTP.
 
 ## Files
 
-| File                        | What it is                                                   |
-| --------------------------- | ------------------------------------------------------------ |
-| `graft.yml`                 | The entries `graft start` loads.                             |
-| `src/Gateway.ts`            | The `Route` event, `route()`, and the `Gateway` address key. |
-| `src/TodoStore.ts`          | The `TodoStore` service key.                                 |
-| `src/plugins/server.ts`     | The HTTP server.                                             |
-| `src/plugins/health.ts`     | `GET /health`.                                               |
-| `src/plugins/inspector.ts`  | `GET /_graft`, the live fork tree.                           |
-| `src/plugins/todo-store.ts` | An in-memory `TodoStore`.                                    |
-| `src/plugins/todos.ts`      | `GET /todos` and `POST /todos`.                              |
-| `test/http-gateway.test.ts` | Tests over real HTTP.                                        |
+| Files                                           | Role                                                                                   |
+| ----------------------------------------------- | -------------------------------------------------------------------------------------- |
+| `graft.yml`                                     | The router, the listener, the route plugins, the HttpApi composer and its Scalar page. |
+| `src/plugins/health.ts`                         | A health mount.                                                                        |
+| `src/plugins/inspector.ts`                      | A mount showing the live fork tree.                                                    |
+| `src/TodoStore.ts`, `src/plugins/todo-store.ts` | A dependency used by the todo routes.                                                  |
+| `src/api/Todos.ts`                              | Shared HttpApi contract and typed errors.                                              |
+| `src/plugins/todos.ts`                          | GET, POST and DELETE routes in one mount.                                              |
+| `src/plugins/events.ts`                         | An SSE mount, cut on unload.                                                           |
+| `test/http-gateway.test.ts`                     | Tests against a real server on an OS-assigned port.                                    |

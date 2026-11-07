@@ -1,47 +1,49 @@
-import { Effect, Schema } from "effect"
-import { HttpServerResponse } from "effect/http"
+import { Array, Effect, Option } from "effect"
+import { HttpApiBuilder } from "effect/http-api"
 
 import { Plugin } from "@graftland/graft"
+import * as HttpApis from "@graftland/plugin-http-api/HttpApis"
 
-import { route } from "../Gateway.ts"
+import { Api, Todo, TodoNotFound } from "../api/Todos.ts"
 import { TodoStore } from "../TodoStore.ts"
 
-const NewTodo = Schema.Struct({ title: Schema.String })
-
-/**
- * `GET /todos` and `POST /todos`. They need a `TodoStore`; while none is
- * loaded, this plugin is `Pending` and the routes answer 404.
- */
-export default Plugin.make({
-	name: "todos",
-	inject: [TodoStore],
-	apply: Effect.fn("todos.apply")(function* () {
-		const store = yield* TodoStore
-		yield* route("GET", "/todos", () =>
-			Effect.flatMap(store.list, (todos) =>
-				HttpServerResponse.json(todos),
-			).pipe(Effect.orDie),
-		)
-		yield* route("POST", "/todos", (request) =>
-			request.json.pipe(
-				Effect.flatMap(Schema.decodeUnknownEffect(NewTodo)),
-				Effect.flatMap(({ title }) =>
-					store.add(title).pipe(
-						Effect.flatMap((todo) =>
-							HttpServerResponse.json(todo, { status: 201 }),
-						),
-						Effect.orDie,
-					),
-				),
-				// Only a body that cannot be read or decoded is the client's fault.
-				Effect.catchTag(["HttpServerError", "SchemaError"], () =>
-					Effect.succeed(
-						HttpServerResponse.text('Expected {"title": "..."}\n', {
-							status: 400,
-						}),
-					),
+export const TodosLive = HttpApiBuilder.group(Api, "todos", (handlers) =>
+	handlers
+		.handle("list", () =>
+			Effect.flatMap(TodoStore, (store) =>
+				Effect.map(store.list, (todos) =>
+					Array.map(todos, (todo) => Todo.make(todo)),
 				),
 			),
 		)
-	}),
+		.handle("create", ({ payload }) =>
+			Effect.gen(function* () {
+				const store = yield* TodoStore
+				const todo = yield* store.add(payload.title)
+				return Todo.make(todo)
+			}),
+		)
+		.handle("get", ({ params }) =>
+			Effect.gen(function* () {
+				const store = yield* TodoStore
+				const todos = yield* store.list
+				const todo = Array.findFirst(todos, (todo) => todo.id === params.id)
+				return Option.isSome(todo)
+					? Todo.make(todo.value)
+					: yield* TodoNotFound.make({ id: params.id })
+			}),
+		)
+		.handle("remove", ({ params }) =>
+			Effect.gen(function* () {
+				const store = yield* TodoStore
+				if (!(yield* store.remove(params.id)))
+					return yield* TodoNotFound.make({ id: params.id })
+			}),
+		),
+)
+/** The contract and handlers live exactly as long as the injected store. */
+export default Plugin.make({
+	name: "@graftland/sample-http-gateway/plugins/todos",
+	inject: [TodoStore],
+	apply: () => HttpApis.serve(Api, ["todos"], TodosLive),
 })

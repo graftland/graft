@@ -9,6 +9,7 @@ import {
 	Data,
 	Effect,
 	Equal,
+	HashSet,
 	Layer,
 	Option,
 	Predicate,
@@ -19,15 +20,19 @@ import {
 } from "effect"
 import { identity } from "effect/Function"
 
+import { ProbeError } from "./Fork"
 import { Graft, provide, type ServiceConflict } from "./Graft"
+import * as Probes from "./internal/probes"
 import { RuntimeContext } from "./internal/runtimeContext"
 import * as TaskGroup from "./internal/tasks"
 import type { Tasks } from "./internal/tasks"
 
 export type { Tasks } from "./internal/tasks"
 
-const TypeId = "~@graftland/graft/Plugin"
-const Contract = "~@graftland/graft/Plugin/Contract"
+/** Brands a plugin definition; `isPlugin` checks for it. */
+export const TypeId = "~@graftland/graft/Plugin"
+/** Keys the input and error contract that keeps a definition's types invariant. */
+export const Contract = "~@graftland/graft/Plugin/Contract"
 
 /**
  * Marks a dependency as optional: the plugin starts without it and restarts
@@ -38,6 +43,51 @@ export class Optional<
 > extends Data.TaggedClass("Optional")<{ readonly key: Key }> {}
 
 export type Dependency = Context.Key<any, any> | Optional<Context.Key<any, any>>
+
+/** An immutable protocol operation, independent of its transport and implementation. */
+export const OperationIdentity = Schema.Struct({
+	name: Schema.NonEmptyString.check(Schema.isPattern(/^\S+$/)),
+	version: Schema.Int.check(Schema.isGreaterThan(0)),
+})
+export type OperationIdentity = typeof OperationIdentity.Type
+
+const operationKey = (identity: OperationIdentity) =>
+	`${identity.name}@${identity.version}`
+
+/** Exact operation-set compatibility; package versions and schemas are not compared. */
+export type OperationComparison = Data.TaggedEnum<{
+	Compatible: {}
+	Incompatible: { readonly missing: ReadonlyArray<OperationIdentity> }
+}>
+const OperationComparison = Data.taggedEnum<OperationComparison>()
+
+/** Checks whether the provider includes every required name and version. */
+export const compareOperations = (
+	required: ReadonlyArray<OperationIdentity>,
+	provided: ReadonlyArray<OperationIdentity>,
+): OperationComparison => {
+	const available = HashSet.fromIterable(Array.map(provided, operationKey))
+	const missing = Array.dedupeWith(
+		Array.filter(
+			required,
+			(identity) => !HashSet.has(available, operationKey(identity)),
+		),
+		(left: OperationIdentity, right: OperationIdentity) =>
+			left.name === right.name && left.version === right.version,
+	)
+	return missing.length === 0
+		? OperationComparison.Compatible()
+		: OperationComparison.Incompatible({ missing })
+}
+
+/** Structural contract metadata accepted from any public contract adapter. */
+export interface ProvidedContract {
+	readonly key: Context.Key<unknown, unknown>
+	readonly operations: ReadonlyArray<OperationIdentity>
+}
+
+/** A local service key or a contract service declaration. */
+export type Provided = Context.Key<any, any> | ProvidedContract
 
 /** Identifiers of the required dependencies in an `inject` list. */
 export type Required<Inject extends ReadonlyArray<Dependency>> = Extract<
@@ -55,7 +105,11 @@ export type Requirements<Inject extends ReadonlyArray<Dependency>> =
  */
 export type Update<Config, E = never, R = never> = (
 	next: Config,
-) => Effect.Effect<boolean, never, Graft | Scope.Scope | R | Tasks<E>>
+) => Effect.Effect<
+	boolean,
+	import("./Transition").ManagedFork,
+	Graft | Scope.Scope | R | Tasks<E>
+>
 
 /** Starts an activation-owned worker. Its unhandled errors belong to the plugin, not the launch operation. */
 export const fork: <A, E, R>(
@@ -73,6 +127,21 @@ export const fork: <A, E, R>(
 	return yield* TaskGroup.run(activation.tasks.value, effect)
 })
 
+/** Registers a named health check for this serving attempt without running it. */
+export const probe: <A, E, R>(
+	name: string,
+	effect: Effect.Effect<A, E, R>,
+) => Effect.Effect<void, ProbeError, R | Graft | Scope.Scope> =
+	Effect.fnUntraced(function* <A, E, R>(
+		name: string,
+		effect: Effect.Effect<A, E, R>,
+	) {
+		const { activation } = yield* RuntimeContext
+		if (activation.status === undefined)
+			return yield* ProbeError.make({ probe: name, reason: "Unavailable" })
+		return yield* Probes.register(activation.status.probes, name, effect)
+	})
+
 // A definition has one input/error contract even when referenced through aliases.
 export type Plugin<Config = any, Input = any, E = any> = 0 extends 1 & Input
 	? 0 extends 1 & E
@@ -89,7 +158,13 @@ export interface Definition<in out Config, in out Input, in out E> {
 		readonly error: 0 extends 1 & E ? unknown : (value: E) => E
 	}
 	readonly name: string
+	/** The public configuration schema, when the plugin declares one. */
+	readonly config: Schema.Top | undefined
 	readonly inject: ReadonlyArray<Dependency>
+	/** Declares exports; publishing still happens inside apply. */
+	readonly provides: ReadonlyArray<Provided>
+	/** Declares that serving may overlap another attempt; does not enable transitions. */
+	readonly overlap: boolean
 	readonly retry: Schedule.Schedule<unknown, unknown> | undefined
 	/** Runs only inside an activation, which provides whatever decoding needs. */
 	readonly decode: (
@@ -131,8 +206,17 @@ export const isOptional = (
 
 /** Options shared by `make`, `layer` and `service`. */
 export interface Options<Inject extends ReadonlyArray<Dependency>> {
+	/**
+	 * Labels the plugin in logs, spans and the fork tree. Build it like an
+	 * Effect service key: the package, the module path, then the binding unless
+	 * it is the module's default export, such as `@acme/graft-plugin-db/migrations`.
+	 */
 	readonly name: string
 	readonly inject?: Inject | undefined
+	/** Describes the local services and contract operations this implementation provides. */
+	readonly provides?: ReadonlyArray<Provided> | undefined
+	/** Whether serving is safe alongside another attempt. Defaults to false. */
+	readonly overlap?: boolean | undefined
 	/** Restarts a failed plugin on this schedule; without it, a failed plugin waits for a change. */
 	readonly retry?: Schedule.Schedule<unknown, unknown> | undefined
 }
@@ -189,7 +273,10 @@ export const make: {
 		[TypeId]: TypeId,
 		[Contract]: { input: identity, error: identity },
 		name: options.name,
+		config: schema,
 		inject: options.inject ?? [],
+		provides: options.provides ?? [],
+		overlap: options.overlap ?? false,
 		retry: options.retry,
 		// Overloads connect the schema's decoded type to the callback; this implementation erases that type.
 		decode: (schema === undefined
@@ -248,5 +335,6 @@ export const service = <
 > =>
 	make({
 		...options,
+		provides: options.provides ?? [key],
 		apply: () => Effect.flatMap(build, (value) => provide(key, value)),
 	})

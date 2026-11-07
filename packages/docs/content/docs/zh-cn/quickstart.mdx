@@ -19,11 +19,13 @@ Node 适配器要求的版本。该版本也提供热重载所需的 `module.reg
 
    先看这几个文件：
 
-   | 文件            | 用途                                 |
-   | --------------- | ------------------------------------ |
-   | `graft.yml`     | 配置文件，指定要加载的插件及其配置。 |
-   | `src/hello.ts`  | 示例插件。                           |
-   | `tsconfig.json` | 供 `npm run typecheck` 做类型检查。  |
+   | 文件             | 用途                                 |
+   | ---------------- | ------------------------------------ |
+   | `graft.yml`      | 配置文件，指定要加载的插件及其配置。 |
+   | `src/hello.ts`   | 输出配置中消息的插件。               |
+   | `src/greeter.ts` | 发布 `Greeter` 服务的插件。          |
+   | `src/ticker.ts`  | 注入 `Greeter` 并定时问候的插件。    |
+   | `tsconfig.json`  | 供 `npm run typecheck` 做类型检查。  |
 
    [`graft create`](../cli/#graft-create)
    列出了各个问题、其他模板，以及跳过提问的选项。
@@ -34,48 +36,90 @@ Node 适配器要求的版本。该版本也提供热重载所需的 `module.reg
    npm run dev
    ```
 
-   `hello` 插件会输出 `Hello from Graft!`。进程会持续运行，直到你按下
+   `hello` 输出 `Hello from Graft!`；`ticker` 通过 `greeter` 发布的
+   `Greeter`，每 3 秒输出一次 `Hello, Graft!`。进程会持续运行，直到你按下
 
    <kbd>Ctrl</kbd>+<kbd>C</kbd>，此时 Graft 会卸载所有插件。
 
-3. 在应用运行期间修改配置。打开 `graft.yml`，修改消息：
+3. 在应用运行期间修改配置。打开 `graft.yml`，修改问候语：
 
    ```yaml
-   - id: hello
-     name: ./src/hello.ts
+   - id: greeter
+     name: ./src/greeter.ts
      config:
-       message: Hello again!
+       greeting: Hi
    ```
 
-   保存后，Graft 会卸载 `hello`，再用新消息重新加载。你会先看到
-   `Hello plugin stopped`，然后是 `Hello again!`。
+   保存后，Graft 先停止使用 `Greeter` 的 `ticker`，再用新问候语重启
+   `greeter`，然后重新启动 `ticker`。你会看到
+   `Ticker stopped`、`Greeter stopped`，然后是 `Hi, Graft!`。`hello` 不受影响。
 
-4. 在应用运行期间修改代码。编辑
-   `src/hello.ts`（例如让它输出两次消息），然后保存。Graft 会导入模块的新版本，用它替换正在运行的插件。如果新代码导入失败，旧版本会继续运行，Graft 会把错误记录到日志中。
+4. 在应用运行期间修改代码。把 `src/ticker.ts` 中的 `"3 seconds"` 改为
+   `"1 second"` 并保存。Graft 导入新模块，只重启
+   `ticker`。如果新代码导入或启动失败，旧版本会继续运行，Graft 会把错误记录到日志中。
+
+5. 拿走一个依赖。给 `greeter` 配置项加上 `disabled: true` 并保存。`ticker`
+   会停止，并以 `Pending` 状态等待，直到 `Greeter`
+   再次出现。删除这一行，它就恢复问候。
 
 </Steps>
 
 ## 示例插件
 
-```ts title="src/hello.ts"
-import { Effect, Schema } from "effect"
+```ts title="src/greeter.ts"
+import { Context, Effect, Schema } from "effect"
 
-import { Plugin } from "@graftland/graft"
+import { Graft, Plugin } from "@graftland/graft"
 
-// Module evaluation only defines the plugin; its activation owns all resources.
+/** Greets by name. Other plugins list it in `inject` to use it. */
+export class Greeter extends Context.Service<
+	Greeter,
+	{ readonly greet: (name: string) => Effect.Effect<void> }
+>()("app/Greeter") {}
+
+// Publishes a Greeter while it is loaded. Plugins that use it stop first.
 export default Plugin.make({
-	name: "hello",
-	config: Schema.Struct({ message: Schema.String }),
-	apply: ({ message }) =>
-		Effect.acquireRelease(Effect.logInfo(message), () =>
-			Effect.logInfo("Hello plugin stopped"),
-		),
+	name: "app/greeter",
+	config: Schema.Struct({ greeting: Schema.String }),
+	apply: ({ greeting }) =>
+		Effect.gen(function* () {
+			yield* Effect.addFinalizer(() => Effect.logInfo("Greeter stopped"))
+			yield* Graft.provide(Greeter, {
+				greet: (name) => Effect.logInfo(`${greeting}, ${name}!`),
+			})
+		}),
 })
 ```
 
-Node 直接运行这个 TypeScript 文件，只去掉类型，因此没有构建步骤。插件模块通过默认导出或名为
+```ts title="src/ticker.ts"
+import { Effect, Schedule, Schema } from "effect"
+
+import { Plugin } from "@graftland/graft"
+
+import { Greeter } from "./greeter.ts"
+
+// Starts once a Greeter exists and greets on a schedule. The task belongs to
+// the plugin, so it stops when the plugin stops or reloads.
+export default Plugin.make({
+	name: "app/ticker",
+	config: Schema.Struct({ name: Schema.String }),
+	inject: [Greeter],
+	apply: ({ name }) =>
+		Effect.gen(function* () {
+			const greeter = yield* Greeter
+			yield* Plugin.fork(
+				greeter.greet(name).pipe(Effect.repeat(Schedule.spaced("3 seconds"))),
+			)
+			yield* Effect.addFinalizer(() => Effect.logInfo("Ticker stopped"))
+		}),
+})
+```
+
+`inject: [Greeter]` 由编译器检查：删掉它，`npm run typecheck` 就会报告 `apply`
+使用了未声明的服务。Node 直接运行这些 TypeScript 文件，只去掉类型，因此没有构建步骤。插件模块通过默认导出或名为
 `plugin` 的导出提供插件。导入模块时不应启动任何工作。连接、定时器和服务器都应在
-`apply` 内启动，以便 Graft 能够释放这些资源。参见[插件](../plugins/)。
+`apply`
+内启动，以便 Graft 能够释放这些资源。参见[插件](../plugins/)和[服务](../services/)。
 
 ## 从 npm 添加插件
 
@@ -85,9 +129,9 @@ npx graft add graft-plugin-review
 
 `graft add` 使用项目的包管理器安装包。如果安装失败，它会将 `package.json`
 和锁文件恢复原状。安装和恢复期间，不要编辑项目文件或运行其他安装命令。回滚会覆盖修改，不会合并修改。参见[安装的独占性与恢复](../cli/#包管理器)。然后在
-`graft.yml` 中添加该插件的配置项。`name` 可以使用短名称
-`review`。Graft 会依次查找 `review`、`@graftland/plugin-review` 和
-`graft-plugin-review`。参见[配置文件](../config-file/)。
+`graft.yml` 中添加该插件的配置项。`name` 可以使用短名称 `review`：Graft 先查找
+`review` 本身，再查找 `@graftland/plugin-review` 和
+`graft-plugin-review`；后两者都已安装时失败。参见[配置文件](../config-file/)。
 
 ## 后续步骤
 
