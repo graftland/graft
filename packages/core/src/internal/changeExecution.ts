@@ -75,6 +75,63 @@ const waitInvalidation = Effect.fnUntraced(function* (
 	)
 }, Effect.tx)
 
+const prepareCandidate = Effect.fnUntraced(function* (
+	coordinator: Engine,
+	run: Run,
+	desired: Change.Candidate,
+): Effect.fn.Return<Attempt, Failed> {
+	const attempt = yield* coordinator.allocate(desired)
+	yield* TxRef.set(run.candidate, Option.some(attempt))
+	yield* coordinator.start(attempt)
+	return attempt
+})
+const observeTrial = (
+	coordinator: Engine,
+	policy: Deadlines,
+	attempt: Attempt,
+): Effect.Effect<void, Failed> =>
+	policy.trial === 0
+		? Effect.void
+		: coordinator.step(
+				attempt.id,
+				"Trial",
+				Effect.asVoid(Effect.timeoutOption(attempt.failure, policy.trial)),
+				Number.POSITIVE_INFINITY,
+			)
+const retirePrevious = Effect.fnUntraced(function* (
+	coordinator: Engine,
+	previous: Option.Option<Attempt>,
+): Effect.fn.Return<void, Failed> {
+	if (Option.isNone(previous)) return
+	const result = yield* coordinator.retire(previous.value)
+	yield* settlement(result)
+})
+const settleCandidate = Effect.fnUntraced(function* (
+	coordinator: Engine,
+	run: Run,
+): Effect.fn.Return<void, Failed> {
+	const candidate = yield* TxRef.get(run.candidate)
+	if (Option.isNone(candidate)) return
+	const result = yield* coordinator.terminate(candidate.value)
+	yield* settlement(result)
+	yield* TxRef.set(run.candidate, Option.none())
+})
+const recover = Effect.fnUntraced(function* (
+	coordinator: Engine,
+	policy: Deadlines,
+	run: Run,
+): Effect.fn.Return<void, Failed> {
+	yield* retirePrevious(coordinator, run.previous)
+	yield* TxRef.set(run.budget.reserved, derive(policy).cleanup)
+	const restored = yield* prepareCandidate(
+		coordinator,
+		run,
+		run.previousDesired,
+	)
+	yield* coordinator.cutover(restored)
+	yield* observeTrial(coordinator, policy, restored)
+})
+
 /** Strategies compose the same owned primitives; only their order differs. */
 export const execute = Effect.fnUntraced(function* (
 	managed: Managed,
@@ -125,33 +182,6 @@ export const execute = Effect.fnUntraced(function* (
 				}
 			}),
 		)
-	const prepare = Effect.fnUntraced(function* (desired: Change.Candidate) {
-		const attempt = yield* coordinator.allocate(desired)
-		yield* TxRef.set(run.candidate, Option.some(attempt))
-		yield* coordinator.start(attempt)
-		return attempt
-	})
-	const trial = (attempt: Attempt) =>
-		policy.trial === 0
-			? Effect.void
-			: coordinator.step(
-					attempt.id,
-					"Trial",
-					Effect.asVoid(Effect.timeoutOption(attempt.failure, policy.trial)),
-					Number.POSITIVE_INFINITY,
-				)
-	const retireOld = Effect.fnUntraced(function* () {
-		if (Option.isNone(previous)) return
-		const result = yield* coordinator.retire(previous.value)
-		yield* settlement(result)
-	})
-	const settleCandidate = Effect.fnUntraced(function* () {
-		const candidate = yield* TxRef.get(run.candidate)
-		if (Option.isNone(candidate)) return
-		const result = yield* coordinator.terminate(candidate.value)
-		yield* settlement(result)
-		yield* TxRef.set(run.candidate, Option.none())
-	})
 	const healthyOld = Effect.fnUntraced(function* () {
 		if (Option.isNone(previous)) return false
 		const observed = yield* Effect.result(
@@ -177,15 +207,19 @@ export const execute = Effect.fnUntraced(function* (
 		if (strategy === "Restart") {
 			yield* Effect.tx(Admission.pause(managed))
 			yield* TxRef.set(run.budget.reserved, limits.recovery + limits.cleanup)
-			yield* retireOld()
+			yield* retirePrevious(coordinator, previous)
 			yield* coordinator.setRoute(Option.none())
 		}
-		const next = yield* prepare(record.request.candidate)
+		const next = yield* prepareCandidate(
+			coordinator,
+			run,
+			record.request.candidate,
+		)
 		yield* coordinator.cutover(next)
-		yield* trial(next)
+		yield* observeTrial(coordinator, policy, next)
 		if (strategy === "Overlap") {
 			yield* TxRef.set(run.budget.reserved, limits.recovery + limits.cleanup)
-			yield* retireOld()
+			yield* retirePrevious(coordinator, previous)
 		}
 		yield* coordinator.step(
 			next.id,
@@ -195,17 +229,10 @@ export const execute = Effect.fnUntraced(function* (
 		)
 		return yield* complete("Accepted", "Complete", "Failed")
 	})
-	const recovery = Effect.gen(function* () {
-		yield* retireOld()
-		yield* TxRef.set(run.budget.reserved, limits.cleanup)
-		const restored = yield* prepare(run.previousDesired)
-		yield* coordinator.cutover(restored)
-		yield* trial(restored)
-	})
 	const stop = Effect.fnUntraced(function* (failure: Failed) {
 		yield* Effect.tx(Admission.pause(managed))
 		yield* TxRef.set(run.budget.reserved, limits.recovery)
-		const cleanup = yield* Effect.result(settleCandidate())
+		const cleanup = yield* Effect.result(settleCandidate(coordinator, run))
 		if (
 			cleanup._tag === "Failure" &&
 			(cleanup.failure.reason === "UnconfirmedTermination" ||
@@ -217,7 +244,9 @@ export const execute = Effect.fnUntraced(function* (
 		}
 		if (yield* closing(managed)) {
 			yield* TxRef.set(run.budget.reserved, 0)
-			const stopped = yield* Effect.result(retireOld())
+			const stopped = yield* Effect.result(
+				retirePrevious(coordinator, previous),
+			)
 			yield* coordinator.setRoute(Option.none())
 			yield* Admission.close(managed, "Closing")
 			return yield* complete(
@@ -262,7 +291,7 @@ export const execute = Effect.fnUntraced(function* (
 				Effect.andThen(
 					Effect.interruptible(
 						Effect.raceFirst(
-							recovery,
+							recover(coordinator, policy, run),
 							Effect.raceFirst(
 								waitClosing(managed, run),
 								waitInvalidation(record, run),
@@ -284,7 +313,7 @@ export const execute = Effect.fnUntraced(function* (
 			}),
 		)
 		yield* TxRef.set(run.budget.reserved, 0)
-		const ended = yield* Effect.result(settleCandidate())
+		const ended = yield* Effect.result(settleCandidate(coordinator, run))
 		yield* coordinator.setRoute(Option.none())
 		yield* Admission.close(
 			managed,

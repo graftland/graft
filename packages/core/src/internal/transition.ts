@@ -134,7 +134,6 @@ const releaseRegistration = Effect.fnUntraced(function* (managed: Managed) {
 
 export interface Run {
 	readonly trace: Change.Trace | undefined
-	readonly reply: TxRef.TxRef<Option.Option<ExecutionOutcome>>
 	readonly previous: Option.Option<Attempt>
 	readonly previousDesired: Change.Candidate
 	readonly candidate: TxRef.TxRef<Option.Option<Attempt>>
@@ -1049,7 +1048,7 @@ const disposeRegistration = Effect.fnUntraced(function* (
 	)
 	if (Option.isSome(active)) {
 		yield* TxRef.set(active.value.cancel, true)
-		yield* waitReply(active.value)
+		yield* waitOutcome(active.value)
 	}
 	const remaining = yield* TxRef.get(managed.attempts)
 	const cleanup = yield* Effect.forEach(remaining, (attempt) =>
@@ -1303,11 +1302,9 @@ export const register = Effect.fnUntraced(function* (
 	)
 })
 
-export const waitReply = (run: Run): Effect.Effect<ExecutionOutcome> =>
-	Effect.tx(
-		TxRef.get(run.reply).pipe(
-			Effect.flatMap(
-				Option.match({ onNone: () => Effect.txRetry, onSome: Effect.succeed }),
-			),
-		),
-	)
+const waitOutcome = (run: Run): Effect.Effect<Change.Outcome> =>
+	run.record === undefined
+		? Effect.die(
+				new Error("Waiting for completion requires an admitted Change record"),
+			)
+		: run.record.handle.await

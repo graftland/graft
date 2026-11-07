@@ -19,12 +19,7 @@ import * as Settlement from "./changeSettlement"
 import * as ChangeTable from "./changeTable"
 import { captureEdges, resolutionChanged } from "./dependencies"
 import { realmOf, Realms, type Runtime } from "./runtime"
-import {
-	ExecutionOutcome,
-	type Attempt,
-	type Managed,
-	type Run,
-} from "./transition"
+import { type Attempt, type Managed, type Run } from "./transition"
 import * as Trust from "./trust"
 
 const footprint = Effect.fnUntraced(function* (managed: Managed) {
@@ -149,7 +144,6 @@ export const makeRun = Effect.fnUntraced(function* (
 			traceId: span.traceId,
 			spanId: span.spanId,
 		})).pipe(Option.getOrUndefined),
-		reply: yield* TxRef.make(Option.none<ExecutionOutcome>()),
 		previous: Option.none(),
 		previousDesired: normalized.candidate,
 		candidate: yield* TxRef.make(Option.none<Attempt>()),

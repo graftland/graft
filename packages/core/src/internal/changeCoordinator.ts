@@ -279,7 +279,6 @@ const work = Effect.fnUntraced(function* (
 			yield* ChangeTable.finish(managed.runtime.changes, record, published)
 			if (published._tag !== "Stuck")
 				yield* TxRef.update(managed.pending, HashSet.remove(record.handle.id))
-			yield* TxRef.set(run.reply, Option.some(outcome))
 		}),
 	)
 	if (outcome._tag === "Stuck")
