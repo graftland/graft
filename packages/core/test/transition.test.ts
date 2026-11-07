@@ -10,6 +10,7 @@ import {
 	Exit,
 	Fiber,
 	HashMap,
+	HashSet,
 	MutableRef,
 	Option,
 	Order,
@@ -539,7 +540,7 @@ it.effect("keeps the coordinator busy across the entire trial window", () =>
 )
 
 it.effect(
-	"does not let a stale failure or late readiness change the route",
+	"fences late readiness until settlement and ignores stale failure after a later change",
 	() =>
 		Effect.gen(function* () {
 			const gate = yield* Deferred.make<void>()
@@ -555,14 +556,26 @@ it.effect(
 			)
 			const running = yield* Effect.forkScoped(h.request())
 			yield* Deferred.await(entered)
-			yield* TestClock.adjust(100)
-			const aborted = yield* Fiber.join(running)
-			assert.equal(aborted._tag, "Aborted")
+			yield* TestClock.adjust(200)
+			const stuck = yield* Fiber.join(running)
+			assert.equal(stuck._tag, "Stuck")
+			const blocked = yield* h.request().pipe(Effect.flip)
+			assert.equal(blocked.reason._tag, "Busy")
+			yield* Deferred.succeed(gate, undefined)
+			const { runtime } = yield* RuntimeContext
+			const instances = yield* TxRef.get(runtime.instances)
+			const managed = HashMap.getUnsafe(instances, "integration")
+			yield* Effect.tx(
+				TxRef.get(managed.pending).pipe(
+					Effect.flatMap((pending) =>
+						HashSet.size(pending) === 0 ? Effect.void : Effect.txRetry,
+					),
+				),
+			)
 			const later = yield* h.request()
 			assert.equal(later._tag, "Accepted")
 			const stale = yield* h.control(2)
 			yield* Deferred.fail(stale.failed, problem)
-			yield* Deferred.succeed(gate, undefined)
 			const current = yield* h.value.read
 			assert.equal(current, "new")
 			const all = yield* Stream.runHead(h.fork.generations)

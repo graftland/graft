@@ -389,23 +389,25 @@ export const engine = (
 			return yield* Effect.fail(failed({ reason: "TimedOut", phase }))
 		}
 		// Wait on an owned fiber, not on cancellation of a possibly stuck lifecycle operation.
-		const fiber = yield* Effect.forkIn(
-			effect.pipe(
-				Effect.onExit((exit) =>
-					Exit.isFailure(exit)
-						? record({ attempt, phase, cause: exit.cause }).pipe(
-								Effect.andThen(
-									Effect.logError(
-										"Execution lifecycle operation failed",
-										exit.cause,
-									),
+		const operation = effect.pipe(
+			Effect.onExit((exit) =>
+				Exit.isFailure(exit)
+					? record({ attempt, phase, cause: exit.cause }).pipe(
+							Effect.andThen(
+								Effect.logError(
+									"Execution lifecycle operation failed",
+									exit.cause,
 								),
-							)
-						: Effect.void,
-				),
+							),
+						)
+					: Effect.void,
 			),
-			managed.scope,
 		)
+		const leases = yield* TxRef.get(managed.leases)
+		const lease = Array.findFirst(leases, (lease) => lease.id === attempt)
+		const fiber = yield* Option.isSome(lease) && phase !== "Terminating"
+			? lease.value.executor.run(operation)
+			: Effect.forkIn(operation, managed.scope)
 		const result = yield* Effect.timeoutOption(
 			Fiber.await(fiber),
 			remaining,
@@ -932,7 +934,7 @@ export const engine = (
 			return { termination: known, host: yield* awaitHostRelease(attempt) }
 		}
 		// A command's acknowledgement is not exit evidence. Observe exit independently.
-		const command = yield* Effect.forkIn(
+		const command = yield* attempt.executor.run(
 			Effect.suspend(() => attempt.unit.terminate).pipe(
 				Effect.tapCause((cause) =>
 					Effect.logError("Execution termination command failed", cause),
@@ -948,7 +950,6 @@ export const engine = (
 						: Effect.void,
 				),
 			),
-			managed.scope,
 		)
 		const observed = yield* Effect.result(
 			step(
