@@ -127,10 +127,16 @@ jobs:
       # Tests run against the built packages; the docs site is not needed.
       - name: Build
         run: devenv shell -- pnpm -r --filter '!@graftland/docs' build
+      # Ubuntu's AppArmor blocks unprivileged user namespaces, which the Nix
+      # bubblewrap needs to confine untrusted plugins. Lifting it lets the
+      # sandbox suite run, and GRAFT_REQUIRE_SANDBOX makes it fail, not skip.
+      - name: Allow unprivileged user namespaces
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - name: Test
         run: devenv shell -- pnpm vitest run --project "$PROJECT"
         env:
           PROJECT: ${{ matrix.project }}
+          GRAFT_REQUIRE_SANDBOX: "true"
 
   # Pushes enqueue publication to GitHub Packages: main as a commit snapshot,
   # version tags as stable releases or prereleases.
