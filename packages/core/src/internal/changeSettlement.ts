@@ -9,7 +9,7 @@ export const read = Effect.fnUntraced(function* (
 	lease: HostLease,
 ): Effect.fn.Return<Change.Settlement> {
 	const termination = yield* TxRef.get(lease.terminated)
-	const host = yield* Ref.get(lease.hostRelease)
+	const host = yield* Ref.get(lease.hostRelease.state)
 	return {
 		generation: lease.id,
 		execution: Option.match(termination, {

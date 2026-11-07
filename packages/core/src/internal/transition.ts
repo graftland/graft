@@ -4,7 +4,6 @@ import {
 	Clock,
 	Context,
 	Data,
-	Deferred,
 	Duration,
 	Effect,
 	Equal,
@@ -28,6 +27,7 @@ import * as Release from "../Release"
 import * as T from "../Transition"
 import { withdraw } from "./activation"
 import * as Admission from "./admission"
+import * as AsyncClose from "./asyncClose"
 import * as Capacity from "./capacity"
 import * as Settlement from "./changeSettlement"
 import * as ChangeTable from "./changeTable"
@@ -60,19 +60,13 @@ export type ExecutionOutcome = Data.TaggedEnum<{
 }>
 export const ExecutionOutcome = Data.taggedEnum<ExecutionOutcome>()
 
-type HostRelease =
-	| { readonly _tag: "Pending" }
-	| {
-			readonly _tag: "Running"
-			readonly completed: Deferred.Deferred<Exit.Exit<void>>
-	  }
-	| { readonly _tag: "Completed"; readonly exit: Exit.Exit<void> }
+type HostRelease = AsyncClose.State
 
 export interface HostLease extends Capacity.Credit {
 	readonly generation: Generations.Token
 	readonly id: number
 	readonly scope: Scope.Closeable
-	readonly hostRelease: Ref.Ref<HostRelease>
+	readonly hostRelease: AsyncClose.Close
 	readonly terminated: TxRef.TxRef<Option.Option<Change.Termination>>
 }
 export interface Attempt extends HostLease {
@@ -481,9 +475,10 @@ export const engine = (
 					}),
 				)
 				const { id, generation: tokenGeneration } = grant
+				const scope = yield* Scope.make()
 				const lease: HostLease = {
 					id,
-					scope: yield* Scope.make(),
+					scope,
 					charged:
 						change === undefined
 							? managed.initialCredit.charged
@@ -492,7 +487,11 @@ export const engine = (
 						change === undefined ? Option.none() : Option.some(change.capacity),
 					),
 					generation: tokenGeneration,
-					hostRelease: yield* Ref.make<HostRelease>({ _tag: "Pending" }),
+					hostRelease: yield* AsyncClose.make(
+						managed.scope,
+						Release.close(scope, Exit.void),
+						(exit) => completeHostRelease(lease, exit),
+					),
 					terminated: yield* TxRef.make(Option.none<Change.Termination>()),
 				}
 				yield* TxRef.update(managed.leases, Array.append(lease))
@@ -718,77 +717,43 @@ export const engine = (
 				policy.probe,
 			)
 	})
-	const beginHostRelease = Effect.fnUntraced(function* (attempt: HostLease) {
-		return yield* Effect.uninterruptible(
-			Effect.gen(function* () {
-				const completed = yield* Deferred.make<Exit.Exit<void>>()
-				const claim = yield* Ref.modify(
-					attempt.hostRelease,
-					(
-						state,
-					): readonly [
-						{
-							readonly owner: boolean
-							readonly state: Exclude<HostRelease, { readonly _tag: "Pending" }>
-						},
-						HostRelease,
-					] => {
-						if (state._tag !== "Pending")
-							return [{ owner: false, state }, state]
-						const running: HostRelease & { readonly _tag: "Running" } = {
-							_tag: "Running",
-							completed,
-						}
-						return [{ owner: true, state: running }, running]
-					},
-				)
-				if (claim.owner)
-					yield* Effect.forkIn(
-						Effect.gen(function* () {
-							const exit = yield* Effect.exit(
-								Release.close(attempt.scope, Exit.void),
-							)
-							if (Exit.isFailure(exit)) {
-								yield* TxRef.update(managed.hostFailures, (all) =>
-									Cause.combine(all, exit.cause),
-								)
-								yield* record({
-									attempt: attempt.id,
-									phase: "Terminating",
-									cause: exit.cause,
-								})
-								yield* Effect.logError(
-									"Execution host release failed",
-									exit.cause,
-								)
-							}
-							yield* Ref.set(attempt.hostRelease, { _tag: "Completed", exit })
-							if (Exit.isSuccess(exit) || !Cause.hasInterruptsOnly(exit.cause))
-								yield* TxRef.update(
-									managed.leases,
-									Array.filter((lease) => lease.id !== attempt.id),
-								)
-							if (Exit.isSuccess(exit) || !Cause.hasInterruptsOnly(exit.cause))
-								yield* TxRef.update(
-									managed.attempts,
-									Array.filter((item) => item.id !== attempt.id),
-								)
-							yield* Effect.tx(releaseRegistration(managed))
-							yield* Deferred.succeed(completed, exit)
-						}),
-						managed.scope,
-						{ uninterruptible: true },
+	const completeHostRelease = Effect.fnUntraced(function* (
+		lease: HostLease,
+		exit: Exit.Exit<void>,
+	) {
+		if (Exit.isFailure(exit)) {
+			yield* TxRef.update(managed.hostFailures, (all) =>
+				Cause.combine(all, exit.cause),
+			)
+			yield* record({
+				attempt: lease.id,
+				phase: "Terminating",
+				cause: exit.cause,
+			})
+			yield* Effect.logError("Execution host release failed", exit.cause)
+		}
+		if (Exit.isSuccess(exit) || !Cause.hasInterruptsOnly(exit.cause))
+			yield* Effect.tx(
+				Effect.gen(function* () {
+					yield* TxRef.update(
+						managed.leases,
+						Array.filter((item) => item.id !== lease.id),
 					)
-				return claim.state
-			}),
+					yield* TxRef.update(
+						managed.attempts,
+						Array.filter((item) => item.id !== lease.id),
+					)
+					yield* releaseRegistration(managed)
+				}),
+			)
+	})
+	const beginHostRelease = (lease: HostLease) =>
+		lease.hostRelease.start.pipe(
+			Effect.andThen(Ref.get(lease.hostRelease.state)),
 		)
-	})
-	const releaseHost = Effect.fnUntraced(function* (attempt: HostLease) {
-		const state = yield* beginHostRelease(attempt)
-		return state._tag === "Completed"
-			? state.exit
-			: yield* Deferred.await(state.completed)
-	})
+	const releaseHost = (lease: HostLease) =>
+		lease.hostRelease.start.pipe(Effect.andThen(lease.hostRelease.await))
+
 	const awaitHostRelease = Effect.fnUntraced(function* (attempt: HostLease) {
 		const state = yield* beginHostRelease(attempt)
 		if (state._tag === "Completed") {
@@ -805,12 +770,12 @@ export const engine = (
 			step(
 				attempt.id,
 				"Terminating",
-				Deferred.await(state.completed),
+				attempt.hostRelease.await,
 				limits.termination.hostRelease,
 			),
 		)
 		// The deadline is evidence about this wait, not the finalizer's eventual exit.
-		const observed = yield* Ref.get(attempt.hostRelease)
+		const observed = yield* Ref.get(attempt.hostRelease.state)
 		yield* observeSettlement(attempt)
 		if (observed._tag === "Completed" && Exit.isFailure(observed.exit))
 			yield* record({
@@ -919,7 +884,7 @@ export const engine = (
 			yield* generation(managed, attempt, "Stuck")
 			return {
 				termination: Option.none<Change.Termination>(),
-				host: yield* Ref.get(attempt.hostRelease),
+				host: yield* Ref.get(attempt.hostRelease.state),
 			}
 		}
 		// Cache exit and register the independent release owner before interruption can resume.

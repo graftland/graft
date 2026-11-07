@@ -1,26 +1,12 @@
-import {
-	Cause,
-	Data,
-	Effect,
-	Exit,
-	HashSet,
-	Option,
-	Scope,
-	TxRef,
-} from "effect"
+import { Cause, Effect, Exit, HashSet, Option, Scope, TxRef } from "effect"
 
 import * as Change from "../Change"
 import * as Release from "../Release"
 import type { Prepared } from "../Transition"
+import * as AsyncClose from "./asyncClose"
 import type { Runtime } from "./runtime"
 import type { Managed } from "./transition"
 
-type ReleaseState = Data.TaggedEnum<{
-	Pending: {}
-	Running: {}
-	Completed: { readonly exit: Exit.Exit<void> }
-}>
-const ReleaseState = Data.taggedEnum<ReleaseState>()
 export interface Preparation {
 	readonly value: Prepared
 	readonly close: Effect.Effect<void>
@@ -41,53 +27,20 @@ export const prepare = Effect.fnUntraced(function* (
 			await: Effect.succeed(Exit.void),
 		} satisfies Preparation
 	const scope = yield* Scope.make()
-	const state = yield* TxRef.make<ReleaseState>(ReleaseState.Pending())
-	const claim = Effect.tx(
-		TxRef.modify(state, (current) =>
-			current._tag === "Pending"
-				? [true, ReleaseState.Running()]
-				: [false, current],
-		),
+	const owner: AsyncClose.Close = yield* AsyncClose.make(
+		runtime.changes.scope,
+		Release.close(scope, Exit.void),
+		(exit) =>
+			Exit.isSuccess(exit) || !Cause.hasInterruptsOnly(exit.cause)
+				? TxRef.update(
+						runtime.changes.preparations,
+						HashSet.remove(owner.dispose),
+					)
+				: Effect.void,
 	)
-	const completed = Effect.tx(
-		TxRef.get(state).pipe(
-			Effect.flatMap((current) =>
-				current._tag === "Completed"
-					? Effect.succeed(current.exit)
-					: Effect.txRetry,
-			),
-		),
-	)
-	const finish = Effect.uninterruptible(
-		Effect.gen(function* () {
-			const exit = yield* Effect.exit(Release.close(scope, Exit.void))
-			yield* TxRef.set(state, ReleaseState.Completed({ exit }))
-			if (Exit.isSuccess(exit) || !Cause.hasInterruptsOnly(exit.cause))
-				yield* TxRef.update(
-					runtime.changes.preparations,
-					HashSet.remove(dispose),
-				)
-		}),
-	)
-	const dispose: Effect.Effect<void> = Effect.uninterruptible(
-		Effect.gen(function* () {
-			if (yield* claim) yield* finish
-			const exit = yield* completed
-			if (Exit.isFailure(exit)) return yield* Effect.failCause(exit.cause)
-		}),
-	)
-	yield* TxRef.update(runtime.changes.preparations, HashSet.add(dispose))
-	const close = Effect.uninterruptible(
-		claim.pipe(
-			Effect.flatMap((owner) =>
-				owner
-					? Effect.forkIn(finish, runtime.changes.scope, {
-							uninterruptible: true,
-						}).pipe(Effect.asVoid)
-					: Effect.void,
-			),
-		),
-	)
+	yield* TxRef.update(runtime.changes.preparations, HashSet.add(owner.dispose))
+	const close = owner.start
+	const completed = owner.await
 
 	const prepareCandidate = managed.driver.prepare
 	const result = yield* Effect.exit(
