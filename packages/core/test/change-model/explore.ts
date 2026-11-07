@@ -1,102 +1,107 @@
-import { Array as Arr, HashMap, HashSet, Option, Result } from "effect"
+import { Array as Arr, HashMap, HashSet, Option } from "effect"
 
-import { step, type Action, type Model, type Step } from "./model.ts"
-import type { Scenario } from "./scenarios.ts"
+import type { Event, State } from "../../src/internal/decisionCore.ts"
+import { checked } from "./assertions.ts"
 
-export interface Observer {
-	readonly transition: (
-		before: Model,
-		action: Action,
-		after: Step,
-		trace: ReadonlyArray<Action>,
-	) => void
-	readonly terminal: (state: Model, trace: ReadonlyArray<Action>) => void
+export interface Stimulus {
+	readonly name: string
+	readonly event: (state: State) => Event
 }
 export interface Exploration {
 	readonly schedules: number
+	readonly states: number
 	readonly transitions: number
 }
-// Enumerate every shuffle preserving each actor's causal order. Rejections consume
-// a command; retries must be explicit. There is no partial-order reduction.
+// Every causal shuffle is visited; the harness supplies only external reports.
 export const explore = (
-	scenario: Scenario,
-	observer: Observer,
+	initial: State,
+	actors: ReadonlyArray<ReadonlyArray<Stimulus>>,
+	terminal: (s: State) => void,
 ): Exploration => {
 	const visit = (
-		state: Model,
+		s: State,
 		positions: HashMap.HashMap<number, number>,
-		trace: ReadonlyArray<Action>,
+		trace: ReadonlyArray<string>,
 	): Exploration => {
-		const enabled = Arr.filterMap(scenario.actors, (actions, actor) => {
-			const position = HashMap.getUnsafe(positions, actor)
-			return Result.fromOption(
-				Option.map(Arr.get(actions, position), (action) => ({
-					action,
-					actor,
-					position,
-				})),
-				() => "Exhausted",
-			)
-		})
+		const enabled = Arr.filter(
+			Arr.map(actors, (actor, id) => ({
+				id,
+				position: Option.getOrElse(HashMap.get(positions, id), () => 0),
+				actor,
+			})),
+			({ position, actor }) => position < actor.length,
+		)
 		if (enabled.length === 0) {
-			observer.terminal(state, trace)
-			return { schedules: 1, transitions: 0 }
+			terminal(s)
+			return { schedules: 1, states: 1, transitions: 0 }
 		}
 		return Arr.reduce(
 			enabled,
-			{ schedules: 0, transitions: 0 },
-			(total, { action, actor, position }) => {
-				const after = step(state, action)
-				const nextTrace = Arr.append(trace, action)
-				observer.transition(state, action, after, nextTrace)
-				const child = visit(
-					after.state,
-					HashMap.set(positions, actor, position + 1),
-					nextTrace,
-				)
-				return {
-					schedules: total.schedules + child.schedules,
-					transitions: total.transitions + child.transitions + 1,
-				}
-			},
+			{ schedules: 0, states: 1, transitions: 0 },
+			(stats, { id, position, actor }) =>
+				Option.match(Arr.get(actor, position), {
+					onNone: () => stats,
+					onSome: (stimulus) => {
+						const names = Arr.append(trace, stimulus.name)
+						const next = checked(s, stimulus.event(s), names)
+						const child = visit(
+							next.state,
+							HashMap.set(positions, id, position + 1),
+							names,
+						)
+						return {
+							schedules: stats.schedules + child.schedules,
+							states: stats.states + child.states,
+							transitions: stats.transitions + child.transitions + 1,
+						}
+					},
+				}),
+		)
+	}
+	return visit(initial, HashMap.empty(), [])
+}
+export interface Reachability {
+	readonly states: HashSet.HashSet<State>
+	readonly transitions: number
+	readonly depth: number
+}
+// Breadth-first exploration deduplicates states, without adding a second reducer.
+export const reachable = (
+	initial: State,
+	alphabet: ReadonlyArray<Stimulus>,
+	depth: number,
+): Reachability => {
+	const visit = (
+		frontier: HashMap.HashMap<State, ReadonlyArray<string>>,
+		visited: HashSet.HashSet<State>,
+		level: number,
+		transitions: number,
+	): Reachability => {
+		if (level === depth || HashMap.size(frontier) === 0)
+			return { states: visited, transitions, depth }
+		const next = HashMap.reduce(
+			frontier,
+			HashMap.empty<State, ReadonlyArray<string>>(),
+			(next, trace, state) =>
+				Arr.reduce(alphabet, next, (next, stimulus) => {
+					const names = Arr.append(trace, stimulus.name)
+					const after = checked(state, stimulus.event(state), names).state
+					return HashSet.has(visited, after)
+						? next
+						: HashMap.set(next, after, names)
+				}),
+		)
+		return visit(
+			next,
+			HashSet.union(visited, HashSet.fromIterable(HashMap.keys(next))),
+			level + 1,
+			transitions + HashMap.size(frontier) * alphabet.length,
 		)
 	}
 	return visit(
-		scenario.initial,
-		HashMap.fromIterable(
-			Arr.map(scenario.actors, (_, index): readonly [number, number] => [
-				index,
-				0,
-			]),
-		),
-		[],
+		HashMap.fromIterable<State, ReadonlyArray<string>>([[initial, []]]),
+		HashSet.make(initial),
+		0,
+		0,
 	)
-}
-
-// Explore arbitrary repetitions of an action alphabet to a depth. Structural
-// state deduplication is sound here: commands depend only on the current state.
-export const reachable = (
-	initial: Model,
-	alphabet: ReadonlyArray<Action>,
-	depth: number,
-	check: Observer["transition"],
-): HashSet.HashSet<Model> => {
-	let frontier = HashSet.make(initial)
-	let visited = frontier
-	for (let level = 0; level < depth; level++) {
-		const next = HashSet.reduce(
-			frontier,
-			HashSet.empty<Model>(),
-			(states, before) =>
-				Arr.reduce(alphabet, states, (acc, action) => {
-					const after = step({ ...before, accesses: HashMap.empty() }, action)
-					check(before, action, after, [action])
-					const state = { ...after.state, accesses: HashMap.empty() }
-					return HashSet.has(visited, state) ? acc : HashSet.add(acc, state)
-				}),
-		)
-		visited = HashSet.union(visited, next)
-		frontier = next
-	}
-	return visited
 }

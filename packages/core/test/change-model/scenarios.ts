@@ -1,236 +1,181 @@
 import { Array as Arr, Cause, HashMap, HashSet, Option } from "effect"
 
-import {
-	Action,
-	cell,
-	ObjectKey,
-	type Generation,
-	type Member,
-	type Model,
-	type Plan,
-	type Token,
-} from "./model.ts"
+import * as Core from "../../src/internal/decisionCore.ts"
 
-export const slot = (id: string, realm = "root"): ObjectKey =>
-	ObjectKey.Slot({ realm, key: id })
-export const instance = (id: string): ObjectKey => ObjectKey.Instance({ id })
-export const group = (id: string): ObjectKey => ObjectKey.Group({ id })
-export interface FixtureMember {
-	readonly id: string
-	readonly group?: string
-	readonly realm?: string
-	readonly dependencies?: ReadonlyArray<{
-		readonly provider: string
-		readonly optional: boolean
-	}>
-}
-export const fixture = (
-	members: ReadonlyArray<FixtureMember> = [
-		{ id: "a" },
-		{ id: "b" },
-		{ id: "c" },
-	],
-): Model => {
-	const empty: Model = {
-		open: true,
-		maxUnits: Number.POSITIVE_INFINITY,
-		capacity: { used: members.length, reserved: 0 },
-		unitOwners: HashMap.empty(),
-		cells: HashMap.empty(),
-		reservations: HashMap.empty(),
-		changes: HashMap.empty(),
-		generations: HashMap.empty(),
-		terms: HashMap.empty(),
-		groups: HashMap.empty(),
-		leaseHolders: HashMap.empty(),
-		unavailable: HashSet.empty(),
-		stopping: HashSet.empty(),
-		accesses: HashMap.empty(),
-	}
-	const base = Arr.reduce(members, empty, (s, m) => {
-		const id = `${m.id}#0`
-		const gen: Generation = {
-			id,
-			instance: m.id,
-			config: "original",
-			owner: "initial",
-			publications: HashSet.make(slot(m.id, m.realm)),
-			started: true,
-			resolution: HashMap.empty(),
-			leases: HashSet.empty(),
-			evidence: "Missing",
-			retired: false,
-			cleanup: "Unknown",
-			exitCause: Cause.empty,
-		}
-		const value = { version: 1, value: Option.some(id) }
-		return {
-			...s,
-			cells: HashMap.set(
-				HashMap.set(
-					HashMap.set(s.cells, instance(m.id), value),
-					slot(m.id, m.realm),
-					value,
-				),
-				group(m.group ?? m.id),
-				{ version: 1, value: Option.some(m.group ?? m.id) },
-			),
-			generations: HashMap.set(s.generations, id, gen),
-			terms: HashMap.set(s.terms, m.id, 0),
-			groups: HashMap.set(
-				s.groups,
-				m.group ?? m.id,
-				HashSet.add(
-					Option.getOrElse(HashMap.get(s.groups, m.group ?? m.id), () =>
-						HashSet.empty(),
-					),
-					m.id,
-				),
-			),
-		}
+export const target = (identity: string): Core.Target => ({
+	identity,
+	placement: "Worker",
+	overlap: true,
+})
+export const initial = (count = 2, maxUnits = count + 2): Core.State =>
+	Core.make({
+		authority: "test",
+		maxUnits,
+		instances: Arr.makeBy(count, (i) => ({
+			id: `instance-${i}`,
+			target: target("original"),
+		})),
 	})
-	return Arr.reduce(members, base, (s, m) =>
-		Arr.reduce(m.dependencies ?? [], s, (state, dep) => {
-			const key = slot(dep.provider)
-			const provider = cell(state, key).value
-			if (Option.isNone(provider)) return state
-			const id = `${m.id}#0`
-			const gen = HashMap.getUnsafe(state.generations, id)
-			return {
-				...state,
-				generations: HashMap.set(state.generations, id, {
-					...gen,
-					resolution: HashMap.set(gen.resolution, key, provider.value),
-					leases: HashSet.add(gen.leases, provider.value),
-				}),
-				leaseHolders: HashMap.set(
-					state.leaseHolders,
-					provider.value,
-					HashSet.add(
-						Option.getOrElse(
-							HashMap.get(state.leaseHolders, provider.value),
-							() => HashSet.empty(),
-						),
-						id,
-					),
-				),
-				cells: HashMap.set(
-					state.cells,
-					ObjectKey.Edge({ consumer: m.id, provider: dep.provider }),
-					{ version: 1, value: provider },
-				),
-			}
-		}),
-	)
-}
-
-// Planning is outside the measured protocol. Fixtures supply complete footprints.
-export const plan = (
-	s: Model,
-	id: string,
-	specs: ReadonlyArray<FixtureMember>,
-	strategy: Plan["strategy"] = "Overlap",
-): Plan => {
-	const members = Arr.reduce(specs, HashMap.empty<string, Member>(), (map, m) =>
-		HashMap.set(map, m.id, {
-			instance: m.id,
-			old: Option.getOrThrow(cell(s, instance(m.id)).value),
-			target: `${id} target`,
-			startHealthy:
-				!HashSet.has(s.unavailable, instance(m.id)) &&
-				!HashMap.getUnsafe(
-					s.generations,
-					Option.getOrThrow(cell(s, instance(m.id)).value),
-				).retired,
-			group: m.group ?? m.id,
-			publications: HashSet.make(slot(m.id, m.realm)),
-			dependencies: Arr.reduce(
-				m.dependencies ?? [],
-				HashMap.empty<
-					ObjectKey,
-					{ readonly provider: string; readonly optional: boolean }
-				>(),
-				(deps, dep) => HashMap.set(deps, slot(dep.provider), dep),
-			),
-		}),
-	)
-	const writes = HashMap.reduce(
-		members,
-		HashSet.empty<ObjectKey>(),
-		(keys, member) =>
-			HashMap.reduce(
-				member.dependencies,
-				HashSet.union(
-					HashSet.add(
-						HashSet.add(keys, instance(member.instance)),
-						group(member.group),
-					),
-					member.publications,
-				),
-				(acc, dep) =>
-					HashSet.add(
-						acc,
-						ObjectKey.Edge({
-							consumer: member.instance,
-							provider: dep.provider,
-						}),
-					),
-			),
-	)
-	const reads = HashMap.reduce(
-		members,
-		HashSet.reduce(
-			writes,
-			HashMap.empty<ObjectKey, ReturnType<typeof cell>>(),
-			(map, key) => HashMap.set(map, key, cell(s, key)),
-		),
-		(map, member) =>
-			HashMap.reduce(member.dependencies, map, (acc, _, key) =>
-				HashMap.set(acc, key, cell(s, key)),
-			),
-	)
-	return { id, members, reads, writes, strategy, participants: HashSet.empty() }
-}
-export const token = (
+export const request = (
+	s: Core.State,
+	instance = "instance-0",
+	strategy: Core.Strategy = "Overlap",
+): Core.Request => ({
+	instance,
+	target: target("next"),
+	strategy,
+	reads: HashMap.make([instance, Core.cell(s, instance).version]),
+	writes: HashSet.make(instance),
+	leases: HashSet.empty(),
+	participants: HashSet.empty(),
+	budget: {
+		total: 1000,
+		startup: 50,
+		probe: 50,
+		drain: 50,
+		stop: 50,
+		terminate: 50,
+	},
+	trial: 10,
+})
+export const submit = (s: Core.State, r = request(s)): Core.State =>
+	Core.reduce(s, { _tag: "Submit", request: r, now: s.now }).state
+export const pending = (
+	s: Core.State,
 	change: string,
-	member: string,
-	term = 1,
-	view = 1,
-): Token => ({ change, generation: `${member}#${term}`, view })
-export const activate = (
+	kind: Core.CommandKind,
+): Core.Command =>
+	Option.getOrThrow(
+		Arr.findFirst(
+			HashMap.values(s.commands),
+			(c) =>
+				c.change === change && c.kind === kind && c.disposition === "Pending",
+		),
+	)
+export const report = (
+	s: Core.State,
+	c: Core.Command,
+	result: Core.Report = { _tag: "Succeeded" },
+): Core.State =>
+	Core.reduce(s, {
+		_tag: "Reported",
+		command: c.id,
+		token: c.token,
+		result,
+		now: s.now,
+	}).state
+export const succeed = (
+	s: Core.State,
 	id: string,
-	member: string,
-	term = 1,
-	view = 1,
-): ReadonlyArray<Action> => [
-	Action.Install({ change: id }),
-	Action.Acknowledge({ token: token(id, member, term, view) }),
-	Action.Commit({ change: id }),
-]
-export const exit = (generation: string): ReadonlyArray<Action> => [
-	Action.Evidence({ generation, evidence: "Exited" }),
-	Action.Retire({ generation }),
-]
-export const accepting = (p: Plan, member: string): ReadonlyArray<Action> => [
-	Action.Submit({ plan: p }),
-	Action.Prepare({ change: p.id }),
-	...activate(p.id, member),
-	...exit(`${member}#0`),
-	Action.Finish({ change: p.id }),
-]
-export interface Scenario {
-	readonly name: string
-	readonly initial: Model
-	readonly actors: ReadonlyArray<ReadonlyArray<Action>>
+	kind: Core.CommandKind,
+): Core.State => report(s, pending(s, id, kind))
+export const exit = (
+	s: Core.State,
+	unit: string,
+	cleanup: Core.Cleanup = { _tag: "Unknown" },
+): Core.State => {
+	const u = Option.getOrThrow(HashMap.get(s.units, unit))
+	return Core.reduce(s, {
+		_tag: "Exited",
+		unit,
+		incarnation: u.incarnation,
+		observer: u.spawn,
+		cleanup,
+		cause: Cause.empty,
+		now: s.now,
+	}).state
 }
-export const independent = (): Scenario => {
-	const initial = fixture()
+export const fire = (
+	s: Core.State,
+	id: string,
+	purpose: Core.TimerPurpose,
+): Core.State => {
+	const t = Option.getOrThrow(
+		Arr.findFirst(
+			HashMap.values(s.timers),
+			(t) => t.change === id && t.purpose === purpose && t.active,
+		),
+	)
+	return Core.reduce(s, {
+		_tag: "TimerFired",
+		timer: t.id,
+		generation: t.generation,
+		now: t.deadline,
+	}).state
+}
+export const started = (s: Core.State, id: string): Core.State =>
+	Arr.reduce(
+		[
+			"Resolve",
+			"Spawn",
+			"Start",
+			"Serve",
+			"Ready",
+			"Probe",
+		] satisfies ReadonlyArray<Core.CommandKind>,
+		s,
+		(s, kind) => succeed(s, id, kind),
+	)
+export const installed = (s: Core.State, id: string): Core.State =>
+	succeed(started(s, id), id, "Install")
+export const accept = (s: Core.State, id: string): Core.State => {
+	const trial = fire(installed(s, id), id, "Trial")
+	const stop = Arr.findFirst(
+		HashMap.values(trial.commands),
+		(c) => c.change === id && c.kind === "Stop" && c.disposition === "Pending",
+	)
+	return Option.match(stop, {
+		onNone: () => trial,
+		onSome: (c) => exit(succeed(trial, id, "Stop"), c.unit),
+	})
+}
+export const status = (s: Core.State, id = "change-1"): Core.Status =>
+	Option.getOrThrow(Core.get(s, id))
+export const conclusion = (s: Core.State, id = "change-1"): Core.Conclusion =>
+	Option.getOrThrow(status(s, id).conclusion)
+
+export const reportEvent = (
+	s: Core.State,
+	id: string,
+	kind: Core.CommandKind,
+): Core.Event => {
+	const command = pending(s, id, kind)
 	return {
-		name: "independent changes",
-		initial,
-		actors: [
-			accepting(plan(initial, "A", [{ id: "a" }]), "a"),
-			accepting(plan(initial, "B", [{ id: "b" }]), "b"),
-		],
+		_tag: "Reported",
+		command: command.id,
+		token: command.token,
+		result: { _tag: "Succeeded" },
+		now: s.now,
+	}
+}
+export const exitEvent = (s: Core.State, id: string): Core.Event => {
+	const unit = Option.getOrThrow(HashMap.get(s.units, id))
+	return {
+		_tag: "Exited",
+		unit: id,
+		incarnation: unit.incarnation,
+		observer: unit.spawn,
+		cleanup: { _tag: "Unknown" },
+		cause: Cause.empty,
+		now: s.now,
+	}
+}
+export const timerEvent = (
+	s: Core.State,
+	id: string,
+	purpose: Core.TimerPurpose,
+): Core.Event => {
+	const timer = Option.getOrThrow(
+		Arr.findFirst(
+			HashMap.values(s.timers),
+			(timer) =>
+				timer.change === id && timer.purpose === purpose && timer.active,
+		),
+	)
+	return {
+		_tag: "TimerFired",
+		timer: timer.id,
+		generation: timer.generation,
+		now: timer.deadline,
 	}
 }
