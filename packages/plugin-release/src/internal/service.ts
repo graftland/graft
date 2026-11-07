@@ -83,12 +83,15 @@ export const make = Effect.fnUntraced(function* (options: Options) {
 	)
 	const lock = yield* Semaphore.make(1)
 	const journalLock = yield* Semaphore.make(1)
+	// The journal belongs to this owner: callbacks such as projection audit run
+	// in callers' contexts, which need not carry platform services.
+	const platform = yield* Effect.context<FileSystem.FileSystem | Path.Path>()
 	const persist = (modify: (journal: Journal) => Journal) =>
 		journalLock.withPermit(
 			Effect.gen(function* () {
 				const previous = yield* Ref.get(state)
 				const next = modify(previous)
-				yield* durable(journalFile, next)
+				yield* durable(journalFile, next).pipe(Effect.provideContext(platform))
 				yield* Ref.set(state, next)
 			}).pipe(Effect.uninterruptible),
 		)

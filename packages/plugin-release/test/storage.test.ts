@@ -614,3 +614,46 @@ it.effect(
 			if (error._tag === "ReleaseError") assert.equal(error.code, "Journal")
 		}).pipe(Effect.scoped, Effect.provide(runtime)),
 )
+
+it.effect(
+	"records projection revisions for callers without platform services",
+	() =>
+		Effect.gen(function* () {
+			const h = yield* Effect.gen(function* () {
+				const h = yield* setup()
+				const file = h.path.join(h.store, "trust.json")
+				yield* write(file, { version: "1", entries: [] })
+				yield* make({
+					store: h.store,
+					initial: h.id,
+					host,
+					trust: file,
+				}).pipe(
+					Effect.provideService(ModuleResolver.ModuleResolver, h.resolver),
+				)
+				return h
+			}).pipe(Effect.provide(NodeServices.layer))
+			const values = [
+				{
+					service: "forecast",
+					operation: "read@1",
+					value: { description: "A" },
+				},
+			]
+			const publisher = yield* Trust.publish({
+				projection: "mcp/tools",
+				view: "forecast-tools",
+				values,
+			})
+			yield* publisher.update([])
+			const journal = yield* read(
+				h.path.join(h.store, "journal.json"),
+				Journal,
+			).pipe(Effect.provide(NodeServices.layer))
+			assert.equal(
+				Array.filter(journal.events, (event) => event.kind === "Projection")
+					.length,
+				2,
+			)
+		}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
+)
