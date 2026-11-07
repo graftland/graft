@@ -1195,7 +1195,9 @@ export const register = Effect.fnUntraced(function* (
 				managed.scope,
 				Effect.gen(function* () {
 					const leases = yield* TxRef.get(managed.leases)
-					const exits = yield* Effect.forEach(leases, coordinator.releaseHost)
+					const exits = yield* Effect.forEach(leases, (lease) =>
+						Effect.exit(lease.hostRelease.dispose),
+					)
 					const cause = foldCauses(exits)
 					if (cause.reasons.length > 0) return yield* Effect.failCause(cause)
 				}),

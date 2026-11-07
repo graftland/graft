@@ -145,7 +145,9 @@ service slots. Confirmed unit exit releases those runtime leases independently
 of host cleanup. Ending the registration scope closes facade admission; an
 unconfirmed generation keeps the instance name fenced until late settlement.
 Runtime ownership of a disposed registration ends after its execution, cleanup
-and admitted Changes have all settled.
+and admitted Changes have all settled. Runtime shutdown still closes pending
+host resources when unit exit is unconfirmed and reports the unresolved
+execution separately.
 
 ## Remote drain
 

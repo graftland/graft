@@ -42,24 +42,26 @@ export const make = Effect.fnUntraced(function* (
 			),
 		),
 	)
+	// Claim only once an executor is running; a fork into a closed owner cannot strand Running.
+	const run = Effect.uninterruptible(
+		claim.pipe(Effect.flatMap((owns) => (owns ? finish : Effect.void))),
+	)
 	return {
 		state,
 		start: Effect.uninterruptible(
-			claim.pipe(
-				Effect.flatMap((owns) =>
-					owns
-						? Effect.forkIn(finish, owner, { uninterruptible: true }).pipe(
-								Effect.asVoid,
-							)
-						: Effect.void,
-				),
+			Effect.suspend(() =>
+				owner.state._tag === "Closed"
+					? run
+					: Effect.forkIn(run, owner, { uninterruptible: true }).pipe(
+							Effect.asVoid,
+						),
 			),
 		),
 		await: Deferred.await(completed),
 		// Shutdown may already be closing the owner, so an unstarted close runs inline.
 		dispose: Effect.uninterruptible(
 			Effect.gen(function* () {
-				if (yield* claim) yield* finish
+				yield* run
 				const exit = yield* Deferred.await(completed)
 				if (Exit.isFailure(exit)) return yield* Effect.failCause(exit.cause)
 			}),
