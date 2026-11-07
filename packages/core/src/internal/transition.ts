@@ -680,7 +680,10 @@ export const engine = (
 			}),
 		)
 
-	const start = Effect.fnUntraced(function* (attempt: Attempt) {
+	const start = Effect.fnUntraced(function* (
+		attempt: Attempt,
+		requirement: "Exclusive" | "Overlap" = "Exclusive",
+	) {
 		const { unit, id } = attempt
 		yield* step(
 			id,
@@ -710,11 +713,7 @@ export const engine = (
 			),
 			limits.startup.describe,
 		)
-		if (
-			change !== undefined &&
-			(yield* TxRef.get(change.status)).strategy === "Overlap" &&
-			!description.overlap
-		)
+		if (requirement === "Overlap" && !description.overlap)
 			return yield* Effect.fail(
 				failed({ reason: "IncompatibleContract", phase: "Describing" }),
 			)

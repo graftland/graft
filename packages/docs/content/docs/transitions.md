@@ -121,6 +121,9 @@ that target. It checks approval again before execution and retains the Change’
 object versions and reservations. Unconfirmed exit or host cleanup can produce
 `Stuck`; late settlement never resumes that Change.
 
+Recovery starts after previous retirement, so the previous target does not need
+an Overlap declaration.
+
 `Graft.Options.maxUnits` defaults to 256. Initial registrations, reserved
 allocations, serving units, draining units and units without exit evidence count
 toward the limit. Restart can reuse capacity after confirmed old-unit exit;

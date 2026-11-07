@@ -99,10 +99,11 @@ const settleCandidate = Effect.fnUntraced(function* ({
 const prepareCandidate = Effect.fnUntraced(function* (
 	{ coordinator, run }: Execution,
 	desired: Change.Candidate,
+	requirement: "Exclusive" | "Overlap",
 ): Effect.fn.Return<Attempt, Failed> {
 	const attempt = yield* coordinator.allocate(desired)
 	yield* TxRef.set(run.candidate, Option.some(attempt))
-	yield* coordinator.start(attempt)
+	yield* coordinator.start(attempt, requirement)
 	return attempt
 })
 const observeTrial = (
@@ -214,7 +215,7 @@ const recover = Effect.fnUntraced(function* (
 	yield* TxRef.set(run.candidate, Option.some(restored))
 	yield* Effect.raceFirst(
 		Effect.gen(function* () {
-			yield* coordinator.start(restored)
+			yield* coordinator.start(restored, "Exclusive")
 			yield* coordinator.cutover(restored)
 			yield* observeTrial(execution, restored)
 		}),
@@ -318,7 +319,11 @@ const forward = Effect.fnUntraced(function* (
 		yield* retirePrevious(execution)
 		yield* coordinator.setRoute(Option.none())
 	}
-	const next = yield* prepareCandidate(execution, record.request.candidate)
+	const next = yield* prepareCandidate(
+		execution,
+		record.request.candidate,
+		strategy === "Overlap" ? "Overlap" : "Exclusive",
+	)
 	yield* coordinator.cutover(next)
 	yield* observeTrial(execution, next)
 	if (strategy === "Overlap") {
