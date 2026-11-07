@@ -139,6 +139,8 @@ or closed scope never replaces exit evidence.
 without executing the plugin. Authorization versions are checked again at route
 commit; removal and recreation cannot hide a stale premise. Metadata cleanup
 keeps its original completion record and may also leave a Change Stuck.
+Cancelling submission before admission starts cleanup; slow cleanup remains
+owned by the runtime.
 
 Each managed generation keeps its own leases to captured providers and retained
 service slots. Confirmed unit exit releases those runtime leases independently

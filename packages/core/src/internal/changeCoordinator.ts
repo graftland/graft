@@ -330,78 +330,83 @@ export const submit = Effect.fnUntraced(function* (
 	const normalized = yield* normalize(request, false)
 	const preliminary = yield* Admission.preflight(runtime, request, normalized)
 	if (preliminary._tag === "Duplicate") return preliminary.handle
-	const preparation = yield* prepare(
+	return yield* prepare(
 		runtime,
 		preliminary.managed,
 		normalized.candidate,
-		normalized.budget.startup,
-	)
-	return yield* Effect.uninterruptible(
-		Effect.gen(function* () {
-			const run = yield* Admission.makeRun(normalized)
-			const admission = yield* Effect.exit(
-				Admission.admit(
-					runtime,
-					request,
-					normalized,
-					run,
-					preparation,
-					preliminary,
-				),
-			)
-			if (Exit.isFailure(admission)) {
-				yield* preparation.close
-				const cleanup = yield* Effect.timeoutOption(
-					preparation.await,
-					normalized.budget.terminate,
-				)
-				return yield* Effect.failCause(
-					Cause.combine(
-						admission.cause,
-						Option.isSome(cleanup) && Exit.isFailure(cleanup.value)
-							? cleanup.value.cause
-							: Cause.empty,
+		normalized.budget,
+		(preparation) =>
+			Effect.gen(function* () {
+				const run = yield* Admission.makeRun(normalized)
+				const admission = yield* Effect.exit(
+					Admission.admit(
+						runtime,
+						request,
+						normalized,
+						run,
+						preparation,
+						preliminary,
 					),
 				)
-			}
-			const admitted = admission.value
-			if (admitted._tag === "Duplicate") {
-				yield* preparation.close
-				yield* preparation.await.pipe(
-					Effect.flatMap((cleanup) =>
-						Exit.isFailure(cleanup)
-							? Effect.logError(
-									"Redundant Change preparation cleanup failed",
-									cleanup.cause,
-								)
-							: Effect.void,
-					),
+				if (Exit.isFailure(admission)) {
+					yield* preparation.close
+					const cleanup = yield* Effect.timeoutOption(
+						preparation.await,
+						normalized.budget.terminate,
+					)
+					return yield* Effect.failCause(
+						Cause.combine(
+							admission.cause,
+							Option.isSome(cleanup) && Exit.isFailure(cleanup.value)
+								? cleanup.value.cause
+								: Cause.empty,
+						),
+					)
+				}
+				const admitted = admission.value
+				if (admitted._tag === "Duplicate") {
+					yield* preparation.close
+					yield* preparation.await.pipe(
+						Effect.flatMap((cleanup) =>
+							Exit.isFailure(cleanup)
+								? Effect.logError(
+										"Redundant Change preparation cleanup failed",
+										cleanup.cause,
+									)
+								: Effect.void,
+						),
+						Effect.annotateLogs({
+							change: admitted.handle.id,
+							instance: normalized.instance,
+						}),
+						Effect.forkIn(runtime.changes.scope),
+					)
+					return admitted.handle
+				}
+				yield* TxRef.set<{
+					readonly attempt: number | undefined
+					readonly phase: Change.Phase
+				}>(run.progress, {
+					attempt: admitted.attempt,
+					phase: "Admission",
+				})
+				const policy = deadlines(normalized)
+				yield* work(
+					admitted.managed,
+					policy,
+					admitted.run,
+					admitted.record,
+				).pipe(
 					Effect.annotateLogs({
-						change: admitted.handle.id,
-						instance: normalized.instance,
+						change: admitted.record.handle.id,
+						instance: admitted.managed.instance,
+						...admitted.run.trace,
 					}),
-					Effect.forkIn(runtime.changes.scope),
+					Effect.provideContext(admitted.managed.context),
+					Effect.forkIn(runtime.changes.scope, { uninterruptible: true }),
 				)
-				return admitted.handle
-			}
-			yield* TxRef.set<{
-				readonly attempt: number | undefined
-				readonly phase: Change.Phase
-			}>(run.progress, {
-				attempt: admitted.attempt,
-				phase: "Admission",
-			})
-			const policy = deadlines(normalized)
-			yield* work(admitted.managed, policy, admitted.run, admitted.record).pipe(
-				Effect.annotateLogs({
-					change: admitted.record.handle.id,
-					instance: admitted.managed.instance,
-					...admitted.run.trace,
-				}),
-				Effect.provideContext(admitted.managed.context),
-				Effect.forkIn(runtime.changes.scope, { uninterruptible: true }),
-			)
-			return admitted.record.handle
-		}),
+				return admitted.record.handle
+			}),
+		request.key,
 	)
 })
