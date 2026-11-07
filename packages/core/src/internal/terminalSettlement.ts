@@ -3,7 +3,7 @@ import { Array, Cause, Data, Effect, Exit, Option, Ref, TxRef } from "effect"
 import type * as Change from "../Change"
 import type { State as CloseState } from "./asyncClose"
 import type { Record } from "./changeTable"
-import type { Attempt, HostLease, Managed } from "./transition"
+import type { HostLease, Managed } from "./transition"
 
 export type Classification = Data.TaggedEnum<{
 	Settled: {}
@@ -121,41 +121,51 @@ export const read = Effect.fnUntraced(function* (
 })
 export interface Snapshot {
 	readonly state: Classification
+	readonly serving: Option.Option<HostLease>
 	readonly generations: ReadonlyArray<Obligation>
 	readonly preparation: NonNullable<Change.Status["preparation"]>
 }
-/** Only the currently serving generation transfers to registration ownership; every retired attempt remains. */
+/** Freeze the serving generation transferred to registration ownership at terminal publication. */
+const serving = Effect.fnUntraced(function* (
+	managed: Managed,
+): Effect.fn.Return<Option.Option<HostLease>> {
+	const route = yield* TxRef.get(managed.route)
+	if (Option.isNone(route)) return Option.none()
+	const retiring = yield* TxRef.get(route.value.retiring)
+	const termination = yield* TxRef.get(route.value.terminated)
+	return !retiring && Option.isNone(termination) ? route : Option.none()
+})
 export const generations = Effect.fnUntraced(function* (
 	managed: Managed,
 	record: Record,
+	transferred?: Option.Option<HostLease>,
 ): Effect.fn.Return<ReadonlyArray<Obligation>> {
-	const route = yield* TxRef.get(managed.route)
 	const owned = yield* TxRef.get(record.obligations)
+	const registrationOwned = transferred ?? (yield* serving(managed))
 	const facts = yield* Effect.forEach(owned, read)
 	return Array.filter(
 		facts,
 		(fact) =>
-			!(
-				Option.exists(
-					route,
-					(serving: Attempt) => serving.id === fact.lease.id,
-				) &&
-				!fact.retiring &&
-				fact.fact.execution === "Unconfirmed"
+			!Option.exists(
+				registrationOwned,
+				(lease) => lease.generation === fact.lease.generation,
 			),
 	)
 })
 export const classify = Effect.fnUntraced(function* (
 	managed: Managed,
 	record: Record,
+	transferred?: Option.Option<HostLease>,
 ): Effect.fn.Return<Snapshot> {
-	const obligations = yield* generations(managed, record)
+	const registrationOwned = transferred ?? (yield* serving(managed))
+	const obligations = yield* generations(managed, record, registrationOwned)
 	const preparation = yield* record.preparation.state
 	return {
 		state: combine([
 			...Array.map(obligations, (obligation) => obligation.state),
 			cleanup(preparation),
 		]),
+		serving: registrationOwned,
 		generations: obligations,
 		preparation: cleanupFact(preparation),
 	}

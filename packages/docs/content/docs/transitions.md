@@ -92,6 +92,9 @@ generation and metadata cleanup. Missing exit or cleanup evidence keeps the
 Change Stuck and its reservations held. Completed cleanup failures retain their
 full causes and enter failure or recovery handling.
 
+A generation that remains serving belongs to its registration. Later retirement
+does not become a new settlement obligation of an earlier Change.
+
 ## Budgets and calls
 
 `budget` limits total time and each startup, probe, drain, stop and termination

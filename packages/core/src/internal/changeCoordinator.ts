@@ -88,16 +88,17 @@ const awaitLateExit = Effect.fnUntraced(function* (
 	if (Option.isNone(attempt)) return yield* finishAllocation(managed, lease)
 	const known = yield* TxRef.get(attempt.value.terminated)
 	if (Option.isNone(known))
-		yield* Effect.suspend(() => attempt.value.unit.terminate).pipe(
-			Effect.catchCause((cause) =>
-				lateFact(managed, record, {
-					generation: lease.id,
-					execution: "Unconfirmed",
-					cleanup: "Unknown",
-					cause,
-				}),
+		yield* attempt.value.executor.run(
+			Effect.suspend(() => attempt.value.unit.terminate).pipe(
+				Effect.catchCause((cause) =>
+					lateFact(managed, record, {
+						generation: lease.id,
+						execution: "Unconfirmed",
+						cleanup: "Unknown",
+						cause,
+					}),
+				),
 			),
-			Effect.forkIn(managed.runtime.changes.scope),
 		)
 	return Option.isSome(known)
 		? known.value
@@ -108,8 +109,9 @@ const lateSettlement = Effect.fnUntraced(function* (
 	record: ChangeTable.Record,
 	policy: Deadlines,
 	run: Run,
+	ownership: Terminal.Snapshot,
 ) {
-	const obligations = yield* Terminal.generations(managed, record)
+	const obligations = ownership.generations
 	const unresolved = Array.filter(
 		obligations,
 		(obligation) => obligation.state._tag === "Unresolved",
@@ -153,7 +155,11 @@ const lateSettlement = Effect.fnUntraced(function* (
 	)
 	yield* record.preparation.close
 	yield* record.preparation.await
-	const settlement = yield* Terminal.classify(managed, record)
+	const settlement = yield* Terminal.classify(
+		managed,
+		record,
+		ownership.serving,
+	)
 	yield* Settlement.observe(
 		managed,
 		record,
@@ -215,7 +221,7 @@ const work = Effect.fnUntraced(function* (
 	)
 	if (finalized.settlement.state._tag === "Unresolved")
 		yield* Effect.interruptible(
-			lateSettlement(managed, record, policy, run),
+			lateSettlement(managed, record, policy, run, finalized.settlement),
 		).pipe(Effect.forkIn(managed.runtime.changes.scope))
 })
 
