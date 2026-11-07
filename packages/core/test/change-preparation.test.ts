@@ -3,12 +3,14 @@ import {
 	Cause,
 	Deferred,
 	Effect,
+	Exit,
 	Fiber,
 	HashMap,
 	HashSet,
 	Logger,
 	Queue,
 	References,
+	Scope,
 	String,
 	TxRef,
 } from "effect"
@@ -395,3 +397,84 @@ for (const mode of ["rejection", "failure", "cancellation"] as const)
 				}
 			}),
 	)
+
+it.effect(
+	"keeps timed-out preparation resources until actual fiber exit while the runtime is closing",
+	() =>
+		Effect.gen(function* () {
+			const callerScope = yield* Effect.scope
+			const entered = yield* Deferred.make<void>()
+			const release = yield* Deferred.make<void>()
+			const closing = yield* Deferred.make<void>()
+			const submitted =
+				yield* Deferred.make<
+					Fiber.Fiber<Exit.Exit<Change.Handle, Change.ChangeRejected>>
+				>()
+			const events = yield* TxRef.make<ReadonlyArray<string>>([])
+			const runtimeClose = yield* run(
+				Effect.gen(function* () {
+					yield* register("a", {
+						prepare: () =>
+							Effect.uninterruptible(
+								Effect.gen(function* () {
+									yield* Effect.addFinalizer(() =>
+										TxRef.update(events, Array.append("cleanup")),
+									)
+									yield* Deferred.succeed(entered, undefined)
+									yield* Deferred.await(release)
+									yield* TxRef.update(events, Array.append("execution ended"))
+									return { overlap: true }
+								}),
+							),
+					})
+					const submission = yield* Change.submit({
+						instance: "a",
+						candidate: candidate("next"),
+						budget,
+					}).pipe(Effect.exit, Effect.forkIn(callerScope))
+					yield* Deferred.succeed(submitted, submission)
+					yield* Deferred.await(entered)
+					const { runtime } = yield* RuntimeContext
+					yield* Scope.addFinalizer(
+						runtime.changes.scope,
+						Deferred.succeed(closing, undefined),
+					)
+				}),
+			).pipe(Effect.exit, Effect.forkScoped)
+			yield* Deferred.await(closing)
+			const submission = yield* Deferred.await(submitted)
+			yield* TestClock.adjust(200)
+			const result = submission.pollUnsafe()
+			const before = yield* TxRef.get(events)
+			yield* Deferred.succeed(release, undefined)
+			yield* Fiber.join(submission)
+			yield* Fiber.join(runtimeClose)
+			const after = yield* TxRef.get(events)
+			assert.isDefined(result)
+			assert.deepStrictEqual(before, [])
+			assert.deepStrictEqual(after, ["execution ended", "cleanup"])
+		}),
+)
+
+it.effect(
+	"releases runtime cleanup ownership after settled preparations and shutdown",
+	() =>
+		Effect.gen(function* () {
+			const owner = yield* run(
+				Effect.gen(function* () {
+					yield* register("a", {
+						prepare: () => Effect.succeed({ overlap: true }),
+					})
+					const outcome = yield* Change.run({
+						instance: "a",
+						candidate: candidate("next"),
+						budget,
+					})
+					assert.strictEqual(outcome._tag, "Accepted")
+					const { runtime } = yield* RuntimeContext
+					return runtime.changes.cleanupScope
+				}),
+			)
+			assert.strictEqual(owner.state._tag, "Closed")
+		}),
+)

@@ -1,5 +1,6 @@
 import {
 	Cause,
+	Deferred,
 	Effect,
 	Exit,
 	Fiber,
@@ -11,7 +12,7 @@ import {
 
 import * as Change from "../Change"
 import * as Release from "../Release"
-import type { Prepared } from "../Transition"
+import type { DriverError, Prepared } from "../Transition"
 import * as AsyncClose from "./asyncClose"
 import type { Runtime } from "./runtime"
 import type { Managed } from "./transition"
@@ -32,19 +33,26 @@ const observeCleanup = (exit: Exit.Exit<void>, correlation: Correlation) =>
 		: Effect.void
 	).pipe(Effect.annotateLogs({ ...correlation }))
 
-const closeScopes = Effect.fnUntraced(function* (
-	execution: Scope.Closeable,
+type Execution = Deferred.Deferred<
+	Option.Option<Fiber.Fiber<Prepared, DriverError>>
+>
+const closePreparation = Effect.fnUntraced(function* (
+	started: Execution,
 	resources: Scope.Closeable,
+	correlation: Correlation,
 ) {
-	const stopped = yield* Effect.exit(Release.close(execution, Exit.void))
-	const cleaned = yield* Effect.exit(Release.close(resources, Exit.void))
-	if (Exit.isFailure(stopped))
-		return yield* Effect.failCause(
-			Exit.isFailure(cleaned)
-				? Cause.combine(stopped.cause, cleaned.cause)
-				: stopped.cause,
-		)
-	if (Exit.isFailure(cleaned)) return yield* Effect.failCause(cleaned.cause)
+	const loading = yield* Deferred.await(started)
+	if (Option.isSome(loading)) {
+		// Only the original fiber Exit proves preparation execution has ended.
+		yield* Fiber.interrupt(loading.value)
+		const exit = yield* Fiber.await(loading.value)
+		if (Exit.isFailure(exit))
+			yield* Effect.logError(
+				"Change metadata preparation failed",
+				exit.cause,
+			).pipe(Effect.annotateLogs({ ...correlation }))
+	}
+	yield* Release.close(resources, Exit.void)
 })
 
 /** Preparation and its admission handoff share one interruption-safe resource boundary. */
@@ -64,11 +72,14 @@ export const prepare = Effect.fnUntraced(function* <A, E, R>(
 					close: Effect.void,
 					await: Effect.succeed(Exit.void),
 				})
-			const execution = yield* Scope.fork(runtime.changes.scope)
+			const started =
+				yield* Deferred.make<
+					Option.Option<Fiber.Fiber<Prepared, DriverError>>
+				>()
 			const scope = yield* Scope.make()
 			const owner: AsyncClose.Close = yield* AsyncClose.make(
-				runtime.changes.scope,
-				closeScopes(execution, scope),
+				runtime.changes.cleanupScope,
+				closePreparation(started, scope, { instance: managed.instance, key }),
 				(exit) =>
 					observeCleanup(exit, { instance: managed.instance, key }).pipe(
 						Effect.andThen(
@@ -94,7 +105,11 @@ export const prepare = Effect.fnUntraced(function* <A, E, R>(
 				}),
 			).pipe(
 				Effect.onExit((exit) =>
-					Exit.isFailure(exit) ? owner.dispose : Effect.void,
+					Exit.isFailure(exit)
+						? Deferred.succeed(started, Option.none()).pipe(
+								Effect.andThen(owner.dispose),
+							)
+						: Effect.void,
 				),
 			)
 			const load = managed.driver.prepare
@@ -102,18 +117,8 @@ export const prepare = Effect.fnUntraced(function* <A, E, R>(
 				const loading = yield* Scope.provide(
 					Effect.suspend(() => load(candidate)),
 					scope,
-				).pipe(
-					Effect.onExit((exit) =>
-						Exit.isFailure(exit)
-							? Effect.logError(
-									"Change metadata preparation failed",
-									exit.cause,
-								)
-							: Effect.void,
-					),
-					Effect.annotateLogs({ instance: managed.instance, key }),
-					Effect.forkIn(execution),
-				)
+				).pipe(Effect.forkIn(runtime.changes.scope))
+				yield* Deferred.succeed(started, Option.some(loading))
 				const result = yield* Effect.exit(
 					restore(Fiber.join(loading).pipe(Effect.timeout(limits.startup))),
 				)
@@ -156,7 +161,8 @@ export const prepare = Effect.fnUntraced(function* <A, E, R>(
 				Effect.onExit((exit) =>
 					Exit.isSuccess(exit)
 						? Effect.void
-						: owner.start.pipe(
+						: Deferred.succeed(started, Option.none()).pipe(
+								Effect.andThen(owner.start),
 								Effect.andThen(
 									Cause.hasInterrupts(exit.cause)
 										? Effect.gen(function* () {

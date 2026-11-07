@@ -14,6 +14,7 @@ import {
 } from "effect"
 
 import * as Change from "../Change"
+import * as Release from "../Release"
 import * as Capacity from "./capacity"
 import type { Preparation } from "./changePreparation"
 import type { Normalized } from "./changeRequest"
@@ -48,6 +49,7 @@ export interface Record {
 }
 export interface Table {
 	readonly scope: Scope.Closeable
+	readonly cleanupScope: Scope.Closeable
 	readonly preparations: TxRef.TxRef<HashSet.HashSet<Effect.Effect<void>>>
 	readonly open: TxRef.TxRef<boolean>
 	readonly next: TxRef.TxRef<number>
@@ -61,6 +63,7 @@ export interface Table {
 }
 export const make = Effect.gen(function* () {
 	const scope = yield* Scope.make()
+	const cleanupScope = yield* Scope.make()
 	const preparations = yield* TxRef.make(HashSet.empty<Effect.Effect<void>>())
 	yield* Scope.addFinalizer(
 		scope,
@@ -69,8 +72,11 @@ export const make = Effect.gen(function* () {
 			const exits = yield* Effect.forEach(pending, Effect.exit, {
 				concurrency: 8,
 			})
+			const released = yield* Effect.exit(
+				Release.close(cleanupScope, Exit.void),
+			)
 			const cause = Array.reduce(
-				exits,
+				[...exits, released],
 				Cause.empty,
 				(all: Cause.Cause<never>, exit) =>
 					Exit.isFailure(exit) ? Cause.combine(all, exit.cause) : all,
@@ -80,6 +86,7 @@ export const make = Effect.gen(function* () {
 	)
 	return {
 		scope,
+		cleanupScope,
 		preparations,
 		open: yield* TxRef.make(true),
 		next: yield* TxRef.make(1),
