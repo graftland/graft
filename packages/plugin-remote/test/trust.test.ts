@@ -4,6 +4,7 @@ import process from "node:process"
 
 import {
 	Cause,
+	Config,
 	Context,
 	Deferred,
 	Effect,
@@ -261,6 +262,17 @@ it.live.skipIf(process.platform !== "linux")(
 				)
 				.pipe(Effect.exit)
 			if (Exit.isFailure(available) || available.value !== 0) {
+				// CI sets this so the confinement suite cannot silently skip.
+				const required = yield* Config.Boolean("GRAFT_REQUIRE_SANDBOX").pipe(
+					Config.withDefault(false),
+				)
+				if (required)
+					assert.fail(
+						"GRAFT_REQUIRE_SANDBOX is set, but bubblewrap cannot create user and network namespaces: " +
+							(Exit.isFailure(available)
+								? Cause.pretty(available.cause)
+								: "bwrap exited with " + available.value),
+					)
 				context.skip(
 					"bubblewrap and unprivileged user/network namespaces are unavailable",
 				)
