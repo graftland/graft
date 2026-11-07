@@ -29,6 +29,7 @@ import * as T from "../Transition"
 import { withdraw } from "./activation"
 import * as Admission from "./admission"
 import * as Capacity from "./capacity"
+import * as Settlement from "./changeSettlement"
 import * as ChangeTable from "./changeTable"
 import { captureEdges, resolutionChanged } from "./dependencies"
 import * as Generations from "./generations"
@@ -67,7 +68,7 @@ type HostRelease =
 	  }
 	| { readonly _tag: "Completed"; readonly exit: Exit.Exit<void> }
 
-interface HostLease extends Capacity.Credit {
+export interface HostLease extends Capacity.Credit {
 	readonly generation: Generations.Token
 	readonly id: number
 	readonly scope: Scope.Closeable
@@ -342,56 +343,19 @@ export const engine = (
 			}),
 		)
 	const observeSettlement = Effect.fnUntraced(function* (lease: HostLease) {
-		if (change === undefined) return
-		const termination = yield* TxRef.get(lease.terminated)
-		const host = yield* Ref.get(lease.hostRelease)
-		const fact: Change.Settlement = {
-			generation: lease.id,
-			execution: Option.match(termination, {
-				onNone: () => "Unconfirmed",
-				onSome: (value) => value.state,
-			}),
-			cleanup:
-				host._tag !== "Completed"
-					? "Pending"
-					: Exit.isSuccess(host.exit)
-						? "Completed"
-						: Cause.hasInterruptsOnly(host.exit.cause)
-							? "Unknown"
-							: "Failed",
-			cause: Cause.combine(
-				Option.flatMap(termination, (value) =>
-					Option.fromUndefinedOr(value.cause),
-				).pipe(Option.getOrElse(() => Cause.empty)),
-				host._tag === "Completed" && Exit.isFailure(host.exit)
-					? host.exit.cause
-					: Cause.empty,
-			),
-		}
-		yield* Effect.tx(
-			ChangeTable.update(managed.runtime.changes, change, (status) => ({
-				...status,
-				settlement: [
-					...Array.filter(
-						status.settlement,
-						(previous) => previous.generation !== lease.id,
-					),
-					fact,
-				],
-				leaseHolders: Option.isSome(termination)
-					? Array.filter(
-							status.leaseHolders,
-							(generation) => generation !== lease.id,
-						)
-					: status.leaseHolders,
-				unconfirmedUnits: Option.isSome(termination)
-					? Array.filter(
-							status.unconfirmedUnits,
-							(generation) => generation !== lease.id,
-						)
-					: status.unconfirmedUnits,
-			})),
-		)
+		const lifecycle = yield* TxRef.get(managed.lifecycle)
+		const active =
+			lifecycle._tag === "Open" || lifecycle._tag === "Closing"
+				? lifecycle.active
+				: Option.none<Run>()
+		const target =
+			change ??
+			Option.getOrUndefined(
+				Option.flatMap(active, (run) => Option.fromUndefinedOr(run.record)),
+			)
+		if (target === undefined) return
+		const fact = yield* Settlement.read(lease)
+		yield* Settlement.observe(managed, target, [fact])
 	})
 
 	const step = <A, E>(
@@ -403,76 +367,19 @@ export const engine = (
 		Effect.gen(function* () {
 			if (progress !== undefined) yield* TxRef.set(progress, { attempt, phase })
 			if (change !== undefined) {
-				const attempts = yield* TxRef.get(managed.attempts)
-				const settlements = yield* Effect.forEach(attempts, (item) =>
-					Effect.gen(function* () {
-						const termination = yield* TxRef.get(item.terminated)
-						const host = yield* Ref.get(item.hostRelease)
-						const settlement: Change.Settlement = {
-							generation: item.id,
-							execution: Option.match(termination, {
-								onNone: () => "Unconfirmed",
-								onSome: (value) => value.state,
-							}),
-							cleanup:
-								host._tag !== "Completed"
-									? "Pending"
-									: Exit.isSuccess(host.exit)
-										? "Completed"
-										: Cause.hasInterruptsOnly(host.exit.cause)
-											? "Unknown"
-											: "Failed",
-							cause:
-								host._tag === "Completed" && Exit.isFailure(host.exit)
-									? host.exit.cause
-									: Option.flatMap(termination, (value) =>
-											Option.fromUndefinedOr(value.cause),
-										).pipe(Option.getOrElse(() => Cause.empty)),
-						}
-						return settlement
-					}),
-				)
+				const leases = yield* TxRef.get(managed.leases)
+				const settlements = yield* Effect.forEach(leases, Settlement.read)
 				const elapsed =
 					Number((yield* Clock.monotonicTimeNanos) - change.started) / 1_000_000
-				yield* Effect.tx(
-					ChangeTable.update(managed.runtime.changes, change, (status) => ({
-						...status,
-						phase,
-						remaining: Math.max(0, policy.total - elapsed),
-						leaseHolders:
-							managed.resolution.provisions.length === 0
-								? []
-								: Array.map(
-										Array.filter(
-											settlements,
-											(fact) => fact.execution === "Unconfirmed",
-										),
-										(fact) => fact.generation,
-									),
-						settlement: [
-							...Array.filter(
-								status.settlement,
-								(old) =>
-									!Array.some(
-										settlements,
-										(next) => next.generation === old.generation,
-									),
-							),
-							...settlements,
-						],
-						unconfirmedUnits: Array.map(
-							Array.filter(
-								settlements,
-								(item) => item.execution === "Unconfirmed",
-							),
-							(item) => item.generation,
-						),
-						members: Array.map(status.members, (member) => ({
-							...member,
-							execution: Change.Execution.Running({ phase }),
-						})),
+				yield* Settlement.observe(managed, change, settlements, (status) => ({
+					...status,
+					phase,
+					remaining: Math.max(0, policy.total - elapsed),
+					members: Array.map(status.members, (member) => ({
+						...member,
+						execution: Change.Execution.Running({ phase }),
 					})),
-				)
+				}))
 			}
 			const remaining =
 				budget === undefined

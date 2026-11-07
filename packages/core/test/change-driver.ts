@@ -35,6 +35,7 @@ export const register = Effect.fnUntraced(function* (
 		readonly inject?: boolean
 		readonly facade?: boolean
 		readonly holdOldExit?: boolean
+		readonly cleanup?: Effect.Effect<void>
 	} = {},
 ) {
 	const entered = yield* Deferred.make<void>()
@@ -45,6 +46,8 @@ export const register = Effect.fnUntraced(function* (
 		prepare: options.prepare,
 		allocate: (desired, term, acknowledgement) =>
 			Effect.gen(function* () {
+				if (term === 1 && options.cleanup !== undefined)
+					yield* Effect.addFinalizer(() => options.cleanup ?? Effect.void)
 				const exited =
 					term === 1 ? oldExit : yield* Deferred.make<Change.Termination>()
 				return {

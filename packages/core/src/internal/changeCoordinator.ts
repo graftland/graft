@@ -10,11 +10,13 @@ import {
 } from "effect"
 
 import * as Change from "../Change"
+import type { DriverError } from "../Transition"
 import * as Capacity from "./capacity"
 import * as Admission from "./changeAdmission"
 import { emergency, execute } from "./changeExecution"
 import { prepare } from "./changePreparation"
 import { normalize } from "./changeRequest"
+import * as Settlement from "./changeSettlement"
 import * as ChangeTable from "./changeTable"
 import * as Generations from "./generations"
 import { RuntimeContext } from "./runtimeContext"
@@ -22,6 +24,8 @@ import {
 	engine,
 	ExecutionOutcome,
 	safetyReserve,
+	type Attempt,
+	type HostLease,
 	type Managed,
 	type Run,
 } from "./transition"
@@ -107,38 +111,32 @@ const lateFact = (
 	managed: Managed,
 	record: ChangeTable.Record,
 	next: Change.Settlement,
-) =>
-	Effect.tx(
-		ChangeTable.update(managed.runtime.changes, record, (status) => ({
-			...status,
-			unconfirmedUnits:
-				next.execution === "Unconfirmed"
-					? status.unconfirmedUnits
-					: Array.filter(
-							status.unconfirmedUnits,
-							(id) => id !== next.generation,
-						),
-			settlement: [
-				...Array.filter(
-					status.settlement,
-					(old) => old.generation !== next.generation,
-				),
-				{
-					...next,
-					cause: Cause.combine(
-						Option.map(
-							Array.findFirst(
-								status.settlement,
-								(old) => old.generation === next.generation,
-							),
-							(old) => old.cause,
-						).pipe(Option.getOrElse(() => Cause.empty)),
-						next.cause,
-					),
-				},
-			],
-		})),
-	)
+) => Settlement.observe(managed, record, [next])
+const awaitLateExit = Effect.fnUntraced(function* (
+	managed: Managed,
+	record: ChangeTable.Record,
+	lease: HostLease,
+	attempt: Option.Option<Attempt>,
+): Effect.fn.Return<Change.Termination, DriverError> {
+	if (Option.isNone(attempt))
+		return { unit: `${managed.instance}-${lease.id}`, state: "NotStarted" }
+	const known = yield* TxRef.get(attempt.value.terminated)
+	if (Option.isNone(known))
+		yield* Effect.suspend(() => attempt.value.unit.terminate).pipe(
+			Effect.catchCause((cause) =>
+				lateFact(managed, record, {
+					generation: lease.id,
+					execution: "Unconfirmed",
+					cleanup: "Unknown",
+					cause,
+				}),
+			),
+			Effect.forkIn(managed.runtime.changes.scope),
+		)
+	return Option.isSome(known)
+		? known.value
+		: yield* Effect.suspend(() => attempt.value.unit.exited)
+})
 const lateSettlement = Effect.fnUntraced(function* (
 	managed: Managed,
 	record: ChangeTable.Record,
@@ -161,29 +159,13 @@ const lateSettlement = Effect.fnUntraced(function* (
 					attempts,
 					(attempt) => attempt.id === lease.id,
 				)
-				let execution: Change.Settlement["execution"] = "NotStarted"
-				let exitCause: Cause.Cause<unknown> = Cause.empty
-				if (Option.isSome(attempt)) {
-					const known = yield* TxRef.get(attempt.value.terminated)
-					if (Option.isNone(known))
-						yield* Effect.suspend(() => attempt.value.unit.terminate).pipe(
-							Effect.catchCause((cause) =>
-								lateFact(managed, record, {
-									generation: lease.id,
-									execution: "Unconfirmed",
-									cleanup: "Unknown",
-									cause,
-								}),
-							),
-							Effect.forkIn(managed.runtime.changes.scope),
-						)
-					const termination = Option.isSome(known)
-						? known.value
-						: yield* Effect.suspend(() => attempt.value.unit.exited)
-					yield* TxRef.set(attempt.value.terminated, Option.some(termination))
-					execution = termination.state
-					exitCause = termination.cause ?? Cause.empty
-				}
+				const termination = yield* awaitLateExit(
+					managed,
+					record,
+					lease,
+					attempt,
+				)
+				yield* TxRef.set(lease.terminated, Option.some(termination))
 				yield* Effect.tx(
 					Generations.settle(
 						managed.runtime,
@@ -191,17 +173,19 @@ const lateSettlement = Effect.fnUntraced(function* (
 						lease.generation,
 					).pipe(Effect.andThen(Capacity.end(managed.runtime.capacity, lease))),
 				)
+				const exited = yield* Settlement.read(lease)
+				yield* lateFact(managed, record, exited)
 				const host = yield* coordinator.releaseHost(lease)
 				yield* lateFact(managed, record, {
 					generation: lease.id,
-					execution,
+					execution: termination.state,
 					cleanup: Exit.isSuccess(host)
 						? "Completed"
 						: Cause.hasInterruptsOnly(host.cause)
 							? "Unknown"
 							: "Failed",
 					cause: Cause.combine(
-						exitCause,
+						termination.cause ?? Cause.empty,
 						Exit.isFailure(host) ? host.cause : Cause.empty,
 					),
 				})
