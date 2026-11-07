@@ -1,4 +1,14 @@
-import { Array, Cause, Effect, Exit, HashMap, Option, Ref, TxRef } from "effect"
+import {
+	Array,
+	Cause,
+	Effect,
+	Equal,
+	Exit,
+	HashMap,
+	Option,
+	Ref,
+	TxRef,
+} from "effect"
 
 import type * as Change from "../Change"
 import * as ChangeTable from "./changeTable"
@@ -34,6 +44,39 @@ export const read = Effect.fnUntraced(function* (
 		),
 	}
 })
+/** Read the actual route and owned version cells; outcomes keep their earlier immutable snapshot. */
+export const members = Effect.fnUntraced(function* (
+	record: ChangeTable.Record,
+	current: ReadonlyArray<Change.Member>,
+): Effect.fn.Return<ReadonlyArray<Change.Member>> {
+	const route = yield* TxRef.get(record.route)
+	const termination = Option.isSome(route)
+		? yield* TxRef.get(route.value.terminated)
+		: Option.none<Change.Termination>()
+	const serving = Option.isNone(termination) ? route : Option.none()
+	const conditions = yield* TxRef.get(record.conditions)
+	const instance = Array.findFirst(
+		conditions,
+		(condition) => condition.object._tag === "Instance",
+	)
+	const version = Option.isSome(instance)
+		? (yield* TxRef.get(instance.value.cell)).version
+		: 0
+	return Array.map(current, (member) => ({
+		...member,
+		actual: {
+			version,
+			generation: Option.map(serving, (attempt) => attempt.id).pipe(
+				Option.getOrUndefined,
+			),
+			health: Option.isSome(serving) ? "Serving" : "Unavailable",
+			matchesTarget: Option.exists(serving, (attempt) =>
+				Equal.equals(attempt.desired, record.request.candidate),
+			),
+		},
+	}))
+}, Effect.tx)
+
 const merge = (
 	previous: ReadonlyArray<Change.Settlement>,
 	next: ReadonlyArray<Change.Settlement>,
@@ -79,11 +122,14 @@ export const observe = Effect.fnUntraced(function* (
 		(lease) => lease.id,
 	)
 
-	yield* ChangeTable.update(managed.runtime.changes, record, (current) => {
-		const status = change(current)
+	const current = yield* TxRef.get(record.status)
+	const status = change(current)
+	const actualMembers = yield* members(record, status.members)
+	yield* ChangeTable.update(managed.runtime.changes, record, () => {
 		const settlement = merge(status.settlement, next)
 		return {
 			...status,
+			members: actualMembers,
 			settlement,
 			leaseHolders,
 			unconfirmedUnits: Array.map(

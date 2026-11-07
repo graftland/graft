@@ -178,7 +178,7 @@ export const execute = Effect.fnUntraced(function* (
 			yield* Effect.tx(Admission.pause(managed))
 			yield* TxRef.set(run.budget.reserved, limits.recovery + limits.cleanup)
 			yield* retireOld()
-			yield* TxRef.set(managed.route, Option.none())
+			yield* coordinator.setRoute(Option.none())
 		}
 		const next = yield* prepare(record.request.candidate)
 		yield* coordinator.cutover(next)
@@ -211,14 +211,14 @@ export const execute = Effect.fnUntraced(function* (
 			(cleanup.failure.reason === "UnconfirmedTermination" ||
 				cleanup.failure.reason === "UnresolvedCleanup")
 		) {
-			yield* TxRef.set(managed.route, Option.none())
+			yield* coordinator.setRoute(Option.none())
 			yield* Admission.close(managed, "RecoveryFailed")
 			return yield* complete("Stuck", failure.phase, cleanup.failure.reason)
 		}
 		if (yield* closing(managed)) {
 			yield* TxRef.set(run.budget.reserved, 0)
 			const stopped = yield* Effect.result(retireOld())
-			yield* TxRef.set(managed.route, Option.none())
+			yield* coordinator.setRoute(Option.none())
 			yield* Admission.close(managed, "Closing")
 			return yield* complete(
 				stopped._tag === "Failure" &&
@@ -236,7 +236,7 @@ export const execute = Effect.fnUntraced(function* (
 		}
 		if (failure.reason === "UnresolvedCleanup") {
 			if (yield* TxRef.get(record.oldChanged)) {
-				yield* TxRef.set(managed.route, Option.none())
+				yield* coordinator.setRoute(Option.none())
 				yield* Admission.close(managed, "RecoveryFailed")
 			} else yield* Admission.open(managed)
 			return yield* complete("Stuck", failure.phase, failure.reason)
@@ -245,7 +245,7 @@ export const execute = Effect.fnUntraced(function* (
 			yield* Admission.open(managed)
 			return yield* complete("Aborted", failure.phase, failure.reason)
 		}
-		yield* TxRef.set(managed.route, Option.none())
+		yield* coordinator.setRoute(Option.none())
 		if (failure.reason === "UnconfirmedTermination") {
 			yield* Admission.close(managed, "RecoveryFailed")
 			return yield* complete("Stuck", failure.phase, failure.reason)
@@ -285,7 +285,7 @@ export const execute = Effect.fnUntraced(function* (
 		)
 		yield* TxRef.set(run.budget.reserved, 0)
 		const ended = yield* Effect.result(settleCandidate())
-		yield* TxRef.set(managed.route, Option.none())
+		yield* coordinator.setRoute(Option.none())
 		yield* Admission.close(
 			managed,
 			(yield* closing(managed)) ? "Closing" : "RecoveryFailed",
@@ -347,15 +347,22 @@ export const emergency = Effect.fnUntraced(function* (
 	run: Run,
 	cause: Cause.Cause<never>,
 ) {
+	const coordinator = engine(
+		managed,
+		policy,
+		run.evidence,
+		run.budget,
+		run.progress,
+		run.record,
+	)
 	const progress = yield* TxRef.get(run.progress)
 	yield* TxRef.update(run.evidence, Array.append({ ...progress, cause }))
 	yield* Effect.tx(
 		Admission.close(managed, "RecoveryFailed").pipe(
-			Effect.andThen(TxRef.set(managed.route, Option.none())),
+			Effect.andThen(coordinator.setRoute(Option.none())),
 		),
 	)
 	yield* TxRef.set(run.budget.reserved, 0)
-	const coordinator = engine(managed, policy, run.evidence, run.budget)
 	const attempts = yield* TxRef.get(managed.attempts)
 	const results = yield* Effect.forEach(attempts, (attempt) =>
 		coordinator.terminate(attempt).pipe(

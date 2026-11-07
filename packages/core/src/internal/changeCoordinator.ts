@@ -1,13 +1,4 @@
-import {
-	Array,
-	Cause,
-	Effect,
-	Equal,
-	Exit,
-	HashSet,
-	Option,
-	TxRef,
-} from "effect"
+import { Array, Cause, Effect, Exit, HashSet, Option, TxRef } from "effect"
 
 import * as Change from "../Change"
 import type { DriverError } from "../Transition"
@@ -31,56 +22,30 @@ import {
 } from "./transition"
 import type { Deadlines } from "./transitionBudgets"
 
-const facts = Effect.fnUntraced(function* (
-	managed: Managed,
-	record: ChangeTable.Record,
-	outcome: ExecutionOutcome,
-) {
-	const status = yield* TxRef.get(record.status)
-	const route = yield* TxRef.get(managed.route)
-	const conditions = yield* TxRef.get(record.conditions)
-	const instance = Array.findFirst(
-		conditions,
-		(c) => c.object._tag === "Instance",
-	)
-	const version = Option.isSome(instance)
-		? (yield* TxRef.get(instance.value.cell)).version
-		: 0
-	return Array.map(status.members, (member): Change.Member => ({
-		...member,
-		execution: Change.Execution.Completed({
-			phase: outcome.phase,
-			outcome: outcome._tag,
-		}),
-		actual: {
-			version,
-			generation: Option.map(route, (attempt) => attempt.id).pipe(
-				Option.getOrUndefined,
-			),
-			health: Option.isSome(route) ? "Serving" : "Unavailable",
-			matchesTarget: Option.exists(route, (attempt) =>
-				Equal.equals(attempt.desired, record.request.candidate),
-			),
-		},
-		recoverability: {
-			possible: outcome._tag !== "Stuck",
-			reason:
-				outcome._tag === "Stuck"
-					? "Settlement obligations remain unresolved"
-					: "Recovery requires fresh resolution and current authorization",
-		},
-	}))
-})
 const publicOutcome = Effect.fnUntraced(function* (
-	managed: Managed,
 	record: ChangeTable.Record,
 	outcome: ExecutionOutcome,
 ): Effect.fn.Return<Change.Outcome> {
+	const status = yield* TxRef.get(record.status)
+	const members = yield* Settlement.members(record, status.members)
 	const result: Change.Result = {
 		change: record.handle.id,
 		phase: outcome.phase,
 		evidence: outcome.evidence,
-		members: yield* facts(managed, record, outcome),
+		members: Array.map(members, (member) => ({
+			...member,
+			execution: Change.Execution.Completed({
+				phase: outcome.phase,
+				outcome: outcome._tag,
+			}),
+			recoverability: {
+				possible: outcome._tag !== "Stuck",
+				reason:
+					outcome._tag === "Stuck"
+						? "Settlement obligations remain unresolved"
+						: "Recovery requires fresh resolution and current authorization",
+			},
+		})),
 	}
 	switch (outcome._tag) {
 		case "Accepted":
@@ -302,7 +267,7 @@ const work = Effect.fnUntraced(function* (
 			},
 		})),
 	)
-	const published = yield* publicOutcome(managed, record, outcome)
+	const published = yield* publicOutcome(record, outcome)
 	yield* Effect.tx(
 		Effect.gen(function* () {
 			const state = yield* TxRef.get(managed.lifecycle)

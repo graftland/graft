@@ -16,6 +16,7 @@ import {
 
 import type { Graft } from "./Graft"
 import * as Coordinator from "./internal/changeCoordinator"
+import * as ChangeFacts from "./internal/changeSettlement"
 import { RuntimeContext } from "./internal/runtimeContext"
 
 /** An immutable implementation identity and driver-owned immutable deployment snapshot. Custom drivers must detach and validate caller-owned input before registration or admission. */
@@ -256,7 +257,15 @@ export const get = Effect.fnUntraced(function* (
 	const records = yield* TxRef.get(runtime.changes.records)
 	const found = HashMap.get(records, id)
 	if (Option.isNone(found)) return Option.none()
-	const status = yield* TxRef.get(found.value.status)
+	const status = yield* Effect.tx(
+		Effect.gen(function* () {
+			const status = yield* TxRef.get(found.value.status)
+			return {
+				...status,
+				members: yield* ChangeFacts.members(found.value, status.members),
+			}
+		}),
+	)
 	const elapsed =
 		Number((yield* Clock.monotonicTimeNanos) - found.value.started) / 1_000_000
 	return Option.some({

@@ -309,6 +309,23 @@ export const engine = (
 		yield* Settlement.observe(managed, target, [fact])
 	})
 
+	const setRoute = Effect.fnUntraced(function* (
+		route: Option.Option<Attempt>,
+	): Effect.fn.Return<void> {
+		yield* TxRef.set(managed.route, route)
+		const lifecycle = yield* TxRef.get(managed.lifecycle)
+		const active =
+			lifecycle._tag === "Open" || lifecycle._tag === "Closing"
+				? lifecycle.active
+				: Option.none<Run>()
+		const target =
+			change ??
+			Option.getOrUndefined(
+				Option.flatMap(active, (run) => Option.fromUndefinedOr(run.record)),
+			)
+		if (target !== undefined) yield* Settlement.observe(managed, target, [])
+	}, Effect.tx)
+
 	const runOperation = Effect.fnUntraced(function* <A, E>(
 		attempt: number,
 		phase: Change.Phase,
@@ -809,7 +826,7 @@ export const engine = (
 						Effect.gen(function* () {
 							const route = yield* TxRef.get(managed.route)
 							if (Option.contains(route, attempt)) {
-								yield* TxRef.set(managed.route, Option.none())
+								yield* setRoute(Option.none())
 								const gate = yield* TxRef.get(managed.admission)
 								if (gate._tag !== "Paused")
 									yield* Admission.close(managed, "RecoveryFailed")
@@ -932,12 +949,21 @@ export const engine = (
 				)
 				if (change !== undefined) yield* TxRef.set(change.oldChanged, true)
 				yield* TxRef.set(managed.desired, attempt.desired)
-				yield* TxRef.set(managed.route, Option.some(attempt))
+				yield* setRoute(Option.some(attempt))
 				yield* Admission.open(managed)
 				yield* generation(managed, attempt, "Serving")
 			}),
 		).pipe(Effect.andThen(record({ attempt: attempt.id, phase: "Cutover" })))
-	return { allocate, start, terminate, retire, cutover, step, releaseHost }
+	return {
+		allocate,
+		start,
+		terminate,
+		retire,
+		cutover,
+		step,
+		releaseHost,
+		setRoute,
+	}
 }
 
 const admitRegistration = Effect.fnUntraced(function* (
@@ -1007,6 +1033,7 @@ const disposeRegistration = Effect.fnUntraced(function* (
 	closed: Fiber.Fiber<void>,
 ): Effect.fn.Return<void> {
 	const { runtime, entry, instance, resolution, policy } = managed
+	const coordinator = engine(managed, policy, evidence)
 	const active = yield* Effect.tx(
 		Effect.gen(function* () {
 			const state = yield* TxRef.get(managed.lifecycle)
@@ -1016,7 +1043,7 @@ const disposeRegistration = Effect.fnUntraced(function* (
 					: Option.none<Run>()
 			yield* Admission.close(managed, "Closing")
 			yield* TxRef.set(managed.lifecycle, { _tag: "Closing", active })
-			yield* TxRef.set(managed.route, Option.none())
+			yield* coordinator.setRoute(Option.none())
 			return active
 		}),
 	)
@@ -1257,7 +1284,7 @@ export const register = Effect.fnUntraced(function* (
 					Effect.catchCause((cause) =>
 						Effect.gen(function* () {
 							yield* TxRef.set(initializationReserve, 0)
-							yield* TxRef.set(managed.route, Option.none())
+							yield* coordinator.setRoute(Option.none())
 							for (const attempt of yield* TxRef.get(managed.attempts)) {
 								yield* coordinator.terminate(attempt)
 							}

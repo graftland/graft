@@ -15,6 +15,7 @@ import * as Plugin from "../Plugin"
 import * as Capacity from "./capacity"
 import type { Preparation } from "./changePreparation"
 import { validate, type Normalized } from "./changeRequest"
+import * as Settlement from "./changeSettlement"
 import * as ChangeTable from "./changeTable"
 import { captureEdges, resolutionChanged } from "./dependencies"
 import { realmOf, Realms, type Runtime } from "./runtime"
@@ -370,6 +371,7 @@ const makeRecord = Effect.fnUntraced(function* (
 		yield* TxRef.set(current.value.capacity, Option.some(capacity))
 	const record: ChangeTable.Record = {
 		runtime,
+		route: managed.route,
 		authorization: yield* TxRef.make(authorization),
 		preparation,
 		capacity,
@@ -383,6 +385,11 @@ const makeRecord = Effect.fnUntraced(function* (
 		handle,
 	}
 
+	const actualMembers = yield* Settlement.members(record, members)
+	yield* TxRef.update(status, (current) => ({
+		...current,
+		members: actualMembers,
+	}))
 	return record
 })
 
