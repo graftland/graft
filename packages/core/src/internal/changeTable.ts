@@ -33,7 +33,7 @@ export interface Condition {
 }
 export interface Record {
 	readonly runtime: Runtime
-	readonly authorization: Trust.Condition
+	readonly authorization: TxRef.TxRef<Trust.Condition>
 	readonly preparation: Preparation
 	readonly capacity: Capacity.Claim
 	readonly oldChanged: TxRef.TxRef<boolean>
@@ -169,12 +169,7 @@ export const reserve = Effect.fnUntraced(function* (
 	return conditions
 })
 
-export const invalidation = Effect.fnUntraced(function* (record: Record) {
-	const authorization = yield* Effect.result(
-		Trust.verify(record.runtime, record.authorization),
-	)
-	if (authorization._tag === "Failure")
-		return Option.some(Cause.fail(authorization.failure))
+const objectInvalidation = Effect.fnUntraced(function* (record: Record) {
 	const conditions = yield* TxRef.get(record.conditions)
 	for (const c of conditions) {
 		const current = yield* TxRef.get(c.cell)
@@ -194,6 +189,29 @@ export const invalidation = Effect.fnUntraced(function* (record: Record) {
 			)
 	}
 	return Option.none<Cause.Cause<unknown>>()
+})
+/** Recovery changes the execution target, never the reserved object ownership. */
+export const authorizeRecovery = Effect.fnUntraced(function* (
+	record: Record,
+	identity: string,
+) {
+	const invalidation = yield* objectInvalidation(record)
+	if (Option.isSome(invalidation)) return yield* Effect.fail(invalidation.value)
+	const authorization = yield* Trust.snapshot(
+		record.runtime,
+		record.request.instance,
+		identity,
+	).pipe(Effect.mapError(Cause.fail))
+	yield* TxRef.set(record.authorization, authorization)
+}, Effect.tx)
+export const invalidation = Effect.fnUntraced(function* (record: Record) {
+	const condition = yield* TxRef.get(record.authorization)
+	const authorization = yield* Effect.result(
+		Trust.verify(record.runtime, condition),
+	)
+	return authorization._tag === "Failure"
+		? Option.some(Cause.fail(authorization.failure))
+		: yield* objectInvalidation(record)
 })
 export const valid = (record: Record) =>
 	invalidation(record).pipe(Effect.map(Option.isNone))

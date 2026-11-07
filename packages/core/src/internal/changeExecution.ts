@@ -251,18 +251,38 @@ export const execute = Effect.fnUntraced(function* (
 			return yield* complete("Stuck", failure.phase, failure.reason)
 		}
 		const recovered = yield* Effect.result(
-			Effect.interruptible(
-				Effect.raceFirst(
-					recovery,
-					Effect.raceFirst(
-						waitClosing(managed, run),
-						waitInvalidation(record, run),
+			ChangeTable.authorizeRecovery(record, run.previousDesired.identity).pipe(
+				Effect.mapError((cause) =>
+					failed({
+						reason: "Stale",
+						phase: "Recovery",
+						cause,
+					}),
+				),
+				Effect.andThen(
+					Effect.interruptible(
+						Effect.raceFirst(
+							recovery,
+							Effect.raceFirst(
+								waitClosing(managed, run),
+								waitInvalidation(record, run),
+							),
+						),
 					),
 				),
 			),
 		)
 		if (recovered._tag === "Success")
 			return yield* complete("Recovered", "Recovery", failure.reason)
+		const recoveryProgress = yield* TxRef.get(run.progress)
+		yield* TxRef.update(
+			run.evidence,
+			Array.append<Change.Evidence>({
+				...recoveryProgress,
+				phase: "Recovery",
+				cause: Cause.fail(recovered.failure),
+			}),
+		)
 		yield* TxRef.set(run.budget.reserved, 0)
 		const ended = yield* Effect.result(settleCandidate())
 		yield* TxRef.set(managed.route, Option.none())

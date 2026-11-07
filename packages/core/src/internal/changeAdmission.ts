@@ -364,7 +364,7 @@ const makeRecord = Effect.fnUntraced(function* (
 		yield* TxRef.set(current.value.capacity, Option.some(capacity))
 	const record: ChangeTable.Record = {
 		runtime,
-		authorization,
+		authorization: yield* TxRef.make(authorization),
 		preparation,
 		capacity,
 		oldChanged: yield* TxRef.make(Option.isNone(current)),
