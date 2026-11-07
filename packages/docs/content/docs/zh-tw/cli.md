@@ -305,7 +305,7 @@ Windows 以現狀提供：行程樹清理和還原未經驗證，Graft 不作保
 
 `graft start` 與嵌入式宿主使用相同的公開 Loader 和驅動 API，載入
 [受管理的 Remote 項目](../config-file/#受管理的整合)。由應用程式提供操作端點，使用項目 id 呼叫
-`Graft.transition`。CLI 沒有內建 transition 子命令。 `--watch`
+`Change.run`。CLI 沒有內建 Change 子命令。 `--watch`
 不升級受管理的單元：HMR 跳過含受管理實例的執行環境，Loader 在改變目標前拒絕受管理樹的更新。
 
 ## graft check

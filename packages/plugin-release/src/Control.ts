@@ -83,7 +83,7 @@ const applied = (value: import("./Model").Applied): Reply => ({
 	),
 	value: {
 		status: value.status,
-		outcomes: Array.map(value.outcomes, (item) =>
+		outcomes: Array.map(value.outcomes, (item): Schema.Json =>
 			item._tag === "Admitted"
 				? {
 						_tag: item._tag,

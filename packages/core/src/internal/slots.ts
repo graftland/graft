@@ -32,6 +32,13 @@ export const release = Effect.fnUntraced(function* (
 	if (count === 1) {
 		const provision = yield* TxRef.get(slot.provision)
 		if (Option.isNone(provision))
-			yield* TxRef.update(runtime.slots, HashMap.remove(slot.key))
+			yield* TxRef.update(runtime.slots, (directory) =>
+				Option.exists(
+					HashMap.get(directory, slot.key),
+					(current) => current === slot,
+				)
+					? HashMap.remove(directory, slot.key)
+					: directory,
+			)
 	}
 })

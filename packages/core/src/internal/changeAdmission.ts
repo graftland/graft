@@ -15,9 +15,72 @@ import * as Capacity from "./capacity"
 import type { Preparation } from "./changePreparation"
 import { validate, type Normalized } from "./changeRequest"
 import * as ChangeTable from "./changeTable"
+import { captureEdges, resolutionChanged } from "./dependencies"
 import { realmOf, Realms, type Runtime } from "./runtime"
-import { ExecutionOutcome, type Run } from "./transition"
+import { ExecutionOutcome, type Managed, type Run } from "./transition"
 import * as Trust from "./trust"
+
+const footprint = Effect.fnUntraced(function* (managed: Managed) {
+	const realms = Context.get(managed.context, Realms)
+	const spec = yield* TxRef.get(managed.entry.spec)
+	const facadeKeys = Array.map(managed.facades, (facade) => facade.key)
+	const dependencyKeys = Array.dedupe(
+		Array.map(spec.plugin.inject, (dependency) =>
+			Plugin.isOptional(dependency) ? dependency.key.key : dependency.key,
+		),
+	)
+	const readSlots = Array.filter(
+		dependencyKeys,
+		(key) => !Array.contains(facadeKeys, key),
+	)
+	return [
+		...Array.map(
+			captureEdges(managed.instance, managed.resolution),
+			(object) => ({ object, write: true }),
+		),
+		...Array.map(readSlots, (key) => ({
+			object: {
+				_tag: "Slot",
+				realm: realmOf(realms, key),
+				key,
+			} satisfies Change.ObjectKey,
+			write: false,
+		})),
+		{
+			object: {
+				_tag: "Instance",
+				instance: managed.instance,
+			} satisfies Change.ObjectKey,
+			write: true,
+		},
+		...Array.map(managed.facades, (facade) => ({
+			object: {
+				_tag: "Slot",
+				realm: realmOf(realms, facade.key),
+				key: facade.key,
+			} satisfies Change.ObjectKey,
+			write: true,
+		})),
+	]
+})
+export interface Plan {
+	readonly managed: Managed
+	readonly conditions: ReadonlyArray<ChangeTable.Condition>
+}
+const checkPlan = Effect.fnUntraced(function* (plan: Plan) {
+	for (const condition of plan.conditions) {
+		const current = yield* TxRef.get(condition.cell)
+		if (current.version !== condition.version)
+			return yield* Change.ChangeRejected.make({
+				reason: {
+					_tag: "Stale",
+					object: condition.object,
+					expected: condition.version,
+					actual: current.version,
+				},
+			})
+	}
+})
 
 export const preflight = Effect.fnUntraced(function* (
 	runtime: Runtime,
@@ -58,13 +121,26 @@ export const preflight = Effect.fnUntraced(function* (
 		return yield* Change.ChangeRejected.make({
 			reason: { _tag: "UnsupportedTarget", instance: normalized.instance },
 		})
-	return { _tag: "Prepare", managed: managed.value } as const
+	const objects = yield* footprint(managed.value)
+	const conditions = yield* Effect.forEach(objects, (object) =>
+		Effect.gen(function* () {
+			const cell = yield* ChangeTable.object(runtime.changes, object.object)
+			const current = yield* TxRef.get(cell)
+			return { ...object, cell, version: current.version }
+		}),
+	)
+	return { _tag: "Prepare", managed: managed.value, conditions } as const
 }, Effect.tx)
 
 export const makeRun = Effect.fnUntraced(function* (
 	normalized: Normalized,
 ): Effect.fn.Return<Run> {
+	const span = yield* Effect.option(Effect.currentSpan)
 	return {
+		trace: Option.map(span, (span) => ({
+			traceId: span.traceId,
+			spanId: span.spanId,
+		})).pipe(Option.getOrUndefined),
 		reply: yield* TxRef.make(Option.none<ExecutionOutcome>()),
 		previous: Option.none(),
 		previousDesired: normalized.candidate,
@@ -90,7 +166,9 @@ const select = Effect.fnUntraced(function* (
 	runtime: Runtime,
 	normalized: Normalized,
 	preparation: Preparation,
+	plan: Plan,
 ) {
+	yield* checkPlan(plan)
 	const table = runtime.changes
 	const instances = yield* TxRef.get(runtime.instances)
 	const found = HashMap.get(instances, normalized.instance)
@@ -105,6 +183,14 @@ const select = Effect.fnUntraced(function* (
 			},
 		})
 	const managed = found.value
+	if (yield* resolutionChanged(managed.resolution))
+		return yield* Change.ChangeRejected.make({
+			reason: {
+				_tag: "Unsupported",
+				message:
+					"Captured dependencies changed; a fresh registration is required",
+			},
+		})
 	const lifecycle = yield* TxRef.get(managed.lifecycle)
 	if (lifecycle._tag === "Closing" || lifecycle._tag === "Closed")
 		return yield* Change.ChangeRejected.make({
@@ -168,40 +254,12 @@ const reserve = Effect.fnUntraced(function* (
 	normalized: Normalized,
 	selection: Selection,
 	id: Change.Id,
+	plan: Plan,
 ) {
 	const table = runtime.changes
-	const { managed, key } = selection
-	const realms = Context.get(managed.context, Realms)
-	const spec = yield* TxRef.get(managed.entry.spec)
-	const facadeKeys = Array.map(managed.facades, (facade) => facade.key)
-	const dependencyKeys = Array.dedupe(
-		Array.map(spec.plugin.inject, (dependency) =>
-			Plugin.isOptional(dependency) ? dependency.key.key : dependency.key,
-		),
-	)
-	const readSlots = Array.filter(
-		dependencyKeys,
-		(key) => !Array.contains(facadeKeys, key),
-	)
-	const conditions = yield* ChangeTable.reserve(table, id, [
-		...Array.map(readSlots, (key) => ({
-			object: {
-				_tag: "Slot",
-				realm: realmOf(realms, key),
-				key,
-			} satisfies Change.ObjectKey,
-			write: false,
-		})),
-		{ object: key, write: true },
-		...Array.map(managed.facades, (facade) => ({
-			object: {
-				_tag: "Slot",
-				realm: realmOf(realms, facade.key),
-				key: facade.key,
-			} satisfies Change.ObjectKey,
-			write: true,
-		})),
-	])
+	const { managed } = selection
+	yield* checkPlan(plan)
+	const conditions = yield* ChangeTable.reserve(table, id, plan.conditions)
 	const authorization = yield* Trust.snapshot(
 		runtime,
 		managed.instance,
@@ -266,13 +324,17 @@ const makeRecord = Effect.fnUntraced(function* (
 		id,
 		key: request.key,
 		source: "Application",
+		trace: run.trace,
 		sequence: 0,
 		instance: managed.instance,
 		strategy,
 		phase: "Admission",
 		remaining: normalized.budget.total,
 		members,
-		leaseHolders: [],
+		leaseHolders:
+			managed.resolution.provisions.length > 0 && Option.isSome(current)
+				? [current.value.id]
+				: [],
 		unconfirmedUnits: Option.isSome(current) ? [current.value.id] : [],
 		evidence: [],
 		settlement: [],
@@ -323,6 +385,7 @@ export const admit = Effect.fnUntraced(function* (
 	normalized: Normalized,
 	run: Run,
 	preparation: Preparation,
+	plan: Plan,
 ) {
 	const table = runtime.changes
 	const duplicate = yield* ChangeTable.duplicate(table, request.key, normalized)
@@ -337,11 +400,11 @@ export const admit = Effect.fnUntraced(function* (
 			reason: { _tag: "Closing" },
 		})
 
-	const selection = yield* select(runtime, normalized, preparation)
+	const selection = yield* select(runtime, normalized, preparation, plan)
 	const { managed, current } = selection
 	const sequence = yield* TxRef.get(table.next)
 	const id = Change.Id.make(`change-${sequence}`)
-	const premises = yield* reserve(runtime, normalized, selection, id)
+	const premises = yield* reserve(runtime, normalized, selection, id, plan)
 	const record = yield* makeRecord(
 		runtime,
 		request,

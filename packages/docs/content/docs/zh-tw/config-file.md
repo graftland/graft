@@ -398,7 +398,7 @@ Include 會保留符號連結。每次磁碟操作都會解析設定的路徑，
 `target: { _tag: Local }`。
 
 項目 id 就是受管理的實例名稱：透過
-`Graft.transition({ target: "forecasts", candidate })`
+`Change.run({ instance: "forecasts", candidate })`
 發起升級。實例名稱在整個執行環境中必須唯一，包括巢狀 Loader。子註冊繼承所屬項目的識別。
 
 Loader 在寫入檔案或變更已接受目標前，以 `ManagedFork`

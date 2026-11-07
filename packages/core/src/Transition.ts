@@ -167,14 +167,15 @@ export interface Registration {
 		| undefined
 }
 
-/** Registers a driver for the current fork, owned by the fork's scope, and starts its first attempt. */
+/** Registers a driver for the current fork, owned by the registration scope, and starts its first attempt. */
 export const registerDriver: (
 	driver: Driver,
 	registration: Registration,
-) => Effect.Effect<void, DriverError | Graft.ServiceConflict, Graft.Graft> = (
-	driver,
-	registration,
-) => Coordinator.register(driver, registration)
+) => Effect.Effect<
+	void,
+	DriverError | Graft.ServiceConflict,
+	Graft.Graft | Scope.Scope
+> = (driver, registration) => Coordinator.register(driver, registration)
 
 /** Rejects edits before persistence or cache mutation. Ancestors include all managed descendants. */
 export const assertUnmanaged: (

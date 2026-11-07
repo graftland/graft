@@ -36,9 +36,11 @@ Awaiting the same handle again returns the same outcome.
 
 `Change.get(id)` returns the current status, or `None` for an unknown or evicted
 id. `Change.changes` sends bounded notifications with per-Change sequence
-numbers. Slow observers never block execution; reconcile gaps with `get`.
-Settled observation history retains 128 Changes. Keyed admission records and
-unresolved records are retained separately.
+numbers. Slow observers never block execution; reconcile gaps with `get`. Status
+includes the Change id, available trace correlation, member facts and settlement
+evidence. Diagnostics carry the same correlation. Settled observation history
+retains 128 Changes. Keyed admission records and unresolved records are retained
+separately.
 
 ## Request keys
 
@@ -58,7 +60,7 @@ a conflicting Change.
 | `Closing`           | Runtime or instance admission is closed.                                  |
 | `UnsupportedTarget` | No matching registered driver.                                            |
 | `InvalidBudget`     | Limits are invalid or omit required trial, cleanup or recovery allowance. |
-| `Stale`             | The expected instance version no longer matches.                          |
+| `Stale`             | The caller version or an internal prepared premise no longer matches.     |
 | `KeyConflict`       | A request key already identifies different normalized input.              |
 | `Capacity`          | Managed-unit capacity cannot cover the strategy and recovery.             |
 | `Unsupported`       | The requested strategy or member closure is unavailable.                  |
@@ -128,6 +130,11 @@ stop, disconnected transport or closed scope never replaces exit evidence.
 without executing the plugin. Authorization versions are checked again at route
 commit; removal and recreation cannot hide a stale premise. Metadata cleanup
 keeps its original completion record and may also leave a Change Stuck.
+
+Each managed generation keeps its own leases to captured providers and retained
+service slots. Confirmed unit exit releases those runtime leases independently
+of host cleanup. Ending the registration scope closes facade admission; an
+unconfirmed generation keeps the instance name fenced until late settlement.
 
 ## Remote drain
 

@@ -51,7 +51,7 @@ private imports. The same installed code runs in Workers and child processes.
 Startup creates `config/graft.yml` in that temporary project. Its `forecasts`
 entry names `@graftland/plugin-remote`, the installed contract, a relative
 captured-artifact directory and a direct placement. The operator calls
-`Graft.transition({ target: "forecasts", candidate })`; it does not rewrite the
+`Change.run({ instance: "forecasts", candidate })`; it does not rewrite the
 file. Loader rejects managed-tree edits before persistence.
 
 Artifacts pin package bytes only. External runtime dependencies are not captured
@@ -110,3 +110,8 @@ notification delivery.
 placements, a slow v1 call across cutover, changed metadata records and rejected
 annotations. The packed consumer compiles these modules using public exports
 only.
+
+The packed checks also submit independent Changes to two managed instances while
+one is held at a probe. Release orchestration remains sequential. RPC replies
+and client cancellation do not certify remote request-scope completion; that
+guarantee remains unsupported until phase 2.

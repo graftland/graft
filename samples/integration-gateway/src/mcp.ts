@@ -11,7 +11,7 @@ import stdio from "@graftland/plugin-mcp-server/stdio"
 
 import { Forecast, Get } from "@example/forecast-contract"
 
-import { policy, type start } from "./app.js"
+import { budget, requirements, type start } from "./app.js"
 
 export const view = (version: string, title = "City forecast") =>
 	Projection.operation(
@@ -83,7 +83,8 @@ export const expose = Effect.fnUntraced(function* (
 				Change.run({
 					instance: "forecasts",
 					candidate: app.candidate("v2"),
-					policy,
+					budget,
+					requirements,
 				}),
 				[view("v2", title)],
 				(outcome) => outcome._tag === "Accepted",

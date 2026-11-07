@@ -1,13 +1,26 @@
 import assert from "node:assert/strict"
 import { test } from "node:test"
 
-import { Effect, Fiber, FileSystem, Layer, Queue, Ref, Schedule } from "effect"
+import {
+	Effect,
+	Fiber,
+	FileSystem,
+	Layer,
+	Option,
+	Queue,
+	Ref,
+	Schedule,
+	Stream,
+} from "effect"
 import { SecureRandom } from "effect/crypto"
 import { NodeServices } from "@effect/platform-node"
 
-import { Graft } from "@graftland/graft"
+import { Change, Graft } from "@graftland/graft"
+import * as Remote from "@graftland/plugin-remote"
 
-import { start } from "../host/dist/app.js"
+import { contract, Forecast } from "@example/forecast-contract"
+
+import { budget, requirements, start } from "../host/dist/app.js"
 
 const runtime = Graft.layer.pipe(
 	Layer.provideMerge(
@@ -65,6 +78,62 @@ for (const target of [{ _tag: "Worker", execArgv: [] }, { _tag: "Local" }]) {
 				}).pipe(Effect.scoped, Effect.provide(runtime)),
 			),
 		)
+	run(
+		"changes a second managed instance while the first is gated in a probe",
+		(app) =>
+			Effect.gen(function* () {
+				const secondary = yield* Graft.plugin(
+					Remote.plugin(contract, {
+						instance: "secondary",
+						artifact: app.artifactFor("v1"),
+						contractModule: import.meta.resolve("@example/forecast-contract"),
+						target,
+						budget,
+						requirements,
+					}),
+					app.input,
+					{ isolate: [Forecast] },
+				)
+				yield* secondary.await
+				const probing = yield* Change.changes.pipe(
+					Stream.filter(
+						(status) =>
+							status.instance === "forecasts" && status.phase === "Probing",
+					),
+					Stream.runHead,
+					Effect.forkScoped({ startImmediately: true }),
+				)
+				const a = yield* Change.submit({
+					instance: "forecasts",
+					candidate: Remote.candidate({
+						...app.candidate("v2").deployment,
+						input: { ...app.input, holdProbe: true },
+					}),
+					strategy: "Overlap",
+					budget: { ...budget, total: "3 minutes", probe: "30 seconds" },
+					requirements,
+				})
+				yield* Fiber.join(probing)
+				const b = yield* Change.run({
+					instance: "secondary",
+					candidate: app.candidate("v2"),
+					strategy: "Overlap",
+					budget,
+					requirements,
+				})
+				assert.equal(b._tag, "Accepted")
+				assert.equal(b.members[0].actual.version, 2)
+				const pending = yield* Change.get(a.id)
+				assert.ok(Option.isNone(Option.getOrThrow(pending).outcome))
+				yield* a.cancel
+				assert.equal((yield* a.await)._tag, "Aborted")
+				assert.equal(
+					(yield* app.ask("parallel", "London")).text,
+					"v1 forecast for London",
+				)
+				yield* stable(app)
+			}),
+	)
 	run(
 		"healthy upgrades preserve the session, activations and reclaim every old unit",
 		(app) =>

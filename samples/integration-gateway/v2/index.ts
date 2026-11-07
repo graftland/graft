@@ -13,7 +13,10 @@ export default Plugin.make({
 	apply: Effect.fnUntraced(function* (input) {
 		const fs = yield* FileSystem.FileSystem
 		const crashed = yield* Deferred.make<void>()
-		yield* Plugin.probe("health", Effect.void)
+		yield* Plugin.probe(
+			"health",
+			input.holdProbe === true ? Effect.never : Effect.void,
+		)
 		yield* Plugin.fork(
 			Deferred.await(crashed).pipe(
 				Effect.andThen(Effect.fail("Forecast trial failed")),

@@ -18,7 +18,7 @@ import {
 	String,
 } from "effect"
 
-import { Change, Graft, Plugin, type Transition } from "@graftland/graft"
+import { Change, Graft, Plugin } from "@graftland/graft"
 import { Include, Loader, ModuleResolver } from "@graftland/loader"
 import type { ProjectionError } from "@graftland/plugin-mcp-server/Projection"
 import * as Remote from "@graftland/plugin-remote"
@@ -27,21 +27,27 @@ import { consume, gateway, localBot } from "./gateway.js"
 
 export const releases = ["v1", "v2", "broken-probe", "broken-trial"] as const
 export type Release = (typeof releases)[number]
-export const policy = {
-	total: "30 seconds",
+export const budget = {
+	total: "60 seconds",
 	startup: "2 seconds",
 	probe: "200 millis",
-	trial: 0,
 	drain: "2 seconds",
 	stop: "200 millis",
 	terminate: "2 seconds",
+} satisfies Change.Budget
+export const requirements: Change.Requirements = {
 	probes: ["health"],
-} satisfies Change.Budget & Change.Requirements
+	trial: 0,
+}
 
 export type TransitionWrapper = (
 	release: Release,
-	action: Effect.Effect<Change.Outcome, never, Graft.Graft>,
-) => Effect.Effect<Change.Outcome, ProjectionError, Graft.Graft>
+	action: Effect.Effect<Change.Outcome, Change.ChangeRejected, Graft.Graft>,
+) => Effect.Effect<
+	Change.Outcome,
+	ProjectionError | Change.ChangeRejected,
+	Graft.Graft
+>
 
 export const start = Effect.fnUntraced(function* (
 	directory: string,
@@ -205,8 +211,9 @@ export const start = Effect.fnUntraced(function* (
 						Change.run({
 							instance: "forecasts",
 							candidate: candidate(release.value),
-							policy: {
-								...policy,
+							budget,
+							requirements: {
+								...requirements,
 								trial: release.value === "broken-trial" ? "2 seconds" : 0,
 							},
 						}),

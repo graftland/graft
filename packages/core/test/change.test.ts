@@ -1,5 +1,6 @@
 import {
 	Array,
+	Cause,
 	Context,
 	Deferred,
 	Effect,
@@ -111,8 +112,10 @@ it.effect(
 const register = Effect.fnUntraced(function* (
 	instance: string,
 	stuck: boolean = false,
-	prepared: Effect.Effect<void> = Effect.void,
+	prepared: Effect.Effect<void, Transition.DriverError> = Effect.void,
 	prepare: Transition.Driver["prepare"] = undefined,
+	inject: ReadonlyArray<Plugin.Dependency> = [],
+	failure: Effect.Effect<never, Transition.DriverError> = Effect.never,
 ) {
 	const ready = yield* Deferred.make<void>()
 	const oldExit = yield* Deferred.make<Change.Termination>()
@@ -144,13 +147,14 @@ const register = Effect.fnUntraced(function* (
 									state: "Exited",
 								}).pipe(Effect.asVoid),
 					exited: Deferred.await(exited),
-					failure: Effect.never,
+					failure: term === 2 ? failure : Effect.never,
 				}
 			}),
 	}
 	const fork = yield* Graft.plugin(
 		Plugin.make({
 			name: instance,
+			inject,
 			apply: () =>
 				Transition.registerDriver(driver, {
 					instance,
@@ -471,6 +475,193 @@ it.effect(
 				const second = yield* register("a")
 				const generations = yield* second.fork.generations.pipe(Stream.runHead)
 				assert.strictEqual(Option.getOrThrow(generations)[0]?.attempt, 2)
+			}),
+		),
+)
+
+it.effect(
+	"rejects an internal instance premise changed during metadata preparation without a caller expected version",
+	() =>
+		run(
+			Effect.gen(function* () {
+				const entered = yield* Deferred.make<void>()
+				const release = yield* Deferred.make<void>()
+				yield* register("a", false, Effect.void, (desired) =>
+					(desired.identity === "delayed"
+						? Deferred.succeed(entered, undefined).pipe(
+								Effect.andThen(Deferred.await(release)),
+							)
+						: Effect.void
+					).pipe(Effect.as({ overlap: true })),
+				)
+				const preparing = yield* Effect.flip(
+					Change.submit({
+						instance: "a",
+						candidate: candidate("delayed"),
+						budget,
+					}),
+				).pipe(Effect.forkScoped)
+				yield* Deferred.await(entered)
+				const accepted = yield* Change.run({
+					instance: "a",
+					candidate: candidate("next"),
+					budget,
+				})
+				assert.strictEqual(accepted._tag, "Accepted")
+				yield* Deferred.succeed(release, undefined)
+				const stale = yield* Fiber.join(preparing)
+				assert.strictEqual(stale.reason._tag, "Stale")
+			}),
+		),
+)
+
+class Premise extends Context.Service<Premise, string>()(
+	"@graftland/graft/test/change.test/Premise",
+) {}
+
+it.effect(
+	"detects optional service absence ABA during metadata preparation using real publication and withdrawal",
+	() =>
+		run(
+			Effect.gen(function* () {
+				const entered = yield* Deferred.make<void>()
+				const release = yield* Deferred.make<void>()
+				yield* register(
+					"a",
+					false,
+					Effect.void,
+					() =>
+						Deferred.succeed(entered, undefined).pipe(
+							Effect.andThen(Deferred.await(release)),
+							Effect.as({ overlap: true }),
+						),
+					[Plugin.optional(Premise)],
+				)
+				const preparing = yield* Effect.flip(
+					Change.submit({
+						instance: "a",
+						candidate: candidate("next"),
+						budget,
+					}),
+				).pipe(Effect.forkScoped)
+				yield* Deferred.await(entered)
+				const provider = yield* Graft.plugin(
+					Plugin.make({
+						name: "premise-provider",
+						apply: () => Graft.provide(Premise, "appeared"),
+					}),
+				)
+				yield* provider.await
+				yield* provider.dispose
+				yield* Deferred.succeed(release, undefined)
+				const stale = yield* Fiber.join(preparing)
+				assert.strictEqual(stale.reason._tag, "Stale")
+				if (stale.reason._tag === "Stale") {
+					assert.deepStrictEqual(stale.reason.object, {
+						_tag: "Slot",
+						realm: "",
+						key: Premise.key,
+					})
+					assert.strictEqual(stale.reason.expected, 0)
+					assert.strictEqual(stale.reason.actual, 2)
+				}
+			}),
+		),
+)
+
+it.effect(
+	"retains available trace correlation in an admitted Change status",
+	() =>
+		run(
+			Effect.gen(function* () {
+				yield* register("a")
+				const handle = yield* Change.submit({
+					instance: "a",
+					candidate: candidate("next"),
+					budget,
+				}).pipe(Effect.withSpan("replacement"))
+				const observed = yield* Change.get(handle.id)
+				const status = Option.getOrThrow(observed)
+				assert.isString(status.trace?.traceId)
+				assert.isString(status.trace?.spanId)
+				yield* handle.await
+			}),
+		),
+)
+
+it.effect(
+	"recovers only A's owned patch while B commits and keeps both actual versions",
+	() =>
+		run(
+			Effect.gen(function* () {
+				const failed = yield* Deferred.make<never, Transition.DriverError>()
+				const recoveryReady = yield* Deferred.make<void>()
+				const releaseRecovery = yield* Deferred.make<void>()
+				const starts = yield* TxRef.make(0)
+				const ready = Effect.gen(function* () {
+					const count = yield* TxRef.modify(starts, (count) => [
+						count + 1,
+						count + 1,
+					])
+					if (count === 2)
+						yield* Deferred.succeed(recoveryReady, undefined).pipe(
+							Effect.andThen(Deferred.await(releaseRecovery)),
+						)
+				})
+				yield* register(
+					"a",
+					false,
+					ready,
+					undefined,
+					[],
+					Deferred.await(failed),
+				)
+				yield* register("b")
+				const trial = yield* Change.changes.pipe(
+					Stream.filter(
+						(status) => status.instance === "a" && status.phase === "Trial",
+					),
+					Stream.runHead,
+					Effect.forkScoped({ startImmediately: true }),
+				)
+				const a = yield* Change.submit({
+					instance: "a",
+					candidate: candidate("next"),
+					budget,
+					requirements: { trial: 1000 },
+				})
+				yield* Fiber.join(trial)
+				yield* Deferred.fail(
+					failed,
+					Transition.DriverError.make({
+						cause: Cause.fail("Candidate execution failed during trial"),
+					}),
+				)
+				yield* Deferred.await(recoveryReady)
+				const b = yield* Change.run({
+					instance: "b",
+					candidate: candidate("next"),
+					budget,
+				})
+				assert.strictEqual(b._tag, "Accepted")
+				const recoveringTrial = yield* Change.changes.pipe(
+					Stream.filter(
+						(status) => status.id === a.id && status.phase === "Trial",
+					),
+					Stream.runHead,
+					Effect.forkScoped({ startImmediately: true }),
+				)
+				yield* Deferred.succeed(releaseRecovery, undefined)
+				yield* Fiber.join(recoveringTrial)
+				yield* TestClock.adjust(1000)
+				const recovered = yield* a.await
+				assert.strictEqual(recovered._tag, "Recovered")
+				assert.strictEqual(recovered.members[0]?.actual.version, 3)
+				const actualB = yield* Change.get(b.change)
+				assert.strictEqual(
+					Option.getOrThrow(actualB).members[0]?.actual.version,
+					2,
+				)
 			}),
 		),
 )

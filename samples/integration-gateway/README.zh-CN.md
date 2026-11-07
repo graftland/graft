@@ -43,7 +43,7 @@ curl -X POST http://127.0.0.1:PORT/upgrade/broken-probe
 
 启动时在临时项目中创建 `config/graft.yml`。`forecasts` 条目指定
 `@graftland/plugin-remote`、已安装的契约、相对的制品目录和直连部署方式。操作端点调用
-`Graft.transition({ target: "forecasts", candidate })`，不重写文件。Loader 在持久化前拒绝托管树的编辑。
+`Change.run({ instance: "forecasts", candidate })`，不重写文件。Loader 在持久化前拒绝托管树的编辑。
 
 制品只固定包的字节内容。外部运行时依赖不会被捕获或固定版本。退出时删除临时项目及其制品。
 
@@ -93,3 +93,5 @@ node scripts/packed-gateway.mjs test
 
 `devenv shell -- node scripts/packed-gateway.mjs test`
 检查两种直接放置、跨切换的慢速 v1 调用、元数据变更记录和注解拒绝。打包消费者仅通过公开导出编译这些模块。
+
+打包检查还会在一个实例被探针阻挡时，直接向两个受管理实例提交独立 Change。Release 编排仍按顺序执行。RPC 回复和客户端取消不证明远端请求 Scope 完成；该保证等待阶段 2。

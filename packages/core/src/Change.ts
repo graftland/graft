@@ -210,10 +210,15 @@ export interface Settlement {
 	readonly cleanup: "Pending" | "Completed" | "Failed" | "Unknown"
 	readonly cause: Cause.Cause<unknown>
 }
+export interface Trace {
+	readonly traceId: string
+	readonly spanId: string
+}
 export interface Status {
 	readonly id: Id
 	readonly key: string | undefined
 	readonly source: "Application"
+	readonly trace: Trace | undefined
 	readonly sequence: number
 	readonly instance: string
 	readonly strategy: Strategy

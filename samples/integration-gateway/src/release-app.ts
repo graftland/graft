@@ -15,7 +15,7 @@ import { ModuleResolver } from "@graftland/loader"
 import * as Release from "@graftland/plugin-release"
 import type { CandidateOptions } from "@graftland/plugin-remote"
 
-import { policy } from "./app.js"
+import { budget, requirements } from "./app.js"
 import { consume, gateway, localBot } from "./gateway.js"
 
 export const startReleases = Effect.fnUntraced(function* (
@@ -125,7 +125,8 @@ export const startReleases = Effect.fnUntraced(function* (
 		store,
 		initial,
 		socket,
-		policy,
+		budget,
+		requirements,
 		host: {
 			node: "22.22.0",
 			effect: "4.1.2",

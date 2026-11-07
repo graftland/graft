@@ -176,9 +176,11 @@ const lateSettlement = Effect.fnUntraced(function* (
 					exitCause = termination.cause ?? Cause.empty
 				}
 				yield* Effect.tx(
-					Generations.settle(managed.entry.node, lease.generation).pipe(
-						Effect.andThen(Capacity.end(managed.runtime.capacity, lease)),
-					),
+					Generations.settle(
+						managed.runtime,
+						managed.entry.node,
+						lease.generation,
+					).pipe(Effect.andThen(Capacity.end(managed.runtime.capacity, lease))),
 				)
 				const host = yield* coordinator.releaseHost(lease)
 				yield* lateFact(managed, record, {
@@ -340,7 +342,14 @@ export const submit = Effect.fnUntraced(function* (
 		Effect.gen(function* () {
 			const run = yield* Admission.makeRun(normalized)
 			const admission = yield* Effect.exit(
-				Admission.admit(runtime, request, normalized, run, preparation),
+				Admission.admit(
+					runtime,
+					request,
+					normalized,
+					run,
+					preparation,
+					preliminary,
+				),
 			)
 			if (Exit.isFailure(admission)) {
 				yield* preparation.close
@@ -377,6 +386,11 @@ export const submit = Effect.fnUntraced(function* (
 				...normalized.requirements,
 			}
 			yield* work(admitted.managed, policy, admitted.run, admitted.record).pipe(
+				Effect.annotateLogs({
+					change: admitted.record.handle.id,
+					instance: admitted.managed.instance,
+					...admitted.run.trace,
+				}),
 				Effect.provideContext(admitted.managed.context),
 				Effect.forkIn(runtime.changes.scope, { uninterruptible: true }),
 			)

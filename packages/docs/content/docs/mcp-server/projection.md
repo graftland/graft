@@ -108,9 +108,9 @@ cancellation reaches clients as a protocol error.
 
 `Projection.offer` returns a controller. Use `controller.update` for a host-only
 view edit. Use `controller.updateAfter(action, bindings, accepted)` when the
-view belongs to a deployment change: pass `Graft.transition` or a release apply
-as the action, and accept only its `Accepted` outcome. The new view is validated
-before the action starts. The action and subsequent publication belong to the
+view belongs to a deployment change: pass `Change.run` or a release apply as the
+action, and accept only its `Accepted` outcome. The new view is validated before
+the action starts. The action and subsequent publication belong to the
 contributor scope, so cancelling the caller does not lose an accepted update.
 
 Concurrent controller actions fail with `ProjectionError` before their action

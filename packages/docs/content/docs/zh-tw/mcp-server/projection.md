@@ -92,7 +92,7 @@ export default Plugin.make({
 
 `Projection.offer` 回傳控制器。只修改宿主視圖時使用
 `controller.update`。視圖屬於部署變更時，使用
-`controller.updateAfter(action, bindings, accepted)`：將 `Graft.transition`
+`controller.updateAfter(action, bindings, accepted)`：將 `Change.run`
 或發布 apply 作為 action，僅接受其 `Accepted`
 結局。新視圖在 action 開始前完成驗證。Action 與後續發布歸貢獻插件的 scope 持有，因此取消呼叫方不會遺失已接受的更新。
 

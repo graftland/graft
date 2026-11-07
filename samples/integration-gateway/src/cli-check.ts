@@ -1,12 +1,12 @@
 import { Effect, Exit, FileSystem, Schema } from "effect"
 
 import { Application } from "@graftland/cli/Application"
-import { Change, Graft, Plugin } from "@graftland/graft"
+import { Change, Plugin } from "@graftland/graft"
 import * as Remote from "@graftland/plugin-remote"
 
 import { Forecast } from "@example/forecast-contract"
 
-import { policy } from "./app.js"
+import { budget, requirements } from "./app.js"
 
 /** The packed-consumer test loads this observer through the real CLI. */
 export default Plugin.make({
@@ -34,7 +34,8 @@ export default Plugin.make({
 		const outcome = yield* Change.run({
 			instance: "forecasts",
 			candidate: Remote.candidate(deployment),
-			policy,
+			budget,
+			requirements,
 		})
 		const after = yield* forecast.get("London")
 		const text = yield* Schema.encodeEffect(

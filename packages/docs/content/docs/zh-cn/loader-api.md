@@ -182,9 +182,9 @@ Graft 会重新解析序列化后的 YAML，确认它与计划目标一致；不
 
 ## 定位托管条目
 
-将条目 id 作为 `Graft.transition` 的 `target`；也支持数字 fork
-id。Loader 在条目注册驱动前绑定名称。嵌入式注册必须显式提供
+将条目 id 作为 `Change.run` 的
+`instance`。Loader 在条目注册驱动前绑定名称。嵌入式注册必须显式提供
 `instance`；名称冲突或重复注册会在启动执行单元前失败。
 
-`update`、`remove`、`create`、刷新和重试仍属于绕过协调器的操作：只要存在托管后代，就会在调用 store 前拒绝。文件边界见[托管配置](../config-file/#托管集成)。已接受的 transition 不改变
+`update`、`remove`、`create`、刷新和重试仍属于绕过协调器的操作：只要存在托管后代，就会在调用 store 前拒绝。文件边界见[托管配置](../config-file/#托管集成)。已接受的 Change 不改变
 `loader.entries`；它表示持久化配置，而非当前运行的代。

@@ -1,6 +1,18 @@
-import { Effect, HashMap, HashSet, Option, TxRef } from "effect"
+import { Array, Effect, HashMap, HashSet, Option, TxRef } from "effect"
 
+import type { ObjectKey } from "../Change"
 import type { ActiveResolution, GraphNode, ServiceKey } from "./runtime"
+
+export const captureEdges = (
+	consumer: string,
+	resolution: ActiveResolution,
+): ReadonlyArray<ObjectKey> =>
+	Array.map(
+		Array.dedupe(
+			Array.map(resolution.provisions, (provision) => provision.owner),
+		),
+		(provider) => ({ _tag: "Edge", consumer, provider: `fork-${provider}` }),
+	)
 
 /** The exact dependency snapshot must still be valid when plugin code publishes. */
 export const resolutionChanged = Effect.fnUntraced(function* (

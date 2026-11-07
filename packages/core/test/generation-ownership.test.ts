@@ -63,14 +63,14 @@ it.effect(
 				)
 				const both = yield* TxRef.get(provision.consumers)
 				assert.strictEqual(HashSet.size(both), 2)
-				yield* Effect.tx(Generations.settle(consumer, old))
-				yield* Effect.tx(Generations.settle(consumer, old))
+				yield* Effect.tx(Generations.settle(runtime, consumer, old))
+				yield* Effect.tx(Generations.settle(runtime, consumer, old))
 				const holders = yield* TxRef.get(provision.consumers)
 				assert.strictEqual(HashSet.size(holders), 1)
 				assert.isTrue(HashSet.has(holders, next))
 				const state = yield* TxRef.get(consumer.state)
 				assert.isTrue(HashMap.has(state.resolutions, next))
-				yield* Effect.tx(Generations.settle(consumer, next))
+				yield* Effect.tx(Generations.settle(runtime, consumer, next))
 				const empty = yield* TxRef.get(provision.consumers)
 				assert.strictEqual(HashSet.size(empty), 0)
 			}),
@@ -111,7 +111,7 @@ it.effect(
 					Effect.provideService(RuntimeContext, { runtime, activation: old }),
 				)
 				yield* withdraw(runtime, old)
-				yield* Effect.tx(Generations.settle(logical, old.generation))
+				yield* Effect.tx(Generations.settle(runtime, logical, old.generation))
 				const next = yield* make
 				yield* Graft.provide(Value, "next").pipe(
 					Effect.provideService(RuntimeContext, { runtime, activation: next }),
@@ -120,13 +120,13 @@ it.effect(
 				const slot = HashMap.getUnsafe(directory, realmKey("", Value.key))
 				const retain = yield* TxRef.get(slot.holders)
 				yield* withdraw(runtime, old)
-				yield* Effect.tx(Generations.settle(logical, old.generation))
+				yield* Effect.tx(Generations.settle(runtime, logical, old.generation))
 				const current = yield* TxRef.get(slot.provision)
 				assert.strictEqual(Option.getOrThrow(current).value, "next")
 				const retained = yield* TxRef.get(slot.holders)
 				assert.strictEqual(retained, retain)
 				yield* withdraw(runtime, next)
-				yield* Effect.tx(Generations.settle(logical, next.generation))
+				yield* Effect.tx(Generations.settle(runtime, logical, next.generation))
 			}),
 		),
 )
@@ -158,10 +158,10 @@ it.effect(
 				)
 				const before = yield* Effect.tx(publicationCycle(child, watched.key))
 				assert.isTrue(before)
-				yield* Effect.tx(Generations.settle(parent, next))
+				yield* Effect.tx(Generations.settle(runtime, parent, next))
 				const retained = yield* Effect.tx(publicationCycle(child, watched.key))
 				assert.isTrue(retained)
-				yield* Effect.tx(Generations.settle(parent, old))
+				yield* Effect.tx(Generations.settle(runtime, parent, old))
 				const settled = yield* Effect.tx(publicationCycle(child, watched.key))
 				assert.isFalse(settled)
 			}),

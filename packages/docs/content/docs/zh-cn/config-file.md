@@ -396,7 +396,7 @@ Include 会保留符号链接。每次磁盘操作先解析配置路径的真实
 `target: { _tag: Local }`。
 
 条目 id 就是托管实例名称：通过
-`Graft.transition({ target: "forecasts", candidate })`
+`Change.run({ instance: "forecasts", candidate })`
 发起升级。实例名称在整个运行时中必须唯一，包括嵌套 Loader。子注册继承所属条目的标识。
 
 Loader 在写入文件或更改已接受目标前，以 `ManagedFork`

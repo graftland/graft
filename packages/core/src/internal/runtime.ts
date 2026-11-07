@@ -74,6 +74,8 @@ export interface Activation {
 export interface ActiveResolution {
 	readonly watch: HashMap.HashMap<ServiceKey, Slot>
 	readonly provisions: ReadonlyArray<Provision>
+	/** Owned handles survive withdrawal removing absence premises from cycle checks. */
+	readonly retained?: ReadonlyArray<Slot>
 }
 
 export interface Spec {

@@ -214,13 +214,12 @@ editor and write through the API at the same time.
 
 ## Address a managed entry
 
-Use an entry id as `Graft.transition`'s `target`; numeric fork ids are also
-accepted. Loader binds the name before the entry registers its driver. Embedded
-registrations supply `instance` explicitly; a conflicting name or duplicate
-registration fails before a unit starts.
+Use an entry id as `Change.run`'s `instance`. Loader binds the name before the
+entry registers its driver. Embedded registrations supply `instance` explicitly;
+a conflicting name or duplicate registration fails before a unit starts.
 
 `update`, `remove`, `create`, refresh and retry remain bypass operations: a
 managed descendant rejects the operation before the store is invoked.
 [Managed configuration](../config-file/#managed-integrations) describes the file
-boundary. An accepted transition does not change `loader.entries`; that value
+boundary. An accepted Change does not change `loader.entries`; that value
 describes persisted configuration, not current generations.

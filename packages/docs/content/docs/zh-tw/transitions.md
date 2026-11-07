@@ -35,7 +35,8 @@ export const replacement = Effect.gen(function* () {
 `Change.get(id)` 回傳目前狀態；未知或已被歷史淘汰的 id 回傳
 `None`。`Change.changes`
 傳送有界通知，每個 Change 帶獨立序號。慢觀察者不會阻塞執行，遺漏通知後用 `get`
-對齊。已結算觀察歷史保留 128 筆；請求鍵紀錄和未結算紀錄另行保留。
+對齊。狀態包含 Change
+id、可用的 trace 關聯、成員事實與結算證據；診斷攜帶相同關聯。已結算觀察歷史保留 128 筆；請求鍵紀錄和未結算紀錄另行保留。
 
 ## 請求鍵
 
@@ -52,7 +53,7 @@ export const replacement = Effect.gen(function* () {
 | `Closing`           | 執行時或實例已關閉准入。                     |
 | `UnsupportedTarget` | 沒有匹配的已註冊驅動。                       |
 | `InvalidBudget`     | 期限無效，或未為試執行、清理和復原預留預算。 |
-| `Stale`             | 預期實例版本已不匹配。                       |
+| `Stale`             | 呼叫方版本或內部準備前提已不匹配。           |
 | `KeyConflict`       | 請求鍵已用於不同的正規化輸入。               |
 | `Capacity`          | 單元容量不足以涵蓋策略和復原。               |
 | `Unsupported`       | 不支援請求的策略或成員閉包。                 |
@@ -105,6 +106,9 @@ Overlap 要求驅動在分配前提供已驗證的宣告；候選先啟動，舊
 
 `Transition.Driver.prepare`
 在准入前驗證部署中繼資料，不執行外掛。路由提交再次核對授權版本；移除後重建不能隱藏過期前提。中繼資料清理保留原始完成紀錄，也可能使 Change 保持 Stuck。
+
+每個受管理執行代各自持有擷取的 provider
+lease 和服務 slot。確認單元退出後，執行態 lease 獨立於宿主清理釋放。註冊 Scope 結束時關閉門面准入；代的退出尚未確認時，實例名稱保持隔離，直到遲到結算完成。
 
 ## 遠端排空
 

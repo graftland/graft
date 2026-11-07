@@ -185,9 +185,9 @@ Graft 也會在 rename 已備妥的暫存檔之前，再檢查一次目的地：
 
 ## 定位受管理的項目
 
-將項目 id 作為 `Graft.transition` 的 `target`；也支援數字 fork
-id。Loader 在項目註冊驅動前綁定名稱。嵌入式註冊必須明確提供
+將項目 id 作為 `Change.run` 的
+`instance`。Loader 在項目註冊驅動前綁定名稱。嵌入式註冊必須明確提供
 `instance`；名稱衝突或重複註冊會在啟動執行單元前失敗。
 
-`update`、`remove`、`create`、更新和重試仍屬於繞過協調器的操作：只要存在受管理的後代，就會在呼叫 store 前拒絕。檔案邊界見[受管理的設定](../config-file/#受管理的整合)。已接受的 transition 不改變
+`update`、`remove`、`create`、更新和重試仍屬於繞過協調器的操作：只要存在受管理的後代，就會在呼叫 store 前拒絕。檔案邊界見[受管理的設定](../config-file/#受管理的整合)。已接受的 Change 不改變
 `loader.entries`；它代表持久化設定，而非目前執行的世代。

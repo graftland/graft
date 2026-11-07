@@ -557,7 +557,9 @@ export const supervise = Effect.fnUntraced(function* (
 			)
 			const closed = yield* Effect.exit(Release.close(running.scope, exit))
 			const released = yield* Effect.exit(
-				Effect.tx(Generations.settle(node, running.activation.generation)),
+				Effect.tx(
+					Generations.settle(runtime, node, running.activation.generation),
+				),
 			)
 			const tasks = yield* Ref.get(running.tasks.failures)
 			const updates = yield* Ref.get(running.updateCleanup)

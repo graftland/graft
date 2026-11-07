@@ -10,5 +10,8 @@
 		"effect": "4.1.*",
 		"@graftland/graft": "0.0.0",
 		"@example/forecast-contract": "1.0.0"
+	},
+	"graft": {
+		"overlap": true
 	}
 }

@@ -448,12 +448,12 @@ contract locations resolve from the configuration file's directory. Use
 `target: { _tag: Local }` for a child process.
 
 The entry id is the managed instance name: request
-`Graft.transition({ target: "forecasts", candidate })`. Instance names must be
+`Change.run({ instance: "forecasts", candidate })`. Instance names must be
 unique in the runtime, including nested loaders. A child registration inherits
 its entry's identity.
 
 Loader edits to a managed tree fail with `ManagedFork` before writing the file
 or changing its accepted target. Hand-written file changes cannot be prevented;
-watch refresh rejects them and retains the previous target. A transition changes
-the live generation only; it does not rewrite `graft.yml`. Keep persisted
-deployment intent separate from [transition outcomes](../transitions/).
+watch refresh rejects them and retains the previous target. A Change changes the
+live generation only; it does not rewrite `graft.yml`. Keep persisted deployment
+intent separate from [Change outcomes](../transitions/).

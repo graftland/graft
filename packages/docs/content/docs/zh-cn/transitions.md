@@ -35,7 +35,8 @@ export const replacement = Effect.gen(function* () {
 `Change.get(id)` 返回当前状态；未知或已被历史淘汰的 id 返回
 `None`。`Change.changes`
 发送有界通知，每个 Change 带独立序号。慢观察者不会阻塞执行，遗漏通知后用 `get`
-对齐。已结算观察历史保留 128 条；请求键记录和未结算记录单独保留。
+对齐。状态包含 Change
+id、可用的 trace 关联、成员事实与结算证据；诊断携带相同关联。已结算观察历史保留 128 条；请求键记录和未结算记录单独保留。
 
 ## 请求键
 
@@ -52,7 +53,7 @@ export const replacement = Effect.gen(function* () {
 | `Closing`           | 运行时或实例已关闭准入。                     |
 | `UnsupportedTarget` | 没有匹配的已注册驱动。                       |
 | `InvalidBudget`     | 期限无效，或未为试运行、清理和恢复预留预算。 |
-| `Stale`             | 预期实例版本已不匹配。                       |
+| `Stale`             | 调用方版本或内部准备前提已不匹配。           |
 | `KeyConflict`       | 请求键已用于不同的规范化输入。               |
 | `Capacity`          | 单元容量不足以覆盖策略和恢复。               |
 | `Unsupported`       | 不支持请求的策略或成员闭包。                 |
@@ -105,6 +106,9 @@ Overlap 要求驱动在分配前提供已验证的声明；候选先启动，旧
 
 `Transition.Driver.prepare`
 在准入前验证部署元数据，不执行插件。路由提交再次核对授权版本；移除后重建不能隐藏过期前提。元数据清理保留原始完成记录，也可能使 Change 保持 Stuck。
+
+每个受管理执行代各自持有捕获的 provider
+lease 和服务 slot。确认单元退出后，运行态 lease 独立于宿主清理释放。注册 Scope 结束时关闭门面准入；代的退出尚未确认时，实例名保持隔离，直到迟到结算完成。
 
 ## 远端排空
 

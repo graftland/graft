@@ -12,10 +12,10 @@ export const managedPlugin = (
 		apply: () => Transition.registerDriver(driver, registration),
 	})
 export const transition = (
-	fork: number,
+	instance: string,
 	deployment: Remote.CandidateOptions,
-): Effect.Effect<Change.Outcome, never, Graft.Graft> =>
-	Change.run({ instance: fork, candidate: Remote.candidate(deployment) })
+): Effect.Effect<Change.Outcome, Change.ChangeRejected, Graft.Graft> =>
+	Change.run({ instance, candidate: Remote.candidate(deployment) })
 
 export const directPlugin = (artifact: Remote.Artifact.Artifact) =>
 	Remote.plugin(
@@ -26,11 +26,17 @@ export const directPlugin = (artifact: Remote.Artifact.Artifact) =>
 			contractModule: "independent/contract",
 			target: { _tag: "Worker" },
 			maxInFlight: 8,
-			policy: { total: "5 minutes", drain: Duration.seconds(1) },
+			budget: { total: "5 minutes", drain: Duration.seconds(1) },
 		},
 	)
-export const busy = Change.Outcome.Aborted({
-	phase: "Admission",
-	reason: "Busy",
-	evidence: [],
+export const busy = Change.ChangeRejected.make({
+	reason: { _tag: "Busy", conflicts: [] },
 })
+export const completed = Change.Outcome.Accepted({
+	change: Change.Id.make("compile-only"),
+	phase: "Complete",
+	evidence: [],
+	members: [],
+})
+export const observe = (id: Change.Id) => Change.get(id)
+export const submit = (request: Change.Request) => Change.submit(request)
