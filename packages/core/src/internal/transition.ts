@@ -43,7 +43,11 @@ import {
 } from "./runtime"
 import { RuntimeContext } from "./runtimeContext"
 import * as Snapshots from "./snapshot"
-import { derive, type Deadlines } from "./transitionBudgets"
+import {
+	derive,
+	remaining as remainingBudget,
+	type Deadlines,
+} from "./transitionBudgets"
 import * as Trust from "./trust"
 
 interface ExecutionResult {
@@ -448,16 +452,12 @@ export const engine = (
 				})),
 			}))
 		}
+		const reserved =
+			budget === undefined ? 0 : yield* TxRef.get(budget.reserved)
 		const remaining =
 			budget === undefined
 				? limit
-				: Math.min(
-						limit,
-						policy.total -
-							Number((yield* Clock.monotonicTimeNanos) - budget.started) /
-								1_000_000 -
-							(yield* TxRef.get(budget.reserved)),
-					)
+				: yield* remainingBudget(budget.started, policy.total, limit, reserved)
 		return yield* runOperation(attempt, phase, effect, remaining)
 	})
 	const acquireLease = Effect.fnUntraced(function* (
@@ -628,10 +628,15 @@ export const engine = (
 				uninterruptible: true,
 			}),
 		)
-		const ended = yield* Effect.timeoutOption(
-			Fiber.await(cleanup),
-			limits.termination.exit,
-		)
+		const limit =
+			budget === undefined
+				? limits.termination.exit
+				: yield* remainingBudget(
+						budget.started,
+						policy.total,
+						limits.termination.exit,
+					)
+		const ended = yield* Effect.timeoutOption(Fiber.await(cleanup), limit)
 		if (Option.isNone(ended))
 			return yield* Effect.fail(
 				failed({ reason: "UnconfirmedTermination", phase: "Starting" }),

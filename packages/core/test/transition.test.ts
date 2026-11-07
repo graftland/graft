@@ -915,7 +915,7 @@ it.effect(
 					: {},
 			)
 			const start = yield* Clock.currentTimeMillis
-			const running = yield* Effect.forkScoped(h.request({ total: 1450 }))
+			const running = yield* Effect.forkScoped(h.request({ total: 1550 }))
 			yield* waitFor(h, 2, "Starting")
 			yield* TestClock.adjust(50)
 			const result = yield* Fiber.join(running)

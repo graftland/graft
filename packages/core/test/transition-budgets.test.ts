@@ -26,6 +26,7 @@ it("derives cleanup and recovery reserves from the lifecycle operations they pro
 	])
 	assert.deepEqual(Record.keys(budgets.termination), ["exit", "hostRelease"])
 	assert.equal(budgets.cleanup, sum(budgets.termination))
+	assert.equal(budgets.preparation, policy.terminate)
 	assert.equal(
 		budgets.recovery,
 		sum(budgets.startup) +
@@ -35,6 +36,7 @@ it("derives cleanup and recovery reserves from the lifecycle operations they pro
 	assert.equal(
 		budgets.safety,
 		budgets.recovery +
+			budgets.preparation +
 			policy.drain +
 			policy.stop +
 			budgets.cleanup +

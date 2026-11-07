@@ -32,6 +32,7 @@ export const reserves = (request: Normalized) => {
 	const limits = derive(deadlines(request))
 	return {
 		startup: limits.startupTotal,
+		preparation: limits.preparation,
 		cleanup: limits.cleanup,
 		recovery: limits.recovery,
 		minimum: limits.minimum,

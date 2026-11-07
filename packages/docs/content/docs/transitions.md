@@ -101,6 +101,10 @@ seconds for other operations. `requirements.probes` defaults to empty and
 forward and recovery trial consume the total. Initial driver registrations use
 the same budget validation.
 
+Metadata cleanup is included in admission reserves and shares the original total
+deadline. A cleanup wait never receives extra time after that deadline; its
+original owner continues if the wait expires.
+
 ## Strategy
 
 Overlap requires a driver-verified declaration before allocation. The candidate

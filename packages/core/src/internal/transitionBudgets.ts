@@ -1,4 +1,4 @@
-import { Array, Record } from "effect"
+import { Array, Clock, Effect, Record } from "effect"
 
 import type { Budget, Requirements } from "../Change"
 
@@ -21,9 +21,11 @@ export const derive = (policy: Deadlines) => {
 	}
 	const termination = { exit: policy.terminate, hostRelease: policy.terminate }
 	const cleanup = sum(termination)
+	const preparation = policy.terminate
 	const recovery =
 		sum(startup) + policy.probes.length * policy.probe + policy.trial + cleanup
 	const safety = sum({
+		preparation,
 		recovery,
 		drainPrevious: policy.drain,
 		stopPrevious: policy.stop,
@@ -32,6 +34,7 @@ export const derive = (policy: Deadlines) => {
 	})
 	return {
 		startup,
+		preparation,
 		termination,
 		cleanup,
 		recovery,
@@ -40,3 +43,15 @@ export const derive = (policy: Deadlines) => {
 		minimum: safety + policy.trial,
 	}
 }
+
+/** All waits use the same monotonic Change deadline; reserves protect later obligations. */
+export const remaining = Effect.fnUntraced(function* (
+	started: bigint,
+	total: number,
+	limit: number,
+	reserved = 0,
+) {
+	const elapsed =
+		Number((yield* Clock.monotonicTimeNanos) - started) / 1_000_000
+	return Math.max(0, Math.min(limit, total - elapsed - reserved))
+})

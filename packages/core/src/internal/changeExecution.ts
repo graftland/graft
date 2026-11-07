@@ -13,7 +13,7 @@ import {
 	type Managed,
 	type Run,
 } from "./transition"
-import { derive, type Deadlines } from "./transitionBudgets"
+import { derive, remaining, type Deadlines } from "./transitionBudgets"
 import * as Trust from "./trust"
 
 type Engine = ReturnType<typeof engine>
@@ -133,7 +133,12 @@ const terminal = Effect.fnUntraced(function* (
 	)
 	if (generationState._tag !== "Unresolved") {
 		yield* record.preparation.close
-		yield* Effect.timeoutOption(record.preparation.await, policy.terminate)
+		const limit = yield* remaining(
+			record.started,
+			policy.total,
+			policy.terminate,
+		)
+		yield* Effect.timeoutOption(record.preparation.await, limit)
 	}
 	const settlement = yield* Terminal.classify(managed, record)
 	yield* Effect.tx(
@@ -210,7 +215,10 @@ const recover = Effect.fnUntraced(function* (
 ): Effect.fn.Return<void, Failed> {
 	const { coordinator, policy, run, record } = execution
 	yield* retirePrevious(execution)
-	yield* TxRef.set(run.budget.reserved, derive(policy).cleanup)
+	yield* TxRef.set(
+		run.budget.reserved,
+		derive(policy).cleanup + derive(policy).preparation,
+	)
 	const restored = yield* coordinator.allocate(run.previousDesired, true)
 	yield* TxRef.set(run.candidate, Option.some(restored))
 	yield* Effect.raceFirst(
@@ -228,7 +236,10 @@ const stop = Effect.fnUntraced(function* (
 ): Effect.fn.Return<Finalized> {
 	const { managed, policy, run, record, coordinator } = execution
 	yield* Effect.tx(Admission.pause(managed))
-	yield* TxRef.set(run.budget.reserved, derive(policy).recovery)
+	yield* TxRef.set(
+		run.budget.reserved,
+		derive(policy).recovery + derive(policy).preparation,
+	)
 	yield* Effect.result(settleCandidate(execution))
 	const generations = yield* Terminal.generations(managed, record)
 	const state = Terminal.combine(
@@ -258,7 +269,7 @@ const stop = Effect.fnUntraced(function* (
 		)
 	}
 	if (yield* closing(managed)) {
-		yield* TxRef.set(run.budget.reserved, 0)
+		yield* TxRef.set(run.budget.reserved, derive(policy).preparation)
 		yield* Effect.result(retirePrevious(execution))
 		yield* coordinator.setRoute(Option.none())
 		yield* Admission.close(managed, "Closing")
@@ -293,7 +304,7 @@ const stop = Effect.fnUntraced(function* (
 			cause: Cause.fail(recovered.failure),
 		}),
 	)
-	yield* TxRef.set(run.budget.reserved, 0)
+	yield* TxRef.set(run.budget.reserved, derive(policy).preparation)
 	yield* Effect.result(settleCandidate(execution))
 	yield* coordinator.setRoute(Option.none())
 	const isClosing = yield* closing(managed)
@@ -314,7 +325,9 @@ const forward = Effect.fnUntraced(function* (
 		yield* Effect.tx(Admission.pause(managed))
 		yield* TxRef.set(
 			run.budget.reserved,
-			derive(policy).recovery + derive(policy).cleanup,
+			derive(policy).recovery +
+				derive(policy).cleanup +
+				derive(policy).preparation,
 		)
 		yield* retirePrevious(execution)
 		yield* coordinator.setRoute(Option.none())
@@ -329,7 +342,9 @@ const forward = Effect.fnUntraced(function* (
 	if (strategy === "Overlap") {
 		yield* TxRef.set(
 			run.budget.reserved,
-			derive(policy).recovery + derive(policy).cleanup,
+			derive(policy).recovery +
+				derive(policy).cleanup +
+				derive(policy).preparation,
 		)
 		yield* retirePrevious(execution)
 	}
@@ -434,7 +449,7 @@ export const emergency = Effect.fnUntraced(function* (
 	)
 	yield* execution.coordinator.setRoute(Option.none())
 	yield* Admission.close(managed, "RecoveryFailed")
-	yield* TxRef.set(run.budget.reserved, 0)
+	yield* TxRef.set(run.budget.reserved, derive(policy).preparation)
 	const obligations = yield* TxRef.get(record.obligations)
 	yield* Effect.forEach(obligations, (lease) =>
 		Effect.gen(function* () {
