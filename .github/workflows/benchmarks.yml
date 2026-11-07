@@ -1,0 +1,82 @@
+name: Benchmarks
+
+# Pushes and pull requests run the quick suite. The full suite, with the
+# precision the published results need, runs weekly and on demand. Shared
+# runners are noisy, so results are reported rather than gated.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "packages/**"
+      - "pnpm-lock.yaml"
+      - ".github/workflows/benchmarks.yml"
+  pull_request:
+    paths:
+      - "packages/**"
+      - "pnpm-lock.yaml"
+      - ".github/workflows/benchmarks.yml"
+  schedule:
+    - cron: "0 3 * * 1"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Suite to run
+        type: choice
+        options: [quick, full]
+        default: full
+
+concurrency:
+  group: benchmarks-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  bench:
+    name:
+      Benchmarks (${{ github.event_name == 'schedule' && 'full' || inputs.mode
+      || 'quick' }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      MODE:
+        ${{ github.event_name == 'schedule' && 'full' || inputs.mode || 'quick'
+        }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: DeterminateSystems/nix-installer-action@3138316df39ed29be04236d7ffc686fa525866aa # v23
+        with:
+          # Download prebuilt devenv packages instead of building them.
+          extra-conf: |
+            extra-substituters = https://devenv.cachix.org
+            extra-trusted-public-keys = devenv.cachix.org-1:w1cLUi8dv3hnoSPGAuibQv+f9TZLr6cv/Hm9XgU50cw=
+      - name: Install devenv
+        run: nix profile add github:cachix/devenv/v2.4.0
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .cache/pnpm
+          key: pnpm-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: pnpm-${{ runner.os }}-
+      - name: Install dependencies
+        run:
+          devenv shell -- pnpm install --frozen-lockfile --store-dir .cache/pnpm
+      # The bench script builds the suite and the packages it measures first.
+      - name: Run benchmarks
+        run: |
+          flag=""
+          if [ "$MODE" = quick ]; then flag="--quick"; fi
+          devenv shell -- pnpm bench $flag --output "$GITHUB_WORKSPACE/.bench/results"
+      - name: Summarize
+        if: always()
+        run: |
+          if [ -f .bench/results.md ]; then
+            cat .bench/results.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: benchmarks-${{ env.MODE }}-${{ github.sha }}
+          path: .bench/
+          include-hidden-files: true
+          retention-days: 30

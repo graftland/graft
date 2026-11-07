@@ -7,6 +7,10 @@ EventEmitter 與 emittery。先檢查各實作完成的工作是否一致，再�
 
 所有命令都從儲存庫根目錄執行。依賴與 pnpm 儲存空間保留在目前的工作樹中。基準命令先建置 Graft 與適配器。
 
+CI 在推送到 `main` 與修改 `packages/`
+的提取要求上執行快速套件，每週或透過 Benchmarks 工作流程的 **Run workflow**
+按鈕執行完整套件。每次執行把報告寫入作業摘要，JSON 放進成品。CI 執行器是共用的，所以 CI 只回報數字，不因數字失敗；只在 CI 執行之間比較。
+
 ```sh
 devenv shell -- pnpm install --frozen-lockfile --store-dir .cache/pnpm-store
 devenv shell -- pnpm bench

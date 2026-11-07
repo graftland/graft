@@ -9,6 +9,12 @@ speed. Unsupported operations appear as N/A with a reason in the report.
 Run every command from the repository root. Dependencies and the pnpm store stay
 in this worktree. The benchmark command builds Graft and its adapters first.
 
+CI runs the quick suite on pushes to `main` and on pull requests that touch
+`packages/`, and the full suite weekly or from the Benchmarks workflow's **Run
+workflow** button. Each run puts its report in the job summary and its JSON in
+an artifact. CI runners are shared, so CI reports numbers without failing on
+them; compare runs only with each other.
+
 ```sh
 devenv shell -- pnpm install --frozen-lockfile --store-dir .cache/pnpm-store
 devenv shell -- pnpm bench
