@@ -366,3 +366,36 @@ managed instances, `Committed` and the deletion of `ManagedFork` (phase 4);
 batch reservations, persistence and persistent dedupe (phase 5); the inter-unit
 completion record and term exposure inside units (phase 2); byte and memory
 capacity.
+
+## Stopped status
+
+Stopped on 2026-11-08 at `8a9d2a2c596f823226d8b39e36a85de5367edd4b`. The scope
+above records Phase 1's implementation contract, not certification of the
+unit-only kernel in architecture section 1. Phase 1 delivered Change ids,
+handles and observation, local reservations and patch commits, generation
+ownership, Restart/recovery, bounded admission and runtime-lifetime request
+keys, with the remote/release integrations described above.
+
+Four independent review rounds found 6, 6, 3 and 5 defects. Their fixes are
+recorded in [round 1](phase-1-review-fixes.md),
+[round 2](phase-1-review2-fixes.md), [round 3](phase-1-review3-fixes.md) and
+[round 4](phase-1-review4-fixes.md). Those fixes remain; the owner stops further
+per-defect repair. The following are residual risk classes, not claims that
+every repaired reproduction still fails.
+
+| Risk class                                             | Evidence and remaining limit                                                                                                                                                                |
+| ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Kernel waits for in-process work (about nine findings) | Rounds 1–4: metadata preparation, allocation, host lifecycle executors and shutdown retain ownership but cannot terminate arbitrary host code; runtime shutdown may still wait indefinitely |
+| Recovery semantics (four findings)                     | Rounds 1, 3 and 4: current authorization, fresh binding, owned versions and exclusive recovery must stay aligned across imperative paths                                                    |
+| Hand-maintained current facts (three findings)         | Rounds 1–3: route, lease and recreated-instance facts have drifted between stored status and actual ownership                                                                               |
+| Scattered terminal classification (two findings)       | Round 4 unified classification, but the engine still coordinates mutable obligations across execution, recovery and late settlement; passing fixes do not establish exhaustive coverage     |
+
+The owner classification attributes these risks to kernel guarantees built
+around in-process execution and an imperative engine layered onto the old
+runtime. [Phase 2](phase-2.md) replaces this execution path with the production
+pure decision core and terminable units. It deletes the in-process Change
+mechanism and its mechanism-specific tests without compatibility adapters;
+useful behavior becomes acceptance tests for the new mechanism. Embedded mode
+keeps composition and cooperative member restart, with no Change outcomes or
+kernel guarantees. RPC completion and Scope attribution limits remain explicit
+until the scoped Phase 2 protocol or upstream support supplies the evidence.
