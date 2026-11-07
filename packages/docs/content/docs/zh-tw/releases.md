@@ -178,14 +178,52 @@ devenv shell -- pnpm packages:publish npm
 
 ## 文件網站
 
-工作流程 `.github/workflows/docs.yml` 在每次推送到 `main` 時，從 `packages/docs`
-建置本網站，並部署到 GitHub
-Pages：[graftland.github.io/graft](https://graftland.github.io/graft/)。你也可以從 Actions 分頁手動啟動它。同一時間只會有一個部署在執行。
+工作流程 `.github/workflows/docs.yml` 從 `packages/docs`
+建置本網站，並部署到Cloudflare
+Pages：[graft-docs.pages.dev](https://graft-docs.pages.dev/)。`main`
+上的每個 commit 和每個發佈 tag 都會保留當時的文件。
 
-| 任務           | 做法                                                |
-| -------------- | --------------------------------------------------- |
-| Pages 來源     | 將版本庫的 Pages 來源設為 **GitHub Actions**。      |
-| 在本機處理網站 | `devenv shell -- pnpm --filter @graftland/docs dev` |
+| 位址                                                  | 內容                                        |
+| ----------------------------------------------------- | ------------------------------------------- |
+| `https://graft-docs.pages.dev/`                       | `main` 上最新的 commit。                    |
+| `https://<hash 前 12 碼>.graft-docs.pages.dev/`       | 該 commit，永久保留。                       |
+| `https://versions.graft-docs.pages.dev/versions.json` | 所有已部署的 commit，及其日期、標題和 tag。 |
+| `https://graftland.github.io/graft/<path>`            | 重新導向到正式網站的 `<path>`。             |
+
+### 每次執行做什麼
+
+| 觸發方式                         | 建置                                                                | 之後                           |
+| -------------------------------- | ------------------------------------------------------------------- | ------------------------------ |
+| 推送到 `main`                    | 推送的 commit。                                                     | 加入清單，並設為正式網站。     |
+| 推送 `v1.2.3` 這類 tag           | tag 指向的 commit，僅在它還沒有文件時。                             | 在清單中為該 commit 標上 tag。 |
+| 在 Actions 分頁勾選 **backfill** | 文件網站出現以來 `main` 上的每個 commit 和每個 tag 中還沒有文件的。 | 加入清單；正式網站不變。       |
+
+- **每個 commit 只建置一次。**
+  使用該 commit 自己的 lockfile 與工具鏈建置，上傳後不再取代。正式網站是同一份建置再上傳一次，Cloudflare 會略過已有的檔案。
+- **順序。**
+  各次執行逐一更新清單。正式網站只會前進到目前 commit 的後代，較晚完成的執行不會讓它倒退。
+- **失敗。**
+  已經無法建置的 commit 會被略過，其他 commit 照常部署。讀取線上清單失敗時，執行會停止，而不是建立新的清單。
+- **上限。** 一次 backfill 最多建置 256 個 commit，其餘的再執行一次。
+
+### 切換版本
+
+每個已部署的頁面都從版本位址載入下拉選單，所以在它出現之前建置的版本也有。
+
+- **下拉選單。**
+  在主題選單旁邊。由新到舊列出所有已部署的 commit，顯示 tag 或短 hash，選取後開啟同一頁面在該版本中的位址。當時還不存在的頁面會顯示該版本的 404 頁。
+- **提示。**
+  不是正式網站 commit 的頁面頂端會說明這一點，並連結到最新文件中的同一頁面。
+
+### 設定
+
+| 任務                 | 做法                                                                                       |
+| -------------------- | ------------------------------------------------------------------------------------------ |
+| Cloudflare 專案      | 執行一次 `npx wrangler pages project create graft-docs --production-branch main`。         |
+| `docs` 環境的 secret | `CLOUDFLARE_API_TOKEN`（需要 **Cloudflare Pages: Edit** 權限）和 `CLOUDFLARE_ACCOUNT_ID`。 |
+| 舊位址               | 將版本庫的 Pages 來源設為 **GitHub Actions**。                                             |
+| 補齊以前的文件       | 在 Actions 分頁對 `main` 手動執行該工作流程，並勾選 **backfill**。                         |
+| 在本機處理網站       | `devenv shell -- pnpm --filter @graftland/docs dev`；下拉選單只出現在已部署的頁面上。      |
 
 ### 撰寫頁面
 
