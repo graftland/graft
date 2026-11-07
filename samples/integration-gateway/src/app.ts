@@ -20,6 +20,7 @@ import {
 
 import { Graft, Plugin, type Transition } from "@graftland/graft"
 import { Include, Loader, ModuleResolver } from "@graftland/loader"
+import type { ProjectionError } from "@graftland/plugin-mcp-server/Projection"
 import * as Remote from "@graftland/plugin-remote"
 
 import { consume, gateway, localBot } from "./gateway.js"
@@ -37,9 +38,15 @@ export const policy = {
 	probes: ["health"],
 } satisfies Transition.Policy
 
+export type TransitionWrapper = (
+	release: Release,
+	action: Effect.Effect<Transition.Outcome, never, Graft.Graft>,
+) => Effect.Effect<Transition.Outcome, ProjectionError, Graft.Graft>
+
 export const start = Effect.fnUntraced(function* (
 	directory: string,
 	target: Remote.CandidateOptions["target"],
+	wrapTransition: TransitionWrapper = (_, action) => action,
 ) {
 	const fs = yield* FileSystem.FileSystem
 	const path = yield* Path.Path
@@ -193,14 +200,17 @@ export const start = Effect.fnUntraced(function* (
 					return
 				}
 				run(
-					Graft.transition({
-						target: "forecasts",
-						candidate: candidate(release.value),
-						policy: {
-							...policy,
-							trial: release.value === "broken-trial" ? "2 seconds" : 0,
-						},
-					}).pipe(
+					wrapTransition(
+						release.value,
+						Graft.transition({
+							target: "forecasts",
+							candidate: candidate(release.value),
+							policy: {
+								...policy,
+								trial: release.value === "broken-trial" ? "2 seconds" : 0,
+							},
+						}),
+					).pipe(
 						Effect.flatMap((outcome) =>
 							Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(
 								outcome,

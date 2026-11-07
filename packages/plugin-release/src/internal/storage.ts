@@ -151,7 +151,8 @@ const syncDirectory = Effect.fnUntraced(function* (
 		}),
 	)
 })
-export const load = Effect.fnUntraced(function* (store: string, id: string) {
+/** Verifies immutable bytes and decodes stored metadata without importing implementations. */
+export const verify = Effect.fnUntraced(function* (store: string, id: string) {
 	yield* Schema.decodeEffect(Id)(id)
 	const path = yield* Path.Path
 	const directory = path.join(store, id)
@@ -168,6 +169,15 @@ export const load = Effect.fnUntraced(function* (store: string, id: string) {
 			...entry.artifact,
 			directory: path.join(directory, entry.artifact.directory),
 		})
+	}
+	return release
+}, protect)
+/** Inspects runtime availability and current provenance only for a selected deployment. */
+export const load = Effect.fnUntraced(function* (store: string, id: string) {
+	const release = yield* verify(store, id)
+	const path = yield* Path.Path
+	const directory = path.join(store, id)
+	for (const entry of release.entries) {
 		const generated = yield* Publication.generate(
 			path.join(directory, entry.artifact.directory),
 		)

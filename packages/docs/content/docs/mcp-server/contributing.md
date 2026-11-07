@@ -36,6 +36,9 @@ through Effect's `Tool`. `Tools.plugin` rejects undeclared service requirements.
 Inside an existing plugin, use `Tools.offer(toolkit, handlers)` instead. A
 conflicting name hides the entire toolkit, including its otherwise unique tools.
 
+Use [contract tools](../projection/) to project annotated contract operations
+instead of maintaining a separate toolkit.
+
 ## Offer resources and prompts
 
 ```ts

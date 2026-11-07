@@ -45,6 +45,10 @@
 			"source": "./src/Middleware.ts",
 			"default": "./dist/Middleware.js"
 		},
+		"./Projection": {
+			"source": "./src/Projection.ts",
+			"default": "./dist/Projection.js"
+		},
 		"./Prompts": {
 			"source": "./src/Prompts.ts",
 			"default": "./dist/Prompts.js"
@@ -83,7 +87,8 @@
 		"effect": "4.1.*",
 		"@graftland/graft": "workspace:^",
 		"@graftland/cli": "workspace:^",
-		"@graftland/plugin-http": "workspace:^"
+		"@graftland/plugin-http": "workspace:^",
+		"@graftland/plugin-remote": "workspace:^"
 	},
 	"devDependencies": {
 		"@effect/platform-node": "4.1.2",
@@ -93,7 +98,8 @@
 		"@graftland/graft": "workspace:*",
 		"@graftland/cli": "workspace:*",
 		"@graftland/loader": "workspace:*",
-		"@graftland/plugin-http": "workspace:*"
+		"@graftland/plugin-http": "workspace:*",
+		"@graftland/plugin-remote": "workspace:*"
 	},
 	"publishConfig": {
 		"exports": {
@@ -104,6 +110,7 @@
 			"./Extensions": "./dist/Extensions.js",
 			"./http": "./dist/http.js",
 			"./Middleware": "./dist/Middleware.js",
+			"./Projection": "./dist/Projection.js",
 			"./Prompts": "./dist/Prompts.js",
 			"./Resources": "./dist/Resources.js",
 			"./schema": "./dist/schema.js",
@@ -122,6 +129,9 @@
 			"optional": true
 		},
 		"@graftland/plugin-http": {
+			"optional": true
+		},
+		"@graftland/plugin-remote": {
 			"optional": true
 		}
 	}

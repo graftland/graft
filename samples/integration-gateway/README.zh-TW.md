@@ -79,3 +79,17 @@ node scripts/packed-gateway.mjs test
 發佈來源在各受管項目下使用 `package`、`entry`、`contract`、`target`、`config` 和
 `probes`。`Releases.build` 儲存編碼後的輸入；秘密使用 `!env` 或 `$env`
 參照。外部相依套件不會被擷取或固定。
+
+## MCP 工具
+
+宿主會列印獨立的 MCP URL。用 MCP 客戶端透過 Streamable HTTP 連線，列出工具並用
+`{ "city": "London" }` 呼叫 `forecast`。保持客戶端連線，然後 POST
+`/upgrade/v2`：工具透過同一個門面回傳 v2。
+
+`src/mcp.ts` 宣告工具描述、提示和輸出策略。維運端點在轉換前驗證新視圖，並且只在
+`Accepted` 後發布。測試還用獨立 MCP SDK 啟動
+`src/mcp-stdio.ts`，斷言無需重新連線即可收到
+`notifications/tools/list_changed`。舊版 HTTP 轉接器不傳送閒置通知；stdio 驗證涵蓋通知交付。
+
+`devenv shell -- node scripts/packed-gateway.mjs test`
+檢查兩種直接放置、跨切換的慢速 v1 呼叫、中繼資料變更紀錄和註解拒絕。打包消費者僅透過公開匯出編譯這些模組。

@@ -12,6 +12,8 @@
 		"@graftland/loader": "workspace:*",
 		"@graftland/cli": "workspace:*",
 		"@graftland/plugin-remote": "workspace:*",
-		"@graftland/plugin-release": "workspace:*"
+		"@graftland/plugin-release": "workspace:*",
+		"@graftland/plugin-mcp-server": "workspace:*",
+		"@graftland/plugin-http": "workspace:*"
 	}
 }

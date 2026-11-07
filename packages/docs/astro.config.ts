@@ -107,6 +107,7 @@ export default defineConfig({
 						"http-authorization",
 						"mcp-server/overview",
 						"mcp-server/contributing",
+						"mcp-server/projection",
 						"mcp-server/extending",
 					],
 				},

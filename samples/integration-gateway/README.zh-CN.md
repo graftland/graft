@@ -79,3 +79,17 @@ node scripts/packed-gateway.mjs test
 发布源在各托管条目下使用 `package`、`entry`、`contract`、`target`、`config` 和
 `probes`。`Releases.build` 保存编码后的输入；秘密使用 `!env` 或 `$env`
 引用。外部依赖不会被捕获或固定。
+
+## MCP 工具
+
+宿主会打印单独的 MCP URL。用 MCP 客户端通过 Streamable HTTP 连接，列出工具并用
+`{ "city": "London" }` 调用 `forecast`。保持客户端连接，然后 POST
+`/upgrade/v2`：工具通过同一个门面返回 v2。
+
+`src/mcp.ts` 声明工具描述、提示和输出策略。运维端点在转换前验证新视图，并且只在
+`Accepted` 后发布。测试还用独立 MCP SDK 启动
+`src/mcp-stdio.ts`，断言无需重连即可收到
+`notifications/tools/list_changed`。旧版 HTTP 适配器不发送空闲通知；stdio 验证覆盖通知交付。
+
+`devenv shell -- node scripts/packed-gateway.mjs test`
+检查两种直接放置、跨切换的慢速 v1 调用、元数据变更记录和注解拒绝。打包消费者仅通过公开导出编译这些模块。

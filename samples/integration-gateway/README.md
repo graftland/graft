@@ -92,3 +92,21 @@ The release source uses `package`, `entry`, `contract`, `target`, `config` and
 `probes` under each managed entry. `Releases.build` stores encoded input;
 secrets use `!env` or `$env` references. External dependencies are not captured
 or pinned.
+
+## MCP tools
+
+The host prints a separate MCP URL. Connect an MCP client with Streamable HTTP,
+list tools and call `forecast` with `{ "city": "London" }`. Keep that client
+open while posting `/upgrade/v2`: the tool returns v2 through the same facade.
+
+`src/mcp.ts` declares the tool description, hints and output policy. The
+operator validates the new view before transitioning and publishes it only after
+`Accepted`. The tests also launch `src/mcp-stdio.ts` with the independent MCP
+SDK to assert `notifications/tools/list_changed` without reconnecting. The
+legacy HTTP adapter does not deliver idle notifications; the stdio proof covers
+notification delivery.
+
+`devenv shell -- node scripts/packed-gateway.mjs test` checks both direct
+placements, a slow v1 call across cutover, changed metadata records and rejected
+annotations. The packed consumer compiles these modules using public exports
+only.

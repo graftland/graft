@@ -13,7 +13,7 @@ import type { Graft, Plugin, Transition } from "@graftland/graft"
 import * as Control from "./internal/control"
 
 export { service } from "./internal/services"
-export { operation } from "./internal/operations"
+export { operation, identity } from "./internal/operations"
 export { compareOperations } from "@graftland/graft/Plugin"
 export type { OperationComparison } from "@graftland/graft/Plugin"
 

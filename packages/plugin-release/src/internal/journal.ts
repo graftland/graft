@@ -2,7 +2,7 @@ import { Array, Effect } from "effect"
 
 import type { Event, Journal, Release, Status } from "../Model"
 import { changes } from "./changes"
-import { equal, failure, load } from "./storage"
+import { equal, failure, verify } from "./storage"
 
 interface Pending {
 	readonly intent: Event
@@ -28,7 +28,7 @@ export const validate = Effect.fnUntraced(function* (
 	const [bootstrap, ...events] = journal.events
 	if (bootstrap?.kind !== "Bootstrap" || bootstrap.current !== bootstrap.target)
 		return yield* corrupt("missing accepted bootstrap")
-	const first = yield* load(store, bootstrap.current)
+	const first = yield* verify(store, bootstrap.current)
 	const replay = yield* Effect.reduce(
 		events,
 		(): Replay => ({
@@ -158,7 +158,7 @@ export const validate = Effect.fnUntraced(function* (
 							(pending.intent.overrideRevocations === true)
 					)
 						return yield* corrupt("commit has no fully accepted intent")
-					const next = yield* load(store, event.target)
+					const next = yield* verify(store, event.target)
 					const changed = yield* changes(state.release, next)
 					const required = Array.map(changed, (change) => change.entry)
 					if (!(yield* equal(required, pending.accepted)))

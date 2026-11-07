@@ -105,6 +105,10 @@ connected server never sends headers.
 
 ## Journal and revocations
 
+Recovery verifies historical release bytes and stored metadata without importing
+old implementations. Only the selected release receives runtime and provenance
+inspection, so obsolete external dependencies do not block restart.
+
 Before starting units, recovery validates the accepted bootstrap and completed
 transactions against current/previous ids and accumulated revocations. A commit
 requires an accepted outcome for every changed entry. A schema-valid but

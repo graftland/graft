@@ -16,7 +16,8 @@ import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import { NodeServices } from "@effect/platform-node"
 
 import { Graft } from "@graftland/graft"
-import { Control } from "@graftland/plugin-release"
+import { Control, plugin as releasePlugin } from "@graftland/plugin-release"
+import { Artifact } from "@graftland/plugin-remote"
 
 import { startReleases } from "../host/dist/release-app.js"
 
@@ -568,3 +569,66 @@ for (const target of [{ _tag: "Worker" }, { _tag: "Local" }]) {
 			),
 	)
 }
+
+test(
+	"restart inspects only the accepted release after an obsolete external dependency is removed",
+	{ timeout: 120_000 },
+	() =>
+		Effect.runPromise(
+			Effect.gen(function* () {
+				const fs = yield* FileSystem.FileSystem
+				const implementation = new URL(
+					import.meta.resolve("@example/forecasts-release"),
+				).pathname
+				const legacy = directory + "legacy.js"
+				yield* fs.writeFileString(legacy, "export const legacy = true")
+				const app = yield* Effect.acquireUseRelease(
+					fs.readFileString(implementation),
+					(original) =>
+						fs
+							.writeFileString(
+								implementation,
+								"import " +
+									JSON.stringify(
+										new URL("legacy.js", new URL("../", import.meta.url)).href,
+									) +
+									";\n" +
+									original,
+							)
+							.pipe(
+								Effect.andThen(startReleases(directory, { _tag: "Worker" })),
+							),
+					(original) =>
+						fs.writeFileString(implementation, original).pipe(Effect.orDie),
+				)
+				const accepted = yield* app.build(input("current"))
+				const applied = yield* app.releases.apply({
+					target: accepted,
+					expected: app.initial,
+				})
+				assert.equal(applied.outcomes[0].outcome._tag, "Accepted")
+				yield* fs.remove(legacy)
+				assert.equal(
+					(yield* Artifact.directoryIdentity(app.store + "/" + app.initial))
+						.digest,
+					app.initial,
+				)
+				assert.deepEqual((yield* app.releases.plan(accepted)).diagnostics, [])
+				yield* app.releaseFork.dispose
+				const restarted = yield* Graft.plugin(releasePlugin(app.options))
+				yield* restarted.await
+				assert.equal(
+					(yield* Control.call(app.socket, { _tag: "status" })).value.current,
+					accepted,
+				)
+				assert.equal(
+					(yield* app.ask("London")).text,
+					"current forecast for London",
+				)
+				const history = (yield* Control.call(app.socket, { _tag: "history" }))
+					.value
+				assert.equal(history.at(-1).kind, "Startup")
+				assert.equal(history.at(-1).target, accepted)
+			}).pipe(Effect.scoped, Effect.provide(runtime)),
+		),
+)

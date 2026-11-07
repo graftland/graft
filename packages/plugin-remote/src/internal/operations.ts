@@ -7,6 +7,10 @@ class Identity extends Context.Service<Identity, Plugin.OperationIdentity>()(
 	"@graftland/plugin-remote/internal/operations/Identity",
 ) {}
 
+/** Reads the declared operation identity without interpreting its schemas. */
+export const identity = (rpc: Rpc.Any) =>
+	Context.getOption(rpc.annotations, Identity)
+
 /** Gives an Effect RPC its immutable protocol identity without changing its wire tag. */
 export const operation = <
 	Tag extends string,

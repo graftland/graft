@@ -12,6 +12,7 @@ export default defineConfig({
 		"src/Server.ts",
 		"src/Catalog.ts",
 		"src/Tools.ts",
+		"src/Projection.ts",
 		"src/Resources.ts",
 		"src/Prompts.ts",
 		"src/Middleware.ts",

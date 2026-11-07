@@ -22,7 +22,7 @@ const run = (command, args, cwd) => {
 		return execFileSync(command, args, {
 			cwd,
 			stdio: "pipe",
-			timeout: 180_000,
+			timeout: 240_000,
 			maxBuffer: 16 * 1024 * 1024,
 		})
 	} catch (cause) {
@@ -43,6 +43,7 @@ export function prepare() {
 		mkdirSync(tarballs)
 		const dependencies = {
 			effect: "4.1.2",
+			"@modelcontextprotocol/sdk": "1.32.2",
 			"@effect/platform-node": "4.1.2",
 			"@types/node": "26.6.6",
 			"@types/ws": "8.18.2",
@@ -59,6 +60,8 @@ export function prepare() {
 					"@graftland/cli",
 					"@graftland/plugin-remote",
 					"@graftland/plugin-release",
+					"@graftland/plugin-mcp-server",
+					"@graftland/plugin-http",
 					"@graftland/hmr",
 					"@graftland/create",
 					"@graftland/package-manager",
@@ -196,7 +199,12 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
 			process.stdout.write(
 				run(
 					"node",
-					["--test", "test/gateway.test.mjs", "test/releases.test.mjs"],
+					[
+						"--test",
+						"test/gateway.test.mjs",
+						"test/releases.test.mjs",
+						"test/mcp.test.mjs",
+					],
 					directory,
 				),
 			)

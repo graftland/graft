@@ -132,3 +132,9 @@ export default Plugin.make({
 		}),
 })
 ```
+
+## 投影契约操作
+
+[MCP 投影](../../mcp-server/projection/)通过注入的服务公开显式注解的操作。`Contract.identity(rpc)`
+读取操作身份，不解释 schema。MCP JSON
+Schema 只描述工具输入，绝不参与来源记录或兼容性。

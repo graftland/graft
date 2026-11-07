@@ -20,25 +20,20 @@ export const config = Schema.Struct({
 	holdProbe: Schema.optionalKey(Schema.Boolean),
 	credential: Schema.optionalKey(Schema.String),
 })
-export const service = Contract.service(
-	Forecast,
-	RpcGroup.make(
-		Contract.operation(
-			"@example/forecast/Get",
-			1,
-			Rpc.make("Get", {
-				payload: { city: Schema.String },
-				success: Schema.String,
-			}),
-		),
-	),
-	{
-		toHandlers: (forecast) => ({
-			Get: ({ city }) => forecast.get(city).pipe(Effect.orDie),
-		}),
-		fromClient: (client) => ({ get: (city) => client.Get({ city }) }),
-	},
+export const Get = Contract.operation(
+	"@example/forecast/Get",
+	1,
+	Rpc.make("Get", {
+		payload: { city: Schema.String },
+		success: Schema.String,
+	}),
 )
+export const service = Contract.service(Forecast, RpcGroup.make(Get), {
+	toHandlers: (forecast) => ({
+		Get: ({ city }) => forecast.get(city).pipe(Effect.orDie),
+	}),
+	fromClient: (client) => ({ get: (city) => client.Get({ city }) }),
+})
 export const contract = Contract.make({
 	name: "@example/forecasts",
 	config,

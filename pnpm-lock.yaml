@@ -312,6 +312,9 @@ importers:
       "@graftland/plugin-http":
         specifier: workspace:*
         version: link:../plugin-http
+      "@graftland/plugin-remote":
+        specifier: workspace:*
+        version: link:../plugin-remote
       effect:
         specifier: 4.1.2
         version: 4.1.2
@@ -623,6 +626,12 @@ importers:
       "@graftland/loader":
         specifier: workspace:*
         version: link:../../packages/loader
+      "@graftland/plugin-http":
+        specifier: workspace:*
+        version: link:../../packages/plugin-http
+      "@graftland/plugin-mcp-server":
+        specifier: workspace:*
+        version: link:../../packages/plugin-mcp-server
       "@graftland/plugin-release":
         specifier: workspace:*
         version: link:../../packages/plugin-release

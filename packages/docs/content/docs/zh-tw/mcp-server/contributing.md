@@ -33,6 +33,8 @@ export default Tools.plugin({
 宣告工具依賴。`Tools.plugin` 拒絕未宣告的服務需求。在現有外掛中使用
 `Tools.offer(toolkit, handlers)`。名稱衝突會隱藏整個工具集，包括其中沒有重名的工具。
 
+使用[契約工具](../projection/)投影帶註解的契約操作，無需維護另一套工具定義。
+
 ## 提供資源和提示詞
 
 ```ts

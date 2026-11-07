@@ -1,4 +1,4 @@
-import { Context, Effect, Schema } from "effect"
+import { Context, Effect, Option, Schema } from "effect"
 import { Rpc, RpcGroup } from "effect/rpc"
 import { assert, describe, it } from "@effect/vitest"
 
@@ -109,6 +109,11 @@ describe("operation identities", () => {
 			error: Schema.String,
 		}).annotate(First, {})
 		const named = Contract.operation("@acme/items/read", 1, original)
+		assert.deepEqual(
+			Contract.identity(named),
+			Option.some({ name: "@acme/items/read", version: 1 }),
+		)
+		assert.deepEqual(Contract.identity(original), Option.none())
 		expectTypeOf(named).toEqualTypeOf<typeof original>()
 		assert.deepEqual(
 			Context.getOption(named.annotations, First),

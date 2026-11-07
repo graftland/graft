@@ -140,3 +140,10 @@ export default Plugin.make({
 		}),
 })
 ```
+
+## Project contract operations
+
+The [MCP projection](../../mcp-server/projection/) exposes explicitly annotated
+operations through injected services. `Contract.identity(rpc)` reads an
+operation identity without interpreting its schemas. MCP JSON Schema describes
+tool input only; it never participates in provenance or compatibility.
