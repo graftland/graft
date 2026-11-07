@@ -326,6 +326,12 @@ The changes to `runtime.ts`, `activation.ts`, `dependencies.ts` and
 | 5    | plugin-remote (declared overlap support, `resolve`, term) and plugin-release (rejections, compensation versions), in parallel | Credential rotation, revoked authorization, unsupported Overlap; A accepted then B rejected still compensates; compensation version conflict not overwritten     |
 | 6    | Docs, sample, real adapter for the phase 0 scenarios, packed proof                                                            | Model, engine and remote coverage stated separately; two instances changing in parallel                                                                          |
 
+Steps 5 and 6 shipped as written. From phase 2 on, paths that a later phase
+deletes or rebuilds (Remote module mode, the release journal, `replace`, HMR,
+`Update`, `ManagedFork`) are not migrated again; they are deleted in the phase
+that replaces them, and behavior worth keeping becomes acceptance tests for the
+new mechanism.
+
 Edge cases come before happy paths: host cleanup still blocking after unit exit;
 candidate start failing after the old generation stopped; Stuck followed by
 disposal; the same key retried after history eviction. Ordering uses `Deferred`,
