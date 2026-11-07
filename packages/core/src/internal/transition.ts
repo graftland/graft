@@ -309,270 +309,293 @@ export const engine = (
 		yield* Settlement.observe(managed, target, [fact])
 	})
 
-	const step = <A, E>(
+	const runOperation = Effect.fnUntraced(function* <A, E>(
+		attempt: number,
+		phase: Change.Phase,
+		effect: Effect.Effect<A, E>,
+		remaining: number,
+	): Effect.fn.Return<A, Failed> {
+		if (remaining <= 0) {
+			yield* record({
+				attempt,
+				phase,
+				cause: Cause.die(
+					new Error(`Transition total budget exhausted during ${phase}`),
+				),
+			})
+			return yield* Effect.fail(failed({ reason: "TimedOut", phase }))
+		}
+		// Wait on an owned fiber, not on cancellation of a possibly stuck lifecycle operation.
+		const fiber = yield* Effect.forkIn(
+			effect.pipe(
+				Effect.onExit((exit) =>
+					Exit.isFailure(exit)
+						? record({ attempt, phase, cause: exit.cause }).pipe(
+								Effect.andThen(
+									Effect.logError(
+										"Execution lifecycle operation failed",
+										exit.cause,
+									),
+								),
+							)
+						: Effect.void,
+				),
+			),
+			managed.scope,
+		)
+		const result = yield* Effect.timeoutOption(
+			Fiber.await(fiber),
+			remaining,
+		).pipe(
+			Effect.onInterrupt(() =>
+				Effect.forkIn(Fiber.interrupt(fiber), managed.scope).pipe(
+					Effect.asVoid,
+				),
+			),
+		)
+		if (Option.isNone(result)) {
+			yield* Effect.forkIn(Fiber.interrupt(fiber), managed.scope)
+			yield* record({
+				attempt,
+				phase,
+				cause: Cause.die(
+					new Error(`Transition deadline expired during ${phase}`),
+				),
+			})
+			return yield* Effect.fail(failed({ reason: "TimedOut", phase: phase }))
+		}
+		const attempts = yield* TxRef.get(managed.attempts)
+		const observedAttempt = Array.findFirst(
+			attempts,
+			(item) => item.id === attempt,
+		)
+		if (
+			Option.isSome(observedAttempt) &&
+			!Equal.equals(
+				observedAttempt.value.unit.acknowledgement,
+				observedAttempt.value.allocation,
+			)
+		)
+			return yield* Effect.fail(failed({ reason: "Stale", phase }))
+		if (Exit.isFailure(result.value)) {
+			yield* record({ attempt, phase, cause: result.value.cause })
+			return yield* Effect.fail(failed({ reason: "Failed", phase: phase }))
+		}
+		yield* record({ attempt, phase })
+		return result.value.value
+	})
+	const step = Effect.fnUntraced(function* <A, E>(
 		attempt: number,
 		phase: Change.Phase,
 		effect: Effect.Effect<A, E>,
 		limit: number,
-	): Effect.Effect<A, Failed> =>
-		Effect.gen(function* () {
-			if (progress !== undefined) yield* TxRef.set(progress, { attempt, phase })
-			if (change !== undefined) {
-				const leases = yield* TxRef.get(managed.leases)
-				const settlements = yield* Effect.forEach(leases, Settlement.read)
-				const elapsed =
-					Number((yield* Clock.monotonicTimeNanos) - change.started) / 1_000_000
-				yield* Settlement.observe(managed, change, settlements, (status) => ({
-					...status,
-					phase,
-					remaining: Math.max(0, policy.total - elapsed),
-					members: Array.map(status.members, (member) => ({
-						...member,
-						execution: Change.Execution.Running({ phase }),
-					})),
-				}))
-			}
-			const remaining =
-				budget === undefined
-					? limit
-					: Math.min(
-							limit,
-							policy.total -
-								Number((yield* Clock.monotonicTimeNanos) - budget.started) /
-									1_000_000 -
-								(yield* TxRef.get(budget.reserved)),
-						)
-			if (remaining <= 0) {
-				yield* record({
-					attempt,
-					phase,
-					cause: Cause.die(
-						new Error(`Transition total budget exhausted during ${phase}`),
-					),
-				})
-				return yield* Effect.fail(failed({ reason: "TimedOut", phase }))
-			}
-			// Wait on an owned fiber, not on cancellation of a possibly stuck lifecycle operation.
-			const fiber = yield* Effect.forkIn(
-				effect.pipe(
-					Effect.onExit((exit) =>
-						Exit.isFailure(exit)
-							? record({ attempt, phase, cause: exit.cause }).pipe(
-									Effect.andThen(
-										Effect.logError(
-											"Execution lifecycle operation failed",
-											exit.cause,
-										),
-									),
-								)
-							: Effect.void,
-					),
-				),
-				managed.scope,
-			)
-			const result = yield* Effect.timeoutOption(
-				Fiber.await(fiber),
-				remaining,
-			).pipe(
-				Effect.onInterrupt(() =>
-					Effect.forkIn(Fiber.interrupt(fiber), managed.scope).pipe(
-						Effect.asVoid,
-					),
-				),
-			)
-			if (Option.isNone(result)) {
-				yield* Effect.forkIn(Fiber.interrupt(fiber), managed.scope)
-				yield* record({
-					attempt,
-					phase,
-					cause: Cause.die(
-						new Error(`Transition deadline expired during ${phase}`),
-					),
-				})
-				return yield* Effect.fail(failed({ reason: "TimedOut", phase: phase }))
-			}
-			const attempts = yield* TxRef.get(managed.attempts)
-			const observedAttempt = Array.findFirst(
-				attempts,
-				(item) => item.id === attempt,
-			)
-			if (
-				Option.isSome(observedAttempt) &&
-				!Equal.equals(
-					observedAttempt.value.unit.acknowledgement,
-					observedAttempt.value.allocation,
-				)
-			)
-				return yield* Effect.fail(failed({ reason: "Stale", phase }))
-			if (Exit.isFailure(result.value)) {
-				yield* record({ attempt, phase, cause: result.value.cause })
-				return yield* Effect.fail(failed({ reason: "Failed", phase: phase }))
-			}
-			yield* record({ attempt, phase })
-			return result.value.value
-		})
-	const allocate = Effect.fnUntraced(function* (desired: Change.Candidate) {
-		return yield* Effect.uninterruptibleMask((restore) =>
-			Effect.gen(function* () {
-				const grant = yield* Effect.tx(
-					Effect.gen(function* () {
-						if (yield* resolutionChanged(managed.resolution))
-							return yield* Effect.fail(
-								failed({ reason: "Stale", phase: "Starting" }),
-							)
-						const term = yield* TxRef.get(managed.next)
-						const generation = yield* Generations.acquire(
-							managed.runtime,
-							managed.entry.node,
-							managed.resolution,
-						)
-						yield* TxRef.set(managed.next, term + 1)
-						if (change !== undefined) yield* Capacity.take(change.capacity)
-						return { id: term, generation }
-					}),
-				)
-				const { id, generation: tokenGeneration } = grant
-				const scope = yield* Scope.make()
-				const lease: HostLease = {
-					id,
-					scope,
-					charged:
-						change === undefined
-							? managed.initialCredit.charged
-							: yield* TxRef.make(true),
-					capacity: yield* TxRef.make<Option.Option<Capacity.Claim>>(
-						change === undefined ? Option.none() : Option.some(change.capacity),
-					),
-					generation: tokenGeneration,
-					hostRelease: yield* AsyncClose.make(
-						managed.scope,
-						Release.close(scope, Exit.void),
-						(exit) => completeHostRelease(lease, exit),
-					),
-					terminated: yield* TxRef.make(Option.none<Change.Termination>()),
-				}
-				yield* TxRef.update(managed.leases, Array.append(lease))
-				const allocated = yield* Effect.exit(
-					restore(
-						Effect.gen(function* () {
-							const routeVersion = yield* Effect.tx(
-								Effect.gen(function* () {
-									const cell = yield* ChangeTable.object(
-										managed.runtime.changes,
-										{ _tag: "Instance", instance: managed.instance },
-									)
-									const current = yield* TxRef.get(cell)
-									return current.version + (change === undefined ? 0 : 1)
-								}),
-							)
-							const token: T.Allocation = Object.freeze({
-								change:
-									change === undefined
-										? Option.none()
-										: Option.some(change.handle.id),
-								generation: id,
-								term: id,
-								routeVersion,
-							})
-							const allocation = yield* step(
-								id,
-								"Starting",
-								Scope.provide(
-									Effect.gen(function* () {
-										const candidate = yield* Effect.suspend(() =>
-											managed.resolve(desired),
-										)
-										if (
-											candidate.driver !== desired.driver ||
-											candidate.identity !== desired.identity ||
-											(managed.driver.footprint !== undefined &&
-												!Equal.equals(
-													managed.driver.footprint(desired),
-													managed.driver.footprint(candidate),
-												))
-										)
-											return yield* T.DriverError.make({
-												cause: Cause.fail(
-													"Resolved input changed the admitted resource footprint",
-												),
-											})
-										const unit = yield* Effect.suspend(() =>
-											managed.driver.allocate(candidate, id, token),
-										)
-										return { candidate, unit }
-									}),
-									lease.scope,
-								),
-								limits.startup.allocate,
-							)
-							const { candidate, unit } = allocation
-							if (!Equal.equals(unit.acknowledgement, token))
-								return yield* Effect.fail(
-									failed({ reason: "Stale", phase: "Starting" }),
-								)
-							const attempt: Attempt = {
-								...lease,
-								allocation: token,
-								desired,
-								candidate,
-								unit,
-								failure: Effect.raceFirst(
-									Effect.suspend(() => unit.failure),
-									Effect.suspend(() => unit.exited).pipe(
-										Effect.flatMap((termination) =>
-											T.DriverError.make({
-												cause: termination.cause ?? Cause.fail(termination),
-											}),
-										),
-									),
-								),
-								calls: yield* TxRef.make(0),
-								services: yield* TxRef.make(Context.empty()),
-							}
-							yield* TxRef.update(managed.attempts, Array.append(attempt))
-							yield* generation(managed, attempt, "Starting")
-							yield* observeExit(attempt).pipe(Effect.forkIn(managed.scope))
-							return attempt
-						}),
-					),
-				)
-				if (Exit.isSuccess(allocated)) return allocated.value
-				yield* TxRef.set(
-					lease.terminated,
-					Option.some({
-						unit: `${managed.instance}-${id}`,
-						state: "NotStarted",
-					}),
-				)
-				const host = yield* awaitHostRelease(lease)
-				yield* Effect.tx(
-					Generations.settle(
-						managed.runtime,
-						managed.entry.node,
-						lease.generation,
-					).pipe(Effect.andThen(Capacity.end(managed.runtime.capacity, lease))),
-				)
-				yield* record({
-					attempt: id,
-					phase: "Starting",
-					termination: {
-						unit: `${managed.instance}-${id}`,
-						state: "NotStarted",
-					},
-					cause: allocated.cause,
-				})
-				if (
-					host._tag !== "Completed" ||
-					(Exit.isFailure(host.exit) &&
-						Cause.hasInterruptsOnly(host.exit.cause))
-				)
-					return yield* Effect.fail(
-						failed({ reason: "UnresolvedCleanup", phase: "Starting" }),
+	): Effect.fn.Return<A, Failed> {
+		if (progress !== undefined) yield* TxRef.set(progress, { attempt, phase })
+		if (change !== undefined) {
+			const leases = yield* TxRef.get(managed.leases)
+			const settlements = yield* Effect.forEach(leases, Settlement.read)
+			const elapsed =
+				Number((yield* Clock.monotonicTimeNanos) - change.started) / 1_000_000
+			yield* Settlement.observe(managed, change, settlements, (status) => ({
+				...status,
+				phase,
+				remaining: Math.max(0, policy.total - elapsed),
+				members: Array.map(status.members, (member) => ({
+					...member,
+					execution: Change.Execution.Running({ phase }),
+				})),
+			}))
+		}
+		const remaining =
+			budget === undefined
+				? limit
+				: Math.min(
+						limit,
+						policy.total -
+							Number((yield* Clock.monotonicTimeNanos) - budget.started) /
+								1_000_000 -
+							(yield* TxRef.get(budget.reserved)),
 					)
-				return yield* Effect.failCause(allocated.cause)
+		return yield* runOperation(attempt, phase, effect, remaining)
+	})
+	const acquireLease = Effect.fnUntraced(function* (): Effect.fn.Return<
+		HostLease,
+		Failed
+	> {
+		const grant = yield* Effect.tx(
+			Effect.gen(function* () {
+				if (yield* resolutionChanged(managed.resolution))
+					return yield* Effect.fail(
+						failed({ reason: "Stale", phase: "Starting" }),
+					)
+				const term = yield* TxRef.get(managed.next)
+				const generation = yield* Generations.acquire(
+					managed.runtime,
+					managed.entry.node,
+					managed.resolution,
+				)
+				yield* TxRef.set(managed.next, term + 1)
+				if (change !== undefined) yield* Capacity.take(change.capacity)
+				return { id: term, generation }
 			}),
 		)
+		const { id, generation: tokenGeneration } = grant
+		const scope = yield* Scope.make()
+		const lease: HostLease = {
+			id,
+			scope,
+			charged:
+				change === undefined
+					? managed.initialCredit.charged
+					: yield* TxRef.make(true),
+			capacity: yield* TxRef.make<Option.Option<Capacity.Claim>>(
+				change === undefined ? Option.none() : Option.some(change.capacity),
+			),
+			generation: tokenGeneration,
+			hostRelease: yield* AsyncClose.make(
+				managed.scope,
+				Release.close(scope, Exit.void),
+				(exit) => completeHostRelease(lease, exit),
+			),
+			terminated: yield* TxRef.make(Option.none<Change.Termination>()),
+		}
+		yield* TxRef.update(managed.leases, Array.append(lease))
+
+		return lease
 	})
+	const allocateUnit = Effect.fnUntraced(function* (
+		desired: Change.Candidate,
+		lease: HostLease,
+	): Effect.fn.Return<Attempt, Failed> {
+		const { id } = lease
+		const routeVersion = yield* Effect.tx(
+			Effect.gen(function* () {
+				const cell = yield* ChangeTable.object(managed.runtime.changes, {
+					_tag: "Instance",
+					instance: managed.instance,
+				})
+				const current = yield* TxRef.get(cell)
+				return current.version + (change === undefined ? 0 : 1)
+			}),
+		)
+		const token: T.Allocation = Object.freeze({
+			change:
+				change === undefined ? Option.none() : Option.some(change.handle.id),
+			generation: id,
+			term: id,
+			routeVersion,
+		})
+		const allocation = yield* step(
+			id,
+			"Starting",
+			Scope.provide(
+				Effect.gen(function* () {
+					const candidate = yield* Effect.suspend(() =>
+						managed.resolve(desired),
+					)
+					if (
+						candidate.driver !== desired.driver ||
+						candidate.identity !== desired.identity ||
+						(managed.driver.footprint !== undefined &&
+							!Equal.equals(
+								managed.driver.footprint(desired),
+								managed.driver.footprint(candidate),
+							))
+					)
+						return yield* T.DriverError.make({
+							cause: Cause.fail(
+								"Resolved input changed the admitted resource footprint",
+							),
+						})
+					const unit = yield* Effect.suspend(() =>
+						managed.driver.allocate(candidate, id, token),
+					)
+					return { candidate, unit }
+				}),
+				lease.scope,
+			),
+			limits.startup.allocate,
+		)
+		const { candidate, unit } = allocation
+		if (!Equal.equals(unit.acknowledgement, token))
+			return yield* Effect.fail(failed({ reason: "Stale", phase: "Starting" }))
+		const attempt: Attempt = {
+			...lease,
+			allocation: token,
+			desired,
+			candidate,
+			unit,
+			failure: Effect.raceFirst(
+				Effect.suspend(() => unit.failure),
+				Effect.suspend(() => unit.exited).pipe(
+					Effect.flatMap((termination) =>
+						T.DriverError.make({
+							cause: termination.cause ?? Cause.fail(termination),
+						}),
+					),
+				),
+			),
+			calls: yield* TxRef.make(0),
+			services: yield* TxRef.make(Context.empty()),
+		}
+		yield* TxRef.update(managed.attempts, Array.append(attempt))
+		yield* generation(managed, attempt, "Starting")
+		yield* observeExit(attempt).pipe(Effect.forkIn(managed.scope))
+		return attempt
+	})
+	const failAllocation = Effect.fnUntraced(function* (
+		lease: HostLease,
+		cause: Cause.Cause<Failed>,
+	): Effect.fn.Return<never, Failed> {
+		const { id } = lease
+		yield* TxRef.set(
+			lease.terminated,
+			Option.some({
+				unit: `${managed.instance}-${id}`,
+				state: "NotStarted",
+			}),
+		)
+		const host = yield* awaitHostRelease(lease)
+		yield* Effect.tx(
+			Generations.settle(
+				managed.runtime,
+				managed.entry.node,
+				lease.generation,
+			).pipe(Effect.andThen(Capacity.end(managed.runtime.capacity, lease))),
+		)
+		yield* record({
+			attempt: id,
+			phase: "Starting",
+			termination: {
+				unit: `${managed.instance}-${id}`,
+				state: "NotStarted",
+			},
+			cause,
+		})
+		if (
+			host._tag !== "Completed" ||
+			(Exit.isFailure(host.exit) && Cause.hasInterruptsOnly(host.exit.cause))
+		)
+			return yield* Effect.fail(
+				failed({ reason: "UnresolvedCleanup", phase: "Starting" }),
+			)
+		return yield* Effect.failCause(cause)
+	})
+
+	const allocate = (
+		desired: Change.Candidate,
+	): Effect.Effect<Attempt, Failed> =>
+		Effect.uninterruptibleMask((restore) =>
+			Effect.gen(function* () {
+				const lease = yield* acquireLease()
+				const allocated = yield* Effect.exit(
+					restore(allocateUnit(desired, lease)),
+				)
+				return Exit.isSuccess(allocated)
+					? allocated.value
+					: yield* failAllocation(lease, allocated.cause)
+			}),
+		)
 
 	const start = Effect.fnUntraced(function* (attempt: Attempt) {
 		const { unit, id } = attempt
@@ -917,6 +940,136 @@ export const engine = (
 	return { allocate, start, terminate, retire, cutover, step, releaseHost }
 }
 
+const admitRegistration = Effect.fnUntraced(function* (
+	managed: Managed,
+): Effect.fn.Return<void, T.DriverError> {
+	const { runtime, entry, instance, resolution } = managed
+	if ((yield* TxRef.get(runtime.mutations)) > 0)
+		return yield* T.DriverError.make({
+			cause: Cause.die(new Error("A bypass mutation is in progress")),
+		})
+	const spec = yield* TxRef.get(entry.spec)
+	const snapshot = yield* Snapshots.get(entry.status.snapshot)
+	if (snapshot.accepted !== spec)
+		return yield* T.DriverError.make({
+			cause: Cause.die(
+				new Error("The fork changed before driver registration"),
+			),
+		})
+	const existing = yield* TxRef.get(entry.status.managed)
+	if (Option.isSome(existing))
+		return yield* T.DriverError.make({
+			cause: Cause.die(new Error("The fork already has an execution driver")),
+		})
+	const registered = yield* TxRef.get(runtime.instances)
+	if (HashMap.has(registered, instance))
+		return yield* T.DriverError.make({
+			cause: Cause.die(
+				new Error(`Managed instance already registered: ${instance}`),
+			),
+		})
+	const reservation = yield* ChangeTable.object(runtime.changes, {
+		_tag: "Instance",
+		instance,
+	})
+	if (Option.isSome((yield* TxRef.get(reservation)).writer))
+		return yield* T.DriverError.make({
+			cause: Cause.die(
+				new Error(`Managed instance has unresolved settlement: ${instance}`),
+			),
+		})
+	yield* Capacity.initial(runtime.capacity).pipe(
+		Effect.mapError((error) =>
+			T.DriverError.make({ cause: Cause.fail(error) }),
+		),
+	)
+	yield* TxRef.set(
+		runtime.instances,
+		HashMap.set(registered, instance, managed),
+	)
+	yield* ChangeTable.bump(runtime.changes, {
+		_tag: "Instance",
+		instance,
+	})
+	yield* TxRef.update(runtime.trust, (state) => ({
+		...state,
+		used: true,
+	}))
+	for (const edge of captureEdges(instance, resolution))
+		yield* ChangeTable.bump(runtime.changes, edge)
+	yield* TxRef.set(entry.status.managed, Option.some(managed))
+}, Effect.tx)
+
+const disposeRegistration = Effect.fnUntraced(function* (
+	managed: Managed,
+	facadeActivation: Activation,
+	evidence: TxRef.TxRef<ReadonlyArray<Change.Evidence>>,
+	closed: Fiber.Fiber<void>,
+): Effect.fn.Return<void> {
+	const { runtime, entry, instance, resolution, policy } = managed
+	const active = yield* Effect.tx(
+		Effect.gen(function* () {
+			const state = yield* TxRef.get(managed.lifecycle)
+			const active =
+				state._tag === "Open" || state._tag === "Closing"
+					? state.active
+					: Option.none<Run>()
+			yield* Admission.close(managed, "Closing")
+			yield* TxRef.set(managed.lifecycle, { _tag: "Closing", active })
+			yield* TxRef.set(managed.route, Option.none())
+			return active
+		}),
+	)
+	if (Option.isSome(active)) {
+		yield* TxRef.set(active.value.cancel, true)
+		yield* waitReply(active.value)
+	}
+	const remaining = yield* TxRef.get(managed.attempts)
+	const cleanup = yield* Effect.forEach(remaining, (attempt) =>
+		Effect.gen(function* () {
+			const coordinator = engine(managed, policy, evidence)
+			const result = yield* coordinator.terminate(attempt)
+			if (confirmed(result)) return Exit.void
+
+			const observed = yield* TxRef.get(evidence)
+			return Exit.failCause(
+				Cause.die(
+					T.DriverError.make({
+						cause: Cause.fail({ evidence: observed }),
+					}),
+				),
+			)
+		}),
+	)
+	const releases = yield* Effect.forEach(
+		[withdraw(runtime, facadeActivation)],
+		Effect.exit,
+	)
+	yield* Effect.tx(
+		Effect.gen(function* () {
+			yield* TxRef.set(managed.lifecycle, { _tag: "Closed" })
+			const installed = yield* TxRef.get(entry.status.managed)
+			if (Option.contains(installed, managed))
+				yield* TxRef.set(entry.status.managed, Option.none())
+			yield* releaseRegistration(managed)
+			for (const edge of captureEdges(instance, resolution))
+				yield* ChangeTable.bump(runtime.changes, edge)
+			yield* ChangeTable.bump(runtime.changes, {
+				_tag: "Instance",
+				instance,
+			})
+		}),
+	)
+	if (yield* registrationSettled(managed)) yield* Fiber.join(closed)
+	const hostFailures = yield* TxRef.get(managed.hostFailures)
+	const cause = Cause.combine(
+		foldCauses([...cleanup, ...releases]),
+		hostFailures,
+	)
+	if (cause.reasons.length > 0)
+		return yield* Effect.die(T.DriverError.make({ cause }))
+})
+
 export const register = Effect.fnUntraced(function* (
 	driver: T.Driver,
 	registration: T.Registration,
@@ -1025,68 +1178,7 @@ export const register = Effect.fnUntraced(function* (
 				context: yield* Effect.context<never>(),
 				entry,
 			}
-			yield* Effect.tx(
-				Effect.gen(function* () {
-					if ((yield* TxRef.get(runtime.mutations)) > 0)
-						return yield* T.DriverError.make({
-							cause: Cause.die(new Error("A bypass mutation is in progress")),
-						})
-					const spec = yield* TxRef.get(entry.spec)
-					const snapshot = yield* Snapshots.get(entry.status.snapshot)
-					if (snapshot.accepted !== spec)
-						return yield* T.DriverError.make({
-							cause: Cause.die(
-								new Error("The fork changed before driver registration"),
-							),
-						})
-					const existing = yield* TxRef.get(entry.status.managed)
-					if (Option.isSome(existing))
-						return yield* T.DriverError.make({
-							cause: Cause.die(
-								new Error("The fork already has an execution driver"),
-							),
-						})
-					const registered = yield* TxRef.get(runtime.instances)
-					if (HashMap.has(registered, instance))
-						return yield* T.DriverError.make({
-							cause: Cause.die(
-								new Error(`Managed instance already registered: ${instance}`),
-							),
-						})
-					const reservation = yield* ChangeTable.object(runtime.changes, {
-						_tag: "Instance",
-						instance,
-					})
-					if (Option.isSome((yield* TxRef.get(reservation)).writer))
-						return yield* T.DriverError.make({
-							cause: Cause.die(
-								new Error(
-									`Managed instance has unresolved settlement: ${instance}`,
-								),
-							),
-						})
-					yield* Capacity.initial(runtime.capacity).pipe(
-						Effect.mapError((error) =>
-							T.DriverError.make({ cause: Cause.fail(error) }),
-						),
-					)
-					yield* TxRef.set(
-						runtime.instances,
-						HashMap.set(registered, instance, managed),
-					)
-					yield* ChangeTable.bump(runtime.changes, {
-						_tag: "Instance",
-						instance,
-					})
-					yield* TxRef.update(runtime.trust, (state) => ({
-						...state,
-						used: true,
-					}))
-					for (const edge of captureEdges(instance, resolution))
-						yield* ChangeTable.bump(runtime.changes, edge)
-					yield* TxRef.set(entry.status.managed, Option.some(managed))
-				}),
-			)
+			yield* admitRegistration(managed)
 			const evidence = yield* TxRef.make<ReadonlyArray<Change.Evidence>>([])
 			const initializationReserve = yield* TxRef.make(derive(policy).cleanup)
 			const coordinator = engine(managed, policy, evidence, {
@@ -1121,69 +1213,7 @@ export const register = Effect.fnUntraced(function* (
 			}
 			yield* Scope.addFinalizer(
 				registrationScope,
-				Effect.gen(function* () {
-					const active = yield* Effect.tx(
-						Effect.gen(function* () {
-							const state = yield* TxRef.get(managed.lifecycle)
-							const active =
-								state._tag === "Open" || state._tag === "Closing"
-									? state.active
-									: Option.none<Run>()
-							yield* Admission.close(managed, "Closing")
-							yield* TxRef.set(managed.lifecycle, { _tag: "Closing", active })
-							yield* TxRef.set(managed.route, Option.none())
-							return active
-						}),
-					)
-					if (Option.isSome(active)) {
-						yield* TxRef.set(active.value.cancel, true)
-						yield* waitReply(active.value)
-					}
-					const remaining = yield* TxRef.get(managed.attempts)
-					const cleanup = yield* Effect.forEach(remaining, (attempt) =>
-						Effect.gen(function* () {
-							const coordinator = engine(managed, policy, evidence)
-							const result = yield* coordinator.terminate(attempt)
-							if (confirmed(result)) return Exit.void
-
-							const observed = yield* TxRef.get(evidence)
-							return Exit.failCause(
-								Cause.die(
-									T.DriverError.make({
-										cause: Cause.fail({ evidence: observed }),
-									}),
-								),
-							)
-						}),
-					)
-					const releases = yield* Effect.forEach(
-						[withdraw(runtime, facadeActivation)],
-						Effect.exit,
-					)
-					yield* Effect.tx(
-						Effect.gen(function* () {
-							yield* TxRef.set(managed.lifecycle, { _tag: "Closed" })
-							const installed = yield* TxRef.get(entry.status.managed)
-							if (Option.contains(installed, managed))
-								yield* TxRef.set(entry.status.managed, Option.none())
-							yield* releaseRegistration(managed)
-							for (const edge of captureEdges(instance, resolution))
-								yield* ChangeTable.bump(runtime.changes, edge)
-							yield* ChangeTable.bump(runtime.changes, {
-								_tag: "Instance",
-								instance,
-							})
-						}),
-					)
-					if (yield* registrationSettled(managed)) yield* Fiber.join(closed)
-					const hostFailures = yield* TxRef.get(managed.hostFailures)
-					const cause = Cause.combine(
-						foldCauses([...cleanup, ...releases]),
-						hostFailures,
-					)
-					if (cause.reasons.length > 0)
-						return yield* Effect.die(T.DriverError.make({ cause }))
-				}),
+				disposeRegistration(managed, facadeActivation, evidence, closed),
 			)
 			yield* restore(
 				Effect.gen(function* () {
