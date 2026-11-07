@@ -379,9 +379,10 @@ keys, with the remote/release integrations described above.
 Four independent review rounds found 6, 6, 3 and 5 defects. Their fixes are
 recorded in [round 1](phase-1-review-fixes.md),
 [round 2](phase-1-review2-fixes.md), [round 3](phase-1-review3-fixes.md) and
-[round 4](phase-1-review4-fixes.md). Those fixes remain; the owner stops further
-per-defect repair. The following are residual risk classes, not claims that
-every repaired reproduction still fails.
+[round 4](phase-1-review4-fixes.md). A fifth round ran after the stop and is
+recorded unfixed in [round 5](phase-1-review5.md). Those fixes remain; the owner
+stops further per-defect repair. The following are residual risk classes, not
+claims that every repaired reproduction still fails.
 
 | Risk class                                             | Evidence and remaining limit                                                                                                                                                                |
 | ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
