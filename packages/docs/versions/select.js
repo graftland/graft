@@ -5,6 +5,8 @@
 	const strings = {
 		en: {
 			label: "Docs version",
+			releases: "Releases",
+			commits: "Commits",
 			latest: "default",
 			unknown: "This build",
 			notice: (name) => `You are reading the docs as of ${name}.`,
@@ -12,6 +14,8 @@
 		},
 		"zh-CN": {
 			label: "文档版本",
+			releases: "发布版本",
+			commits: "Commit",
 			latest: "默认",
 			unknown: "当前构建",
 			notice: (name) => `你正在阅读 ${name} 时的文档。`,
@@ -19,6 +23,8 @@
 		},
 		"zh-TW": {
 			label: "文件版本",
+			releases: "發佈版本",
+			commits: "Commit",
 			latest: "預設",
 			unknown: "目前建置",
 			notice: (name) => `你正在閱讀 ${name} 時的文件。`,
@@ -63,15 +69,17 @@
 		return new URL(path + location.search + location.hash, root).href
 	}
 
+	// A release by its tags and date; a commit by its short hash, date and
+	// subject.
 	const label = (version, production) =>
-		[
-			version.tags.length
-				? version.tags.join(", ")
-				: version.commit.slice(0, 7),
-			version.date.slice(0, 10),
-			version.commit === production ? `(${t.latest})` : "",
-			version.subject,
-		]
+		(version.tags.length
+			? [
+					version.tags.join(", "),
+					version.date.slice(0, 10),
+					version.commit === production ? `(${t.latest})` : "",
+				]
+			: [version.commit.slice(0, 7), version.date.slice(0, 10), version.subject]
+		)
 			.filter(Boolean)
 			.join(" · ")
 
@@ -83,15 +91,25 @@
 		field.setAttribute("aria-label", t.label)
 		field.autocomplete = "off"
 		if (!current) field.append(new Option(t.unknown, "", true, true))
-		for (const version of data.versions)
-			field.append(
-				new Option(
-					label(version, data.production),
-					version.commit,
-					false,
-					version.commit === current,
-				),
-			)
+		// Tagged commits first, then the others, each newest first.
+		for (const [name, tagged] of [
+			[t.releases, true],
+			[t.commits, false],
+		]) {
+			const group = document.createElement("optgroup")
+			group.label = name
+			for (const version of data.versions)
+				if (version.tags.length > 0 === tagged)
+					group.append(
+						new Option(
+							label(version, data.production),
+							version.commit,
+							false,
+							version.commit === current,
+						),
+					)
+			if (group.children.length) field.append(group)
+		}
 		field.addEventListener("change", () => {
 			const version = data.versions.find(({ commit }) => commit === field.value)
 			if (version) location.href = samePage(root(version))

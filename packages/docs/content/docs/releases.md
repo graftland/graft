@@ -254,10 +254,11 @@ as a **Worker Preview**.
 
 Every deployed page loads the select from the versions address.
 
-- **Select.** Next to the theme select. It lists every kept commit, newest
-  first, by its tag or short hash, and marks the default release. It opens the
-  same page in the chosen version; a page that did not exist yet shows that
-  version's 404 page.
+- **Select.** Next to the theme select. It lists the kept commits in two groups,
+  each newest first: **Releases**, the tagged commits by their tags, with the
+  default release marked; and **Commits**, the others by their short hash and
+  subject. It opens the same page in the chosen version; a page that did not
+  exist yet shows that version's 404 page.
 - **Notice.** A page of any other commit says so at the top, with a link to the
   same page in the default release.
 
