@@ -142,3 +142,9 @@ capability grants. Startup restores journaled approvals and revocations, and
 revoked grant references also participate in rollback checks. See
 [trust and isolation](../trust/) for approval, revocation and explicit override
 commands.
+
+The audit journal also records each changed logical view's name, projection tag,
+previous and next facts, and timestamp before metadata becomes visible. These
+revisions remain available through `history`; the live approval statement
+retains only the latest facts. Restart validates the revision chain and restores
+the latest view even if it has not been approved yet.

@@ -2,6 +2,7 @@ import {
 	Array,
 	Cause,
 	Clock,
+	Deferred,
 	Effect,
 	Fiber,
 	FileSystem,
@@ -14,7 +15,7 @@ import {
 	Stream,
 } from "effect"
 
-import { Graft, Manifest, Transition } from "@graftland/graft"
+import { Graft, Manifest, Transition, Trust } from "@graftland/graft"
 import { ModuleResolver } from "@graftland/loader"
 import * as Remote from "@graftland/plugin-remote"
 import * as Policy from "@graftland/plugin-remote/Policy"
@@ -68,14 +69,6 @@ export const make = Effect.fnUntraced(function* (options: Options) {
 			? undefined
 			: yield* read(options.trust, Policy.Policy)
 	const initialRelease = yield* load(store, initial, governed)
-	const authority =
-		policy === undefined
-			? undefined
-			: yield* Policy.install(
-					policy,
-					recovered?.approvals ?? [],
-					saved?.status.revocations ?? initialRelease.revocations,
-				)
 	const state = yield* Ref.make<Journal>(
 		saved ?? {
 			version: 1,
@@ -89,8 +82,62 @@ export const make = Effect.fnUntraced(function* (options: Options) {
 		},
 	)
 	const lock = yield* Semaphore.make(1)
-	const persist = (journal: Journal) =>
-		durable(journalFile, journal).pipe(Effect.andThen(Ref.set(state, journal)))
+	const journalLock = yield* Semaphore.make(1)
+	const persist = (modify: (journal: Journal) => Journal) =>
+		journalLock.withPermit(
+			Effect.gen(function* () {
+				const previous = yield* Ref.get(state)
+				const next = modify(previous)
+				yield* durable(journalFile, next)
+				yield* Ref.set(state, next)
+			}).pipe(Effect.uninterruptible),
+		)
+	const ready = yield* Deferred.make<void, Trust.RegistrationError>()
+	yield* Effect.addFinalizer(() =>
+		Deferred.fail(
+			ready,
+			Trust.RegistrationError.make({
+				message: "Release owner closed before audit became available",
+			}),
+		),
+	)
+	const authority =
+		policy === undefined
+			? undefined
+			: yield* Policy.install(
+					policy,
+					recovered?.approvals ?? [],
+					saved?.status.revocations ?? initialRelease.revocations,
+					recovered?.publications ?? [],
+				).pipe(
+					Effect.provideService(Policy.Audit, {
+						ready: Deferred.await(ready),
+						record: (projection) =>
+							Effect.gen(function* () {
+								const at = yield* Clock.currentTimeMillis
+								yield* persist((journal) => ({
+									...journal,
+									events: [
+										...journal.events,
+										{
+											kind: "Projection",
+											current: journal.status.current,
+											target: journal.status.current,
+											at,
+											projection,
+										},
+									],
+								})).pipe(
+									Effect.mapError((error) =>
+										Trust.RegistrationError.make({
+											message: "Could not record projection revision",
+											cause: Cause.fail(error),
+										}),
+									),
+								)
+							}),
+					}),
+				)
 	const event = (
 		kind: import("../Model").Event["kind"],
 		target: string,
@@ -99,10 +146,10 @@ export const make = Effect.fnUntraced(function* (options: Options) {
 	) =>
 		Ref.get(state).pipe(
 			Effect.flatMap((journal) =>
-				persist({
+				persist((latest) => ({
 					...journal,
 					events: [
-						...journal.events,
+						...latest.events,
 						{
 							kind,
 							current: journal.status.current,
@@ -111,7 +158,7 @@ export const make = Effect.fnUntraced(function* (options: Options) {
 							...(outcome === undefined ? {} : { outcome: summarize(outcome) }),
 						},
 					],
-				}),
+				})),
 			),
 		)
 	const contract = Effect.fnUntraced(function* (entry: Entry) {
@@ -411,6 +458,7 @@ export const make = Effect.fnUntraced(function* (options: Options) {
 		status: { ...journal.status, state: "Ready" as const },
 	}))
 	yield* event(saved === undefined ? "Bootstrap" : "Startup", initial)
+	yield* Deferred.succeed(ready, undefined)
 	const execute = Effect.fnUntraced(function* (request: Apply) {
 		const journal = yield* Ref.get(state)
 		if (journal.status.current !== request.expected)
@@ -455,11 +503,11 @@ export const make = Effect.fnUntraced(function* (options: Options) {
 				}
 			}),
 		)
-		yield* persist({
+		yield* persist((latest) => ({
 			...journal,
 			status: { ...journal.status, state: "Applying" },
 			events: [
-				...journal.events,
+				...latest.events,
 				{
 					kind: "Intent",
 					entries: Array.map(work, (item) => item.target.id),
@@ -468,7 +516,7 @@ export const make = Effect.fnUntraced(function* (options: Options) {
 					overrideRevocations: request.overrideRevocations === true,
 				},
 			],
-		})
+		}))
 		const progress = yield* executeEntries(
 			work,
 			(item) => item.target.id,
@@ -505,11 +553,11 @@ export const make = Effect.fnUntraced(function* (options: Options) {
 							...next.revocations,
 						]),
 					}
-		yield* persist({
+		yield* persist((latest) => ({
 			...finished,
 			status,
 			events: [
-				...finished.events,
+				...latest.events,
 				{
 					kind: progress._tag === "Rejected" ? "Rejected" : "Commit",
 					current: status.current,
@@ -517,7 +565,7 @@ export const make = Effect.fnUntraced(function* (options: Options) {
 					overrideRevocations: request.overrideRevocations === true,
 				},
 			],
-		})
+		}))
 		if (progress._tag !== "Rejected" && authority !== undefined)
 			yield* authority.revoke(
 				Array.filter(
@@ -553,8 +601,16 @@ export const make = Effect.fnUntraced(function* (options: Options) {
 										...journal,
 										status: { ...journal.status, state: "Degraded" },
 									}
-									yield* Ref.set(state, degraded)
-									const persisted = yield* Effect.exit(persist(degraded))
+									yield* Ref.update(state, (current) => ({
+										...current,
+										status: { ...current.status, state: "Degraded" as const },
+									}))
+									const persisted = yield* Effect.exit(
+										persist((latest) => ({
+											...degraded,
+											events: latest.events,
+										})),
+									)
 									return yield* Effect.failCause(
 										persisted._tag === "Failure"
 											? Cause.combine(cause, persisted.cause)
@@ -578,10 +634,10 @@ export const make = Effect.fnUntraced(function* (options: Options) {
 					})
 				const approval = yield* authority.review(request)
 				const journal = yield* Ref.get(state)
-				yield* persist({
+				yield* persist((latest) => ({
 					...journal,
 					events: [
-						...journal.events,
+						...latest.events,
 						{
 							kind: "Approval",
 							current: journal.status.current,
@@ -589,7 +645,7 @@ export const make = Effect.fnUntraced(function* (options: Options) {
 							approval,
 						},
 					],
-				})
+				}))
 				yield* authority.approve(approval)
 				return approval
 			}).pipe(owned, protect),
@@ -598,7 +654,8 @@ export const make = Effect.fnUntraced(function* (options: Options) {
 				if (who.length === 0)
 					return yield* failure("Approval", "An operator identity is required")
 				const journal = yield* Ref.get(state)
-				yield* persist({
+				const at = yield* Clock.currentTimeMillis
+				yield* persist((latest) => ({
 					...journal,
 					status: {
 						...journal.status,
@@ -608,17 +665,17 @@ export const make = Effect.fnUntraced(function* (options: Options) {
 						]),
 					},
 					events: [
-						...journal.events,
+						...latest.events,
 						{
 							kind: "Revocation",
 							current: journal.status.current,
 							target: journal.status.current,
 							revocations: references,
 							who,
-							at: yield* Clock.currentTimeMillis,
+							at,
 						},
 					],
-				})
+				}))
 				if (authority !== undefined) yield* authority.revoke(references)
 			}).pipe(owned, protect),
 		build: (request) =>

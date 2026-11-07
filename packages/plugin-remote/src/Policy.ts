@@ -7,7 +7,13 @@ import { Service } from "./internal/policy"
 import { PolicyError } from "./internal/policyModel"
 
 export * from "./internal/policyModel"
-export { Service, type Operations, install } from "./internal/policy"
+export {
+	Service,
+	type Operations,
+	install,
+	Audit,
+	ProjectionChange,
+} from "./internal/policy"
 export { termination } from "./internal/policyLimits"
 /** Reads the ordinary injected policy service. Missing policy is a recoverable error. */
 export const service = Effect.serviceOption(Service).pipe(

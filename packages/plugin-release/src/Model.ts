@@ -120,6 +120,7 @@ export const summarize = (outcome: Transition.Outcome): OutcomeSummary => ({
 })
 export const Event = Schema.Struct({
 	approval: Schema.optionalKey(Policy.Approval),
+	projection: Schema.optionalKey(Policy.ProjectionChange),
 	revocations: Schema.optionalKey(Schema.Array(Schema.NonEmptyString)),
 	who: Schema.optionalKey(Schema.NonEmptyString),
 	at: Schema.optionalKey(Schema.Finite),
@@ -127,6 +128,7 @@ export const Event = Schema.Struct({
 		"Bootstrap",
 		"Startup",
 		"Approval",
+		"Projection",
 		"Revocation",
 		"Intent",
 		"Outcome",

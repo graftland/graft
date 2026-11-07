@@ -1,5 +1,6 @@
-import { Array, Effect } from "effect"
+import { Array, Effect, Option } from "effect"
 
+import { Trust } from "@graftland/graft"
 import * as Policy from "@graftland/plugin-remote/Policy"
 
 import type { Event, Journal, Release, Status } from "../Model"
@@ -14,6 +15,7 @@ interface Pending {
 	readonly degraded: boolean
 }
 interface Replay {
+	readonly publications: ReadonlyArray<Trust.Publication>
 	readonly approvals: ReadonlyArray<Policy.Approval>
 	readonly status: Status
 	readonly release: Release
@@ -36,6 +38,7 @@ export const validate = Effect.fnUntraced(function* (
 		events,
 		(): Replay => ({
 			approvals: [],
+			publications: [],
 			status: {
 				current: bootstrap.current,
 				previous: null,
@@ -53,6 +56,42 @@ export const validate = Effect.fnUntraced(function* (
 					"event current id disagrees with accepted checkpoint",
 				)
 			switch (event.kind) {
+				case "Projection": {
+					const change = event.projection
+					if (
+						change === undefined ||
+						event.at === undefined ||
+						event.target !== state.status.current
+					)
+						return yield* corrupt("invalid projection audit record")
+					const previous = Array.findFirst(
+						state.publications,
+						(item) =>
+							item.projection === change.after.projection &&
+							item.view === change.after.view,
+					)
+					const before = Option.getOrElse(previous, () => ({
+						projection: change.after.projection,
+						view: change.after.view,
+						values: [],
+					}))
+					if (!(yield* equal(before, change.before)))
+						return yield* corrupt(
+							"projection history disagrees with the preceding view",
+						)
+					return {
+						...state,
+						publications: [
+							...Array.filter(
+								state.publications,
+								(item) =>
+									item.projection !== change.after.projection ||
+									item.view !== change.after.view,
+							),
+							change.after,
+						],
+					}
+				}
 				case "Approval":
 					if (
 						pending !== undefined ||
@@ -209,6 +248,7 @@ export const validate = Effect.fnUntraced(function* (
 							"commit restores a revoked reference without an override",
 						)
 					return {
+						publications: state.publications,
 						approvals: retainApprovals(
 							state.approvals,
 							Array.filter(

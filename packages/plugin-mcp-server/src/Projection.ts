@@ -377,10 +377,11 @@ const prepare = <R>(bindings: ReadonlyArray<Binding<R>>) =>
 
 /** Registers one dynamic contributor; revisions share its call owner and do not interrupt old calls. */
 export const offer = <R>(
+	name: string,
 	bindings: ReadonlyArray<Binding<R>>,
 ): Effect.Effect<
 	Controller<R>,
-	ProjectionError,
+	ProjectionError | Trust.ProjectionConflict,
 	Graft.Graft | Scope.Scope | Exclude<R, Catalog.RequestServices>
 > =>
 	Effect.gen(function* () {
@@ -423,28 +424,40 @@ export const offer = <R>(
 				operation,
 				metadata,
 			}))
+		const values = (items: ReadonlyArray<Prepared<R>>) =>
+			Array.map(descriptions(items), ({ service, operation, metadata }) => ({
+				service,
+				operation,
+				value: metadata,
+			}))
+		const registrationError = (cause: Trust.RegistrationError) =>
+			ProjectionError.make({
+				service: "projection",
+				operation: "approval",
+				reason: cause.message,
+			})
+		const publisher = yield* Trust.publish({
+			projection: "mcp/tools",
+			view: name,
+			values: values(initial),
+		}).pipe(
+			Effect.catchTag("AdmissionRegistrationError", (error) =>
+				Effect.logError(
+					"Projected approval metadata rejected",
+					error.cause ?? Cause.fail(error),
+				).pipe(Effect.andThen(Effect.fail(registrationError(error)))),
+			),
+		)
 		const record = (items: ReadonlyArray<Prepared<R>>) =>
-			Trust.publish(
-				Array.map(descriptions(items), ({ service, operation, metadata }) => ({
-					projection: "mcp/tools",
-					service,
-					operation,
-					value: metadata,
-				})),
-			).pipe(
+			publisher.update(values(items)).pipe(
 				Effect.tapCause((cause) =>
-					Effect.logError("Projected approval metadata rejected", cause),
+					Cause.hasInterruptsOnly(cause)
+						? Effect.void
+						: Effect.logError("Projected approval metadata rejected", cause),
 				),
-				Effect.mapError((cause) =>
-					ProjectionError.make({
-						service: "projection",
-						operation: "approval",
-						reason: cause.message,
-					}),
-				),
-				Scope.provide(scope),
+				Effect.mapError(registrationError),
 			)
-		yield* record(initial)
+
 		const initialChange: Change = {
 			revision: 1,
 			before: [],

@@ -51,7 +51,7 @@ export default Plugin.make({
 	name: "forecast-tools",
 	inject: [Forecast],
 	apply: () =>
-		Projection.offer([
+		Projection.offer("forecast-tools", [
 			Projection.operation(Forecast, Get, (forecast, { city }) =>
 				forecast.get(city),
 			),
@@ -154,6 +154,10 @@ tag for approval. Withdrawing a contributor removes its live tools but preserves
 these approval facts. Remounting identical metadata needs no new approval;
 publishing different metadata blocks admission before exposing the change.
 
-Distinct views and earlier metadata revisions remain separate approval facts,
-even for the same service operation. Republishing an unchanged view cannot erase
-another view or restore approval for changed metadata.
+Pass a stable name to `Projection.offer`, such as `"public/forecast-tools"`.
+Each name identifies one logical view in this Graft runtime. Duplicate live
+owners fail with `ProjectionConflict`; disposal releases ownership while
+retaining the latest approval facts. Updates replace only that view's facts.
+Reverting its metadata restores a matching approval. The release audit journal
+keeps revisions; the live statement keeps only the latest values. See
+[trust and isolation](../../trust/) for audit and revocation rules.

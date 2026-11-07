@@ -83,7 +83,7 @@ const start = Effect.fnUntraced(function* (
 			inject: [Local],
 			apply: () =>
 				Effect.gen(function* () {
-					const controller = yield* Projection.offer(bindings)
+					const controller = yield* Projection.offer("forecast-tools", bindings)
 					yield* Deferred.succeed(ready, controller)
 				}),
 		}),
@@ -386,7 +386,8 @@ it.effect(
 					Plugin.make({
 						name: "tuple",
 						inject: [Local],
-						apply: () => Projection.offer([item]).pipe(Effect.asVoid),
+						apply: () =>
+							Projection.offer("forecast-tools", [item]).pipe(Effect.asVoid),
 					}),
 				)).await
 				yield* (yield* Graft.plugin(core, {})).await
@@ -535,9 +536,10 @@ it.effect(
 						name: "two-services",
 						inject: [Local, Other],
 						apply: () =>
-							Projection.offer<Local | Other>([binding(), second]).pipe(
-								Effect.asVoid,
-							),
+							Projection.offer<Local | Other>("forecast-tools", [
+								binding(),
+								second,
+							]).pipe(Effect.asVoid),
 					}),
 				)).await
 				yield* (yield* Graft.plugin(core, {})).await
@@ -976,7 +978,7 @@ it.effect(
 						name: "remounted-tools",
 						inject: [Local],
 						apply: () =>
-							Projection.offer([binding()]).pipe(
+							Projection.offer("forecast-tools", [binding()]).pipe(
 								Effect.flatMap((controller) =>
 									Deferred.succeed(ready, controller).pipe(Effect.asVoid),
 								),
@@ -1043,7 +1045,9 @@ it.effect(
 						name: "second-view",
 						inject: [Local],
 						apply: () =>
-							Projection.offer([second("Other forecast", true)]).pipe(
+							Projection.offer("other-forecast-tools", [
+								second("Other forecast", true),
+							]).pipe(
 								Effect.flatMap((controller) =>
 									Deferred.succeed(ready, controller),
 								),
@@ -1074,7 +1078,7 @@ it.effect(
 					"Changed other forecast",
 				)
 				const facts = yield* authority.statement("forecast", artifact)
-				assert.equal(facts.projections.length, 3)
+				assert.equal(facts.projections.length, 2)
 				assert.equal(
 					(yield* Policy.check("forecast", "current").pipe(Effect.flip)).reason,
 					"ChangedStatement",
@@ -1098,4 +1102,79 @@ it.effect(
 				yield* Policy.check("forecast", "current")
 			}),
 		),
+)
+
+it.effect(
+	"restores approval on revert and keeps one fact through twenty view revisions",
+	() =>
+		run(
+			Effect.gen(function* () {
+				const artifact = {
+					package: "@example/forecast",
+					digest: String.repeat(64)("a"),
+				}
+				const authority = yield* Policy.install({
+					version: "1",
+					entries: [{ entry: "forecast", artifact, tier: "own", grants: [] }],
+				})
+				yield* authority.bind("forecast", "current", artifact, [Local.key])
+				const graft = yield* Graft.Graft
+				const h = yield* start(({ city }) =>
+					Policy.check("forecast", "current").pipe(
+						Effect.provideService(Graft.Graft, graft),
+						Effect.as(city),
+					),
+				)
+				const expected = yield* authority.statement("forecast", artifact)
+				yield* authority
+					.review({ expected, who: "Operator" })
+					.pipe(Effect.flatMap(authority.approve))
+				for (let revision = 1; revision <= 20; revision++) {
+					yield* h.controller.update([binding(`Forecast revision ${revision}`)])
+					yield* Queue.take(h.client.notifications)
+					const statement = yield* authority.statement("forecast", artifact)
+					assert.equal(statement.projections.length, 1)
+					assert.equal(
+						(yield* Policy.check("forecast", "current").pipe(Effect.flip))
+							.reason,
+						"ChangedStatement",
+					)
+				}
+				yield* h.controller.update([binding()])
+				yield* Queue.take(h.client.notifications)
+				yield* Policy.check("forecast", "current")
+				const restored = yield* authority.statement("forecast", artifact)
+				assert.deepEqual(restored, expected)
+				const reply = yield* h.client.callTool({
+					name: "forecast",
+					arguments: { city: "London" },
+				})
+				assert.notEqual(reply.isError, true)
+			}),
+		),
+)
+
+it.effect("rejects two live owners of the same logical projection view", () =>
+	run(
+		Effect.gen(function* () {
+			const h = yield* start()
+			const denied = yield* Projection.offer("forecast-tools", [
+				binding("Unowned description"),
+			]).pipe(
+				Effect.provideService(Local, {
+					read: ({ city }) => Effect.succeed(city),
+				}),
+				Effect.flip,
+			)
+			assert.equal(denied._tag, "ProjectionConflict")
+			if (denied._tag === "ProjectionConflict") {
+				assert.equal(denied.projection, "mcp/tools")
+				assert.equal(denied.view, "forecast-tools")
+			}
+			assert.equal(
+				(yield* h.client.listTools()).tools[0]?.description,
+				metadata.description,
+			)
+		}),
+	),
 )

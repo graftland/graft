@@ -41,7 +41,9 @@ export const expose = Effect.fnUntraced(function* (
 			inject: [Forecast],
 			apply: () =>
 				Effect.gen(function* () {
-					const controller = yield* Projection.offer([view("v1")])
+					const controller = yield* Projection.offer("forecast-tools", [
+						view("v1"),
+					])
 					yield* Deferred.succeed(ready, controller)
 				}),
 		}),

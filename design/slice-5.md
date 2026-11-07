@@ -15,15 +15,28 @@ requires another approval; notification delivery is not approval. Admission
 checks the selected generation and approval in the same transaction that counts
 the call. MCP publication invalidates the statement before exposing changed
 metadata, including for clients with cached lists. Stable publication facts
-survive view withdrawal and unchanged remounting; replay restores approved facts
-before views mount. Facts are identified by the entire projection tag,
-service/operation binding and exact payload. Retain all distinct published views
-and metadata revisions, deduplicating only structurally equal facts;
-republishing one view cannot remove another view's approval requirements.
-Per-attempt binding leases begin at allocation and close on failed allocation or
-confirmed retirement. Overlapping attempts have separate leases; service keys
-become reusable when all previous owners retire. No schema hashing or
-contract-document representation is introduced.
+survive view withdrawal and unchanged remounting. Each fact is keyed by
+projection tag, author/operator-controlled logical view name, and
+service/operation. MCP requires an explicit name in
+`Projection.offer(name, bindings)`, independent of mount UUIDs and tool
+metadata. One scoped publisher owns each logical view per runtime; duplicate
+live ownership returns the typed `ProjectionConflict`. Updates replace that
+view's complete fact set, preserving other views. Disposal retains the latest
+payloads but releases ownership. Reverting metadata restores an otherwise
+matching, nonrevoked approval.
+
+The release journal retains publication revisions before they change admission
+or become visible. Policy captures the public `Policy.Audit` service; embedded
+hosts can supply their own sink. Release writes use one journal mutex distinct
+from deployment coordination, preserving audit appends during apply or rollback.
+Replay validates revision chains and restores only the latest view snapshots,
+including unapproved changes. Approval history is never the source of current
+view state; embedded recovery supplies publication snapshots explicitly. Live
+statements do not accumulate revisions. Per-attempt binding leases begin at
+allocation and close on failed allocation or confirmed retirement. Overlapping
+attempts have separate leases; service keys become reusable when all previous
+owners retire. No schema hashing or contract-document representation is
+introduced.
 
 ## Isolation and capabilities
 

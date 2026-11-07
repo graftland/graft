@@ -94,12 +94,12 @@ graft approve statement.json --who operator@example --socket /app/control.sock -
 graft release revoke weather --who operator@example --socket /app/control.sock --json
 ```
 
-| Approval covers | Comparison                                                                                                                                                  |
-| --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Artifact        | Package name and captured directory digest, including dependencies present in that directory.                                                               |
-| Exposed views   | Exact projection tag, service/operation binding and payload. MCP includes name, title, description, all four hints and output handling. Whitespace matters. |
-| Grants          | Exact capability ids, destinations, filesystem roots and credential reference names.                                                                        |
-| Policy          | Exact version and entry assignment.                                                                                                                         |
+| Approval covers | Comparison                                                                                                                                                                     |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Artifact        | Package name and captured directory digest, including dependencies present in that directory.                                                                                  |
+| Exposed views   | Exact projection tag, logical view name, service/operation binding and payload. MCP includes name, title, description, all four hints and output handling. Whitespace matters. |
+| Grants          | Exact capability ids, destinations, filesystem roots and credential reference names.                                                                                           |
+| Policy          | Exact version and entry assignment.                                                                                                                                            |
 
 The journal records who, when and the complete statement before enabling calls.
 A stale statement returns `Unapproved`. Published presentation facts persist
@@ -110,11 +110,25 @@ changes the approval statement before notifying MCP clients.
 receive `Unapproved` at admission. Approved code bytes do not guarantee
 deterministic behavior or freeze the behavior of an allowed external service.
 
-Every distinct published payload remains in the statement, including earlier
-revisions. Two views of one service operation retain separate facts:
-republishing one cannot erase the other's name, description or hints. Only
-exactly identical facts are deduplicated. Approval covers the full accumulated
-statement.
+Each fact is keyed by projection tag, stable logical view name, and
+service/operation. `Projection.offer("forecast-tools", bindings)` uses the name
+chosen by the projection author or operator; use distinct names for separate
+server views. A mount UUID is not a logical identity. Each view has one live
+owner per Graft runtime; another claim fails with `ProjectionConflict`.
+
+An update replaces only that view's complete fact set. Its latest payloads
+survive withdrawal and remount, while revisions do not enlarge the statement.
+Reverting to an approved payload restores admission when the rest of the
+statement still matches and no revocation blocks it. Updating one view cannot
+replace another view of the same operation.
+
+Release-owned policy writes revisions to the release audit journal before
+changing admission or exposing metadata. Journal replay restores the latest
+facts, including unapproved changes, without restoring obsolete revisions to the
+statement. A failed audit write rejects publication. Embedded hosts can supply
+`Policy.Audit` for durable history. Embedded recovery passes the latest
+publication snapshots to `Policy.install`; approval records alone do not
+describe the current views.
 
 Revoking a grant or `env:NAME` reference blocks admission first, then waits up
 to five seconds for each affected unit's termination and independently observed
@@ -126,9 +140,9 @@ does not reopen admission. Revocations survive restart. Rollback checks grant
 references too. Restoration needs the recorded `--override-revocations` and a
 matching approval with that explicit override; neither removes the revocation
 record. A restarted unit can initialize under that recorded override. Startup
-restores the approved presentation facts; publishing different metadata blocks
-admission again. Carrying a revocation forward does not revoke an override
-again; a new explicit revocation does.
+restores the latest audited presentation facts; publishing different metadata
+blocks admission again. Carrying a revocation forward does not revoke an
+override again; a new explicit revocation does.
 
 ## Run untrusted code
 

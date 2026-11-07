@@ -13,7 +13,7 @@ import {
 import { NodeServices } from "@effect/platform-node"
 import { assert, it } from "@effect/vitest"
 
-import { Graft } from "@graftland/graft"
+import { Graft, Trust } from "@graftland/graft"
 import { ModuleResolver } from "@graftland/loader"
 import { Artifact } from "@graftland/plugin-remote"
 import * as Policy from "@graftland/plugin-remote/Policy"
@@ -534,5 +534,83 @@ it.effect(
 			assert.isFalse(secondImport)
 			const result = yield* load(h.store, id, true)
 			assert.equal(result.entries[0]?.package.name, "@example/untrusted")
+		}).pipe(Effect.scoped, Effect.provide(runtime)),
+)
+
+it.effect(
+	"journals every projection revision while replay retains only each view's latest payload",
+	() =>
+		Effect.gen(function* () {
+			const h = yield* setup()
+			const file = h.path.join(h.store, "trust.json")
+			yield* write(file, { version: "1", entries: [] })
+			const releases = yield* make({
+				store: h.store,
+				initial: h.id,
+				host,
+				trust: file,
+			}).pipe(Effect.provideService(ModuleResolver.ModuleResolver, h.resolver))
+			const values = (revision: number) => [
+				{
+					service: "forecast",
+					operation: "read@1",
+					value: { description: `Forecast ${revision}` },
+				},
+			]
+			const publisher = yield* Trust.publish({
+				projection: "mcp/tools",
+				view: "forecast-tools",
+				values: values(0),
+			})
+			for (let revision = 1; revision <= 20; revision++)
+				yield* publisher.update(values(revision))
+			yield* publisher.update(values(0))
+			const source = h.path.join(h.store, "next.yml")
+			yield* h.fs.writeFileString(source, "[]")
+			const target = yield* build(h.store, {
+				file: source,
+				references: ["capability:extra"],
+				revocations: [],
+			})
+			yield* Effect.all(
+				[
+					releases.apply({ expected: h.id, target }),
+					publisher.update(values(21)),
+				],
+				{ concurrency: "unbounded" },
+			)
+			const journal = yield* read(h.path.join(h.store, "journal.json"), Journal)
+			const revisions = Array.filter(
+				journal.events,
+				(event) => event.kind === "Projection",
+			)
+			assert.equal(revisions.length, 23)
+			assert.deepEqual(revisions[21]!.projection?.after.values, values(0))
+			const replay = yield* validate(h.store, journal)
+			assert.equal(replay.status.current, target)
+			assert.deepEqual(replay.publications, [
+				{ projection: "mcp/tools", view: "forecast-tools", values: values(21) },
+			])
+			const corrupted = {
+				...journal,
+				events: Array.map(journal.events, (event) =>
+					event === revisions[1]
+						? {
+								...event,
+								projection: {
+									before: {
+										projection: "mcp/tools",
+										view: "forecast-tools",
+										values: [],
+									},
+									after: event.projection!.after,
+								},
+							}
+						: event,
+				),
+			}
+			const error = yield* validate(h.store, corrupted).pipe(Effect.flip)
+			assert.equal(error._tag, "ReleaseError")
+			if (error._tag === "ReleaseError") assert.equal(error.code, "Journal")
 		}).pipe(Effect.scoped, Effect.provide(runtime)),
 )

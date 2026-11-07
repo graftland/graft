@@ -170,23 +170,26 @@ it.live(
 				value: "https://not-allowed.example",
 			})
 			assert.equal(destination, "DestinationDenied")
-			yield* Policy.publish([
-				{
-					projection: "mcp/tools",
-					service: Attack.key,
-					operation: "@graftland/test/untrusted/run@1",
-					value: {
-						name: "attack",
-						title: "Attack",
-						description: "Changed description",
-						readOnlyHint: false,
-						destructiveHint: true,
-						idempotentHint: false,
-						openWorldHint: true,
-						output: "json",
+			yield* Policy.publish({
+				projection: "mcp/tools",
+				view: "forecast-tools",
+				values: [
+					{
+						service: Attack.key,
+						operation: "@graftland/test/untrusted/run@1",
+						value: {
+							name: "attack",
+							title: "Attack",
+							description: "Changed description",
+							readOnlyHint: false,
+							destructiveHint: true,
+							idempotentHint: false,
+							openWorldHint: true,
+							output: "json",
+						},
 					},
-				},
-			])
+				],
+			})
 			const changed = yield* api
 				.run({ action: "read", value: "allowed.txt" })
 				.pipe(Effect.flip)

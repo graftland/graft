@@ -5,7 +5,9 @@ import type * as Graft from "./Graft"
 import * as Internal from "./internal/trust"
 import type {
 	Authority,
-	Projection,
+	ProjectionConflict,
+	Publication,
+	Publisher,
 	RegistrationError,
 	Unapproved,
 } from "./internal/trustModel"
@@ -19,11 +21,14 @@ export const register: (
 	RegistrationError,
 	Graft.Graft | Scope.Scope
 > = (authority) => Internal.register(authority)
-/** Publishes stable projection facts before a view exposes them. View withdrawal does not erase facts. */
+/** Claims a logical view for this scope and publishes its initial facts. Withdrawal retains the latest facts. */
 export const publish: (
-	values: ReadonlyArray<Projection>,
-) => Effect.Effect<void, RegistrationError, Graft.Graft> = (values) =>
-	Internal.publish(values)
+	publication: Publication,
+) => Effect.Effect<
+	Publisher,
+	RegistrationError | ProjectionConflict,
+	Graft.Graft | Scope.Scope
+> = (publication) => Internal.publish(publication)
 /** Checks an attempt, or an unregistered caller when no candidate is supplied. Registered authorities reject unregistered callers. */
 export const check: (
 	entry: string,

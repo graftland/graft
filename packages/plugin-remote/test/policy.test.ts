@@ -39,6 +39,7 @@ const assignment: Policy.Assignment = {
 }
 const description = {
 	projection: "mcp/tools",
+	view: "forecast-tools",
 	service: "forecast",
 	operation: "read@1",
 	value: {
@@ -58,11 +59,15 @@ const approved = Effect.gen(function* () {
 		entries: [assignment],
 	})
 	yield* authority.bind("forecast", "candidate", artifact, ["forecast"])
-	yield* Policy.publish([description])
+	const publisher = yield* Policy.publish({
+		projection: "mcp/tools",
+		view: "forecast-tools",
+		values: [description],
+	})
 	const expected = yield* authority.statement("forecast", artifact)
 	const record = yield* authority.review({ expected, who: "operator@example" })
 	yield* authority.approve(record)
-	return { record, authority }
+	return { record, authority, publisher }
 })
 it.effect(
 	"blocks unknown and unapproved artifacts before calls are admitted",
@@ -97,7 +102,7 @@ for (const field of [
 		"invalidates approval when exact tool metadata changes: " + field,
 		() =>
 			Effect.gen(function* () {
-				const { authority } = yield* approved
+				const { authority, publisher } = yield* approved
 				yield* Policy.check("forecast", "candidate")
 				const value = description.value[field]
 				const metadata = {
@@ -109,7 +114,7 @@ for (const field of [
 								? ("void" as const)
 								: value + " ",
 				}
-				yield* Policy.publish([{ ...description, value: metadata }])
+				yield* publisher.update([{ ...description, value: metadata }])
 				assert.equal(
 					(yield* Policy.check("forecast", "candidate").pipe(Effect.flip))
 						.reason,
@@ -299,6 +304,13 @@ it.effect(
 				{ version: "1", entries: [assignment] },
 				[record],
 				["weather"],
+				[
+					{
+						projection: "mcp/tools",
+						view: "forecast-tools",
+						values: [description],
+					},
+				],
 			)
 			yield* authority.bind("forecast", "candidate", artifact, ["forecast"])
 			const terminated = yield* Ref.make(false)
@@ -310,7 +322,11 @@ it.effect(
 			const stopped = yield* Ref.get(terminated)
 			assert.isFalse(stopped)
 			yield* Policy.check("forecast", "candidate")
-			yield* Policy.publish([description])
+			yield* Policy.publish({
+				projection: "mcp/tools",
+				view: "forecast-tools",
+				values: [description],
+			})
 			yield* Policy.check("forecast", "candidate")
 			yield* authority.revoke(["unrelated"])
 			const unrelated = yield* Ref.get(terminated)
@@ -430,7 +446,7 @@ it.effect(
 )
 
 it.effect(
-	"restores every published fact from multiple journaled approvals",
+	"restores the latest audited view independently of approval history",
 	() =>
 		Effect.gen(function* () {
 			const old = {
@@ -443,7 +459,7 @@ it.effect(
 					statement: {
 						assignment,
 						policyVersion: "1",
-						projections,
+						projections: [projections[projections.length - 1]!],
 					},
 					who: "Operator",
 					at: 1,
@@ -453,13 +469,25 @@ it.effect(
 			const authority = yield* Policy.install(
 				{ version: "1", entries: [assignment] },
 				records,
+				[],
+				[
+					{
+						projection: "mcp/tools",
+						view: "forecast-tools",
+						values: [description],
+					},
+				],
 			)
 			yield* authority.bind("forecast", "candidate", artifact, ["forecast"])
 			yield* Policy.check("forecast", "candidate")
-			yield* Policy.publish([description])
+			yield* Policy.publish({
+				projection: "mcp/tools",
+				view: "forecast-tools",
+				values: [description],
+			})
 			yield* Policy.check("forecast", "candidate")
 			const statement = yield* authority.statement("forecast", artifact)
-			assert.deepEqual(statement.projections, [old, description])
+			assert.deepEqual(statement.projections, [description])
 		}).pipe(run),
 )
 
@@ -518,7 +546,11 @@ it.effect(
 			policy.version = "changed"
 			yield* authority.bind("forecast", "candidate", artifact, ["forecast"])
 			const fact = structuredClone(description)
-			yield* Policy.publish([fact])
+			yield* Policy.publish({
+				projection: "mcp/tools",
+				view: "forecast-tools",
+				values: [fact],
+			})
 			fact.value.description = "Unreviewed change"
 			const expected = yield* authority.statement("forecast", artifact)
 			const approval = yield* authority.review({ expected, who: "Operator" })
@@ -536,5 +568,112 @@ it.effect(
 			assert.equal(observed.policyVersion, "1")
 			assert.equal(observed.assignment.tier, "untrusted")
 			assert.deepEqual(observed.projections, [description])
+		}).pipe(run),
+)
+
+it.effect(
+	"restores the latest audited view before mount and recovers approval by reverting it",
+	() =>
+		Effect.gen(function* () {
+			const record: Policy.Approval = {
+				statement: {
+					assignment,
+					policyVersion: "1",
+					projections: [description],
+				},
+				who: "Operator",
+				at: 1,
+				overrideRevocations: false,
+			}
+			const latest = {
+				...description,
+				value: { ...description.value, description: "Unapproved revision" },
+			}
+			const authority = yield* Policy.install(
+				{ version: "1", entries: [assignment] },
+				[record],
+				[],
+				[{ projection: "mcp/tools", view: "forecast-tools", values: [latest] }],
+			)
+			yield* authority.bind("forecast", "candidate", artifact, ["forecast"])
+			assert.equal(
+				(yield* Policy.check("forecast", "candidate").pipe(Effect.flip)).reason,
+				"ChangedStatement",
+			)
+			const restored = yield* authority.statement("forecast", artifact)
+			assert.deepEqual(restored.projections, [latest])
+			yield* Policy.publish({
+				projection: "mcp/tools",
+				view: "forecast-tools",
+				values: [description],
+			})
+			yield* Policy.check("forecast", "candidate")
+		}).pipe(run),
+)
+
+it.effect("rejects audit failure without changing the approved view", () =>
+	Effect.gen(function* () {
+		const failed = yield* Ref.make(false)
+		const { publisher, authority, record } = yield* approved.pipe(
+			Effect.provideService(Policy.Audit, {
+				ready: Effect.void,
+				record: () =>
+					Ref.get(failed).pipe(
+						Effect.flatMap((reject) =>
+							reject
+								? Trust.RegistrationError.make({
+										message: "Audit write failed",
+									})
+								: Effect.void,
+						),
+					),
+			}),
+		)
+		yield* Ref.set(failed, true)
+		const error = yield* publisher
+			.update([
+				{
+					...description,
+					value: { ...description.value, description: "Not persisted" },
+				},
+			])
+			.pipe(Effect.flip)
+		assert.equal(error.message, "Audit write failed")
+		yield* Policy.check("forecast", "candidate")
+		const current = yield* authority.statement("forecast", artifact)
+		assert.deepEqual(current, record.statement)
+	}).pipe(run),
+)
+
+it.effect(
+	"cancels initial publication while its audit owner is still starting",
+	() =>
+		Effect.gen(function* () {
+			const ready = yield* Deferred.make<void>()
+			const waiting = yield* Deferred.make<void>()
+			const authority = yield* Policy.install({
+				version: "1",
+				entries: [assignment],
+			}).pipe(
+				Effect.provideService(Policy.Audit, {
+					ready: Deferred.succeed(waiting, undefined).pipe(
+						Effect.andThen(Deferred.await(ready)),
+					),
+					record: () => Effect.void,
+				}),
+			)
+			yield* authority.bind("forecast", "candidate", artifact, ["forecast"])
+			const publication = {
+				projection: "mcp/tools",
+				view: "forecast-tools",
+				values: [description],
+			}
+			const pending = yield* Policy.publish(publication).pipe(Effect.forkScoped)
+			yield* Deferred.await(waiting)
+			yield* Fiber.interrupt(pending)
+			const current = yield* authority.statement("forecast", artifact)
+			assert.deepEqual(current.projections, [])
+			yield* Deferred.succeed(ready, undefined)
+			yield* Policy.publish(publication)
 		}).pipe(run),
 )

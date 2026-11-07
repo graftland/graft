@@ -48,7 +48,7 @@ export default Plugin.make({
 	name: "forecast-tools",
 	inject: [Forecast],
 	apply: () =>
-		Projection.offer([
+		Projection.offer("forecast-tools", [
 			Projection.operation(Forecast, Get, (forecast, { city }) =>
 				forecast.get(city),
 			),
@@ -120,4 +120,6 @@ attempt。
 投影验证 MCP 字段，并以 `mcp/tools`
 标签发布批准数据。撤下贡献者会移除其在线工具，但保留批准事实。重新挂载相同元数据无需再次批准；发布不同元数据会在暴露变更前阻止准入。
 
-同一服务操作的不同视图和历史元数据版本保留各自的批准事实。重新发布未变的视图，不会抹去另一个视图，也不会恢复已变元数据的批准。
+给 `Projection.offer` 传入稳定名称，例如
+`"public/forecast-tools"`。每个名称在当前 Graft 运行时标识一个逻辑视图。重复在线所有者返回
+`ProjectionConflict`；释放时撤销所有权，但保留最新批准事实。更新只替换该视图的事实。还原元数据会恢复匹配的批准。发布审计日志保存修订，在线声明仅保留最新值。审计及撤销规则见[信任与隔离](../../trust/)。

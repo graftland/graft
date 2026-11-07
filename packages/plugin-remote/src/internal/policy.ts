@@ -9,6 +9,7 @@ import {
 	Order,
 	Schema,
 	Scope,
+	Semaphore,
 	TxRef,
 } from "effect"
 
@@ -63,11 +64,19 @@ const same = Schema.toEquivalence(T.Statement)
 const sameAssignment = Schema.toEquivalence(T.Assignment)
 // Operator data is copied on ingress and egress; comparison uses schema structural equality.
 const snapshot = <A extends Schema.Json>(value: A): A => structuredClone(value)
-const sameProjection = Schema.toEquivalence(Trust.Projection)
-const mergeProjections = (
+const sameView = (a: Trust.View, b: Trust.View) =>
+	a.projection === b.projection && a.view === b.view
+const replaceView = (
 	previous: ReadonlyArray<Trust.Projection>,
-	values: ReadonlyArray<Trust.Projection>,
-) => Array.dedupeWith([...previous, ...values], sameProjection)
+	publication: Trust.Publication,
+) => [
+	...Array.filter(previous, (item) => !sameView(item, publication)),
+	...Array.map(publication.values, (value) => ({
+		...value,
+		projection: publication.projection,
+		view: publication.view,
+	})),
+]
 const current = (
 	state: State,
 	entry: string,
@@ -89,6 +98,7 @@ const current = (
 	)
 	const projections = Array.sortBy(
 		Order.mapInput(Order.String, (item: Trust.Projection) => item.projection),
+		Order.mapInput(Order.String, (item: Trust.Projection) => item.view),
 		Order.mapInput(Order.String, (item: Trust.Projection) => item.service),
 		Order.mapInput(Order.String, (item: Trust.Projection) => item.operation),
 	)(
@@ -176,6 +186,7 @@ export const install = Effect.fnUntraced(function* (
 	policy: T.Policy,
 	approvals: ReadonlyArray<T.Approval> = [],
 	revocations: ReadonlyArray<string> = [],
+	publications: ReadonlyArray<Trust.Publication> = [],
 ) {
 	const decoded = yield* Schema.decodeEffect(T.Policy)(policy).pipe(
 		Effect.mapError((error) =>
@@ -208,10 +219,7 @@ export const install = Effect.fnUntraced(function* (
 		approvals: snapshot(approvals),
 		revocations: snapshot(revocations),
 		projections: snapshot(
-			mergeProjections(
-				[],
-				Array.flatMap(approvals, (record) => record.statement.projections),
-			),
+			Array.reduce(publications, Array.empty<Trust.Projection>(), replaceView),
 		),
 	})
 	const provide = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
@@ -228,9 +236,12 @@ export const install = Effect.fnUntraced(function* (
 			Effect.map((state) => state.bindings.length),
 		),
 	})
+	const audit = yield* Effect.serviceOption(Audit)
+	const publicationLock = yield* Semaphore.make(1)
 	const { close } = yield* Trust.register({
 		compare: (entry, candidate) => provide(comparison(entry, candidate)),
-		publish: (values) => provide(publish(values)),
+		publish: (value) =>
+			publicationLock.withPermit(provide(publish(value, audit))),
 	}).pipe(
 		Effect.mapError((error) =>
 			T.PolicyError.make({ message: error.message, cause: Cause.fail(error) }),
@@ -325,23 +336,67 @@ export const statement = Effect.fnUntraced(function* (
 	})
 })
 const publish = Effect.fnUntraced(function* (
-	values: ReadonlyArray<Trust.Projection>,
+	publication: Trust.Publication,
+	audit: Option.Option<Audit["Service"]>,
 ) {
-	const stateRef = yield* Store
-	const decoded = yield* Schema.decodeEffect(Schema.Array(Trust.Projection))(
-		values,
-	).pipe(
-		Effect.mapError((error) =>
-			Trust.RegistrationError.make({
-				message: "Invalid projection payload",
-				cause: Cause.fail(error),
-			}),
-		),
+	return yield* Effect.uninterruptibleMask((restore) =>
+		Effect.gen(function* () {
+			const stateRef = yield* Store
+			const decoded = yield* Schema.decodeEffect(Trust.Publication)(
+				snapshot(publication),
+			).pipe(
+				Effect.mapError((error) =>
+					Trust.RegistrationError.make({
+						message: "Invalid projection payload",
+						cause: Cause.fail(error),
+					}),
+				),
+			)
+			const values = Array.sortBy(
+				Order.mapInput(
+					Order.String,
+					(item: Trust.ProjectionValue) => item.service,
+				),
+				Order.mapInput(
+					Order.String,
+					(item: Trust.ProjectionValue) => item.operation,
+				),
+			)(decoded.values)
+			if (
+				Array.dedupeWith(
+					values,
+					(a, b) => a.service === b.service && a.operation === b.operation,
+				).length !== values.length
+			)
+				return yield* Trust.RegistrationError.make({
+					message: "A logical view must declare each service/operation once",
+				})
+			const after = { ...decoded, values }
+			const state = yield* TxRef.get(stateRef)
+			if (state.closed)
+				return yield* Trust.RegistrationError.make({
+					message: "Policy is closed",
+				})
+			const before: Trust.Publication = {
+				projection: after.projection,
+				view: after.view,
+				values: Array.map(
+					Array.filter(state.projections, (item) => sameView(item, after)),
+					({ service, operation, value }) => ({ service, operation, value }),
+				),
+			}
+			if (Schema.toEquivalence(Trust.Publication)(before, after)) return
+			// Audit acknowledgement precedes admission changes and external metadata exposure.
+			if (Option.isSome(audit)) {
+				yield* restore(audit.value.ready)
+				yield* audit.value.record(snapshot({ before, after }))
+			}
+			yield* TxRef.update(stateRef, (current) => ({
+				...current,
+				projections: replaceView(current.projections, after),
+			}))
+		}),
 	)
-	yield* TxRef.update(stateRef, (state) => ({
-		...state,
-		projections: mergeProjections(state.projections, snapshot(decoded)),
-	}))
 })
 export const review = Effect.fnUntraced(function* (request: T.Approve) {
 	const expected = snapshot(request.expected)
@@ -521,3 +576,20 @@ export interface Operations {
 export class Service extends Context.Service<Service, Operations>()(
 	"@graftland/plugin-remote/internal/policy/Service",
 ) {}
+
+/** Durable history supplied by the release owner; embedded hosts may supply their own sink. */
+export class Audit extends Context.Service<
+	Audit,
+	{
+		/** May wait interruptibly for the audit owner to finish initialization. */
+		readonly ready: Effect.Effect<void, Trust.RegistrationError>
+		readonly record: (
+			change: ProjectionChange,
+		) => Effect.Effect<void, Trust.RegistrationError>
+	}
+>()("@graftland/plugin-remote/internal/policy/Audit") {}
+export const ProjectionChange = Schema.Struct({
+	before: Trust.Publication,
+	after: Trust.Publication,
+})
+export type ProjectionChange = typeof ProjectionChange.Type
