@@ -74,6 +74,7 @@ test("preserves core exports, re-exports, overloads, and local Schema fields", a
 		"Plugin",
 		"Release",
 		"Transition",
+		"Trust",
 	])
 	assert.ok(
 		index.children.every((child) => child.kindOf(ReflectionKind.Reference)),
