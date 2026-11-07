@@ -1,4 +1,13 @@
-import { Array, Cause, Effect, Equal, Exit, Option, TxRef } from "effect"
+import {
+	Array,
+	Cause,
+	Effect,
+	Equal,
+	Exit,
+	HashSet,
+	Option,
+	TxRef,
+} from "effect"
 
 import * as Change from "../Change"
 import * as Capacity from "./capacity"
@@ -242,6 +251,9 @@ const lateSettlement = Effect.fnUntraced(function* (
 	yield* Effect.tx(
 		ChangeTable.release(record).pipe(
 			Effect.andThen(ChangeTable.archive(managed.runtime.changes, record)),
+			Effect.andThen(
+				TxRef.update(managed.pending, HashSet.remove(record.handle.id)),
+			),
 		),
 	)
 })
@@ -316,6 +328,8 @@ const work = Effect.fnUntraced(function* (
 			)
 				yield* TxRef.set(managed.lifecycle, { ...state, active: Option.none() })
 			yield* ChangeTable.finish(managed.runtime.changes, record, published)
+			if (published._tag !== "Stuck")
+				yield* TxRef.update(managed.pending, HashSet.remove(record.handle.id))
 			yield* TxRef.set(run.reply, Option.some(outcome))
 		}),
 	)

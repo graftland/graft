@@ -11,6 +11,7 @@ import {
 	Exit,
 	Fiber,
 	HashMap,
+	HashSet,
 	Option,
 	Order,
 	Ref,
@@ -86,6 +87,7 @@ export interface Managed {
 	readonly runtime: Runtime
 	readonly resolution: ActiveResolution
 	readonly initialCredit: Capacity.Credit
+	readonly pending: TxRef.TxRef<HashSet.HashSet<Change.Id>>
 	readonly instance: string
 	readonly driver: T.Driver
 	readonly resolve: (
@@ -109,10 +111,18 @@ export interface Managed {
 	readonly entry: ForkEntry
 }
 
-const releaseRegistration = Effect.fnUntraced(function* (managed: Managed) {
+const registrationSettled = Effect.fnUntraced(function* (managed: Managed) {
 	const lifecycle = yield* TxRef.get(managed.lifecycle)
 	const leases = yield* TxRef.get(managed.leases)
-	if (lifecycle._tag !== "Closed" || leases.length !== 0) return
+	const pending = yield* TxRef.get(managed.pending)
+	return (
+		lifecycle._tag === "Closed" &&
+		leases.length === 0 &&
+		HashSet.size(pending) === 0
+	)
+})
+const releaseRegistration = Effect.fnUntraced(function* (managed: Managed) {
+	if (!(yield* registrationSettled(managed))) return
 	const instances = yield* TxRef.get(managed.runtime.instances)
 	if (
 		Option.exists(
@@ -1146,6 +1156,7 @@ export const register = Effect.fnUntraced(function* (
 			const managed: Managed = {
 				runtime,
 				resolution,
+				pending: yield* TxRef.make(HashSet.empty<Change.Id>()),
 				initialCredit: {
 					charged: yield* TxRef.make(true),
 					capacity: yield* TxRef.make(Option.none<Capacity.Claim>()),
@@ -1256,6 +1267,17 @@ export const register = Effect.fnUntraced(function* (
 					if (cause.reasons.length > 0) return yield* Effect.failCause(cause)
 				}),
 			)
+			// The closer belongs to the parent; managed workers never synchronously close their own scope.
+			const closed = yield* Effect.tx(
+				Effect.gen(function* () {
+					if (!(yield* registrationSettled(managed)))
+						return yield* Effect.txRetry
+					yield* releaseRegistration(managed)
+				}),
+			).pipe(
+				Effect.andThen(Release.close(managed.scope, Exit.void)),
+				Effect.forkIn(runtime.changes.scope),
+			)
 			const facadeActivation: Activation = {
 				...activation,
 				published: yield* TxRef.make<Option.Option<ReadonlyArray<Provision>>>(
@@ -1318,6 +1340,7 @@ export const register = Effect.fnUntraced(function* (
 							})
 						}),
 					)
+					if (yield* registrationSettled(managed)) yield* Fiber.join(closed)
 					const hostFailures = yield* TxRef.get(managed.hostFailures)
 					const cause = Cause.combine(
 						foldCauses([...cleanup, ...releases]),

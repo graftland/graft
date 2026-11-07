@@ -5,6 +5,7 @@ import {
 	Context,
 	Effect,
 	HashMap,
+	HashSet,
 	Option,
 	TxRef,
 } from "effect"
@@ -426,6 +427,7 @@ export const admit = Effect.fnUntraced(function* (
 		previous: current,
 		previousDesired: yield* TxRef.get(managed.desired),
 	}
+	yield* TxRef.update(managed.pending, HashSet.add(id))
 	yield* TxRef.set(managed.lifecycle, {
 		_tag: "Open",
 		active: Option.some(active),
