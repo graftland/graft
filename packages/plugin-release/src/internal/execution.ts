@@ -74,24 +74,30 @@ export const execute = <A, R>(
 				Array.reverse(progress.accepted),
 				() => Progress.Rejected({ outcomes, degraded: degraded(observation) }),
 				Effect.fnUntraced(function* (rejected, item) {
-					const previous = Option.getOrThrow(
-						Array.findFirst(
-							progress.outcomes,
-							(itemObservation) =>
-								itemObservation.entry === id(item) && accepted(itemObservation),
-						),
+					const previous = Array.findFirst(
+						progress.outcomes,
+						(itemObservation) =>
+							itemObservation.entry === id(item) && accepted(itemObservation),
 					)
-					if (previous._tag !== "Admitted")
+					if (Option.isNone(previous) || previous.value._tag !== "Admitted")
 						return yield* Effect.die(
 							new Error("Compensation requires an admitted accepted Change"),
 						)
-					const member = Option.getOrThrow(
-						Array.findFirst(
-							previous.outcome.members,
-							(member) => member.instance === id(item),
-						),
+					const member = Array.findFirst(
+						previous.value.outcome.members,
+						(member) => member.instance === id(item),
 					)
-					const observation = yield* attempt(item, true, member.actual.version)
+					if (Option.isNone(member))
+						return yield* Effect.die(
+							new Error(
+								"Compensation requires an accepted member matching the entry",
+							),
+						)
+					const observation = yield* attempt(
+						item,
+						true,
+						member.value.actual.version,
+					)
 					return Progress.Rejected({
 						outcomes: Array.append(rejected.outcomes, observation),
 						degraded: rejected.degraded || !accepted(observation),

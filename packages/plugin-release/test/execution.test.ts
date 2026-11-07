@@ -1,4 +1,13 @@
-import { Array, Cause, Context, Deferred, Effect, Option, Ref } from "effect"
+import {
+	Array,
+	Cause,
+	Context,
+	Deferred,
+	Effect,
+	Exit,
+	Option,
+	Ref,
+} from "effect"
 import { assert, it } from "@effect/vitest"
 
 import { Change, Graft, Plugin, Transition } from "@graftland/graft"
@@ -304,4 +313,39 @@ it.effect(
 			const started = yield* Ref.get(allocations)
 			assert.deepStrictEqual(started, ["old", "next", "later"])
 		}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
+)
+
+it.effect(
+	"reports a missing accepted member as an explicit compensation invariant defect",
+	() =>
+		Effect.gen(function* () {
+			const result = yield* Effect.exit(
+				execute(
+					["first", "second"],
+					(entry) => entry,
+					(entry) =>
+						entry === "first"
+							? Effect.succeed(
+									Change.Outcome.Accepted({
+										change: Change.Id.make("missing-member"),
+										members: [],
+										phase: "Complete",
+										evidence: [],
+									}),
+								)
+							: Change.ChangeRejected.make({
+									reason: { _tag: "UnsupportedTarget", instance: entry },
+								}),
+				),
+			)
+			assert.isTrue(Exit.isFailure(result))
+			if (Exit.isFailure(result)) {
+				const defect = Cause.squash(result.cause)
+				assert.instanceOf(defect, Error)
+				assert.strictEqual(
+					defect instanceof Error ? defect.message : undefined,
+					"Compensation requires an accepted member matching the entry",
+				)
+			}
+		}),
 )
