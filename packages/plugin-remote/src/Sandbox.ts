@@ -106,8 +106,15 @@ export const linux = Layer.effect(
 					const prlimit = yield* executable("prlimit")
 					const bwrap = yield* executable("bwrap")
 					const node = yield* fs.realPath(process.execPath)
+					// Node's own dynamic loader lists what it maps, including itself.
+					// An ldd from PATH may belong to another libc and name its own
+					// loader instead, which leaves Node unable to start in the sandbox.
 					const libraryProcess = yield* spawner.spawn(
-						ChildProcess.make("ldd", [node]),
+						ChildProcess.make(node, [], {
+							env: { LD_TRACE_LOADED_OBJECTS: "1" },
+							extendEnv: false,
+							stdin: "ignore",
+						}),
 					)
 					const [status, output] = yield* Effect.all(
 						[
@@ -116,17 +123,17 @@ export const linux = Layer.effect(
 						],
 						{ concurrency: 2 },
 					)
-					if (status !== 0)
-						return yield* SandboxError.make({
-							reason: "LauncherUnavailable",
-							message: "Cannot resolve the trusted Node runtime libraries",
-						})
 					const libraries = Array.dedupe(
 						Array.flatMap(String.split(output, "\n"), (line) => {
 							const match = /(?:=>\s+)?(\/[^\s]+)\s+\(/.exec(line)
 							return match === null ? [] : [match[1]!]
 						}),
 					)
+					if (status !== 0 || libraries.length === 0)
+						return yield* SandboxError.make({
+							reason: "LauncherUnavailable",
+							message: "Cannot resolve the trusted Node runtime libraries",
+						})
 					const args = [
 						"--unshare-user",
 						"--unshare-ipc",

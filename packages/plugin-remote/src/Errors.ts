@@ -1,4 +1,6 @@
-import { Option, Schema } from "effect"
+import { Option, Schema, String } from "effect"
+
+const stderrInMessage = 512
 
 export class ProcessExited extends Schema.TaggedError<
 	ProcessExited,
@@ -11,9 +13,13 @@ export class ProcessExited extends Schema.TaggedError<
 	statusCause: Schema.Cause(Schema.Unknown, Schema.Unknown),
 }) {
 	override get message() {
-		return this.threadId !== undefined
-			? `Remote worker ${this.threadId} exited unexpectedly (${this.exitCode})`
-			: `Remote process${Option.isSome(this.pid) ? ` ${this.pid.value}` : ""} exited unexpectedly (${this.exitCode ?? "signal"})`
+		const exit =
+			this.threadId !== undefined
+				? `Remote worker ${this.threadId} exited unexpectedly (${this.exitCode})`
+				: `Remote process${Option.isSome(this.pid) ? ` ${this.pid.value}` : ""} exited unexpectedly (${this.exitCode ?? "signal"})`
+		// The end of stderr usually names the reason; the full tail stays in `stderr`.
+		const reason = String.trim(String.takeRight(this.stderr, stderrInMessage))
+		return reason === "" ? exit : `${exit}: ${reason}`
 	}
 }
 export class TransportError extends Schema.TaggedError<

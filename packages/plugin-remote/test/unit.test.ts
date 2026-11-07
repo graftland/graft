@@ -11,6 +11,7 @@ import {
 	Ref,
 	Sink,
 	Stream,
+	String,
 } from "effect"
 import { SecureRandom } from "effect/crypto"
 import { RpcClient } from "effect/rpc"
@@ -338,3 +339,21 @@ it.live(
 			yield* unit.terminate("forced")
 		}).pipe(Effect.scoped, Effect.provide(runtime)),
 )
+
+it("names the end of stderr in an unexpected exit message", () => {
+	const exited = (stderr: string) =>
+		ProcessExited.make({
+			pid: Option.some(42),
+			exitCode: 1,
+			stderr,
+			statusCause: Cause.empty,
+		}).message
+	assert.equal(exited(""), "Remote process 42 exited unexpectedly (1)")
+	assert.equal(
+		exited("bwrap: execvp /node: No such file or directory\n"),
+		"Remote process 42 exited unexpectedly (1): bwrap: execvp /node: No such file or directory",
+	)
+	const long = exited(String.repeat(600)("x") + "the reason")
+	assert.isTrue(String.endsWith("the reason")(long))
+	assert.isBelow(long.length, 600)
+})
