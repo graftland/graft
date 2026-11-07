@@ -121,6 +121,21 @@ const portable = (
 	}
 }
 
+// Cancellation takes precedence at the tool boundary. Log every mixed reason
+// before propagating only its interruption reasons, which MCP preserves.
+const cancel = (cause: Cause.Cause<unknown>): Effect.Effect<never> => {
+	const interruption = Effect.failCause(
+		Cause.fromReasons<never>(
+			Array.filter(cause.reasons, Cause.isInterruptReason),
+		),
+	)
+	return Cause.hasInterruptsOnly(cause)
+		? interruption
+		: Effect.logError("Projected contract call cancelled", cause).pipe(
+				Effect.andThen(interruption),
+			)
+}
+
 /** Binds a declared RPC to the injected service, including a managed fork-owned facade. */
 export const operation = <
 	I,
@@ -210,12 +225,9 @@ export const operation = <
 						Effect.suspend(() => invoke(service, payload as P["Type"])),
 					)
 					if (Exit.isFailure(exit)) {
-						if (Cause.hasInterruptsOnly(exit.cause))
-							return yield* Effect.failCause(exit.cause as Cause.Cause<never>)
-						yield* Effect.logError(
-							"Projected contract call failed",
-							exit.cause,
-						).pipe(Effect.annotateLogs({ service: key.key, operation: id }))
+						if (Cause.hasInterrupts(exit.cause))
+							return yield* cancel(exit.cause)
+						yield* Effect.logError("Projected contract call failed", exit.cause)
 						const error = Cause.findError(exit.cause)
 						if (
 							!Cause.hasDies(exit.cause) &&
@@ -244,10 +256,8 @@ export const operation = <
 									message: "The operation returned a declared error",
 									value: encoded.value,
 								})
-							if (Cause.hasInterruptsOnly(encoded.cause))
-								return yield* Effect.failCause(
-									encoded.cause as Cause.Cause<never>,
-								)
+							if (Cause.hasInterrupts(encoded.cause))
+								return yield* cancel(encoded.cause)
 							yield* Effect.logError(
 								"Projected business error encoding failed",
 								encoded.cause,
@@ -266,8 +276,8 @@ export const operation = <
 					).pipe(
 						Effect.map((value) => ({ value })),
 						Effect.catchCause((cause) =>
-							Cause.hasInterruptsOnly(cause)
-								? Effect.failCause(cause as Cause.Cause<never>)
+							Cause.hasInterrupts(cause)
+								? cancel(cause)
 								: Effect.logError(
 										"Projected output encoding failed",
 										cause,
@@ -281,7 +291,7 @@ export const operation = <
 									),
 						),
 					)
-				}),
+				}).pipe(Effect.annotateLogs({ service: key.key, operation: id })),
 		}
 	}),
 })
@@ -393,12 +403,12 @@ export const offer = <R>(
 			readonly registration: Tools.Registration
 			readonly history: ReadonlyArray<Change>
 		}>({ registration: first, history: [initialChange] })
+		yield* Effect.addFinalizer(() => Event.emit(Catalog.Changed))
 		yield* Event.on(Catalog.Offered, () =>
 			Ref.get(current).pipe(
 				Effect.map((state) => [{ kind: Tools.kind, item: state.registration }]),
 			),
 		)
-		yield* Effect.addFinalizer(() => Event.emit(Catalog.Changed))
 		yield* Event.emit(Catalog.Changed)
 		yield* Event.emit(Changed, initialChange)
 		const publish = (items: ReadonlyArray<Prepared<R>>) =>

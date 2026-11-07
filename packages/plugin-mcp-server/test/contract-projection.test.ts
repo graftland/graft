@@ -8,7 +8,10 @@ import {
 	Fiber,
 	Layer,
 	Logger,
+	Option,
+	Queue,
 	Ref,
+	References,
 	Result,
 	Schema,
 	Scope,
@@ -21,6 +24,7 @@ import { Event, Graft, Plugin } from "@graftland/graft"
 import { Contract } from "@graftland/plugin-remote"
 
 import core from "../src/index.ts"
+import { Middleware as CallMiddleware } from "../src/Middleware.ts"
 import * as Projection from "../src/Projection.ts"
 import { transport } from "./support.ts"
 
@@ -66,6 +70,7 @@ const run = <A, E>(effect: Effect.Effect<A, E, Graft.Graft | Scope.Scope>) =>
 
 const start = Effect.fnUntraced(function* (
 	read: Local["Service"]["read"] = ({ city }) => Effect.succeed(city),
+	bindings: ReadonlyArray<Projection.Binding<Local>> = [binding()],
 ) {
 	yield* Graft.provide(Local, { read })
 	const ready = yield* Deferred.make<Projection.Controller<Local>>()
@@ -75,7 +80,7 @@ const start = Effect.fnUntraced(function* (
 			inject: [Local],
 			apply: () =>
 				Effect.gen(function* () {
-					const controller = yield* Projection.offer([binding()])
+					const controller = yield* Projection.offer(bindings)
 					yield* Deferred.succeed(ready, controller)
 				}),
 		}),
@@ -592,3 +597,183 @@ it.effect(
 			}),
 		),
 )
+
+it.effect(
+	"withdraws disposed tools before notifying the connected client",
+	() =>
+		run(
+			Effect.gen(function* () {
+				const { client, contributor } = yield* start()
+				assert.equal((yield* client.listTools()).tools.length, 1)
+				yield* contributor.dispose
+				const notification = yield* Queue.take(client.notifications)
+				assert.equal(notification.method, "notifications/tools/list_changed")
+				assert.deepStrictEqual((yield* client.listTools()).tools, [])
+				const missing = yield* Effect.result(
+					client.callTool({
+						name: "forecast",
+						arguments: { city: "London" },
+					}),
+				)
+				assert.isTrue(Result.isFailure(missing))
+			}),
+		),
+)
+
+for (const stage of [
+	"invocation defect",
+	"invocation failure",
+	"success encoder",
+	"business encoder",
+] as const) {
+	it.effect(`preserves mixed cancellation through MCP during ${stage}`, () => {
+		const entries: Array<{
+			readonly cause: Cause.Cause<unknown>
+			readonly annotations: Readonly<Record<string, unknown>>
+		}> = []
+		const interrupted =
+			stage === "invocation failure"
+				? Effect.failCause(
+						Cause.combine(Cause.interrupt(), Cause.fail("Cleanup failed")),
+					)
+				: Effect.interrupt.pipe(Effect.ensuring(Effect.die("Cleanup defect")))
+		const encoding = Schema.String.pipe(
+			Schema.middlewareEncoding(() =>
+				Effect.interrupt.pipe(Effect.ensuring(Effect.die("Cleanup defect"))),
+			),
+		)
+		const declaration = Contract.operation(
+			"forecast/read",
+			1,
+			Rpc.make("Read", {
+				payload: { city: Schema.String },
+				success: stage === "success encoder" ? encoding : Schema.String,
+				error: stage === "business encoder" ? encoding : Schema.String,
+			}),
+		).annotate(Projection.Annotation, metadata)
+		const item = Projection.operation(Local, declaration, (service, input) =>
+			service.read(input),
+		)
+		return run(
+			Effect.gen(function* () {
+				const completed = yield* Deferred.make<Exit.Exit<unknown, unknown>>()
+				yield* Event.on(CallMiddleware, (call, next) =>
+					next(call).pipe(
+						Effect.onExit((exit) => Deferred.succeed(completed, exit)),
+					),
+				)
+				const { client } = yield* start(
+					() =>
+						stage === "business encoder"
+							? Effect.fail("No forecast")
+							: stage === "success encoder"
+								? Effect.succeed("London")
+								: interrupted,
+					[item],
+				)
+				const exit = yield* Effect.exit(
+					client.callTool({
+						name: "forecast",
+						arguments: { city: "London" },
+					}),
+				)
+				// JSON-RPC has no fiber exit: unsolicited server cancellation becomes
+				// a protocol error, never a completed CallToolResult.
+				assert.isTrue(Exit.isFailure(exit))
+				const serverExit = yield* Deferred.await(completed)
+				assert.isTrue(
+					Exit.isFailure(serverExit) &&
+						Cause.hasInterruptsOnly(serverExit.cause),
+				)
+				const mixed = Array.findFirst(
+					entries,
+					({ cause }) =>
+						Cause.hasInterrupts(cause) &&
+						(stage === "invocation failure"
+							? Cause.hasFails(cause)
+							: Cause.hasDies(cause)),
+				)
+				assert.isTrue(Option.isSome(mixed))
+				assert.deepInclude(Option.getOrThrow(mixed).annotations, {
+					service: Local.key,
+					operation: "forecast/read@1",
+				})
+				assert.equal((yield* client.listTools()).tools.length, 1)
+			}),
+		).pipe(
+			Effect.provide(
+				Logger.layer([
+					Logger.make((entry) => {
+						entries.push({
+							cause: entry.cause,
+							annotations: entry.fiber.getRef(References.CurrentLogAnnotations),
+						})
+					}),
+				]),
+			),
+		)
+	})
+}
+
+for (const stage of ["success", "business"] as const) {
+	it.effect(`annotates the complete ${stage} encoding failure cause`, () => {
+		const entries: Array<{
+			readonly cause: Cause.Cause<unknown>
+			readonly annotations: Readonly<Record<string, unknown>>
+		}> = []
+		const defect = new Error("Private encoding defect")
+		const encoding = Schema.String.pipe(
+			Schema.middlewareEncoding(() => Effect.die(defect)),
+		)
+		const declaration = Contract.operation(
+			"forecast/read",
+			1,
+			Rpc.make("Read", {
+				payload: { city: Schema.String },
+				success: stage === "success" ? encoding : Schema.String,
+				error: stage === "business" ? encoding : Schema.String,
+			}),
+		).annotate(Projection.Annotation, metadata)
+		const item = Projection.operation(Local, declaration, (service, input) =>
+			service.read(input),
+		)
+		return run(
+			Effect.gen(function* () {
+				const { client } = yield* start(
+					() =>
+						stage === "business"
+							? Effect.fail("No forecast")
+							: Effect.succeed("London"),
+					[item],
+				)
+				const reply = yield* client.callTool({
+					name: "forecast",
+					arguments: { city: "London" },
+				})
+				assert.isTrue(reply.isError)
+				const logged = Array.findFirst(entries, ({ cause }) =>
+					Array.some(
+						cause.reasons,
+						(reason) => Cause.isDieReason(reason) && reason.defect === defect,
+					),
+				)
+				assert.isTrue(Option.isSome(logged))
+				assert.deepInclude(Option.getOrThrow(logged).annotations, {
+					service: Local.key,
+					operation: "forecast/read@1",
+				})
+			}),
+		).pipe(
+			Effect.provide(
+				Logger.layer([
+					Logger.make((entry) => {
+						entries.push({
+							cause: entry.cause,
+							annotations: entry.fiber.getRef(References.CurrentLogAnnotations),
+						})
+					}),
+				]),
+			),
+		)
+	})
+}

@@ -95,8 +95,13 @@ MCP.
 | Cancellation                               | Interrupt the owned call and wait for its cleanup.              |
 | Malformed protocol request                 | MCP protocol error.                                             |
 
-Full failure causes are logged. Business error values are intentionally exposed;
-do not put credentials in those values.
+Full failure causes are logged with the service key and operation identity,
+including encoding failures. Business error values are intentionally exposed; do
+not put credentials in those values.
+
+Cancellation takes precedence even when cleanup also fails. The complete mixed
+cause is logged; it never becomes a business or system tool result.
+Server-initiated cancellation reaches clients as a protocol error.
 
 ## Publish a changed view
 
@@ -113,7 +118,8 @@ atomically.
 
 The host must supply the new annotated view. Changing worker code or a release
 alone does not import new annotations into the host. Failed actions retain the
-old view. Removing the contributor still cancels its owned work.
+old view. Removing the contributor cancels its owned work and withdraws its
+tools before notifying connected clients of the list change.
 
 Publication emits `notifications/tools/list_changed` to supported MCP sessions.
 `Projection.Changed` records the revision and before/after metadata, including
