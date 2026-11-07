@@ -47,15 +47,13 @@ export default Plugin.make({
 				Effect.andThen(
 					release === undefined
 						? Deferred.await(released)
-						: fs
-								.exists(release)
-								.pipe(
-									Effect.repeat({
-										schedule: Schedule.spaced("5 millis"),
-										until: (exists) => exists,
-									}),
-									Effect.orDie,
-								),
+						: fs.exists(release).pipe(
+								Effect.repeat({
+									schedule: Schedule.spaced("5 millis"),
+									until: (exists) => exists,
+								}),
+								Effect.orDie,
+							),
 				),
 				Effect.as(value),
 			),
