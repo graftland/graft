@@ -365,21 +365,8 @@ export const submit = Effect.fnUntraced(function* (
 				}
 				const admitted = admission.value
 				if (admitted._tag === "Duplicate") {
-					yield* preparation.close
-					yield* preparation.await.pipe(
-						Effect.flatMap((cleanup) =>
-							Exit.isFailure(cleanup)
-								? Effect.logError(
-										"Redundant Change preparation cleanup failed",
-										cleanup.cause,
-									)
-								: Effect.void,
-						),
-						Effect.annotateLogs({
-							change: admitted.handle.id,
-							instance: normalized.instance,
-						}),
-						Effect.forkIn(runtime.changes.scope),
+					yield* preparation.close.pipe(
+						Effect.annotateLogs({ change: admitted.handle.id }),
 					)
 					return admitted.handle
 				}

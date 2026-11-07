@@ -21,26 +21,16 @@ export interface Preparation {
 	readonly close: Effect.Effect<void>
 	readonly await: Effect.Effect<Exit.Exit<void>>
 }
-export interface Correlation {
+interface Correlation {
 	readonly instance: string
 	readonly key?: string | undefined
-	readonly change?: Change.Id | undefined
 }
-export const observeCleanup = (
-	runtime: Runtime,
-	completed: Preparation["await"],
-	correlation: Correlation,
-) =>
-	completed.pipe(
-		Effect.flatMap((exit) =>
-			Exit.isFailure(exit)
-				? Effect.logError("Change preparation cleanup failed", exit.cause)
-				: Effect.void,
-		),
-		Effect.annotateLogs({ ...correlation }),
-		Effect.forkIn(runtime.changes.scope, { uninterruptible: true }),
-		Effect.asVoid,
-	)
+/** The runtime-owned original close reports failure before its pending record is forgotten. */
+const observeCleanup = (exit: Exit.Exit<void>, correlation: Correlation) =>
+	(Exit.isFailure(exit)
+		? Effect.logError("Change preparation cleanup failed", exit.cause)
+		: Effect.void
+	).pipe(Effect.annotateLogs({ ...correlation }))
 
 const closeScopes = Effect.fnUntraced(function* (
 	execution: Scope.Closeable,
@@ -80,12 +70,16 @@ export const prepare = Effect.fnUntraced(function* <A, E, R>(
 				runtime.changes.scope,
 				closeScopes(execution, scope),
 				(exit) =>
-					Exit.isSuccess(exit) || !Cause.hasInterruptsOnly(exit.cause)
-						? TxRef.update(
-								runtime.changes.preparations,
-								HashSet.remove(owner.dispose),
-							)
-						: Effect.void,
+					observeCleanup(exit, { instance: managed.instance, key }).pipe(
+						Effect.andThen(
+							Exit.isSuccess(exit) || !Cause.hasInterruptsOnly(exit.cause)
+								? TxRef.update(
+										runtime.changes.preparations,
+										HashSet.remove(owner.dispose),
+									)
+								: Effect.void,
+						),
+					),
 			)
 			yield* Effect.tx(
 				Effect.gen(function* () {
@@ -170,12 +164,10 @@ export const prepare = Effect.fnUntraced(function* <A, E, R>(
 													owner.await,
 													limits.terminate,
 												)
-												if (Option.isNone(cleanup))
-													yield* observeCleanup(runtime, owner.await, {
-														instance: managed.instance,
-														key,
-													})
-												else if (Exit.isFailure(cleanup.value))
+												if (
+													Option.isSome(cleanup) &&
+													Exit.isFailure(cleanup.value)
+												)
 													return yield* Effect.failCause(cleanup.value.cause)
 											})
 										: Effect.void,

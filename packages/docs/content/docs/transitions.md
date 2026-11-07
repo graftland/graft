@@ -142,7 +142,8 @@ keeps its original completion record and may also leave a Change Stuck.
 Cancelling submission before admission starts cleanup; slow cleanup remains
 owned by the runtime. The startup deadline bounds the wait for metadata,
 including uninterruptible preparation; resources close after preparation
-execution ends.
+execution ends. Cleanup failures remain logged with their full cause and request
+correlation even after submission has returned.
 
 Each managed generation keeps its own leases to captured providers and retained
 service slots. Confirmed unit exit releases those runtime leases independently

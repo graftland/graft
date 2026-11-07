@@ -8,6 +8,7 @@ import {
 	HashSet,
 	Logger,
 	Queue,
+	References,
 	String,
 	TxRef,
 } from "effect"
@@ -288,6 +289,108 @@ for (const fails of [false, true])
 								Cause.pretty(entry.cause),
 							),
 						),
+					)
+				}
+			}),
+	)
+
+for (const mode of ["rejection", "failure", "cancellation"] as const)
+	it.effect(
+		mode === "rejection"
+			? "late metadata cleanup failures after rejection remain observable"
+			: mode === "failure"
+				? "logs the complete late cleanup cause after preparation failure with request correlation"
+				: "logs the complete late cleanup cause after submission cancellation with request correlation",
+		() =>
+			Effect.gen(function* () {
+				const logs = yield* Queue.unbounded<{
+					readonly cause: Cause.Cause<unknown>
+					readonly annotations: Readonly<Record<string, unknown>>
+				}>()
+				const logging = Logger.layer([
+					Logger.make((entry) => {
+						Queue.offerUnsafe(logs, {
+							cause: entry.cause,
+							annotations: {
+								...entry.fiber.getRef(References.CurrentLogAnnotations),
+							},
+						})
+					}),
+				])
+				const failure = Cause.combine(
+					Cause.die("Late metadata cleanup failure"),
+					Cause.die("Cleanup detail"),
+				)
+				yield* run(
+					Effect.gen(function* () {
+						const preparing = yield* Deferred.make<void>()
+						const entered = yield* Deferred.make<void>()
+						const release = yield* Deferred.make<void>()
+						yield* register("a", {
+							prepare: () =>
+								Effect.gen(function* () {
+									yield* Effect.addFinalizer(() =>
+										Deferred.succeed(entered, undefined).pipe(
+											Effect.andThen(Deferred.await(release)),
+											Effect.andThen(Effect.failCause(failure)),
+										),
+									)
+									yield* Deferred.succeed(preparing, undefined)
+									if (mode === "cancellation") return yield* Effect.never
+									if (mode === "failure")
+										return yield* Effect.die("Metadata preparation failed")
+									return { overlap: false }
+								}),
+						})
+						const submit = yield* Change.submit({
+							instance: "a",
+							key: `${mode}-metadata`,
+							candidate: candidate("next"),
+							strategy: "Overlap",
+							budget,
+						}).pipe(Effect.exit, Effect.forkScoped)
+						if (mode === "cancellation") {
+							yield* Deferred.await(preparing)
+							const cancelled = yield* Fiber.interrupt(submit).pipe(
+								Effect.forkScoped,
+							)
+							yield* Deferred.await(entered)
+							yield* TestClock.adjust(100)
+							yield* Fiber.join(cancelled)
+						} else {
+							yield* Deferred.await(entered)
+							yield* TestClock.adjust(100)
+							yield* Fiber.join(submit)
+						}
+						yield* Deferred.succeed(release, undefined)
+						const { runtime } = yield* RuntimeContext
+						yield* Effect.tx(
+							TxRef.get(runtime.changes.preparations).pipe(
+								Effect.flatMap((pending) =>
+									HashSet.size(pending) === 0 ? Effect.void : Effect.txRetry,
+								),
+							),
+						)
+					}),
+				).pipe(Effect.provide(logging))
+				const observed = yield* Queue.clear(logs)
+				const cleanup = Array.filter(observed, (entry) =>
+					String.includes("Late metadata cleanup failure")(
+						Cause.pretty(entry.cause),
+					),
+				)
+				assert.strictEqual(cleanup.length, 1)
+				const entry = cleanup[0]
+				assert.isDefined(entry)
+				if (entry !== undefined) {
+					assert.strictEqual(entry.annotations["instance"], "a")
+					assert.strictEqual(entry.annotations["key"], `${mode}-metadata`)
+					assert.deepStrictEqual(
+						Array.map(
+							Array.filter(entry.cause.reasons, Cause.isDieReason),
+							(reason) => reason.defect,
+						),
+						["Late metadata cleanup failure", "Cleanup detail"],
 					)
 				}
 			}),
