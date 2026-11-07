@@ -212,15 +212,15 @@ devenv shell -- pnpm packages:publish npm
 
 The workflow `.github/workflows/docs.yml` builds this site from `packages/docs`
 and deploys it to Cloudflare Pages at
-[graft-docs.pages.dev](https://graft-docs.pages.dev/). Every commit on `main`
-and every release tag keeps the docs as they were at that commit.
+[graft-docs-ekb.pages.dev](https://graft-docs-ekb.pages.dev/). Every commit on
+`main` and every release tag keeps the docs as they were at that commit.
 
-| Address                                                    | Shows                                              |
-| ---------------------------------------------------------- | -------------------------------------------------- |
-| `https://graft-docs.pages.dev/`                            | The newest commit on `main`.                       |
-| `https://<first 12 hash characters>.graft-docs.pages.dev/` | That commit, forever.                              |
-| `https://versions.graft-docs.pages.dev/versions.json`      | Every deployed commit, its date, subject and tags. |
-| `https://graftland.github.io/graft/<path>`                 | Redirects to `<path>` on production.               |
+| Address                                                        | Shows                                              |
+| -------------------------------------------------------------- | -------------------------------------------------- |
+| `https://graft-docs-ekb.pages.dev/`                            | The newest commit on `main`.                       |
+| `https://<first 12 hash characters>.graft-docs-ekb.pages.dev/` | That commit, forever.                              |
+| `https://versions.graft-docs-ekb.pages.dev/versions.json`      | Every deployed commit, its date, subject and tags. |
+| `https://graftland.github.io/graft/<path>`                     | Redirects to `<path>` on production.               |
 
 ### What a run does
 
@@ -229,6 +229,7 @@ and every release tag keeps the docs as they were at that commit.
 | A push to `main`                   | The pushed commit.                                                                       | Adds it to the list and makes it production.       |
 | A tag like `v1.2.3`                | The tagged commit, only if it has no docs yet.                                           | Labels the commit with the tag in the list.        |
 | Actions tab, **backfill** selected | Every commit on `main` since the docs site existed, and every tag, that has no docs yet. | Adds them to the list; production does not change. |
+| Actions tab, **rebuild** filled in | The named commits, even if they have docs.                                               | Replaces their deployments and updates the list.   |
 
 - **Once per commit.** A commit is built once, with its own lockfile and
   toolchain, and its upload is never replaced. Production is the same upload
@@ -253,13 +254,13 @@ before the select existed get it too.
 
 ### Set up
 
-| Task                       | How                                                                                                  |
-| -------------------------- | ---------------------------------------------------------------------------------------------------- |
-| Cloudflare project         | `npx wrangler pages project create graft-docs --production-branch main`, once.                       |
-| `docs` environment secrets | `CLOUDFLARE_API_TOKEN`, with the **Cloudflare Pages: Edit** permission, and `CLOUDFLARE_ACCOUNT_ID`. |
-| Old address                | Set the repository's Pages source to **GitHub Actions**.                                             |
-| Docs of earlier commits    | Start the workflow on `main` from the Actions tab with **backfill** selected.                        |
-| Work on the site locally   | `devenv shell -- pnpm --filter @graftland/docs dev`; the select appears only on deployed pages.      |
+| Task                       | How                                                                                                                                                                                |
+| -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Cloudflare project         | `npx wrangler pages project create graft-docs --production-branch main`, once. Put the `*.pages.dev` name Cloudflare gives it in `DOCS_PAGES_HOST` and `DOCS_URL` of the workflow. |
+| `docs` environment secrets | `CLOUDFLARE_API_TOKEN`, with the **Cloudflare Pages: Edit** permission, and `CLOUDFLARE_ACCOUNT_ID`.                                                                               |
+| Old address                | Set the repository's Pages source to **GitHub Actions**.                                                                                                                           |
+| Docs of earlier commits    | Start the workflow on `main` from the Actions tab with **backfill** selected.                                                                                                      |
+| Work on the site locally   | `devenv shell -- pnpm --filter @graftland/docs dev`; the select appears only on deployed pages.                                                                                    |
 
 ### Writing pages
 

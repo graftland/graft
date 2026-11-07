@@ -180,15 +180,15 @@ devenv shell -- pnpm packages:publish npm
 
 工作流程 `.github/workflows/docs.yml` 從 `packages/docs`
 建置本網站，並部署到Cloudflare
-Pages：[graft-docs.pages.dev](https://graft-docs.pages.dev/)。`main`
+Pages：[graft-docs-ekb.pages.dev](https://graft-docs-ekb.pages.dev/)。`main`
 上的每個 commit 和每個發佈 tag 都會保留當時的文件。
 
-| 位址                                                  | 內容                                        |
-| ----------------------------------------------------- | ------------------------------------------- |
-| `https://graft-docs.pages.dev/`                       | `main` 上最新的 commit。                    |
-| `https://<hash 前 12 碼>.graft-docs.pages.dev/`       | 該 commit，永久保留。                       |
-| `https://versions.graft-docs.pages.dev/versions.json` | 所有已部署的 commit，及其日期、標題和 tag。 |
-| `https://graftland.github.io/graft/<path>`            | 重新導向到正式網站的 `<path>`。             |
+| 位址                                                      | 內容                                        |
+| --------------------------------------------------------- | ------------------------------------------- |
+| `https://graft-docs-ekb.pages.dev/`                       | `main` 上最新的 commit。                    |
+| `https://<hash 前 12 碼>.graft-docs-ekb.pages.dev/`       | 該 commit，永久保留。                       |
+| `https://versions.graft-docs-ekb.pages.dev/versions.json` | 所有已部署的 commit，及其日期、標題和 tag。 |
+| `https://graftland.github.io/graft/<path>`                | 重新導向到正式網站的 `<path>`。             |
 
 ### 每次執行做什麼
 
@@ -197,6 +197,7 @@ Pages：[graft-docs.pages.dev](https://graft-docs.pages.dev/)。`main`
 | 推送到 `main`                    | 推送的 commit。                                                     | 加入清單，並設為正式網站。     |
 | 推送 `v1.2.3` 這類 tag           | tag 指向的 commit，僅在它還沒有文件時。                             | 在清單中為該 commit 標上 tag。 |
 | 在 Actions 分頁勾選 **backfill** | 文件網站出現以來 `main` 上的每個 commit 和每個 tag 中還沒有文件的。 | 加入清單；正式網站不變。       |
+| 在 Actions 分頁填寫 **rebuild**  | 填寫的 commit，即使它們已有文件。                                   | 取代它們的部署並更新清單。     |
 
 - **每個 commit 只建置一次。**
   使用該 commit 自己的 lockfile 與工具鏈建置，上傳後不再取代。正式網站是同一份建置再上傳一次，Cloudflare 會略過已有的檔案。
@@ -217,13 +218,13 @@ Pages：[graft-docs.pages.dev](https://graft-docs.pages.dev/)。`main`
 
 ### 設定
 
-| 任務                 | 做法                                                                                       |
-| -------------------- | ------------------------------------------------------------------------------------------ |
-| Cloudflare 專案      | 執行一次 `npx wrangler pages project create graft-docs --production-branch main`。         |
-| `docs` 環境的 secret | `CLOUDFLARE_API_TOKEN`（需要 **Cloudflare Pages: Edit** 權限）和 `CLOUDFLARE_ACCOUNT_ID`。 |
-| 舊位址               | 將版本庫的 Pages 來源設為 **GitHub Actions**。                                             |
-| 補齊以前的文件       | 在 Actions 分頁對 `main` 手動執行該工作流程，並勾選 **backfill**。                         |
-| 在本機處理網站       | `devenv shell -- pnpm --filter @graftland/docs dev`；下拉選單只出現在已部署的頁面上。      |
+| 任務                 | 做法                                                                                                                                                                        |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Cloudflare 專案      | 執行一次 `npx wrangler pages project create graft-docs --production-branch main`，再把 Cloudflare 分配的 `*.pages.dev` 名稱填入工作流程的 `DOCS_PAGES_HOST` 和 `DOCS_URL`。 |
+| `docs` 環境的 secret | `CLOUDFLARE_API_TOKEN`（需要 **Cloudflare Pages: Edit** 權限）和 `CLOUDFLARE_ACCOUNT_ID`。                                                                                  |
+| 舊位址               | 將版本庫的 Pages 來源設為 **GitHub Actions**。                                                                                                                              |
+| 補齊以前的文件       | 在 Actions 分頁對 `main` 手動執行該工作流程，並勾選 **backfill**。                                                                                                          |
+| 在本機處理網站       | `devenv shell -- pnpm --filter @graftland/docs dev`；下拉選單只出現在已部署的頁面上。                                                                                       |
 
 ### 撰寫頁面
 

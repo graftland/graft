@@ -26,31 +26,38 @@ const details = {
 }
 const detail = (commit) => ({
 	...details[commit],
-	url: commitUrl(commit, "graft-docs", site),
+	url: commitUrl(commit, "graft-docs.pages.dev", site),
 })
 
 test("names a commit's branch and address by its hash", () => {
 	assert.equal(commitBranch(a), "aaaaaaaaaaaa")
 	assert.equal(
-		commitUrl(a, "graft-docs", new URL("https://docs.example/graft/")),
-		"https://aaaaaaaaaaaa.graft-docs.pages.dev/graft/",
+		commitUrl(
+			a,
+			"graft-docs-x1.pages.dev",
+			new URL("https://docs.example/graft/"),
+		),
+		"https://aaaaaaaaaaaa.graft-docs-x1.pages.dev/graft/",
 	)
 	assert.equal(
-		versionsUrl("graft-docs").href,
-		"https://versions.graft-docs.pages.dev/",
+		versionsUrl("graft-docs-x1.pages.dev").href,
+		"https://versions.graft-docs-x1.pages.dev/",
 	)
 	assert.throws(() => commitBranch("main"), /full commit hash/)
 })
 
-test("plans only commits that are not deployed, except the pushed one", () => {
+test("plans only commits that are not deployed, except forced ones", () => {
 	assert.deepEqual(planCommits({ wanted: [a, b, c, a], deployed: [a, b] }), {
 		commits: [c],
 		remaining: 0,
 	})
-	assert.deepEqual(planCommits({ wanted: [b], deployed: [a, b], pushed: b }), {
-		commits: [b],
-		remaining: 0,
-	})
+	assert.deepEqual(
+		planCommits({ wanted: [c], deployed: [a, b], forced: [b] }),
+		{
+			commits: [c, b],
+			remaining: 0,
+		},
+	)
 	const many = Array.from({ length: 300 }, (_, index) =>
 		index.toString(16).padStart(40, "0"),
 	)
@@ -89,26 +96,33 @@ test("lists every deployed commit with its tags, newest first", () => {
 test("starts a new list only when the live one is missing", async () => {
 	const respond = (status, body) => async () =>
 		new Response(body === undefined ? null : JSON.stringify(body), { status })
-	assert.deepEqual(await readVersions("graft-docs", site, respond(404)), empty)
+	assert.deepEqual(
+		await readVersions("graft-docs.pages.dev", site, respond(404)),
+		empty,
+	)
 	await assert.rejects(
-		readVersions("graft-docs", site, respond(503)),
+		readVersions("graft-docs.pages.dev", site, respond(503)),
 		/HTTP 503/,
 	)
 	await assert.rejects(
-		readVersions("graft-docs", site, respond(200, { versions: "none" })),
+		readVersions(
+			"graft-docs.pages.dev",
+			site,
+			respond(200, { versions: "none" }),
+		),
 		/unexpected shape/,
 	)
 })
 
 test("adds the select's script to a page once", () => {
 	const page = "<html><head><title>Graft</title></head><body></body></html>"
-	const once = injectScript(page, "graft-docs")
+	const once = injectScript(page, "graft-docs.pages.dev")
 	assert.match(
 		once,
 		/<script src="https:\/\/versions\.graft-docs\.pages\.dev\/select\.js" defer><\/script><\/head>/,
 	)
-	assert.equal(injectScript(once, "graft-docs"), once)
-	assert.equal(injectScript("plain text", "graft-docs"), "plain text")
+	assert.equal(injectScript(once, "graft-docs.pages.dev"), once)
+	assert.equal(injectScript("plain text", "graft-docs.pages.dev"), "plain text")
 })
 
 test("redirects the old address to the same path on the new site", () => {

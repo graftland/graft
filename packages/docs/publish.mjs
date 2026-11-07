@@ -25,7 +25,8 @@ const matrixLimit = 256
 
 /**
  * The Cloudflare Pages branch that keeps one commit's deployment. Its alias is
- * `<branch>.<project>.pages.dev`; Cloudflare cuts aliases at 28 characters, so a
+ * `<branch>.<host>`, where the host is the project's `*.pages.dev` name;
+ * Cloudflare cuts aliases at 28 characters, so a
  * 12-character prefix of the hash stays whole.
  */
 export const commitBranch = (commit) => {
@@ -34,16 +35,16 @@ export const commitBranch = (commit) => {
 	return commit.slice(0, 12)
 }
 
-const branchUrl = (branch, project, site) =>
-	new URL(site.pathname, `https://${branch}.${project}.pages.dev`).href
+const branchUrl = (branch, host, site) =>
+	new URL(site.pathname, `https://${branch}.${host}`).href
 
 /** The address of the deployment that keeps one commit, under the site's base path. */
-export const commitUrl = (commit, project, site) =>
-	branchUrl(commitBranch(commit), project, site)
+export const commitUrl = (commit, host, site) =>
+	branchUrl(commitBranch(commit), host, site)
 
 /** Where every build loads the select from, and where the list lives. */
-export const versionsUrl = (project) =>
-	new URL(`https://${versionsBranch}.${project}.pages.dev/`)
+export const versionsUrl = (host) =>
+	new URL(`https://${versionsBranch}.${host}/`)
 
 const isVersion = (value) =>
 	typeof value === "object" &&
@@ -71,8 +72,8 @@ export function parseVersions(value) {
  * Read the live list. Only a missing file starts a new one: any other failure
  * stops, so a deploy never drops the history.
  */
-export async function readVersions(project, site, fetchUrl = fetch) {
-	const url = new URL("versions.json", versionsUrl(project))
+export async function readVersions(host, site, fetchUrl = fetch) {
+	const url = new URL("versions.json", versionsUrl(host))
 	const response = await fetchUrl(url, { cache: "no-store" })
 	if (response.status === 404)
 		return { site: site.href, production: "", versions: [] }
@@ -83,13 +84,13 @@ export async function readVersions(project, site, fetchUrl = fetch) {
 
 /**
  * The commits to build, oldest first, leaving out the ones already deployed.
- * The commit that was pushed is always built, so a run started again deploys
- * it again.
+ * Forced commits are built even if they are deployed: the pushed commit, so a
+ * run started again deploys it again, and any commit named to be rebuilt.
  */
-export function planCommits({ wanted, deployed, pushed }) {
+export function planCommits({ wanted, deployed, forced = [] }) {
 	const seen = new Set(deployed)
-	const commits = [...new Set(wanted)].filter(
-		(commit) => commit === pushed || !seen.has(commit),
+	const commits = [...new Set([...wanted, ...forced])].filter(
+		(commit) => forced.includes(commit) || !seen.has(commit),
 	)
 	return {
 		commits: commits.slice(0, matrixLimit),
@@ -115,15 +116,15 @@ export function updateVersions({ live, added, details, site, production }) {
 	}
 }
 
-const script = (project) =>
-	`<script src="${new URL("select.js", versionsUrl(project)).href}" defer></script>`
+const script = (host) =>
+	`<script src="${new URL("select.js", versionsUrl(host)).href}" defer></script>`
 
 /**
  * Add the select's script to a built page. Builds made before the select
  * existed get it the same way, so they are never built again.
  */
-export function injectScript(html, project) {
-	const tag = script(project)
+export function injectScript(html, host) {
+	const tag = script(host)
 	if (html.includes(tag)) return html
 	if (!html.includes("</head>")) return html
 	return html.replace("</head>", `${tag}</head>`)
@@ -205,6 +206,8 @@ function deploy(directory, branch, commit) {
 		`--project-name=${required("DOCS_PROJECT")}`,
 		`--branch=${branch}`,
 		...(commit ? [`--commit-hash=${commit}`] : []),
+		// The checkout holds the build output, which git does not track.
+		"--commit-dirty=true",
 	]
 	console.log(`$ npx ${args.join(" ")}`)
 	execFileSync("npx", args, { stdio: "inherit" })
@@ -218,11 +221,11 @@ function output(name, value) {
 
 /** Choose the commits a run builds, from the event that started it. */
 async function plan() {
-	const project = required("DOCS_PROJECT")
+	const host = required("DOCS_PAGES_HOST")
 	const site = new URL(required("DOCS_URL"))
 	const mode = required("DOCS_MODE")
 	const pushed = git("rev-parse", "HEAD")
-	const live = await readVersions(project, site)
+	const live = await readVersions(host, site)
 	let wanted = [pushed]
 	if (mode === "backfill") {
 		// Every commit on main since the docs site existed, and every tag.
@@ -242,11 +245,16 @@ async function plan() {
 			...tagsByCommit().keys(),
 		]
 	}
+	// Commits named by hand, such as one whose deployment is broken.
+	const rebuild = (process.env["DOCS_REBUILD"] ?? "")
+		.split(/[\s,]+/)
+		.filter(Boolean)
+		.map((name) => git("rev-parse", "--verify", `${name}^{commit}`))
 	// A tag on a deployed commit needs no build: the list job labels it.
 	const { commits, remaining } = planCommits({
 		wanted,
 		deployed: live.versions.map(({ commit }) => commit),
-		pushed: mode === "main" ? pushed : undefined,
+		forced: [...(mode === "main" ? [pushed] : []), ...rebuild],
 	})
 	if (remaining)
 		console.log(`${remaining} more commits remain; run the backfill again.`)
@@ -256,12 +264,12 @@ async function plan() {
 
 /** Add the select to a build and deploy it as its commit's own deployment. */
 function commit(directory, hash) {
-	const project = required("DOCS_PROJECT")
+	const host = required("DOCS_PAGES_HOST")
 	for (const file of readdirSync(directory, { recursive: true }))
 		if (file.endsWith(".html")) {
 			const path = join(directory, file)
 			const html = readFileSync(path, "utf8")
-			const injected = injectScript(html, project)
+			const injected = injectScript(html, host)
 			if (injected !== html) writeFileSync(path, injected)
 		}
 	deploy(directory, commitBranch(hash), hash)
@@ -272,10 +280,10 @@ function commit(directory, hash) {
  * pushed commit if it is newer than the one there.
  */
 async function list(deployedDirectory, productionDirectory) {
-	const project = required("DOCS_PROJECT")
+	const host = required("DOCS_PAGES_HOST")
 	const site = new URL(required("DOCS_URL"))
 	const candidate = process.env["DOCS_PRODUCTION"] ?? ""
-	const live = await readVersions(project, site)
+	const live = await readVersions(host, site)
 	// Each successful build leaves an empty file named after its commit.
 	const added = existsSync(deployedDirectory)
 		? readdirSync(deployedDirectory)
@@ -303,7 +311,7 @@ async function list(deployedDirectory, productionDirectory) {
 				date,
 				subject,
 				tags: tags.get(hash) ?? [],
-				url: commitUrl(hash, project, site),
+				url: commitUrl(hash, host, site),
 			}
 		},
 	})

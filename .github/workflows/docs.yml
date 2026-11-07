@@ -11,16 +11,23 @@ on:
           Build every commit on main and every tag that has no docs yet
         type: boolean
         default: false
+      rebuild:
+        description:
+          Commits to build again even if they have docs, separated by spaces
+        type: string
+        default: ""
 
 permissions:
   contents: read
 
 env:
   # The production site. Every commit also keeps its own deployment at
-  # https://<first 12 characters of the hash>.<project>.pages.dev/, and
-  # https://versions.<project>.pages.dev/ serves the commit list and the select.
-  DOCS_URL: https://graft-docs.pages.dev/
+  # https://<first 12 characters of the hash>.<pages host>/, and
+  # https://versions.<pages host>/ serves the commit list and the select.
+  DOCS_URL: https://graft-docs-ekb.pages.dev/
   DOCS_PROJECT: graft-docs
+  # The project's pages.dev name, which Cloudflare chose when it was created.
+  DOCS_PAGES_HOST: graft-docs-ekb.pages.dev
   # The old address, which now only redirects to DOCS_URL.
   DOCS_OLD_URL: https://graftland.github.io/graft/
 
@@ -45,6 +52,7 @@ jobs:
           DOCS_MODE:
             ${{ inputs.backfill && 'backfill' || startsWith(github.ref,
             'refs/tags/') && 'tag' || 'main' }}
+          DOCS_REBUILD: ${{ inputs.rebuild }}
 
   build:
     name: Build ${{ matrix.commit }}
