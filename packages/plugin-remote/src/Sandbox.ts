@@ -145,9 +145,9 @@ export const linux = Layer.effect(
 						"ALL",
 						"--die-with-parent",
 						"--new-session",
+						// bwrap passes inherited descriptors through; the spawner hands it only
+						// stdio and the fd 3 protocol channel.
 						"--clearenv",
-						"--preserve-fds",
-						"1",
 						"--proc",
 						"/proc",
 						"--dev",
