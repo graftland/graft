@@ -8,6 +8,7 @@ import {
 	engine,
 	ExecutionOutcome,
 	failed,
+	unconfirmedAllocations,
 	type Attempt,
 	type Failed,
 	type Managed,
@@ -107,14 +108,20 @@ const retirePrevious = Effect.fnUntraced(function* (
 	yield* settlement(result)
 })
 const settleCandidate = Effect.fnUntraced(function* (
+	managed: Managed,
 	coordinator: Engine,
 	run: Run,
 ): Effect.fn.Return<void, Failed> {
 	const candidate = yield* TxRef.get(run.candidate)
-	if (Option.isNone(candidate)) return
-	const result = yield* coordinator.terminate(candidate.value)
-	yield* settlement(result)
-	yield* TxRef.set(run.candidate, Option.none())
+	if (Option.isSome(candidate)) {
+		const result = yield* coordinator.terminate(candidate.value)
+		yield* settlement(result)
+		yield* TxRef.set(run.candidate, Option.none())
+	}
+	if (yield* unconfirmedAllocations(managed))
+		return yield* Effect.fail(
+			failed({ reason: "UnconfirmedTermination", phase: "Starting" }),
+		)
 })
 const recover = Effect.fnUntraced(function* (
 	coordinator: Engine,
@@ -240,7 +247,9 @@ export const execute = Effect.fnUntraced(function* (
 	const stop = Effect.fnUntraced(function* (failure: Failed) {
 		yield* Effect.tx(Admission.pause(managed))
 		yield* TxRef.set(run.budget.reserved, limits.recovery)
-		const cleanup = yield* Effect.result(settleCandidate(coordinator, run))
+		const cleanup = yield* Effect.result(
+			settleCandidate(managed, coordinator, run),
+		)
 		if (
 			cleanup._tag === "Failure" &&
 			(cleanup.failure.reason === "UnconfirmedTermination" ||
@@ -271,6 +280,11 @@ export const execute = Effect.fnUntraced(function* (
 						: "Closing",
 			)
 		}
+		if (failure.reason === "UnconfirmedTermination") {
+			yield* coordinator.setRoute(Option.none())
+			yield* Admission.close(managed, "RecoveryFailed")
+			return yield* complete("Stuck", failure.phase, failure.reason)
+		}
 		if (failure.reason === "UnresolvedCleanup") {
 			if (yield* TxRef.get(record.oldChanged)) {
 				yield* coordinator.setRoute(Option.none())
@@ -283,10 +297,7 @@ export const execute = Effect.fnUntraced(function* (
 			return yield* complete("Aborted", failure.phase, failure.reason)
 		}
 		yield* coordinator.setRoute(Option.none())
-		if (failure.reason === "UnconfirmedTermination") {
-			yield* Admission.close(managed, "RecoveryFailed")
-			return yield* complete("Stuck", failure.phase, failure.reason)
-		}
+
 		const recovered = yield* Effect.result(
 			Effect.interruptible(
 				Effect.raceFirst(
@@ -307,7 +318,9 @@ export const execute = Effect.fnUntraced(function* (
 			}),
 		)
 		yield* TxRef.set(run.budget.reserved, 0)
-		const ended = yield* Effect.result(settleCandidate(coordinator, run))
+		const ended = yield* Effect.result(
+			settleCandidate(managed, coordinator, run),
+		)
 		yield* coordinator.setRoute(Option.none())
 		yield* Admission.close(
 			managed,
@@ -403,10 +416,12 @@ export const emergency = Effect.fnUntraced(function* (
 		),
 	)
 	const evidence = yield* TxRef.get(run.evidence)
-	const unconfirmed = Array.some(
-		results,
-		(exit) => Exit.isFailure(exit) || !confirmed(exit.value),
-	)
+	const unconfirmed =
+		(yield* unconfirmedAllocations(managed)) ||
+		Array.some(
+			results,
+			(exit) => Exit.isFailure(exit) || !confirmed(exit.value),
+		)
 	const unresolved = Array.some(
 		results,
 		(exit) =>

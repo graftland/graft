@@ -14,6 +14,7 @@ import * as Change from "../Change"
 import * as Release from "../Release"
 import type { DriverError, Prepared } from "../Transition"
 import * as AsyncClose from "./asyncClose"
+import * as OwnedExecution from "./ownedExecution"
 import type { Runtime } from "./runtime"
 import type { Managed } from "./transition"
 
@@ -34,25 +35,15 @@ const observeCleanup = (exit: Exit.Exit<void>, correlation: Correlation) =>
 	).pipe(Effect.annotateLogs({ ...correlation }))
 
 type Execution = Deferred.Deferred<
-	Option.Option<Fiber.Fiber<Prepared, DriverError>>
+	Option.Option<OwnedExecution.Execution<Prepared, DriverError>>
 >
 const closePreparation = Effect.fnUntraced(function* (
 	started: Execution,
 	resources: Scope.Closeable,
-	correlation: Correlation,
 ) {
 	const loading = yield* Deferred.await(started)
-	if (Option.isSome(loading)) {
-		// Only the original fiber Exit proves preparation execution has ended.
-		yield* Fiber.interrupt(loading.value)
-		const exit = yield* Fiber.await(loading.value)
-		if (Exit.isFailure(exit))
-			yield* Effect.logError(
-				"Change metadata preparation failed",
-				exit.cause,
-			).pipe(Effect.annotateLogs({ ...correlation }))
-	}
-	yield* Release.close(resources, Exit.void)
+	if (Option.isSome(loading)) yield* loading.value.close
+	else yield* Release.close(resources, Exit.void)
 })
 
 /** Preparation and its admission handoff share one interruption-safe resource boundary. */
@@ -74,12 +65,12 @@ export const prepare = Effect.fnUntraced(function* <A, E, R>(
 				})
 			const started =
 				yield* Deferred.make<
-					Option.Option<Fiber.Fiber<Prepared, DriverError>>
+					Option.Option<OwnedExecution.Execution<Prepared, DriverError>>
 				>()
 			const scope = yield* Scope.make()
 			const owner: AsyncClose.Close = yield* AsyncClose.make(
 				runtime.changes.cleanupScope,
-				closePreparation(started, scope, { instance: managed.instance, key }),
+				closePreparation(started, scope),
 				(exit) =>
 					observeCleanup(exit, { instance: managed.instance, key }).pipe(
 						Effect.andThen(
@@ -114,13 +105,23 @@ export const prepare = Effect.fnUntraced(function* <A, E, R>(
 			)
 			const load = managed.driver.prepare
 			return yield* Effect.gen(function* () {
-				const loading = yield* Scope.provide(
-					Effect.suspend(() => load(candidate)),
+				const loading = yield* OwnedExecution.start(
+					runtime.changes.scope,
 					scope,
-				).pipe(Effect.forkIn(runtime.changes.scope))
+					Effect.suspend(() => load(candidate)),
+					(exit) =>
+						Exit.isFailure(exit)
+							? Effect.logError(
+									"Change metadata preparation failed",
+									exit.cause,
+								).pipe(Effect.annotateLogs({ instance: managed.instance, key }))
+							: Effect.void,
+				)
 				yield* Deferred.succeed(started, Option.some(loading))
 				const result = yield* Effect.exit(
-					restore(Fiber.join(loading).pipe(Effect.timeout(limits.startup))),
+					restore(
+						Fiber.join(loading.fiber).pipe(Effect.timeout(limits.startup)),
+					),
 				)
 				if (Exit.isSuccess(result))
 					return yield* use({

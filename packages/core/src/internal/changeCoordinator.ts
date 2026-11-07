@@ -14,6 +14,7 @@ import { RuntimeContext } from "./runtimeContext"
 import {
 	engine,
 	ExecutionOutcome,
+	finishAllocation,
 	safetyReserve,
 	type Attempt,
 	type HostLease,
@@ -83,8 +84,7 @@ const awaitLateExit = Effect.fnUntraced(function* (
 	lease: HostLease,
 	attempt: Option.Option<Attempt>,
 ): Effect.fn.Return<Change.Termination, DriverError> {
-	if (Option.isNone(attempt))
-		return { unit: `${managed.instance}-${lease.id}`, state: "NotStarted" }
+	if (Option.isNone(attempt)) return yield* finishAllocation(managed, lease)
 	const known = yield* TxRef.get(attempt.value.terminated)
 	if (Option.isNone(known))
 		yield* Effect.suspend(() => attempt.value.unit.terminate).pipe(

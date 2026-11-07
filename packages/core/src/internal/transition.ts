@@ -33,6 +33,7 @@ import * as Settlement from "./changeSettlement"
 import * as ChangeTable from "./changeTable"
 import { captureEdges, resolutionChanged } from "./dependencies"
 import * as Generations from "./generations"
+import * as OwnedExecution from "./ownedExecution"
 import {
 	type Activation,
 	type ActiveResolution,
@@ -62,7 +63,13 @@ export const ExecutionOutcome = Data.taggedEnum<ExecutionOutcome>()
 
 type HostRelease = AsyncClose.State
 
+interface Allocated {
+	readonly candidate: Change.Candidate
+	readonly unit: T.Unit
+}
 export interface HostLease extends Capacity.Credit {
+	readonly allocation: T.Allocation
+	readonly executor: OwnedExecution.Execution<Allocated, T.DriverError>
 	readonly generation: Generations.Token
 	readonly id: number
 	readonly scope: Scope.Closeable
@@ -131,6 +138,46 @@ const releaseRegistration = Effect.fnUntraced(function* (managed: Managed) {
 		)
 	}
 })
+
+/** Pending allocation ownership is independent of an Attempt or a coordinator race result. */
+export const unconfirmedAllocations = Effect.fnUntraced(function* (
+	managed: Managed,
+) {
+	const leases = yield* TxRef.get(managed.leases)
+	const attempts = yield* TxRef.get(managed.attempts)
+	const pending = yield* Effect.forEach(
+		Array.filter(
+			leases,
+			(lease) => !Array.some(attempts, (attempt) => attempt.id === lease.id),
+		),
+		(lease) => TxRef.get(lease.terminated),
+	)
+	return Array.some(pending, Option.isNone)
+}, Effect.tx)
+
+/** Allocation is non-executing, but its own executor must end before NotStarted is evidence. */
+export const finishAllocation = Effect.fnUntraced(function* (
+	managed: Managed,
+	lease: HostLease,
+) {
+	yield* lease.executor.stop
+	const termination: Change.Termination = {
+		unit: `${managed.instance}-${lease.id}`,
+		state: "NotStarted",
+	}
+	yield* Effect.tx(
+		Effect.gen(function* () {
+			yield* TxRef.set(lease.terminated, Option.some(termination))
+			yield* Generations.settle(
+				managed.runtime,
+				managed.entry.node,
+				lease.generation,
+			)
+			yield* Capacity.end(managed.runtime.capacity, lease)
+		}),
+	)
+	return termination
+}, Effect.uninterruptible)
 
 export interface Run {
 	readonly trace: Change.Trace | undefined
@@ -434,10 +481,10 @@ export const engine = (
 					)
 		return yield* runOperation(attempt, phase, effect, remaining)
 	})
-	const acquireLease = Effect.fnUntraced(function* (): Effect.fn.Return<
-		HostLease,
-		Failed
-	> {
+	const acquireLease = Effect.fnUntraced(function* (
+		desired: Change.Candidate,
+		recovery: boolean,
+	): Effect.fn.Return<HostLease, Failed> {
 		const grant = yield* Effect.tx(
 			Effect.gen(function* () {
 				if (yield* resolutionChanged(managed.resolution))
@@ -457,7 +504,9 @@ export const engine = (
 		)
 		const { id, generation: tokenGeneration } = grant
 		const scope = yield* Scope.make()
+		const allocation = yield* beginAllocation(desired, id, scope, recovery)
 		const lease: HostLease = {
+			...allocation,
 			id,
 			scope,
 			charged:
@@ -470,7 +519,7 @@ export const engine = (
 			generation: tokenGeneration,
 			hostRelease: yield* AsyncClose.make(
 				managed.scope,
-				Release.close(scope, Exit.void),
+				allocation.executor.close,
 				(exit) => completeHostRelease(lease, exit),
 			),
 			terminated: yield* TxRef.make(Option.none<Change.Termination>()),
@@ -479,12 +528,12 @@ export const engine = (
 
 		return lease
 	})
-	const allocateUnit = Effect.fnUntraced(function* (
+	const beginAllocation = Effect.fnUntraced(function* (
 		desired: Change.Candidate,
-		lease: HostLease,
+		id: number,
+		scope: Scope.Closeable,
 		recovery: boolean,
-	): Effect.fn.Return<Attempt, Failed> {
-		const { id } = lease
+	) {
 		const routeVersion = yield* Effect.tx(
 			Effect.gen(function* () {
 				const cell = yield* ChangeTable.object(managed.runtime.changes, {
@@ -502,43 +551,58 @@ export const engine = (
 			term: id,
 			routeVersion,
 		})
+		const executor = yield* OwnedExecution.start(
+			managed.scope,
+			scope,
+			Effect.gen(function* () {
+				if (recovery && change !== undefined) {
+					// Recovery metadata owns the scoped binding before authorization is captured.
+					if (managed.driver.prepare !== undefined)
+						yield* managed.driver.prepare(desired)
+					yield* ChangeTable.authorizeRecovery(change, desired.identity).pipe(
+						Effect.mapError((cause) => T.DriverError.make({ cause })),
+					)
+				}
+				const candidate = yield* Effect.suspend(() => managed.resolve(desired))
+				if (
+					candidate.driver !== desired.driver ||
+					candidate.identity !== desired.identity ||
+					(managed.driver.footprint !== undefined &&
+						!Equal.equals(
+							managed.driver.footprint(desired),
+							managed.driver.footprint(candidate),
+						))
+				)
+					return yield* T.DriverError.make({
+						cause: Cause.fail(
+							"Resolved input changed the admitted resource footprint",
+						),
+					})
+				const unit = yield* Effect.suspend(() =>
+					managed.driver.allocate(candidate, id, token),
+				)
+				return { candidate, unit }
+			}),
+			(exit) =>
+				Exit.isFailure(exit)
+					? record({ attempt: id, phase: "Starting", cause: exit.cause }).pipe(
+							Effect.andThen(
+								Effect.logError("Execution allocation failed", exit.cause),
+							),
+						)
+					: Effect.void,
+		)
+		return { allocation: token, executor }
+	})
+	const allocateUnit = Effect.fnUntraced(function* (
+		desired: Change.Candidate,
+		lease: HostLease,
+	): Effect.fn.Return<Attempt, Failed> {
+		const { id, allocation: token } = lease
 		const allocation = yield* step(
 			id,
 			"Starting",
-			Scope.provide(
-				Effect.gen(function* () {
-					if (recovery && change !== undefined) {
-						// Recovery metadata owns the scoped binding before authorization is captured.
-						if (managed.driver.prepare !== undefined)
-							yield* managed.driver.prepare(desired)
-						yield* ChangeTable.authorizeRecovery(change, desired.identity).pipe(
-							Effect.mapError((cause) => T.DriverError.make({ cause })),
-						)
-					}
-					const candidate = yield* Effect.suspend(() =>
-						managed.resolve(desired),
-					)
-					if (
-						candidate.driver !== desired.driver ||
-						candidate.identity !== desired.identity ||
-						(managed.driver.footprint !== undefined &&
-							!Equal.equals(
-								managed.driver.footprint(desired),
-								managed.driver.footprint(candidate),
-							))
-					)
-						return yield* T.DriverError.make({
-							cause: Cause.fail(
-								"Resolved input changed the admitted resource footprint",
-							),
-						})
-					const unit = yield* Effect.suspend(() =>
-						managed.driver.allocate(candidate, id, token),
-					)
-					return { candidate, unit }
-				}),
-				lease.scope,
-			),
+			Fiber.join(lease.executor.fiber),
 			limits.startup.allocate,
 		)
 		const { candidate, unit } = allocation
@@ -573,30 +637,39 @@ export const engine = (
 		cause: Cause.Cause<Failed>,
 	): Effect.fn.Return<never, Failed> {
 		const { id } = lease
-		yield* TxRef.set(
-			lease.terminated,
-			Option.some({
-				unit: `${managed.instance}-${id}`,
-				state: "NotStarted",
+		yield* record({ attempt: id, phase: "Starting", cause })
+		const cleanup = yield* finishAllocation(managed, lease).pipe(
+			Effect.andThen(beginHostRelease(lease)),
+			Effect.forkIn(managed.runtime.changes.cleanupScope, {
+				uninterruptible: true,
 			}),
 		)
-		const host = yield* awaitHostRelease(lease)
-		yield* Effect.tx(
-			Generations.settle(
-				managed.runtime,
-				managed.entry.node,
-				lease.generation,
-			).pipe(Effect.andThen(Capacity.end(managed.runtime.capacity, lease))),
+		const ended = yield* Effect.timeoutOption(
+			Fiber.await(cleanup),
+			limits.termination.exit,
 		)
-		yield* record({
-			attempt: id,
-			phase: "Starting",
-			termination: {
-				unit: `${managed.instance}-${id}`,
-				state: "NotStarted",
-			},
-			cause,
-		})
+		if (Option.isNone(ended))
+			return yield* Effect.fail(
+				failed({ reason: "UnconfirmedTermination", phase: "Starting" }),
+			)
+		if (Exit.isFailure(ended.value)) {
+			yield* record({
+				attempt: id,
+				phase: "Starting",
+				cause: ended.value.cause,
+			})
+			return yield* Effect.fail(
+				failed({ reason: "UnresolvedCleanup", phase: "Starting" }),
+			)
+		}
+		const termination = yield* TxRef.get(lease.terminated)
+		if (Option.isSome(termination))
+			yield* record({
+				attempt: id,
+				phase: "Starting",
+				termination: termination.value,
+			})
+		const host = yield* awaitHostRelease(lease)
 		if (
 			host._tag !== "Completed" ||
 			(Exit.isFailure(host.exit) && Cause.hasInterruptsOnly(host.exit.cause))
@@ -613,9 +686,9 @@ export const engine = (
 	): Effect.Effect<Attempt, Failed> =>
 		Effect.uninterruptibleMask((restore) =>
 			Effect.gen(function* () {
-				const lease = yield* acquireLease()
+				const lease = yield* acquireLease(desired, recovery)
 				const allocated = yield* Effect.exit(
-					restore(allocateUnit(desired, lease, recovery)),
+					restore(allocateUnit(desired, lease)),
 				)
 				return Exit.isSuccess(allocated)
 					? allocated.value

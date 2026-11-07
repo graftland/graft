@@ -132,13 +132,16 @@ an explicit instance name. See [artifacts](../remote/artifacts/).
 `Transition.registerDriver` publishes stable facades once. Changes that preserve
 a facade binding share its read premise, so its provider and compatible
 consumers can change concurrently. Phase 1 does not change facade publication or
-ownership. A generation owns its execution, resolution and leases. Driver
-allocation must not start execution; execution begins in `Unit.start`.
-`Registration.resolve` receives the unresolved desired candidate before every
-allocation, including startup and recovery. Each allocation receives a fresh
-monotonic term and a Change, generation and route version token; the unit echoes
-the token in its acknowledgement. An acknowledged stop, disconnected transport
-or closed scope never replaces exit evidence.
+ownership. A generation owns its execution, resolution and leases. Allocation
+deadlines limit waiting; resources and capacity remain owned until the
+allocation executor actually ends. An executor still running after termination
+waits leaves the Change Stuck, with late settlement retaining the original
+outcome. Driver allocation must not start execution; execution begins in
+`Unit.start`. `Registration.resolve` receives the unresolved desired candidate
+before every allocation, including startup and recovery. Each allocation
+receives a fresh monotonic term and a Change, generation and route version
+token; the unit echoes the token in its acknowledgement. An acknowledged stop,
+disconnected transport or closed scope never replaces exit evidence.
 
 `Transition.Driver.prepare` verifies deployment metadata before admission
 without executing the plugin. Authorization versions are checked again at route
