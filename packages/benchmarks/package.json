@@ -1,0 +1,25 @@
+{
+	"name": "@graftland/benchmarks",
+	"version": "0.0.0",
+	"private": true,
+	"type": "module",
+	"scripts": {
+		"build": "tsc -b && tsdown",
+		"bench": "pnpm --filter @graftland/benchmarks... build && node runner.mjs",
+		"test": "vitest run"
+	},
+	"dependencies": {
+		"@graftland/graft": "workspace:*",
+		"avvio": "9.3.1",
+		"cordis": "4.0.0-rc.12",
+		"effect": "4.1.2",
+		"emittery": "2.2.0",
+		"tinybench": "6.2.3",
+		"@graftland/plugin-remote": "workspace:*",
+		"@graftland/loader": "workspace:*",
+		"@effect/platform-node": "4.1.2"
+	},
+	"devDependencies": {
+		"vitest": "5.1.0"
+	}
+}

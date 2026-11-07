@@ -178,7 +178,8 @@ message // => Option.some(["Listening on 8080"])
 [远程插件](../../remote/overview/)的日志按其自身的级别到达宿主的 logger，插件的注解放在
 `remote.annotations` 中，并附带 `remote.pid` 或
 `remote.threadId`。高负载下丢失的日志会以
-[`Remote logs were dropped`](../../remote/transport-auth/#警告) 报告。
+[`Remote logs were dropped`](../../remote/transport-auth/#警告)
+报告。转发只是尽力而为：一次突发可能丢掉几乎全部日志。在插件中对高频消息采样或聚合，不能丢的记录应写入存储，而不是日志。
 
 ## 在插件中收集日志
 

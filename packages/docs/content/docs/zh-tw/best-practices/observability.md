@@ -179,7 +179,7 @@ message // => Option.some(["Listening on 8080"])
 [遠端外掛](../../remote/overview/)的日誌以它們自己的層級送到宿主的 logger，外掛的註解放在
 `remote.annotations` 中，並帶有 `remote.pid` 或
 `remote.threadId`。高負載下遺失的日誌會顯示為
-[`Remote logs were dropped`](../../remote/transport-auth/#警告)。
+[`Remote logs were dropped`](../../remote/transport-auth/#警告)。轉發只是盡力而為：一次突發可能遺失幾乎全部日誌。在外掛中對高頻訊息取樣或彙總，不能遺失的記錄應寫入儲存，而不是日誌。
 
 ## 在外掛中收集日誌
 

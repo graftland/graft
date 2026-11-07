@@ -35,6 +35,40 @@ importers:
         specifier: 5.1.0
         version: 5.1.0(@types/node@26.6.6)(vite@8.3.5(@types/node@26.6.6)(yaml@2.9.1))
 
+  packages/benchmarks:
+    dependencies:
+      "@effect/platform-node":
+        specifier: 4.1.2
+        version: 4.1.2(effect@4.1.2)(redis@6.3.1)
+      "@graftland/graft":
+        specifier: workspace:*
+        version: link:../core
+      "@graftland/loader":
+        specifier: workspace:*
+        version: link:../loader
+      "@graftland/plugin-remote":
+        specifier: workspace:*
+        version: link:../plugin-remote
+      avvio:
+        specifier: 9.3.1
+        version: 9.3.1
+      cordis:
+        specifier: 4.0.0-rc.12
+        version: 4.0.0-rc.12
+      effect:
+        specifier: 4.1.2
+        version: 4.1.2
+      emittery:
+        specifier: 2.2.0
+        version: 2.2.0
+      tinybench:
+        specifier: 6.2.3
+        version: 6.2.3
+    devDependencies:
+      vitest:
+        specifier: 5.1.0
+        version: 5.1.0(@types/node@26.6.6)(vite@8.3.5(@types/node@26.6.6)(yaml@2.9.1))
+
   packages/cli:
     dependencies:
       "@effect/platform-node":
@@ -1010,6 +1044,12 @@ packages:
         integrity: sha512-4Ae2xRSDV5kdWPsi40xWbOtoihbzM0zLVjQKkDAnD5KzFXl+6/kd+VhuWOlTRVaJ5cqGk++vCbAaf0MR1XbZlw==,
       }
 
+  "@fastify/error@4.2.1":
+    resolution:
+      {
+        integrity: sha512-MYBumuIwP+5MIpXSyKm6/o1Eigcoij186lWUssX3LH5U8KWqU0ktZhzC4CErIX9EJeQeRGI+zJZQWakBlFbUcg==,
+      }
+
   "@gerrit0/mini-shiki@3.23.0":
     resolution:
       {
@@ -1664,6 +1704,12 @@ packages:
         integrity: sha512-cVBuhDQjBZaNMTwBquYfPydrUP+E3hE6oYGasx8h6ZrODIM7/r+gxLDXdd66oszbrggZHEntdE6j+5gYIVyMWQ==,
       }
 
+  "@standard-schema/spec@1.1.0":
+    resolution:
+      {
+        integrity: sha512-l2aFy5jALhniG5HgqrD6jXLi/rUWrKvqN/qJx6yoJsgKhblVd+iqqU4RCXavm/jPityDo5TCvKMnpjKnOriy0w==,
+      }
+
   "@tybys/wasm-util@0.10.4":
     resolution:
       {
@@ -2154,6 +2200,12 @@ packages:
       "@astrojs/markdown-remark":
         optional: true
 
+  avvio@9.3.1:
+    resolution:
+      {
+        integrity: sha512-QyTKW61/qlba+cUQBm/sT9X8lri4UdomqSDwCnrnj1IvLVDRRiXRkz4CgBRWB+/cmfC7SK5WQc8T1vSdGvaUcQ==,
+      }
+
   axobject-query@4.1.0:
     resolution:
       {
@@ -2310,6 +2362,27 @@ packages:
         integrity: sha512-yuToqVvRrj6pfDXREyQAAv8SkAEk/8GS3jQRTiUMm66TVtBYmqQeoEjL2Lmq8Rpo6271vH76InTChTitEAm65w==,
       }
     engines: { node: ">=22" }
+
+  cordis@4.0.0-rc.12:
+    resolution:
+      {
+        integrity: sha512-/ZtRivYxr5sffTULPewHuX5kEy5sWi8oADHSpnt0KjAd8uKRIj+kv4fh3lxtutIfVlgwJVFVXWOQp/gYa+kIOQ==,
+      }
+    hasBin: true
+    peerDependencies:
+      "@cordisjs/plugin-include": ^1.2.0
+      "@cordisjs/plugin-loader": ^1.0.0-rc.9
+    peerDependenciesMeta:
+      "@cordisjs/plugin-include":
+        optional: true
+      "@cordisjs/plugin-loader":
+        optional: true
+
+  cosmokit@1.8.1:
+    resolution:
+      {
+        integrity: sha512-PDBv4l90xZKrUsZ0vtoycgZpO/j4iFsqJXrAxsyBDsnQRI7ZMJXIjgDJsKNjd5L8jnVnnlrDCdhkFbTncgCVjQ==,
+      }
 
   crossws@0.3.5:
     resolution:
@@ -2486,6 +2559,13 @@ packages:
         integrity: sha512-d3Oah1WyKxFLFh19yWheS5IXIVaITzxZ71JkE1rkUozq/6EcJSU5nPk5bF2QrSygZ3SQoiNQB8TsxFriyMeMaQ==,
       }
 
+  emittery@2.2.0:
+    resolution:
+      {
+        integrity: sha512-zpmLSuVIqrtTPDR2IYiTbxXB6XgrS7+rRk5uT4w6qgmxeNvtdnSaAOGNNbVokgm+0F6zrRufshUfSlnsPc7d8g==,
+      }
+    engines: { node: ">=22" }
+
   empathic@2.1.0:
     resolution:
       {
@@ -2573,6 +2653,12 @@ packages:
     resolution:
       {
         integrity: sha512-7F2Fl+TjRSenLqlU3UjSH0iyqopqoZIu7eZVpEirP2g1GtWa2G/ecEmBdgz31+Mxr+ELclgg6sokpSFIQiZ02Q==,
+      }
+
+  fastq@1.20.3:
+    resolution:
+      {
+        integrity: sha512-XKv5nnLs6nLF71NgiKJLIZFLkPyIEuOselLG7ujZnGrRfQK8HpvY+WqKhAJUAdLomwVHErVS4LfxFlPq0/FTAw==,
       }
 
   fdir@6.5.0:
@@ -3656,6 +3742,13 @@ packages:
         integrity: sha512-kk0jOU7+zGv//kfjXEBjdIryL1Acl4i9XNkHxtM7Tm5lFiCog576fjNC9hjoR7LTKQ0DsPWy09JummSsH1uqfQ==,
       }
 
+  reusify@1.1.0:
+    resolution:
+      {
+        integrity: sha512-g6QUff04oZpHs0eG5p83rFLhHeV00ug/Yf9nZM6fLeUrPguBTkTQOdpAWWspMh55TZfVQDPaN3NQJfbVRAxdIw==,
+      }
+    engines: { iojs: ">=1.0.0", node: ">=0.10.0" }
+
   rolldown-plugin-dts@0.28.8:
     resolution:
       {
@@ -4705,6 +4798,8 @@ snapshots:
     dependencies:
       "@expressive-code/core": 0.44.3
 
+  "@fastify/error@4.2.1": {}
+
   "@gerrit0/mini-shiki@3.23.0":
     dependencies:
       "@shikijs/engine-oniguruma": 3.23.0
@@ -5017,6 +5112,8 @@ snapshots:
 
   "@shikijs/vscode-textmate@10.1.0": {}
 
+  "@standard-schema/spec@1.1.0": {}
+
   "@tybys/wasm-util@0.10.4":
     dependencies:
       tslib: 2.9.1
@@ -5308,6 +5405,11 @@ snapshots:
       - uploadthing
       - yaml
 
+  avvio@9.3.1:
+    dependencies:
+      "@fastify/error": 4.2.1
+      fastq: 1.20.3
+
   axobject-query@4.1.0: {}
 
   bail@2.0.2: {}
@@ -5365,6 +5467,13 @@ snapshots:
   cookie-es@1.2.3: {}
 
   cookie@2.0.1: {}
+
+  cordis@4.0.0-rc.12:
+    dependencies:
+      "@standard-schema/spec": 1.1.0
+      cosmokit: 1.8.1
+
+  cosmokit@1.8.1: {}
 
   crossws@0.3.5:
     dependencies:
@@ -5448,6 +5557,8 @@ snapshots:
 
   effect@4.1.2: {}
 
+  emittery@2.2.0: {}
+
   empathic@2.1.0: {}
 
   entities@4.5.0: {}
@@ -5486,6 +5597,10 @@ snapshots:
   fast-wrap-ansi@0.2.2:
     dependencies:
       fast-string-width: 3.0.2
+
+  fastq@1.20.3:
+    dependencies:
+      reusify: 1.1.0
 
   fdir@6.5.0(picomatch@4.0.7):
     optionalDependencies:
@@ -6351,6 +6466,8 @@ snapshots:
       "@types/nlcst": 2.0.3
       nlcst-to-string: 4.0.0
       unist-util-visit: 5.2.0
+
+  reusify@1.1.0: {}
 
   rolldown-plugin-dts@0.28.8(rolldown@1.2.16)(typescript@7.0.2):
     dependencies:

@@ -188,7 +188,10 @@ message // => Option.some(["Listening on 8080"])
 A [remote plugin](../../remote/overview/)'s logs reach the host's loggers at
 their own level, with the plugin's annotations in `remote.annotations` and
 `remote.pid` or `remote.threadId`. Entries lost under load show as
-[`Remote logs were dropped`](../../remote/transport-auth/#warnings).
+[`Remote logs were dropped`](../../remote/transport-auth/#warnings). Forwarding
+is best effort: a burst can drop almost every entry. Sample or aggregate
+frequent messages in the plugin, and keep records you must not lose in storage,
+not in logs.
 
 ## Collect logs in a plugin
 

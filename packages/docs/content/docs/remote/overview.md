@@ -27,7 +27,8 @@ it, and restarting the entry replaces it. Moving a plugin has limits:
   [realms](../../isolation/).
 - **Config must encode as JSON.** The plugin process decodes it on its own.
 - **Calls cross a connection.** Each call is a message, and a call that fails
-  because the connection broke is not retried.
+  because the connection broke is not retried. See
+  [what a Remote boundary costs](../../best-practices/production/#what-a-remote-boundary-costs).
 
 ## Move a plugin
 

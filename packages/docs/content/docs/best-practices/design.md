@@ -259,6 +259,7 @@ export const ForecastIssued = Event.make<[city: string, forecast: string]>(
 | Scope key strings to the package       | The string is the key's identity: two keys with the same string are one key. It is also how `graft.yml` names the key in [`inject`, `isolate` and `intercept`](../../config-file/#rules). |
 | Keep implementations out of the module | Consumers then depend on the contract only. The publisher can be [replaced](../../replace/) or [moved to another process](../../remote/overview/) without touching them.                  |
 | Put expected failures in method types  | Callers see which errors they must handle, and a Remote contract can carry them.                                                                                                          |
+| Make remote methods coarse             | Each Remote call crosses a connection. One call that takes a batch costs far less than many small ones; see [What a Remote boundary costs](../production/#what-a-remote-boundary-costs).  |
 | Define values only                     | Importing the module must perform no I/O, like any [plugin module](../../plugins/#plugin-modules).                                                                                        |
 
 To ship tokens and plugins as an npm package, see

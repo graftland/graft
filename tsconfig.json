@@ -78,6 +78,12 @@
 		},
 		{
 			"path": "./packages/plugin-remote/tsconfig.test.json"
+		},
+		{
+			"path": "./packages/benchmarks"
+		},
+		{
+			"path": "./packages/benchmarks/tsconfig.test.json"
 		}
 	]
 }

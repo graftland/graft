@@ -156,6 +156,21 @@ export default Remote.plugin(contract, {
     greeting: Hello
 ```
 
+### What a Remote boundary costs
+
+Moving a plugin keeps its services' API, not their cost. These figures come from
+the
+[benchmark suite](https://github.com/graftland/graft/tree/main/packages/benchmarks)
+on one machine; the ratios carry over, the absolute numbers do not.
+
+| Cost             | Measured                                                                                                                           | What to do                                                                                                                                                  |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Starting         | About 0.7 s for `worker` and `local`, 1.4 s for a runner.                                                                          | Keep entries long-lived. A config change restarts the plugin process and stops its consumers, so it costs as much as a start.                               |
+| One call         | About 0.6 ms round trip for `worker` and `local`, 1.2 ms for a runner. In process: microseconds.                                   | Keep loops on one side of the boundary. Give the contract coarse methods that take batches: 256 items in one call ran 50 to 65 times faster than 256 calls. |
+| Calls in flight  | 256 concurrent calls took about as long as 16.                                                                                     | Bound concurrency, and measure where your connection stops gaining.                                                                                         |
+| Memory           | Each `worker` adds about 40 MiB to the host. Each `local` entry is a whole Node process.                                           | Put operations that may fail together in one remote plugin instead of an entry each.                                                                        |
+| Noticing a crash | Tens of milliseconds for `worker` and `local`, under 100 ms for a runner. Without the runner or its connection, the lease decides. | Do not expect consumers to stop the moment the process exits. Report fork state and failed calls in [health](#report-health).                               |
+
 ## Report health
 
 A failed or pending entry does not stop the process, so a service manager that
