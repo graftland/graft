@@ -623,6 +623,9 @@ importers:
       "@graftland/loader":
         specifier: workspace:*
         version: link:../../packages/loader
+      "@graftland/plugin-release":
+        specifier: workspace:*
+        version: link:../../packages/plugin-release
       "@graftland/plugin-remote":
         specifier: workspace:*
         version: link:../../packages/plugin-remote

@@ -205,7 +205,10 @@ it.effect(
 					state: "Applying",
 					revocations: [],
 				},
-				events: [{ kind: "Intent", current: id, target }],
+				events: [
+					{ kind: "Bootstrap", current: id, target: id },
+					{ kind: "Intent", current: id, target, entries: [] },
+				],
 			}
 			yield* durable(path.join(store, "journal.json"), journal)
 			const service = yield* make({ store, initial: target, host }).pipe(
@@ -267,5 +270,123 @@ it.effect(
 			)
 			assert.equal(result.code, "Storage")
 			assert.equal(Schema.is(Journal)({}), false)
+		}).pipe(Effect.scoped, Effect.provide(runtime)),
+)
+
+it.effect(
+	"rejects semantic corruption before selecting an accepted checkpoint",
+	() =>
+		Effect.gen(function* () {
+			const { fs, path, store, id, resolver } = yield* setup()
+			const file = path.join(store, "source.yml")
+			yield* fs.writeFileString(file, "[]")
+			const target = yield* build(store, {
+				file,
+				references: [],
+				revocations: ["credential:old"],
+			})
+			const accepted: Journal = {
+				version: 1,
+				status: {
+					current: target,
+					previous: id,
+					state: "Ready",
+					revocations: ["credential:old"],
+				},
+				events: [
+					{ kind: "Bootstrap", current: id, target: id },
+					{ kind: "Intent", current: id, target, entries: [] },
+					{ kind: "Commit", current: target, target },
+				],
+			}
+			const corruptions: ReadonlyArray<Journal> = [
+				{
+					...accepted,
+					status: { ...accepted.status, state: "Applying" },
+					events: Array.take(accepted.events, 2),
+				},
+				{ ...accepted, status: { ...accepted.status, previous: null } },
+				{ ...accepted, status: { ...accepted.status, revocations: [] } },
+				{
+					...accepted,
+					status: {
+						...accepted.status,
+						revocations: ["credential:old", "credential:unknown"],
+					},
+				},
+				{
+					...accepted,
+					status: {
+						current: id,
+						previous: null,
+						state: "Ready",
+						revocations: [],
+					},
+					events: Array.take(accepted.events, 2),
+				},
+				{
+					...accepted,
+					events: Array.map(accepted.events, (event) =>
+						event.kind === "Intent"
+							? { ...event, entries: ["unfinished"] }
+							: event,
+					),
+				},
+			]
+			for (const journal of corruptions) {
+				yield* durable(path.join(store, "journal.json"), journal)
+				const error = yield* Effect.flip(
+					make({ store, initial: id, host }).pipe(
+						Effect.provideService(ModuleResolver.ModuleResolver, resolver),
+					),
+				)
+				assert.equal(error.code, "Journal")
+				const persisted = yield* read(path.join(store, "journal.json"), Journal)
+				assert.deepEqual(persisted, journal)
+			}
+			yield* durable(path.join(store, "journal.json"), accepted)
+			const service = yield* make({ store, initial: id, host }).pipe(
+				Effect.provideService(ModuleResolver.ModuleResolver, resolver),
+			)
+			const observed = yield* service.observe
+			assert.deepEqual(observed, accepted.status)
+		}).pipe(Effect.scoped, Effect.provide(runtime)),
+)
+
+it.effect(
+	"does not promote an unfinished target when a schema-valid journal changes current",
+	() =>
+		Effect.gen(function* () {
+			const { fs, path, store, id, resolver } = yield* setup()
+			const file = path.join(store, "source.yml")
+			yield* fs.writeFileString(file, "[]")
+			const target = yield* build(store, {
+				file,
+				references: [],
+				revocations: [],
+			})
+			yield* make({ store, initial: id, host }).pipe(
+				Effect.provideService(ModuleResolver.ModuleResolver, resolver),
+				Effect.scoped,
+			)
+			const accepted = yield* read(path.join(store, "journal.json"), Journal)
+			const corrupted: Journal = {
+				...accepted,
+				status: { ...accepted.status, current: target, state: "Applying" },
+				events: [
+					...accepted.events,
+					{ kind: "Intent", current: id, target, entries: [] },
+				],
+			}
+			assert.isTrue(Schema.is(Journal)(corrupted))
+			yield* durable(path.join(store, "journal.json"), corrupted)
+			const error = yield* Effect.flip(
+				make({ store, initial: id, host }).pipe(
+					Effect.provideService(ModuleResolver.ModuleResolver, resolver),
+				),
+			)
+			assert.equal(error.code, "Journal")
+			const persisted = yield* read(path.join(store, "journal.json"), Journal)
+			assert.deepEqual(persisted, corrupted)
 		}).pipe(Effect.scoped, Effect.provide(runtime)),
 )

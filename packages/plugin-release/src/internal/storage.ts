@@ -14,6 +14,7 @@ import { Artifact, Publication } from "@graftland/plugin-remote"
 import { parseDocument } from "yaml"
 
 import { Build, Id, Release, ReleaseError, SourceEntry } from "../Model"
+import { resolveContract } from "./contract"
 
 export const failure = (code: string, message: string) =>
 	ReleaseError.make({ code, message })
@@ -254,7 +255,7 @@ export const build = Effect.fnUntraced(
 					)
 				return {
 					id: entry.id,
-					contract: entry.config.contract,
+					contract: yield* resolveContract(file, entry.config.contract),
 					target: entry.config.target,
 					input: entry.config.config,
 					probes: entry.config.probes,

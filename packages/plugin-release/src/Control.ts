@@ -6,7 +6,15 @@ import {
 } from "node:http"
 import { createConnection } from "node:net"
 
-import { Array, Cause, Effect, FiberSet, FileSystem, Schema } from "effect"
+import {
+	Array,
+	Cause,
+	Deferred,
+	Effect,
+	FiberSet,
+	FileSystem,
+	Schema,
+} from "effect"
 
 import { failure, json, protect } from "./internal/storage"
 import {
@@ -207,23 +215,21 @@ export const serve = Effect.fnUntraced(function* (
 export const call = Effect.fnUntraced(
 	function* (socket: string, request: Request) {
 		const text = yield* json(request)
-		const incoming = yield* Effect.acquireRelease(
-			Effect.callback<IncomingMessage, ReleaseError>((resume) => {
-				let received = false
-				const client = httpRequest(
-					{
-						socketPath: socket,
-						path: "/",
-						method: "POST",
-						headers: { "content-type": "application/json" },
-					},
-					(response) => {
-						received = true
-						resume(Effect.succeed(response))
-					},
+		const headers = yield* Deferred.make<IncomingMessage, ReleaseError>()
+		const client = yield* Effect.acquireRelease(
+			Effect.sync(() => {
+				const client = httpRequest({
+					socketPath: socket,
+					path: "/",
+					method: "POST",
+					headers: { "content-type": "application/json" },
+				})
+				client.once("response", (response) =>
+					Deferred.doneUnsafe(headers, Effect.succeed(response)),
 				)
 				client.once("error", (error) =>
-					resume(
+					Deferred.doneUnsafe(
+						headers,
 						ReleaseError.make({
 							code: "Control",
 							message: "Cannot reach the release plugin",
@@ -231,13 +237,12 @@ export const call = Effect.fnUntraced(
 						}),
 					),
 				)
-				client.end(text)
-				return Effect.sync(() => {
-					if (!received) client.destroy()
-				})
+				return client
 			}),
-			(incoming) => Effect.sync(() => incoming.destroy()),
+			(client) => Effect.sync(() => client.destroy()),
 		)
+		yield* Effect.sync(() => client.end(text))
+		const incoming = yield* Deferred.await(headers)
 		return yield* body(incoming).pipe(
 			Effect.flatMap(Schema.decodeUnknownEffect(Schema.fromJsonString(Reply))),
 		)

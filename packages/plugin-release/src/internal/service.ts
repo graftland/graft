@@ -21,13 +21,14 @@ import {
 	ReleaseError,
 	Releases,
 	summarize,
-	type Applied,
 	type Apply,
-	type Change,
 	type Diagnostic,
 	type Entry,
 	type Options,
 } from "../Model"
+import { changes } from "./changes"
+import { execute as executeEntries } from "./execution"
+import { validate } from "./journal"
 import {
 	build,
 	durable,
@@ -55,7 +56,9 @@ export const make = Effect.fnUntraced(function* (options: Options) {
 	const saved = (yield* fs.exists(journalFile))
 		? yield* read(journalFile, Journal)
 		: undefined
-	const initial = saved?.status.current ?? options.initial
+	const recovered =
+		saved === undefined ? undefined : yield* validate(store, saved)
+	const initial = recovered?.status.current ?? options.initial
 	const initialRelease = yield* load(store, initial)
 	const state = yield* Ref.make<Journal>(
 		saved ?? {
@@ -96,7 +99,10 @@ export const make = Effect.fnUntraced(function* (options: Options) {
 			),
 		)
 	const contract = Effect.fnUntraced(function* (entry: Entry) {
-		const module = yield* resolver.importModule(entry.contract)
+		const observationScope = yield* Effect.scope
+		const module = yield* resolver.importModule(entry.contract, {
+			observationScope,
+		})
 		const found = Remote.Contract.fromModule(module)
 		if (Option.isNone(found))
 			return yield* failure("Contract", "No contract exported for " + entry.id)
@@ -122,83 +128,71 @@ export const make = Effect.fnUntraced(function* (options: Options) {
 			target: entry.target,
 			input,
 		})
-	})
+	}, Effect.scoped)
 	const inspect = Effect.fnUntraced(function* (target: string) {
 		const journal = yield* Ref.get(state)
 		const current = yield* load(store, journal.status.current)
 		const next = yield* load(store, target)
-		const changes: Array<Change> = []
-		const diagnostics: Array<Diagnostic> = []
 		const selections = Array.map(next.entries, (entry) => ({
 			id: entry.id,
 			package: entry.package,
 			entry: entry.entry,
 		}))
-		for (const entry of next.entries) {
-			const before = Array.findFirst(
-				current.entries,
-				(old) => old.id === entry.id,
-			)
-			const reasons: Array<Change["reasons"][number]> = []
-			if (Option.isNone(before)) {
-				reasons.push("added")
-				diagnostics.push({
-					entry: entry.id,
-					code: "Membership",
-					message: "Live additions require application restart",
-				})
-			} else {
-				if (
-					!(yield* equal(
-						before.value.artifact.identity,
-						entry.artifact.identity,
-					))
+		const inspections = yield* Effect.forEach(
+			next.entries,
+			Effect.fnUntraced(function* (entry) {
+				const before = Array.findFirst(
+					current.entries,
+					(old) => old.id === entry.id,
 				)
-					reasons.push("code")
-				if (
-					!(yield* equal(before.value.input, entry.input)) ||
-					!(yield* equal(before.value.probes, entry.probes))
-				)
-					reasons.push("config")
-				if (
-					before.value.contract !== entry.contract ||
-					!(yield* equal(before.value.target, entry.target))
-				) {
-					if (!Array.contains(reasons, "config")) reasons.push("config")
-					diagnostics.push({
-						entry: entry.id,
-						code: "Deployment",
-						message:
-							"Contract or placement changes require application restart",
-					})
-				}
-			}
-			if (reasons.length > 0) changes.push({ entry: entry.id, reasons })
-			diagnostics.push(
-				...Array.filter(
+				const deployment: ReadonlyArray<Diagnostic> = Option.isNone(before)
+					? [
+							{
+								entry: entry.id,
+								code: "Membership",
+								message: "Live additions require application restart",
+							},
+						]
+					: before.value.contract !== entry.contract ||
+						  !(yield* equal(before.value.target, entry.target))
+						? [
+								{
+									entry: entry.id,
+									code: "Deployment",
+									message:
+										"Contract or placement changes require application restart",
+								},
+							]
+						: []
+				const compatibility = Array.filter(
 					Manifest.check(
 						{ ...options.host, placement: entry.target._tag },
 						selections,
 					),
 					(item) => item.entry === entry.id || item.entry === "host",
-				),
-			)
-			const decoded = yield* prepared(entry).pipe(Effect.exit)
-			if (decoded._tag === "Failure") {
-				if (Cause.hasInterrupts(decoded.cause))
-					return yield* Effect.failCause(decoded.cause)
-				diagnostics.push({
-					entry: entry.id,
-					code: "Configuration",
-					message:
-						"Configuration or its references cannot be decoded for " + entry.id,
-					cause: decoded.cause,
-				})
-			} else {
+				)
+				const decoded = yield* prepared(entry).pipe(Effect.exit)
+				if (decoded._tag === "Failure") {
+					if (Cause.hasInterrupts(decoded.cause))
+						return yield* Effect.failCause(decoded.cause)
+					return [
+						...deployment,
+						...compatibility,
+						{
+							entry: entry.id,
+							code: "Configuration",
+							message:
+								"Configuration or its references cannot be decoded for " +
+								entry.id,
+							cause: decoded.cause,
+						},
+					]
+				}
+				const declaration = decoded.value.declaration
 				const declared = Manifest.getEntry(entry.package.graft, entry.entry)
-				for (const service of decoded.value.declaration.provides) {
+				const missing = Array.filter(declaration.provides, (service) => {
 					const operations = Array.map(service.operations, Manifest.operationId)
-					if (
+					return (
 						declared === undefined ||
 						!Array.some(
 							declared.services.implements,
@@ -209,63 +203,62 @@ export const make = Effect.fnUntraced(function* (options: Options) {
 								),
 						)
 					)
-						diagnostics.push({
-							entry: entry.id,
-							code: "Contract",
-							message:
-								"Implementation does not provide the configured service binding " +
-								service.key.key,
-						})
-				}
-				if (
-					decoded.value.declaration.inject.length > 0 ||
-					!Array.every(
-						decoded.value.declaration.provides,
-						(service) => service.unary,
-					)
-				)
-					diagnostics.push({
-						entry: entry.id,
-						code: "Placement",
-						message:
-							"Managed direct releases require unary contracts without injected services",
-					})
-			}
-		}
-		for (const old of current.entries) {
-			if (!Array.some(next.entries, (entry) => entry.id === old.id)) {
-				changes.push({ entry: old.id, reasons: ["removed"] })
-				diagnostics.push({
-					entry: old.id,
-					code: "Membership",
-					message: "Live removals require application restart",
 				})
-			}
-		}
-		for (const reference of next.references)
-			if (
+				const contracts = Array.map(missing, (service): Diagnostic => ({
+					entry: entry.id,
+					code: "Contract",
+					message:
+						"Implementation does not provide the configured service binding " +
+						service.key.key,
+				}))
+				const placement: ReadonlyArray<Diagnostic> =
+					declaration.inject.length > 0 ||
+					!Array.every(declaration.provides, (service) => service.unary)
+						? [
+								{
+									entry: entry.id,
+									code: "Placement",
+									message:
+										"Managed direct releases require unary contracts without injected services",
+								},
+							]
+						: []
+				return [...deployment, ...compatibility, ...contracts, ...placement]
+			}, Effect.scoped),
+		)
+		const removed = Array.map(
+			Array.filter(
+				current.entries,
+				(old) => !Array.some(next.entries, (entry) => entry.id === old.id),
+			),
+			(old): Diagnostic => ({
+				entry: old.id,
+				code: "Membership",
+				message: "Live removals require application restart",
+			}),
+		)
+		const revoked = Array.map(
+			Array.filter(next.references, (reference) =>
 				Array.contains(
 					[...journal.status.revocations, ...next.revocations],
 					reference,
-				)
-			)
-				diagnostics.push({
-					entry: "release",
-					code: "Revoked",
-					message: "Release restores revoked reference " + reference,
-				})
-		return { current: journal.status.current, target, changes, diagnostics }
+				),
+			),
+			(reference): Diagnostic => ({
+				entry: "release",
+				code: "Revoked",
+				message: "Release restores revoked reference " + reference,
+			}),
+		)
+		return {
+			current: journal.status.current,
+			target,
+			changes: yield* changes(current, next),
+			diagnostics: [...Array.flatten(inspections), ...removed, ...revoked],
+		}
 	})
 	const startupPlan = yield* inspect(initial)
-	const acceptedOverride =
-		saved !== undefined &&
-		Array.some(
-			saved.events,
-			(event) =>
-				event.kind === "Commit" &&
-				event.current === initial &&
-				event.overrideRevocations === true,
-		)
+	const acceptedOverride = recovered?.override === true
 	const startupDiagnostics = Array.filter(
 		startupPlan.diagnostics,
 		(item) => item.code !== "Revoked" || !acceptedOverride,
@@ -344,7 +337,7 @@ export const make = Effect.fnUntraced(function* (options: Options) {
 		...journal,
 		status: { ...journal.status, state: "Ready" as const },
 	}))
-	yield* event("Startup", initial)
+	yield* event(saved === undefined ? "Bootstrap" : "Startup", initial)
 	const execute = Effect.fnUntraced(function* (request: Apply) {
 		const journal = yield* Ref.get(state)
 		if (journal.status.current !== request.expected)
@@ -396,74 +389,56 @@ export const make = Effect.fnUntraced(function* (options: Options) {
 				...journal.events,
 				{
 					kind: "Intent",
+					entries: Array.map(work, (item) => item.target.id),
 					current: journal.status.current,
 					target: request.target,
 					overrideRevocations: request.overrideRevocations === true,
 				},
 			],
 		})
-		const outcomes: Array<Applied["outcomes"][number]> = []
-		const accepted: Array<(typeof work)[number]> = []
-		let failed = false
-		let degraded = false
-		for (const item of work) {
-			const outcome = yield* Graft.transition({
-				target: item.target.id,
-				candidate: item.after,
-				policy: {
-					trial: "2 seconds",
-					...options.policy,
-					probes: item.target.probes,
-				},
-			})
-			outcomes.push({ entry: item.target.id, compensation: false, outcome })
-			yield* event("Outcome", request.target, item.target.id, outcome)
-			if (outcome._tag !== "Accepted") {
-				failed = true
-				degraded = outcome._tag === "RecoveryFailed" || outcome._tag === "Stuck"
-				break
-			}
-			accepted.push(item)
-		}
-		if (failed)
-			for (const item of Array.reverse(accepted)) {
+		const progress = yield* executeEntries(
+			work,
+			(item) => item.target.id,
+			Effect.fnUntraced(function* (item, compensation) {
+				const entry = compensation ? item.old : item.target
 				const outcome = yield* Graft.transition({
-					target: item.old.id,
-					candidate: item.before,
+					target: entry.id,
+					candidate: compensation ? item.before : item.after,
 					policy: {
 						trial: "2 seconds",
 						...options.policy,
-						probes: item.old.probes,
+						probes: entry.probes,
 					},
 				})
-				outcomes.push({ entry: item.old.id, compensation: true, outcome })
 				yield* event(
-					"Compensation",
-					journal.status.current,
-					item.old.id,
+					compensation ? "Compensation" : "Outcome",
+					compensation ? journal.status.current : request.target,
+					entry.id,
 					outcome,
 				)
-				if (outcome._tag !== "Accepted") degraded = true
-			}
+				return outcome
+			}),
+		)
 		const finished = yield* Ref.get(state)
-		const status: import("../Model").Status = failed
-			? { ...journal.status, state: degraded ? "Degraded" : "Ready" }
-			: {
-					current: request.target,
-					previous: journal.status.current,
-					state: "Ready",
-					revocations: Array.dedupe([
-						...journal.status.revocations,
-						...next.revocations,
-					]),
-				}
+		const status: import("../Model").Status =
+			progress._tag === "Rejected"
+				? { ...journal.status, state: progress.degraded ? "Degraded" : "Ready" }
+				: {
+						current: request.target,
+						previous: journal.status.current,
+						state: "Ready",
+						revocations: Array.dedupe([
+							...journal.status.revocations,
+							...next.revocations,
+						]),
+					}
 		yield* persist({
 			...finished,
 			status,
 			events: [
 				...finished.events,
 				{
-					kind: failed ? "Rejected" : "Commit",
+					kind: progress._tag === "Rejected" ? "Rejected" : "Commit",
 					current: status.current,
 					target: request.target,
 					overrideRevocations: request.overrideRevocations === true,
@@ -472,7 +447,7 @@ export const make = Effect.fnUntraced(function* (options: Options) {
 		})
 		const finalGenerations = yield* generations
 		yield* Ref.set(known, finalGenerations)
-		return { status, outcomes }
+		return { status, outcomes: progress.outcomes }
 	})
 	const owned = <A, E>(
 		effect: Effect.Effect<

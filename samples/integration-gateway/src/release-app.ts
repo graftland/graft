@@ -6,6 +6,7 @@ import {
 	Queue,
 	Ref,
 	Schema,
+	Scope,
 	Semaphore,
 } from "effect"
 
@@ -33,6 +34,10 @@ export const startReleases = Effect.fnUntraced(function* (
 		path.join(directory, "node_modules/@example/forecasts-release"),
 	)
 	const file = path.join(root, "graft.yml")
+	const contractFile = yield* path.fromFileUrl(
+		new URL(import.meta.resolve("@example/forecast-contract")),
+	)
+	const relativeContract = path.relative(root, contractFile)
 	const write = Effect.fnUntraced(function* (
 		config: Schema.Json,
 		audit: Schema.Json = {
@@ -49,7 +54,7 @@ export const startReleases = Effect.fnUntraced(function* (
 					config: {
 						package: source,
 						entry: ".",
-						contract: import.meta.resolve("@example/forecast-contract"),
+						contract: relativeContract,
 						target,
 						config,
 						probes: ["health"],
@@ -83,9 +88,25 @@ export const startReleases = Effect.fnUntraced(function* (
 		references: ["credential:legacy"],
 		revocations: [],
 	})
+	const leases = yield* Ref.make(0)
+	const observations = yield* Ref.make(0)
+	const lease = (count: Ref.Ref<number>) =>
+		Effect.acquireRelease(
+			Ref.update(count, (value) => value + 1),
+			() => Ref.update(count, (value) => value - 1),
+		)
 	const resolver = yield* ModuleResolver.make({
 		base: directory,
-		importer: (specifier) => import(specifier),
+		importer: (specifier, options) =>
+			Effect.gen(function* () {
+				yield* lease(leases)
+				yield* lease(observations).pipe(Scope.provide(options.observationScope))
+				return yield* Effect.tryPromise({
+					try: () => import(specifier),
+					catch: (cause) =>
+						ModuleResolver.ModuleInvalid.make({ specifier, cause }),
+				})
+			}),
 	})
 	yield* Graft.provide(ModuleResolver.ModuleResolver, resolver)
 	const ready = yield* Deferred.make<Release.Releases["Service"]>()
@@ -134,6 +155,8 @@ export const startReleases = Effect.fnUntraced(function* (
 	const session = yield* Deferred.await(sessionReady)
 	const commands = yield* Semaphore.make(1)
 	return {
+		leases,
+		observations,
 		initial,
 		root,
 		store,

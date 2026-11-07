@@ -38,6 +38,12 @@ Package directories are relative to the source file. `entry` selects a public
 package export; the package needs the author-owned fields of its
 [publication manifest](../ecosystem/manifest/).
 
+Contract paths and package specifiers resolve from the release source file at
+build time. Package exports need a Node default resolution, as publication does.
+The release records one canonical file URL for both planning and execution;
+other URL schemes and file URL queries/fragments are rejected. Contract package
+identity and directory-digest provenance remain unchanged.
+
 ```yaml title="forecast-release.yml"
 - id: forecasts
   name: "@graftland/plugin-remote"
@@ -90,7 +96,19 @@ accepted id remains visible alongside `Applying` or `Degraded`. Exit code zero
 means the command succeeded; rejection, unsuccessful transition outcomes and
 transport failures exit nonzero. `--json` emits a structured reply.
 
+Planning imports release their resources before returning. Active contract
+imports remain owned by the release plugin and close with it.
+
+The control client has a ten-minute deadline covering connection, response
+headers and body. Timeout or interruption closes its socket, including when a
+connected server never sends headers.
+
 ## Journal and revocations
+
+Before starting units, recovery validates the accepted bootstrap and completed
+transactions against current/previous ids and accumulated revocations. A commit
+requires an accepted outcome for every changed entry. A schema-valid but
+inconsistent journal is rejected; startup never promotes an unfinished intent.
 
 The synced, atomically replaced journal records intent, safe transition outcome
 summaries, current/previous ids and startup selection. An interrupted intent is

@@ -40,9 +40,10 @@ admitted apply. Core remains the sole execution state machine.
 
 An atomically replaced, synced journal records intent before work, sanitized
 outcomes after each transition, and accepted current/previous ids. Startup
-selects the last fully accepted release, records that selection, and starts its
-managed entries. Incomplete intents are not resumed. Journal/control responses
-omit arbitrary causes and decoded inputs; full transition causes remain in the
+validates the accepted checkpoint against transaction history, then selects the
+last fully accepted release, records that selection, and starts its managed
+entries. Incomplete intents are not resumed. Journal/control responses omit
+arbitrary causes and decoded inputs; full transition causes remain in the
 in-memory result. Storage failures fail closed. One process owns a store.
 
 Release manifests list capability/credential references in use and explicit

@@ -20,7 +20,7 @@ export const SourceEntry = Schema.Struct({
 export type SourceEntry = typeof SourceEntry.Type
 export const Entry = Schema.Struct({
 	id: Schema.NonEmptyString,
-	contract: Schema.NonEmptyString,
+	contract: Schema.String.check(Schema.isPattern(/^file:\/\//)),
 	target: RemoteConfig.ManagedHost.fields.target,
 	input: Schema.Json,
 	probes: Schema.Array(Schema.NonEmptyString),
@@ -73,7 +73,13 @@ export const Status = Schema.Struct({
 export type Status = typeof Status.Type
 /** Safe durable summary: never serializes arbitrary causes or resolved configuration. */
 export const OutcomeSummary = Schema.Struct({
-	_tag: Schema.String,
+	_tag: Schema.Literals([
+		"Accepted",
+		"Aborted",
+		"Recovered",
+		"RecoveryFailed",
+		"Stuck",
+	]),
 	phase: Schema.String,
 	reason: Schema.optionalKey(Schema.String),
 	evidence: Schema.Array(
@@ -111,6 +117,7 @@ export const summarize = (outcome: Transition.Outcome): OutcomeSummary => ({
 })
 export const Event = Schema.Struct({
 	kind: Schema.Literals([
+		"Bootstrap",
 		"Startup",
 		"Intent",
 		"Outcome",
@@ -123,6 +130,7 @@ export const Event = Schema.Struct({
 	entry: Schema.optionalKey(Schema.String),
 	outcome: Schema.optionalKey(OutcomeSummary),
 	overrideRevocations: Schema.optionalKey(Schema.Boolean),
+	entries: Schema.optionalKey(Schema.Array(Schema.String)),
 })
 export type Event = typeof Event.Type
 export const Journal = Schema.Struct({

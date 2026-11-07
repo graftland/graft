@@ -521,3 +521,50 @@ test(
 			}).pipe(Effect.scoped, Effect.provide(runtime)),
 		),
 )
+
+for (const target of [{ _tag: "Worker" }, { _tag: "Local" }]) {
+	test(
+		`${target._tag}: relative contracts use the same execution URL and planning imports release their leases`,
+		{ timeout: 120_000 },
+		() =>
+			Effect.runPromise(
+				Effect.gen(function* () {
+					const app = yield* startReleases(directory, target)
+					const fs = yield* FileSystem.FileSystem
+					const source = JSON.parse(yield* fs.readFileString(app.file))
+					assert.ok(source[0].config.contract.startsWith(".."))
+					const stored = JSON.parse(
+						yield* fs.readFileString(
+							app.store + "/" + app.initial + "/release.json",
+						),
+					)
+					assert.equal(
+						stored.entries[0].contract,
+						import.meta.resolve("@example/forecast-contract"),
+					)
+					assert.equal(yield* Ref.get(app.leases), 1)
+					assert.equal(yield* Ref.get(app.observations), 1)
+					const invalid = yield* app.build(input(42))
+					for (const target of [
+						app.initial,
+						invalid,
+						app.initial,
+						invalid,
+						app.initial,
+					]) {
+						const plan = yield* app.releases.plan(target)
+						assert.equal(plan.diagnostics.length, target === invalid ? 1 : 0)
+						assert.equal(yield* Ref.get(app.leases), 1)
+						assert.equal(yield* Ref.get(app.observations), 1)
+					}
+					assert.equal(
+						(yield* app.ask("London")).text,
+						"initial forecast for London",
+					)
+					yield* app.releaseFork.dispose
+					assert.equal(yield* Ref.get(app.leases), 0)
+					assert.equal(yield* Ref.get(app.observations), 0)
+				}).pipe(Effect.scoped, Effect.provide(runtime)),
+			),
+	)
+}
