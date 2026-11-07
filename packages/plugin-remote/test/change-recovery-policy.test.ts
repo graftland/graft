@@ -118,15 +118,13 @@ for (const revoke of [false, true])
 							Effect.gen(function* () {
 								yield* bind(desired)
 								if (term === 3 && revoke)
-									yield* authority
-										.revoke(["api"])
-										.pipe(
-											Effect.mapError((error) =>
-												Transition.DriverError.make({
-													cause: Cause.fail(error),
-												}),
-											),
-										)
+									yield* authority.revoke(["api"]).pipe(
+										Effect.mapError((error) =>
+											Transition.DriverError.make({
+												cause: Cause.fail(error),
+											}),
+										),
+									)
 								const exited = yield* Deferred.make<Change.Termination>()
 								return {
 									acknowledgement,
