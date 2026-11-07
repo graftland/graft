@@ -141,6 +141,6 @@ decides.
 
 ## Further reading
 
-The docs page [Coming from cordis](https://graftland.github.io/graft/cordis/)
-holds the concept table this skill expands. Each topic page under
-`https://graftland.github.io/graft/` is the source of truth for exact behavior.
+The docs page [Coming from cordis](https://docs.graft.land/cordis/) holds the
+concept table this skill expands. Each topic page under
+`https://docs.graft.land/` is the source of truth for exact behavior.

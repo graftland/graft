@@ -54,11 +54,11 @@ const hello = Plugin.make({
 - **線上升級。**
   取代執行在 Worker 或子行程中的外掛，使用它的外掛繼續執行。候選從不可變製品啟動，必須通過探針；新呼叫進入候選，舊呼叫排空後終止舊單元。每次升級以
   `Accepted`、`Aborted`、`Recovered`、`RecoveryFailed` 或 `Stuck`
-  結束，見[轉換](https://graftland.github.io/graft/zh-tw/transitions/)。
+  結束，見[轉換](https://docs.graft.land/zh-tw/transitions/)。
 - **相依受檢查。** 服務是 Effect 的 `Context` 鍵，由 `Layer`
   或其他外掛提供。外掛在 `inject` 中宣告相依，由編譯器檢查。
 
-某根枝條需要單獨栽種時，[Remote](https://graftland.github.io/graft/zh-tw/remote/overview/)
+某根枝條需要單獨栽種時，[Remote](https://docs.graft.land/zh-tw/remote/overview/)
 可以讓這個外掛在子行程、Node
 worker 或另一台機器上執行，使用它服務的外掛不必修改。
 
@@ -73,12 +73,12 @@ cd my-app
 npm run dev
 ```
 
-閱讀[文件](https://graftland.github.io/graft/zh-tw/)。和程式設計代理一起開發？[`graft` skill](skills/graft)
+閱讀[文件](https://docs.graft.land/zh-tw/)。和程式設計代理一起開發？[`graft` skill](skills/graft)
 教它用外掛化、Effect 化的方式拆解應用程式，再撰寫、測試和執行：`npx skills add graftland/graft`。
 
 Graft 的外掛模型借鑑自
 [cordis](https://github.com/cordiverse/cordis)。cordis 在時空中組合，Graft 只照料自己的園子。請看
-[cordis 的概念如何對應到 Graft](https://graftland.github.io/graft/zh-tw/cordis/)。想讓程式設計代理完成遷移，可以安裝[遷移 skills](skills)。
+[cordis 的概念如何對應到 Graft](https://docs.graft.land/zh-tw/cordis/)。想讓程式設計代理完成遷移，可以安裝[遷移 skills](skills)。
 
 ## 範例
 
@@ -128,7 +128,7 @@ devenv shell -- pnpm typecheck
 devenv shell -- pnpm test
 ```
 
-檢查項目、發布流程和文件網站請見[發布](https://graftland.github.io/graft/zh-tw/releases/)。
+檢查項目、發布流程和文件網站請見[發布](https://docs.graft.land/zh-tw/releases/)。
 
 ## 授權
 

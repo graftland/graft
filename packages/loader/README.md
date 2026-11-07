@@ -448,8 +448,8 @@ concurrent-save window as content checking; it is not a multi-file transaction.
 
 ## Documentation
 
-- [Config file](https://graftland.github.io/graft/config-file/)
-- [Use Graft in your program](https://graftland.github.io/graft/embedding/)
+- [Config file](https://docs.graft.land/config-file/)
+- [Use Graft in your program](https://docs.graft.land/embedding/)
 
 Part of [Graft](https://github.com/graftland/graft). Licensed under
 [Apache 2.0](https://github.com/graftland/graft/blob/main/LICENSE).

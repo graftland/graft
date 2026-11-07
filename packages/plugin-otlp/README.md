@@ -73,7 +73,7 @@ provides no log or metrics export; third parties may implement them.
 
 ## Documentation
 
-- [Logs and tracing](https://graftland.github.io/graft/best-practices/observability/)
+- [Logs and tracing](https://docs.graft.land/best-practices/observability/)
 
 Part of [Graft](https://github.com/graftland/graft). Licensed under
 [Apache 2.0](https://github.com/graftland/graft/blob/main/LICENSE).

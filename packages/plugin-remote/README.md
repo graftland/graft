@@ -4,8 +4,8 @@ English | [简体中文](README.zh-CN.md) | [繁體中文](README.zh-TW.md)
 
 Run a Graft plugin somewhere else: in a child process, in a Node worker, or on
 another machine through a runner. The plugins that use it keep injecting its
-[services](https://graftland.github.io/graft/services/) as usual; only its
-[config entry](https://graftland.github.io/graft/config-file/) changes.
+[services](https://docs.graft.land/services/) as usual; only its
+[config entry](https://docs.graft.land/config-file/) changes.
 
 ```yaml
 - id: greeter
@@ -22,16 +22,16 @@ runner in a container or a VM.
 
 ## Documentation
 
-- [Remote](https://graftland.github.io/graft/remote/overview/): what Remote does
-  and its limits.
-- [Host entries](https://graftland.github.io/graft/remote/hosts/): contracts,
-  `remote` entries, services and errors.
-- [Runners](https://graftland.github.io/graft/remote/runners/): run plugins on
-  another machine with `graft start runner.yml`.
-- [Transport and authentication](https://graftland.github.io/graft/remote/transport-auth/)
-- [Replacement and stopping](https://graftland.github.io/graft/remote/lifecycle/)
-- [Capability plugins](https://graftland.github.io/graft/remote/capabilities/)
-- [API reference](https://graftland.github.io/graft/reference/plugin-remote/readme/)
+- [Remote](https://docs.graft.land/remote/overview/): what Remote does and its
+  limits.
+- [Host entries](https://docs.graft.land/remote/hosts/): contracts, `remote`
+  entries, services and errors.
+- [Runners](https://docs.graft.land/remote/runners/): run plugins on another
+  machine with `graft start runner.yml`.
+- [Transport and authentication](https://docs.graft.land/remote/transport-auth/)
+- [Replacement and stopping](https://docs.graft.land/remote/lifecycle/)
+- [Capability plugins](https://docs.graft.land/remote/capabilities/)
+- [API reference](https://docs.graft.land/reference/plugin-remote/readme/)
 
 ## Samples
 

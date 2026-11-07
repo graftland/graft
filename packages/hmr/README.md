@@ -205,7 +205,7 @@ Exit.
 
 ## Documentation
 
-- [Hot reload](https://graftland.github.io/graft/hot-reload/)
+- [Hot reload](https://docs.graft.land/hot-reload/)
 
 Part of [Graft](https://github.com/graftland/graft). Licensed under
 [Apache 2.0](https://github.com/graftland/graft/blob/main/LICENSE).

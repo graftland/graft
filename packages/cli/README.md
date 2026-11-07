@@ -17,8 +17,8 @@ later.
 
 ## Documentation
 
-- [Quickstart](https://graftland.github.io/graft/quickstart/)
-- [Command line](https://graftland.github.io/graft/cli/)
+- [Quickstart](https://docs.graft.land/quickstart/)
+- [Command line](https://docs.graft.land/cli/)
 
 Part of [Graft](https://github.com/graftland/graft). Licensed under
 [Apache 2.0](https://github.com/graftland/graft/blob/main/LICENSE).

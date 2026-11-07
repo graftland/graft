@@ -3,4 +3,4 @@
 Immutable managed application releases, configuration planning and rollback
 through Graft transitions.
 
-https://graftland.github.io/graft/application-releases/
+https://docs.graft.land/application-releases/

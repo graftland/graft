@@ -51,9 +51,9 @@ Streamable HTTP 传输。
 
 ## 文档
 
-- [MCP server](https://graftland.github.io/graft/mcp-server/overview/)
-- [Contributions and limits](https://graftland.github.io/graft/mcp-server/contributing/)
-- [Extension points](https://graftland.github.io/graft/mcp-server/extending/)
+- [MCP server](https://docs.graft.land/mcp-server/overview/)
+- [Contributions and limits](https://docs.graft.land/mcp-server/contributing/)
+- [Extension points](https://docs.graft.land/mcp-server/extending/)
 - [Sample](../../samples/mcp-tools/)
 
 [Apache 2.0](https://github.com/graftland/graft/blob/main/LICENSE).

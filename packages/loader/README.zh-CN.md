@@ -325,8 +325,8 @@ watch 模式同时监听入口目录和当前目标目录。入口链接改变�
 
 ## 文档
 
-- [配置文件](https://graftland.github.io/graft/zh-cn/config-file/)
-- [在你的程序中使用 Graft](https://graftland.github.io/graft/zh-cn/embedding/)
+- [配置文件](https://docs.graft.land/zh-cn/config-file/)
+- [在你的程序中使用 Graft](https://docs.graft.land/zh-cn/embedding/)
 
 属于 [Graft](https://github.com/graftland/graft)。基于
 [Apache 2.0](https://github.com/graftland/graft/blob/main/LICENSE) 许可。

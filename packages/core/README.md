@@ -84,7 +84,7 @@ descendant scopes. Graft rejects such a publication atomically with
 - A rejected provider waits until its configuration, its dependencies, or the
   blocking graph change.
 
-See the [service documentation](https://graftland.github.io/graft/services/).
+See the [service documentation](https://docs.graft.land/services/).
 
 Plugin identity is object reference identity.
 
@@ -118,9 +118,9 @@ stay unchanged.
 
 ## Documentation
 
-- [Plugins](https://graftland.github.io/graft/plugins/)
-- [Services](https://graftland.github.io/graft/services/)
-- [Lifecycle](https://graftland.github.io/graft/lifecycle/)
+- [Plugins](https://docs.graft.land/plugins/)
+- [Services](https://docs.graft.land/services/)
+- [Lifecycle](https://docs.graft.land/lifecycle/)
 
 Part of [Graft](https://github.com/graftland/graft). Licensed under
 [Apache 2.0](https://github.com/graftland/graft/blob/main/LICENSE).

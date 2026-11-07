@@ -54,11 +54,11 @@ const hello = Plugin.make({
 - **在线升级。**
   替换运行在 Worker 或子进程中的插件，使用它的插件继续运行。候选从不可变制品启动，必须通过探针；新调用进入候选，旧调用排空后终止旧单元。每次升级以
   `Accepted`、`Aborted`、`Recovered`、`RecoveryFailed` 或 `Stuck`
-  结束，见[转换](https://graftland.github.io/graft/zh-cn/transitions/)。
+  结束，见[转换](https://docs.graft.land/zh-cn/transitions/)。
 - **依赖受检查。** 服务是 Effect 的 `Context` 键，由 `Layer`
   或其他插件提供。插件在 `inject` 中声明依赖，由编译器检查。
 
-某根枝条需要单独栽种时，[Remote](https://graftland.github.io/graft/zh-cn/remote/overview/)
+某根枝条需要单独栽种时，[Remote](https://docs.graft.land/zh-cn/remote/overview/)
 可以让这个插件在子进程、Node
 worker 或另一台机器上运行，使用它服务的插件不必改动。
 
@@ -73,12 +73,12 @@ cd my-app
 npm run dev
 ```
 
-阅读[文档](https://graftland.github.io/graft/zh-cn/)。和编程智能体一起开发？[`graft` skill](skills/graft)
+阅读[文档](https://docs.graft.land/zh-cn/)。和编程智能体一起开发？[`graft` skill](skills/graft)
 教它用插件化、Effect 化的方式拆解应用，再编写、测试和运行：`npx skills add graftland/graft`。
 
 Graft 的插件模型借鉴自
 [cordis](https://github.com/cordiverse/cordis)。cordis 在时空中组合，Graft 只照料自己的园子。请看
-[cordis 的概念如何对应到 Graft](https://graftland.github.io/graft/zh-cn/cordis/)。想让编程智能体完成迁移，可以安装[迁移 skills](skills)。
+[cordis 的概念如何对应到 Graft](https://docs.graft.land/zh-cn/cordis/)。想让编程智能体完成迁移，可以安装[迁移 skills](skills)。
 
 ## 示例
 
@@ -128,7 +128,7 @@ devenv shell -- pnpm typecheck
 devenv shell -- pnpm test
 ```
 
-检查项、发布流程和文档站点见[发布](https://graftland.github.io/graft/zh-cn/releases/)。
+检查项、发布流程和文档站点见[发布](https://docs.graft.land/zh-cn/releases/)。
 
 ## 许可证
 

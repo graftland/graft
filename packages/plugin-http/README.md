@@ -32,7 +32,7 @@ export default Plugin.make({
 `port` is required; `host` defaults to `127.0.0.1`. There is no server-wide
 authentication: use per-mount middleware or a reverse proxy.
 
-See the [HTTP guide](https://graftland.github.io/graft/http/) and
+See the [HTTP guide](https://docs.graft.land/http/) and
 [http-gateway sample](../../samples/http-gateway).
 
 `Http.Routing` lets sibling listener plugins serve the routing core. Changing a

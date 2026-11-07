@@ -23,5 +23,5 @@ Use `HttpApis.serve` from `@graftland/plugin-http-api/HttpApis` with ordinary
 `HttpApiBuilder.group` layers. Scalar and Swagger are separate plugins;
 third-party UIs inject `HttpApis.Document`.
 
-See the [HTTP API guide](https://graftland.github.io/graft/http-api/) and
+See the [HTTP API guide](https://docs.graft.land/http-api/) and
 [http-gateway sample](../../samples/http-gateway).

@@ -28,7 +28,7 @@ yield * Create.create({ directory: "my-app", template: "plugin" })
 
 ## 文档
 
-- [命令行](https://graftland.github.io/graft/zh-cn/cli/#graft-create)
+- [命令行](https://docs.graft.land/zh-cn/cli/#graft-create)
 
 属于 [Graft](https://github.com/graftland/graft)。基于
 [Apache 2.0](https://github.com/graftland/graft/blob/main/LICENSE) 许可。

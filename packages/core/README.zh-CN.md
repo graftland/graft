@@ -52,7 +52,7 @@ npm install @graftland/graft effect
 - 必选的 `Pending` 依赖正在等待启动，不算作重启的 watcher。
 - 被拒绝的发布者会一直等待，直到它的配置、依赖或造成阻塞的依赖图发生变化。
 
-参见[服务文档](https://graftland.github.io/graft/zh-cn/services/)。
+参见[服务文档](https://docs.graft.land/zh-cn/services/)。
 
 插件的身份就是对象引用的身份。
 
@@ -80,9 +80,9 @@ defect；预期的外部取消仍是 Interrupt。含有其他失败的 cause 原
 
 ## 文档
 
-- [插件](https://graftland.github.io/graft/zh-cn/plugins/)
-- [服务](https://graftland.github.io/graft/zh-cn/services/)
-- [生命周期](https://graftland.github.io/graft/zh-cn/lifecycle/)
+- [插件](https://docs.graft.land/zh-cn/plugins/)
+- [服务](https://docs.graft.land/zh-cn/services/)
+- [生命周期](https://docs.graft.land/zh-cn/lifecycle/)
 
 属于 [Graft](https://github.com/graftland/graft)。基于
 [Apache 2.0](https://github.com/graftland/graft/blob/main/LICENSE) 许可。

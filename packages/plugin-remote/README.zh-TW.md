@@ -3,7 +3,7 @@
 [English](README.md) | [简体中文](README.zh-CN.md) | 繁體中文
 
 把 Graft 外掛放到別處執行：子行程、Node
-worker，或透過 runner 放到另一台機器上。使用它的外掛照常注入它的[服務](https://graftland.github.io/graft/zh-tw/services/)，需要改的只有它的[設定項目](https://graftland.github.io/graft/zh-tw/config-file/)。
+worker，或透過 runner 放到另一台機器上。使用它的外掛照常注入它的[服務](https://docs.graft.land/zh-tw/services/)，需要改的只有它的[設定項目](https://docs.graft.land/zh-tw/config-file/)。
 
 ```yaml
 - id: greeter
@@ -19,15 +19,15 @@ Remote 隔離的是執行，不是權限。需要權限邊界時，請把 runner
 
 ## 文件
 
-- [Remote](https://graftland.github.io/graft/zh-tw/remote/overview/)：Remote 做什麼，以及它的限制。
-- [宿主設定項目](https://graftland.github.io/graft/zh-tw/remote/hosts/)：契約、`remote`
+- [Remote](https://docs.graft.land/zh-tw/remote/overview/)：Remote 做什麼，以及它的限制。
+- [宿主設定項目](https://docs.graft.land/zh-tw/remote/hosts/)：契約、`remote`
   設定項目、服務與錯誤。
-- [Runner](https://graftland.github.io/graft/zh-tw/remote/runners/)：用
+- [Runner](https://docs.graft.land/zh-tw/remote/runners/)：用
   `graft start runner.yml` 在另一台機器上執行外掛。
-- [傳輸與驗證](https://graftland.github.io/graft/zh-tw/remote/transport-auth/)
-- [替換與停止](https://graftland.github.io/graft/zh-tw/remote/lifecycle/)
-- [能力外掛](https://graftland.github.io/graft/zh-tw/remote/capabilities/)
-- [API 參考](https://graftland.github.io/graft/reference/plugin-remote/readme/)
+- [傳輸與驗證](https://docs.graft.land/zh-tw/remote/transport-auth/)
+- [替換與停止](https://docs.graft.land/zh-tw/remote/lifecycle/)
+- [能力外掛](https://docs.graft.land/zh-tw/remote/capabilities/)
+- [API 參考](https://docs.graft.land/reference/plugin-remote/readme/)
 
 ## 範例
 

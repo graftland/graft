@@ -30,7 +30,7 @@ yield * Create.create({ directory: "my-app", template: "plugin" })
 
 ## Documentation
 
-- [Command line](https://graftland.github.io/graft/cli/#graft-create)
+- [Command line](https://docs.graft.land/cli/#graft-create)
 
 Part of [Graft](https://github.com/graftland/graft). Licensed under
 [Apache 2.0](https://github.com/graftland/graft/blob/main/LICENSE).

@@ -163,7 +163,7 @@ scope 關閉之後依然存在。但是作業系統可能會清理暫存目錄�
 
 ## 文件
 
-- [命令列](https://graftland.github.io/graft/zh-tw/cli/)
+- [命令列](https://docs.graft.land/zh-tw/cli/)
 
 屬於 [Graft](https://github.com/graftland/graft)。依
 [Apache 2.0](https://github.com/graftland/graft/blob/main/LICENSE) 授權。

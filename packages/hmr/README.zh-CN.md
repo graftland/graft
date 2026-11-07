@@ -131,7 +131,7 @@ Node 不会淘汰带版本的 ESM 实例。增量重载减少新实例数量，�
 
 ## 文档
 
-- [热重载](https://graftland.github.io/graft/zh-cn/hot-reload/)
+- [热重载](https://docs.graft.land/zh-cn/hot-reload/)
 
 属于 [Graft](https://github.com/graftland/graft)。基于
 [Apache 2.0](https://github.com/graftland/graft/blob/main/LICENSE) 许可。

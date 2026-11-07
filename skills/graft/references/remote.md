@@ -3,7 +3,7 @@
 `@graftland/plugin-remote` runs one plugin in a child process, a Node worker or
 on another machine, while the host keeps its services in the plugin tree.
 Consumers still `inject` the same keys; only the provider's `graft.yml` entry
-changes. Exact behavior: `https://graftland.github.io/graft/remote/overview/`.
+changes. Exact behavior: `https://docs.graft.land/remote/overview/`.
 
 ## When to reach for it
 

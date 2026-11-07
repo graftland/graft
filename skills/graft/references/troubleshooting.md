@@ -47,5 +47,4 @@ A failed fork tries again when its config or dependencies change, when its
 | `Contract.UndeclaredFailure`                           | A remote plugin failed with an undeclared error        | Declare it in the contract's `error`, or handle it in the plugin   |
 | `RemoteEntryError`                                     | A `remote` or `remote/runner` entry is invalid         | Fix the field named by `field`                                     |
 
-The full list is on the docs errors page:
-`https://graftland.github.io/graft/errors/`.
+The full list is on the docs errors page: `https://docs.graft.land/errors/`.
