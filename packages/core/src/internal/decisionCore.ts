@@ -67,6 +67,7 @@ import * as Recording from "./recordingCore"
 import * as Supervisor from "./supervisorCore"
 
 export const getPreparation = Preparation.get
+export const supervision = Supervisor.facts
 export type * from "./decisionState.ts"
 
 const emptyCell: Cell = {
@@ -310,6 +311,8 @@ export const make = (options: {
 			supervisionPolicy: Supervisor.policy(options.supervision),
 			supervision: HashMap.empty(),
 			pendingRestarts: HashMap.empty(),
+			restartBackoffs: HashMap.empty(),
+			nextRestartTimer: 1,
 			nextMemberOperation: 1,
 			memberOperations: HashMap.empty(),
 			memberOperationsByUnit: HashMap.empty(),
@@ -900,7 +903,11 @@ const conclude = (s: Working, c: Change, outcome: Outcome): Working => {
 			: saved
 	const supervised =
 		outcome === "Accepted"
-			? Supervisor.cleared(Recording.settled(recorded, c), c.plan.members)
+			? Supervisor.cleared(
+					Recording.settled(recorded, c),
+					c.plan.members,
+					c.request.supervised === undefined,
+				)
 			: Recording.settled(recorded, c)
 	return release(transferServing(supervised, next), next)
 }
@@ -2755,6 +2762,8 @@ const timerFired = (
 			return withChange(fired, timer.change, (s, c) => {
 				if (Option.isSome(c.conclusion)) return s
 				switch (timer.purpose) {
+					case "Restart":
+						return s
 					case "Trial": {
 						if (c.phase !== "Trial") return s
 						const passed = { ...c, trialPassed: true }
@@ -2908,7 +2917,7 @@ const shutdownUnit = (s: Working, u: Unit): Working => {
 }
 const shutdown = (s: Working): Working => {
 	const closing: Working = {
-		...s,
+		...Supervisor.cancel(s),
 		open: false,
 		units: HashMap.map(s.units, (unit) =>
 			Executions.update(
@@ -3250,7 +3259,9 @@ const superviseMembers = (
 	unit: Unit,
 	affected: HashSet.HashSet<string>,
 	cause: Cause.Cause<unknown>,
+	pending?: PendingRestart,
 ): Working => {
+	if (!s.open) return s
 	if (!Supervisor.allows(s, affected))
 		return Members.start(
 			Supervisor.escalate(s, affected),
@@ -3266,9 +3277,17 @@ const superviseMembers = (
 			Preparation.authorized(s, id, member.target),
 		),
 	)
+	const restart = pending ?? {
+		kind: "Members",
+		unit: unit.id,
+		members: affected,
+		cause,
+	}
+	const waiting = Supervisor.wait(s, restart, permitted)
+	if (Option.isSome(waiting)) return waiting.value
 	const started = Members.start(s, unit, affected, cause, true, permitted)
 	return started.nextMemberOperation === s.nextMemberOperation
-		? defer(s, { kind: "Members", unit: unit.id, members: affected, cause })
+		? defer(s, restart)
 		: Supervisor.attempted(started, permitted)
 }
 const defer = (s: Working, restart: PendingRestart): Working => ({
@@ -3285,6 +3304,7 @@ const superviseUnit = (
 	unit: string,
 	members: HashSet.HashSet<string>,
 	cause: Cause.Cause<unknown>,
+	pending?: PendingRestart,
 ): Working => {
 	// Current policy decides: a revoked target is not redeployed, and is not an attempt.
 	const declared = HashSet.filter(members, (id) =>
@@ -3294,8 +3314,14 @@ const superviseUnit = (
 	)
 	if (!s.open || HashSet.size(declared) === 0) return s
 	if (!Supervisor.allows(s, declared)) return Supervisor.escalate(s, declared)
+	const restart: PendingRestart =
+		pending === undefined
+			? { kind: "Unit", unit, members: declared, cause }
+			: { ...pending, members: declared }
+	const waiting = Supervisor.wait(s, restart, declared)
+	if (Option.isSome(waiting)) return waiting.value
 	if (HashSet.some(declared, (id) => Option.isSome(cell(s, id).writer)))
-		return defer(s, { kind: "Unit", unit, members: declared, cause })
+		return defer(s, restart)
 	const operations = Arr.flatMap(Arr.fromIterable(declared), (id) =>
 		Option.toArray(
 			Option.map(
@@ -3308,12 +3334,6 @@ const superviseUnit = (
 			),
 		),
 	)
-	const restart: PendingRestart = {
-		kind: "Unit",
-		unit,
-		members: declared,
-		cause,
-	}
 	const submitted = requestedBatch(s, { operations, strategy: "Restart" })
 	const reply = submitted.reply
 	const next: Working = { ...submitted, reply: s.reply }
@@ -3350,6 +3370,7 @@ const admittedRestart = (s: Working, request: Request): Working =>
 /** Deferred restarts are tried again after every event; one that still conflicts stays deferred. */
 const retryPending = (s: Working): Working =>
 	HashMap.reduce(s.pendingRestarts, s, (next, restart, key) => {
+		if (!next.open || Supervisor.waiting(next, restart)) return next
 		const cleared = {
 			...next,
 			pendingRestarts: HashMap.remove(next.pendingRestarts, key),
@@ -3362,12 +3383,19 @@ const retryPending = (s: Working): Working =>
 				restart.unit,
 				restart.members,
 				restart.cause,
+				restart,
 			)
 		return Option.match(HashMap.get(cleared.units, restart.unit), {
 			onNone: () => cleared,
 			onSome: (u) =>
 				u.evidence === "Missing"
-					? superviseMembers(cleared, u, restart.members, restart.cause)
+					? superviseMembers(
+							cleared,
+							u,
+							restart.members,
+							restart.cause,
+							restart,
+						)
 					: cleared,
 		})
 	})
@@ -3423,6 +3451,13 @@ const apply = (s: Working, event: Event): Working => {
 				: unitFailed(s, event)
 		case "TimerEnded":
 			if (
+				Option.exists(
+					HashMap.get(s.timers, event.timer),
+					(t) => t.purpose === "Restart",
+				)
+			)
+				return Supervisor.observeTimer(s, event)
+			if (
 				Option.exists(HashMap.get(s.timers, event.timer), (timer) =>
 					HashMap.has(s.memberOperations, timer.change),
 				)
@@ -3468,6 +3503,13 @@ const apply = (s: Working, event: Event): Working => {
 					: s,
 			)
 		case "TimerFired":
+			if (
+				Option.exists(
+					HashMap.get(s.timers, event.timer),
+					(t) => t.purpose === "Restart",
+				)
+			)
+				return Supervisor.observeTimer(s, event)
 			if (
 				Option.exists(HashMap.get(s.timers, event.timer), (timer) =>
 					HashMap.has(s.memberOperations, timer.change),

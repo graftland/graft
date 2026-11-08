@@ -38,6 +38,13 @@ export const Deployment = Schema.Struct({
 				Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
 			),
 			period: Schema.optionalKey(Schema.Finite.check(Schema.isGreaterThan(0))),
+			backoff: Schema.optionalKey(
+				Schema.Struct({
+					initial: Schema.Finite.check(Schema.isGreaterThanOrEqualTo(0)),
+					factor: Schema.Finite.check(Schema.isGreaterThanOrEqualTo(1)),
+					max: Schema.Finite.check(Schema.isGreaterThanOrEqualTo(0)),
+				}),
+			),
 		}),
 	),
 	recording: Schema.optionalKey(
@@ -440,6 +447,14 @@ export const Response = Schema.Union([
 				instance: Schema.String,
 				attempts: Schema.Array(Schema.Finite),
 				escalated: Schema.Boolean,
+				reason: Schema.Option(
+					Schema.Literals([
+						"Revoked",
+						"Escalated",
+						"WaitingForDependency",
+						"RestartPending",
+					]),
+				),
 			}),
 		),
 	}),

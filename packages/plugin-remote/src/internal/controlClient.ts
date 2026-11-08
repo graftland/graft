@@ -53,7 +53,7 @@ export interface Client {
 		Wire.ControlError
 	>
 	readonly supervision: Effect.Effect<
-		ReadonlyArray<{ readonly instance: string } & Kernel.Supervision>,
+		ReadonlyArray<Kernel.SupervisionFact>,
 		Wire.ControlError
 	>
 	readonly recording: Effect.Effect<

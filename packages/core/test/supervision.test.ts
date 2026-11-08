@@ -1,9 +1,9 @@
-import { Array, Cause, HashMap, Option, String } from "effect"
+import { Array, Cause, HashMap, HashSet, Option, String } from "effect"
 import { assert, it } from "@effect/vitest"
 
 import * as Core from "../src/internal/decisionCore"
 import * as Executions from "../src/internal/executionState"
-import { report } from "./change-model/scenarios"
+import { report, request } from "./change-model/scenarios"
 import { declaredMembers, rootRealms } from "./member-fact"
 import * as Prepared from "./preparation-fixture"
 import { target } from "./preparation-fixture"
@@ -22,13 +22,14 @@ const initial = (supervision?: Core.SupervisionDeclaration) =>
 const signal = (
 	state: Core.State,
 	tag: "MemberFailed" | "MemberStopped",
+	instance = "a",
 ): Core.Transition => {
-	const current = Option.getOrThrow(Executions.current(state, "a"))
+	const current = Option.getOrThrow(Executions.current(state, instance))
 	const identity = {
 		unit: current.unit.id,
 		incarnation: current.unit.incarnation,
 		observer: current.unit.spawn,
-		member: "a",
+		member: instance,
 		term: current.member.term,
 		generation: current.member.generation,
 		now: state.now,
@@ -358,4 +359,364 @@ it("restarts the authorized members of a unit while a revoked co-member stays st
 	const after = drive(failed)
 	assert.isTrue(Executions.healthy(after, "a"))
 	assert.isFalse(Executions.healthy(after, "b"))
+})
+
+const backoff = { initial: 100, factor: 2, max: 250 }
+const restartTimer = (s: Core.State): Core.Timer =>
+	Option.getOrThrow(
+		Array.findFirst(
+			HashMap.values(s.timers),
+			(t) => t.purpose === "Restart" && t.active,
+		),
+	)
+const fireRestart = (
+	s: Core.State,
+	t = restartTimer(s),
+	now = t.deadline,
+	generation = t.generation,
+): Core.Transition =>
+	Core.reduce(s, { _tag: "TimerFired", timer: t.id, generation, now })
+const downReason = (s: Core.State, instance = "a") =>
+	Option.getOrThrow(
+		Array.findFirst(Core.supervision(s), (f) => f.instance === instance),
+	).reason
+const crash = (s: Core.State): Core.Transition => {
+	const { unit } = Option.getOrThrow(Executions.current(s, "a"))
+	return Core.reduce(s, {
+		_tag: "Exited",
+		unit: unit.id,
+		incarnation: unit.incarnation,
+		observer: unit.spawn,
+		cleanup: { _tag: "Unknown" },
+		cause: Cause.fail("Native crash"),
+		now: s.now,
+	})
+}
+
+it("waits for the matching due timer before starting a member restart and caps consecutive backoff (C8)", () => {
+	const failed = signal(
+		initial({ intensity: 5, period: 50, backoff }),
+		"MemberFailed",
+	)
+	assert.equal(restarts(failed), 0)
+	assert.equal(fact(failed.state).attempts.length, 0)
+	assert.isTrue(Option.contains(downReason(failed.state), "RestartPending"))
+	const first = restartTimer(failed.state)
+	assert.equal(first.deadline, 100)
+	const early = fireRestart(failed.state, first, 99)
+	assert.equal(restarts(early), 0)
+	const stale = fireRestart(early.state, first, 100, first.generation + 1)
+	assert.equal(restarts(stale), 0)
+	assert.equal(fact(stale.state).attempts.length, 0)
+	const due = fireRestart(stale.state, first)
+	assert.equal(restarts(due), 1)
+	assert.deepEqual(fact(due.state).attempts, [100])
+	const duplicate = fireRestart(due.state, first)
+	assert.equal(restarts(duplicate), 0)
+	const second = signal(settle(duplicate.state), "MemberFailed")
+	assert.equal(restartTimer(second.state).deadline, 300)
+	const third = signal(settle(fireRestart(second.state).state), "MemberFailed")
+	assert.equal(restartTimer(third.state).deadline, 550)
+})
+
+it("uses a timer for a crashed unit and counts its attempt only after the timer fires (C8)", () => {
+	const failed = crash(initial({ backoff }))
+	assert.equal(HashMap.size(failed.state.preparations), 0)
+	assert.equal(fact(failed.state).attempts.length, 0)
+	assert.isTrue(Option.contains(downReason(failed.state), "RestartPending"))
+	const due = fireRestart(failed.state)
+	assert.equal(HashMap.size(due.state.preparations), 1)
+	assert.deepEqual(fact(due.state).attempts, [100])
+	assert.isTrue(Option.contains(downReason(due.state), "RestartPending"))
+})
+
+it("does not infer a fired timer from elapsed event time or consume intensity while waiting (C8)", () => {
+	const failed = signal(
+		initial({ intensity: 1, period: 50, backoff }),
+		"MemberFailed",
+	)
+	const advanced = Core.reduce(failed.state, {
+		_tag: "PolicyChanged",
+		instance: "a",
+		values: {},
+		now: 1000,
+	})
+	assert.equal(restarts(advanced), 0)
+	assert.equal(fact(advanced.state).attempts.length, 0)
+	assert.isFalse(fact(advanced.state).escalated)
+	const once = settle(fireRestart(advanced.state).state)
+	assert.deepEqual(fact(once).attempts, [1000])
+	const exhausted = signal(once, "MemberFailed")
+	assert.isTrue(fact(exhausted.state).escalated)
+	assert.isFalse(
+		Array.some(
+			Array.fromIterable(HashMap.values(exhausted.state.timers)),
+			(t) => t.active && t.purpose === "Restart",
+		),
+	)
+	assert.isTrue(
+		Option.contains(downReason(settle(exhausted.state)), "Escalated"),
+	)
+})
+
+it("keeps a fired backoff across busy retries and counts the eventual restart once (C8)", () => {
+	const base = initial({ intensity: 1, backoff })
+	const failed = signal(base, "MemberFailed")
+	const busy = {
+		...failed.state,
+		cells: HashMap.set(failed.state.cells, "a", {
+			...Core.cell(base, "a"),
+			readers: HashSet.make("reader-change"),
+		}),
+	}
+	const due = fireRestart(busy)
+	assert.equal(restarts(due), 0)
+	assert.equal(fact(due.state).attempts.length, 0)
+	assert.equal(HashMap.size(due.state.pendingRestarts), 1)
+	assert.isTrue(Option.contains(downReason(due.state), "RestartPending"))
+	const free = {
+		...due.state,
+		cells: HashMap.set(due.state.cells, "a", {
+			...Core.cell(due.state, "a"),
+			readers: HashSet.empty<string>(),
+		}),
+	}
+	const retried = Core.reduce(free, {
+		_tag: "PolicyChanged",
+		instance: "a",
+		values: {},
+		now: 150,
+	})
+	assert.equal(restarts(retried), 1)
+	assert.deepEqual(fact(retried.state).attempts, [150])
+	assert.equal(HashMap.size(retried.state.pendingRestarts), 0)
+})
+
+it("resets backoff on an accepted operator Change and cancels its stale pending timer (C8)", () => {
+	const once = settle(
+		fireRestart(signal(initial({ backoff }), "MemberFailed").state).state,
+	)
+	const waiting = signal(once, "MemberFailed").state
+	const stale = restartTimer(waiting)
+	const change = Core.reduce(waiting, {
+		_tag: "Submit",
+		request: { ...request(waiting, "a", "Restart"), trial: 0 },
+		now: waiting.now,
+	})
+	assert.equal(change.reply._tag, "Admitted")
+	// Complete the operator deployment with the same deterministic command evidence used by Change tests.
+	const done = completeChange(change.state)
+	assert.equal(
+		Option.getOrThrow(Core.get(done, "change-1")).conclusion.pipe(
+			Option.getOrThrow,
+		).outcome,
+		"Accepted",
+	)
+	assert.equal(HashMap.size(done.pendingRestarts), 0)
+	assert.isFalse(Option.getOrThrow(HashMap.get(done.timers, stale.id)).active)
+	const late = fireRestart(done, stale, done.now + 1)
+	assert.equal(restarts(late), 0)
+	const failed = signal(late.state, "MemberFailed")
+	assert.equal(restartTimer(failed.state).deadline - failed.state.now, 100)
+	assert.equal(fact(failed.state).attempts.length, 1)
+})
+
+/** Completes one Restart Change, including native exit evidence for old units. */
+const completeChange = (s: Core.State, remaining = 100): Core.State => {
+	assert.isAbove(remaining, 0, "The Change did not settle")
+	const status = Core.get(s, "change-1")
+	if (Option.exists(status, (c) => Option.isSome(c.conclusion))) return s
+	const pendingCommand = Array.findFirst(
+		HashMap.values(s.commands),
+		(c) =>
+			c.change === "change-1" &&
+			c.disposition === "Pending" &&
+			c.kind !== "ArmTimer" &&
+			c.kind !== "CancelTimer" &&
+			c.kind !== "Publish",
+	)
+	if (Option.isNone(pendingCommand)) {
+		const trial = Prepared.timer(s, "change-1", "Trial")
+		return completeChange(
+			Core.reduce(s, {
+				_tag: "TimerFired",
+				timer: trial.id,
+				generation: trial.generation,
+				now: trial.deadline,
+			}).state,
+			remaining - 1,
+		)
+	}
+	const pending = pendingCommand.value
+	let next = report(s, pending)
+	if (pending.kind === "Stop" || pending.kind === "Terminate") {
+		const u = Option.getOrThrow(HashMap.get(next.units, pending.unit))
+		next = Core.reduce(next, {
+			_tag: "Exited",
+			unit: u.id,
+			incarnation: u.incarnation,
+			observer: u.spawn,
+			cleanup: { _tag: "Completed" },
+			cause: Cause.empty,
+			now: next.now,
+		}).state
+	}
+	return completeChange(next, remaining - 1)
+}
+
+it("keeps backoff progression when a supervisor Change succeeds (C8)", () => {
+	const failed = crash(initial({ backoff })).state
+	const due = fireRestart(failed).state
+	const q = Option.getOrThrow(
+		Array.head(Array.fromIterable(HashMap.keys(due.preparations))),
+	)
+	const admitted = Prepared.exit(
+		Prepared.described(due, q, Prepared.description(target("a"))),
+		q,
+	)
+	assert.equal(admitted.reply._tag, "Admitted")
+	const done = completeChange(admitted.state)
+	const failedAgain = crash(done).state
+	assert.equal(restartTimer(failedAgain).deadline - done.now, 200)
+})
+
+it("cancels delayed member and unit restarts on shutdown and ignores their late timers (C8)", () => {
+	for (const failed of [
+		signal(initial({ backoff }), "MemberFailed"),
+		crash(initial({ backoff })),
+	]) {
+		const timer = restartTimer(failed.state)
+		const closed = Core.reduce(failed.state, { _tag: "Shutdown", now: 10 })
+		assert.equal(HashMap.size(closed.state.pendingRestarts), 0)
+		assert.isFalse(
+			Option.getOrThrow(HashMap.get(closed.state.timers, timer.id)).active,
+		)
+		assert.isTrue(
+			Array.some(
+				closed.commands,
+				(c) => c.kind === "CancelTimer" && Option.contains(c.timer, timer.id),
+			),
+		)
+		const late = fireRestart(closed.state, timer)
+		assert.equal(restarts(late), 0)
+		assert.equal(fact(late.state).attempts.length, 0)
+		assert.equal(HashMap.size(late.state.preparations), 0)
+	}
+})
+
+it("projects revocation and suppresses reasons while serving or owned by a Change (C7, C8)", () => {
+	assert.isTrue(Option.isNone(downReason(initial())))
+	assert.isTrue(Option.contains(downReason(revoke(initial())), "Revoked"))
+	assert.isTrue(
+		Option.contains(
+			downReason(settle(signal(revoke(initial()), "MemberFailed").state)),
+			"Revoked",
+		),
+	)
+	const failed = signal(initial({ backoff }), "MemberFailed").state
+	const owned = Core.reduce(failed, {
+		_tag: "Submit",
+		request: request(failed, "a", "Restart"),
+		now: failed.now,
+	})
+	assert.equal(owned.reply._tag, "Admitted")
+	assert.isTrue(Option.isNone(downReason(owned.state)))
+})
+
+it("projects a missing required dependency before a pending restart and ignores optional dependencies (C8)", () => {
+	const pair = Core.make({
+		authority: "dependency-status",
+		maxUnits: 4,
+		realms: rootRealms,
+		declarations: Array.map(
+			declaredMembers([
+				{ id: "a", target: target("a") },
+				{ id: "b", target: target("b") },
+			]),
+			(m) => ({
+				...m,
+				placement: Option.none(),
+				...(m.instance === "a"
+					? { localProvides: ["ab"] }
+					: { localRequires: [{ key: "ab", optional: false }] }),
+			}),
+		),
+		supervision: { backoff },
+	})
+	const failed = signal(pair, "MemberFailed").state
+	assert.isTrue(
+		Option.contains(downReason(failed, "b"), "WaitingForDependency"),
+	)
+	const optional = {
+		...failed,
+		graph: {
+			...failed.graph,
+			dependencies: HashMap.modify(failed.graph.dependencies, "b", (ds) =>
+				Array.map(ds, (d) => ({ ...d, optional: true })),
+			),
+		},
+	}
+	assert.isTrue(Option.isNone(downReason(optional, "b")))
+})
+
+it("starts only the restart whose timer fired when independent instances are waiting (C8)", () => {
+	const base = Core.make({
+		authority: "independent-timers",
+		maxUnits: 4,
+		realms: rootRealms,
+		declarations: declaredMembers([
+			{ id: "a", target: target("a") },
+			{ id: "b", target: target("b") },
+		]),
+		supervision: { backoff },
+	})
+	const a = signal(base, "MemberFailed").state
+	const both = signal(at(a, 50), "MemberFailed", "b").state
+	const pendingA = Option.getOrThrow(
+		Array.findFirst(HashMap.values(both.pendingRestarts), (r) =>
+			HashSet.has(r.members, "a"),
+		),
+	)
+	const timerA = Option.getOrThrow(
+		HashMap.get(both.timers, pendingA.timer ?? "Missing timer"),
+	)
+	const first = fireRestart(both, timerA)
+	assert.deepEqual(
+		Array.flatMap(first.commands, (c) =>
+			c.kind === "StopMembers" ? Array.fromIterable(c.subjects) : [],
+		),
+		["a"],
+	)
+	assert.equal(HashMap.size(first.state.pendingRestarts), 1)
+	const timerB = restartTimer(first.state)
+	assert.equal(timerB.deadline, 150)
+	const second = fireRestart(first.state, timerB)
+	assert.deepEqual(
+		Array.flatMap(second.commands, (c) =>
+			c.kind === "StopMembers" ? Array.fromIterable(c.subjects) : [],
+		),
+		["b"],
+	)
+})
+
+it("retains timer failure causes and escalates instead of silently releasing a delayed restart (C8)", () => {
+	const failed = signal(initial({ backoff }), "MemberFailed").state
+	const timer = restartTimer(failed)
+	const ended = Core.reduce(failed, {
+		_tag: "TimerEnded",
+		timer: timer.id,
+		generation: timer.generation,
+		cause: Cause.fail("Restart timer failed"),
+		now: 10,
+	})
+	assert.equal(restarts(ended), 0)
+	assert.equal(HashMap.size(ended.state.pendingRestarts), 0)
+	assert.equal(fact(ended.state).attempts.length, 0)
+	assert.isTrue(Option.contains(downReason(ended.state), "Escalated"))
+	assert.include(
+		Cause.pretty(
+			Option.getOrThrow(HashMap.get(ended.state.timers, timer.id)).cause,
+		),
+		"Restart timer failed",
+	)
 })

@@ -15,6 +15,7 @@ import { assert, it } from "@effect/vitest"
 import { Change, Kernel } from "@graftland/graft"
 
 import * as Artifact from "../src/Artifact"
+import * as Control from "../src/Control"
 import * as Units from "../src/Units"
 
 const budget = {
@@ -48,11 +49,30 @@ it.live(
 			})
 			yield* Effect.gen(function* () {
 				const kernel = yield* Kernel.Kernel
+				const address = yield* Control.serve()
+				const client = yield* Control.connect(address)
 				const first = yield* Change.run({
 					operations: [{ _tag: "Deploy", instance: "crashing", target }],
 					budget,
 				})
 				assert.equal(first.outcome, "Accepted")
+				const pending = yield* client.supervision.pipe(
+					Effect.map((facts) =>
+						Array.findFirst(
+							facts,
+							(f) =>
+								f.instance === "crashing" &&
+								Option.contains(f.reason, "RestartPending"),
+						),
+					),
+					Effect.repeat({
+						schedule: Schedule.spaced("10 millis"),
+						until: Option.isSome,
+					}),
+					Effect.timeout("10 seconds"),
+				)
+				assert.lengthOf(Option.getOrThrow(pending).attempts, 0)
+				assert.isFalse(Option.getOrThrow(pending).escalated)
 				const restarted = yield* fs.readDirectory(directory).pipe(
 					Effect.map(Array.filter(String.startsWith("started-"))),
 					Effect.repeat({
@@ -73,6 +93,7 @@ it.live(
 						Array.filter(
 							(u) =>
 								u.kind === "Execution" &&
+								u.owner === `group:${u.group}` &&
 								u.evidence === "Missing" &&
 								HashMap.size(u.members) > 0,
 						),
@@ -84,11 +105,26 @@ it.live(
 					Effect.timeout("10 seconds"),
 				)
 				assert.lengthOf(serving, 1)
+				yield* client.setPolicy({
+					instance: "crashing",
+					allowed: [],
+					values: {},
+				})
+				const revoked = yield* client.supervision
+				assert.isTrue(
+					Option.contains(
+						Option.getOrThrow(
+							Array.findFirst(revoked, (f) => f.instance === "crashing"),
+						).reason,
+						"Revoked",
+					),
+				)
 			}).pipe(
 				Effect.provide(
 					Kernel.layer({
 						authority: "native-supervision",
 						maxUnits: 4,
+						supervision: { backoff: { initial: 500, factor: 2, max: 2000 } },
 						instances: [{ id: "crashing", target }],
 					}).pipe(Layer.provide(Units.layer)),
 				),

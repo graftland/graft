@@ -289,12 +289,20 @@ export interface VerifiedDescription {
 	readonly resolution: ResolvedInput
 	readonly description: Description
 }
-/** Deployment data bounding supervisor restarts, as in OTP: at most `intensity` attempts per `period` milliseconds. */
+/** Encodable exponential restart delays, capped in milliseconds. */
+export interface SupervisionBackoff {
+	readonly initial: number
+	readonly factor: number
+	readonly max: number
+}
+/** At most `intensity` restart attempts per `period` milliseconds, with optional backoff. */
 export interface SupervisionDeclaration {
+	readonly backoff?: SupervisionBackoff
 	readonly intensity?: number
 	readonly period?: number
 }
 export interface SupervisionPolicy {
+	readonly backoff: SupervisionBackoff
 	readonly intensity: number
 	readonly period: number
 }
@@ -303,8 +311,16 @@ export interface Supervision {
 	readonly attempts: ReadonlyArray<number>
 	readonly escalated: boolean
 }
-/** A restart that met a conflicting owner; it is tried again, never dropped. */
+/** Why a desired instance is down while no Change owns it. */
+export type InstanceDownReason =
+	"Revoked" | "Escalated" | "WaitingForDependency" | "RestartPending"
+export interface SupervisionFact extends Supervision {
+	readonly instance: string
+	readonly reason: Option.Option<InstanceDownReason>
+}
+/** A restart waiting for backoff or a conflicting owner; waiting consumes no attempt. */
 export interface PendingRestart {
+	readonly timer?: string
 	/** `Reconcile` brings members to the state a `Committed` Change recorded; `unit` is that Change's id. */
 	readonly kind: "Members" | "Unit" | "Reconcile"
 	readonly unit: string
@@ -748,7 +764,8 @@ export interface Command {
 	readonly disposition: "Pending" | "Reported" | "Obsolete"
 	readonly report: Option.Option<Report>
 }
-export type TimerPurpose = "Operation" | "Trial" | "Evidence" | "Total"
+export type TimerPurpose =
+	"Operation" | "Trial" | "Evidence" | "Total" | "Restart"
 export interface Timer {
 	readonly id: string
 	readonly change: string
@@ -788,6 +805,8 @@ export interface State {
 	readonly supervisionPolicy: SupervisionPolicy
 	readonly supervision: HashMap.HashMap<string, Supervision>
 	readonly pendingRestarts: HashMap.HashMap<string, PendingRestart>
+	readonly restartBackoffs: HashMap.HashMap<string, number>
+	readonly nextRestartTimer: number
 	readonly recording: Option.Option<RecordingPolicy>
 	readonly recorder: Option.Option<RecorderGrant>
 	readonly records: HashMap.HashMap<string, RecordDuty>
