@@ -1,43 +1,74 @@
 ---
 title: 發版
-description: Graft 如何檢查、發佈到 npm 和 GitHub Packages，以及文件如何部署。
+description: 新增 changeset、審核版本更新，並發佈 Graft 套件與發佈說明。
 ---
 
-本頁寫給檢查或發佈 Graft 的貢獻者。
+Graft 使用 **Changesets**
+記錄使用者可見的變更，準備套件版本與變更日誌。維護者推送相符的版本標籤後，CI 發佈已通過檢查的套件。
 
 ## 檢查
 
-在專案的 devenv shell 中執行每一個命令：
+從版本庫根目錄透過專案的 devenv shell 執行命令：
 
 ```sh
-devenv shell -- pnpm install
+devenv shell -- pnpm install --frozen-lockfile
 devenv shell -- pnpm build
 devenv shell -- pnpm typecheck
-devenv shell -- pnpm test
+devenv shell -- pnpm vitest run --project <package>
 devenv shell -- pnpm test:packages
 ```
 
-進入該 shell 時會用 treefmt 格式化程式碼。`pnpm test:packages` 測試發佈腳本。
+進入 shell 時 treefmt 會格式化檔案。執行所改套件的測試；`pnpm test:packages`
+檢查打包、發佈與發佈說明。
 
-CLI 的建置也會寫出
-`packages/cli/schema.json`，也就是[設定檔的 JSON Schema](../config-file/#編輯器支援)，由載入器的項目欄位和 CLI 登記的 intercept 產生。它不會提交到版本庫；每次發佈都會打包建置時產生的那一份。
+## 新增 changeset
 
-`pnpm test`
-會檢查所有發布入口是否引用了無法從公開入口存取的型別，並為不寫型別註記的使用範例產生宣告檔。檢查失敗時，應從公開簽名中移除實作細節，或補上公開契約型別的匯出；不要替範例加上註記來避開問題。
+修改公開套件的 pull request 應附上 changeset：
+
+```sh
+devenv shell -- pnpm changeset
+```
+
+| 選項       | 規則                                                                                                 |
+| ---------- | ---------------------------------------------------------------------------------------------------- |
+| 套件       | 選取受影響的公開套件。所有公開的 `@graftland/*` 套件屬於同一固定群組，使用相同版本。                 |
+| 版本增量   | 修正用 `patch`，功能用 `minor`；破壞性變更需註明並提供遷移步驟。0.x 階段的破壞性變更使用次版本增量。 |
+| 摘要       | 描述使用者可見的行為。將 **Breaking** 變更放在最前面，說明如何遷移。                                 |
+| 私有工作區 | 範例、文件和基準測試既不更新版本，也不建立標籤。                                                     |
+| 無公開變更 | 只修改文件或測試的 pull request 不需要 changeset。                                                   |
+
+將產生的 `.changeset/*.md` 與變更一起提交。用
+`devenv shell -- pnpm changeset status` 檢查待發佈的版本。
+
+## Version Packages pull request
+
+推送到 `graftland/graft` 的 `main` 後，`.github/workflows/release.yml`
+會建立或更新 **Version
+Packages**。它消耗待發佈的 changeset，更新套件版本並產生各公開套件的
+`CHANGELOG.md`。先審核並合併該 pull
+request，再建立標籤。此工作流程不發佈套件、不建立 GitHub
+Release，也不在 fork 中執行。
+
+在版本庫的 Actions 設定中啟用 **Allow GitHub Actions to create and approve pull
+requests**。工作流程使用 `GITHUB_TOKEN`；有寫入權限的維護者需在產生的 pull
+request 上選取 **Approve workflows to run**，在合併前啟動檢查。
 
 ## GitHub Actions
 
-工作流程 `.github/workflows/ci.yml` 會在 pull request、推送到 `main`，以及
-`v1.2.3` 或 `v1.2.3-beta.0` 這類標籤時執行。
+`.github/workflows/ci.yml` 在 pull request、推送到 `main` 和
+`v1.2.3`、`v1.2.3-beta.0` 等版本標籤時執行。
 
-| 工作              | 執行時機   | 作用                                                 |
-| ----------------- | ---------- | ---------------------------------------------------- |
-| `check`           | 一律       | 檢查格式、建置、型別檢查、測試，並打包每個公開套件。 |
-| `github-packages` | 推送和標籤 | 將打包好的檔案發佈到 GitHub Packages。               |
-| `npm`             | 標籤       | 透過受信任的發佈，將打包好的檔案發佈到 npm。         |
+| 工作              | 時機                                 | 作用                                                        |
+| ----------------- | ------------------------------------ | ----------------------------------------------------------- |
+| `check`           | 一律                                 | 檢查格式、建置、型別檢查、測試發佈腳本並打包公開套件。      |
+| `test`            | 一律                                 | 測試所有套件和範例。                                        |
+| `github-packages` | 推送和標籤，`check` 與 `test` 通過後 | 將已檢查的檔案發佈到 GitHub Packages。                      |
+| `npm`             | 標籤，`check` 與 `test` 通過後       | 透過受信任發佈將已檢查的檔案發佈到 npm。                    |
+| `github-release`  | 標籤，`npm` 成功後                   | 彙整所有公開套件的該版本變更日誌，建立一個 GitHub Release。 |
 
-發佈工作只會在 `check` 通過後執行。它們發佈的正是 `check`
-打包並測試過的檔案，絕不會再次建置。
+發佈直接使用 `check`
+打包的檔案，不再建置。發佈說明會合併相同條目，並標明所屬套件。預發佈標籤建立預發佈 GitHub
+Release。重新執行時保留已有的 GitHub Release。
 
 ### 發佈佇列
 
@@ -66,9 +97,9 @@ CLI 的建置也會寫出
 
 ## 版本
 
-所有套件以同一個版本一起發佈。`pnpm packages:pack`
-會在每個公開套件中設定該版本，將它們之間的相依項目固定到該版本，把套件打包到
-`.release/`，並將每個檔案的雜湊寫入 `.release/release.json`。
+所有公開套件共用一個已提交的版本。打包發佈標籤時，每個公開套件的 `package.json`
+版本都必須與標籤一致；不一致時在打包前停止。快照版本由 commit 衍生。`pnpm packages:pack`
+將公開套件之間的相依項目固定到打包版本，把檔案及其完整性雜湊寫入 `.release/`。
 
 | 事件                   | 版本                       | npm 標籤                | 發佈到                 |
 | ---------------------- | -------------------------- | ----------------------- | ---------------------- |
@@ -141,18 +172,28 @@ npm 受信任的發佈者只有發佈權限，所以重試絕不會呼叫 `npm d
 
 ## 發佈版本
 
-1. 確認 `main` 通過 CI。
-2. 為該 commit 加上標籤並推送，例如
-   `v1.2.3`。Graft 還在 0.x 階段時直接發佈一般版本，例如
-   `v0.3.0`：0.x 版本號本身就表示 API 可能變動，不需要再加 `-beta` 後綴。
-   `v1.2.3-beta.0` 這類預發佈標籤仍可使用：
+1. **合併** Version Packages pull request，等待 `main` 通過 CI。
+2. **標記** 該 commit，標籤版本與已提交的套件版本相同，然後推送標籤：
 
    ```sh
-   git tag v1.2.3
-   git push origin v1.2.3
+   git tag v0.6.0
+   git push origin v0.6.0
    ```
 
-3. `npm` 工作會等待 `npm` 環境（如果它需要核准），然後發佈。
+3. **檢查** 標籤的 CI 執行。如果 `npm` 環境需要核准，`npm`
+   工作會先等待；npm 成功後，`github-release` 建立合併的 GitHub Release。
+
+Graft 在 0.x 階段使用 `v0.6.0` 這類一般版本。準備 `alpha`、`beta` 或 `rc`
+預發佈時，使用 Changesets 的預發佈模式，讓清單和變更日誌先包含正確的預發佈版本：
+
+```sh
+devenv shell -- pnpm changeset pre enter beta
+devenv shell -- pnpm changeset-version
+```
+
+審核並合併這些變更後再建立 `v0.6.0-beta.0` 標籤。該系列可以發佈穩定版時，執行
+`devenv shell -- pnpm changeset pre exit`，讓 Version
+Packages 準備穩定版本。不要與自動 pull request 同時手動更新套件版本。
 
 ### 受信任的發佈
 
@@ -239,6 +280,6 @@ Pages：[graft-docs-ekb.pages.dev](https://graft-docs-ekb.pages.dev/)。`main`
 - 每個資料夾使用相同的檔名。
 - 頁面之間使用相對連結，例如 `../plugins/`，這樣連結才能在網站的 base
   path 下正常運作。
-- 優先使用表格、編號步驟和簡短清單，而不是冗長的段落。頁面開頭先說明涵蓋的內容，結尾指出接下來可以去哪裡。
+- 優先使用表格、編號步驟和簡短清單，而不是冗長的段落。每個事實只寫一次，內容結束即結束。
 - 每個 README 旁邊都有 `README.zh-CN.md` 和 `README.zh-TW.md`
   翻譯，依英文 README 撰寫。如果你修改英文 README 或英文文件頁面，請在同一次變更中更新翻譯。

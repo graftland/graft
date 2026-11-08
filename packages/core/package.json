@@ -3,7 +3,7 @@
 	"engines": {
 		"node": ">=22.19.0"
 	},
-	"version": "0.0.0",
+	"version": "0.5.0",
 	"type": "module",
 	"description": "A plugin framework built on Effect: plugins, forks, services, isolation, events and logs",
 	"license": "Apache-2.0",

@@ -1,43 +1,74 @@
 ---
 title: 发版
-description: 检查 Graft、发布到 npm 和 GitHub Packages，以及部署文档站。
+description: 添加 changeset、审核版本更新，并发布 Graft 包和发布说明。
 ---
 
-本页面向需要检查或发布 Graft 的贡献者。
+Graft 使用 **Changesets**
+记录面向用户的改动，准备包版本和变更日志。维护者推送匹配的版本标签后，CI 发布已通过检查的包。
 
 ## 检查
 
-所有命令都在项目的 devenv shell 中运行：
+从仓库根目录通过项目的 devenv shell 执行命令：
 
 ```sh
-devenv shell -- pnpm install
+devenv shell -- pnpm install --frozen-lockfile
 devenv shell -- pnpm build
 devenv shell -- pnpm typecheck
-devenv shell -- pnpm test
+devenv shell -- pnpm vitest run --project <package>
 devenv shell -- pnpm test:packages
 ```
 
-进入 shell 时会通过 treefmt 格式化代码。`pnpm test:packages` 用于测试发布脚本。
+进入 shell 时 treefmt 会格式化文件。运行所改包的测试；`pnpm test:packages`
+检查打包、发布和发布说明。
 
-CLI 构建时还会写出
-`packages/cli/schema.json`，即[配置文件的 JSON Schema](../config-file/#编辑器支持)，内容来自 loader 的配置项字段和 CLI 登记的 intercept。这个文件不提交到仓库；每次发布打包的都是该次构建生成的文件。
+## 添加 changeset
 
-`pnpm test`
-会检查所有发布入口是否引用了无法从公开入口访问的类型，并为不写类型注解的用户示例生成声明文件。检查失败时，应从公开签名里移除实现细节，或为属于公开契约的类型补上导出；不要给示例加注解来绕过问题。
+修改公开包的 pull request 应附带 changeset：
+
+```sh
+devenv shell -- pnpm changeset
+```
+
+| 选项       | 规则                                                                                                 |
+| ---------- | ---------------------------------------------------------------------------------------------------- |
+| 包         | 选择受影响的公开包。所有公开的 `@graftland/*` 包属于同一固定组，使用相同版本。                       |
+| 版本增量   | 修复用 `patch`，功能用 `minor`；破坏性改动需注明并提供迁移步骤。0.x 阶段的破坏性改动使用次版本增量。 |
+| 摘要       | 描述用户可见的行为。将 **Breaking** 改动放在最前面，说明如何迁移。                                   |
+| 私有工作区 | 样例、文档和基准测试既不更新版本，也不创建标签。                                                     |
+| 无公开改动 | 只修改文档或测试的 pull request 不需要 changeset。                                                   |
+
+将生成的 `.changeset/*.md` 与改动一起提交。用
+`devenv shell -- pnpm changeset status` 检查待发布的版本。
+
+## Version Packages pull request
+
+推送到 `graftland/graft` 的 `main` 后，`.github/workflows/release.yml`
+会创建或更新 **Version
+Packages**。它消费待发布的 changeset，更新包版本并生成各公开包的
+`CHANGELOG.md`。先审核并合并该 pull
+request，再创建标签。此工作流不发布包、不创建 GitHub
+Release，也不在 fork 中运行。
+
+在仓库的 Actions 设置中启用 **Allow GitHub Actions to create and approve pull
+requests**。工作流使用 `GITHUB_TOKEN`；有写入权限的维护者需在生成的 pull
+request 上选择 **Approve workflows to run**，在合并前启动检查。
 
 ## GitHub Actions
 
-工作流 `.github/workflows/ci.yml` 在提交拉取请求、推送到 `main` 或推送
-`v1.2.3`、`v1.2.3-beta.0` 这样的标签时运行。
+`.github/workflows/ci.yml` 在 pull request、推送到 `main` 和
+`v1.2.3`、`v1.2.3-beta.0` 等版本标签时运行。
 
-| 任务              | 运行时机         | 工作内容                                                 |
-| ----------------- | ---------------- | -------------------------------------------------------- |
-| `check`           | 每次运行         | 检查格式、构建、类型检查、测试，并打包所有公开包。       |
-| `github-packages` | 推送分支和标签时 | 将打包产物发布到 GitHub Packages。                       |
-| `npm`             | 推送标签时       | 通过可信发布（trusted publishing）将打包产物发布到 npm。 |
+| 工作              | 时机                                 | 作用                                                      |
+| ----------------- | ------------------------------------ | --------------------------------------------------------- |
+| `check`           | 始终                                 | 检查格式、构建、类型检查、测试发布脚本并打包公开包。      |
+| `test`            | 始终                                 | 测试所有包和样例。                                        |
+| `github-packages` | 推送和标签，`check` 与 `test` 通过后 | 将已检查的文件发布到 GitHub Packages。                    |
+| `npm`             | 标签，`check` 与 `test` 通过后       | 通过受信任发布将已检查的文件发布到 npm。                  |
+| `github-release`  | 标签，`npm` 成功后                   | 汇总所有公开包的该版本变更日志，创建一个 GitHub Release。 |
 
-发布任务仅在 `check` 通过后运行，发布的就是 `check`
-打包并测试过的文件，不会重新构建。
+发布直接使用 `check`
+打包的文件，不再构建。发布说明去重相同条目，并标明所属包。预发布标签创建预发布 GitHub
+Release。重新运行时保留已有的 GitHub Release。
 
 ### 发布队列
 
@@ -68,15 +99,15 @@ CLI 构建时还会写出
 
 ## 版本
 
-所有包使用同一个版本号一同发布。`pnpm packages:pack`
-会为每个公开包设置该版本，将包之间的依赖固定到此版本，打包到 `.release/`，并在
-`.release/release.json` 中记录每个文件的哈希值。
+所有公开包共享一个已提交的版本。打包发布标签时，每个公开包的 `package.json`
+版本都必须与标签一致；不一致时在打包前停止。快照版本由 commit 派生。`pnpm packages:pack`
+将公开包之间的依赖固定到打包版本，把文件及其完整性哈希写入 `.release/`。
 
-| 事件                            | 版本                       | npm 标签                | 发布目标               |
-| ------------------------------- | -------------------------- | ----------------------- | ---------------------- |
-| 推送到 `main`                   | `0.0.0-commit-<full hash>` | `sha-<full hash>`       | GitHub Packages        |
-| 推送 `v1.2.3-beta.0` 这样的标签 | `1.2.3-beta.0`             | `alpha`、`beta` 或 `rc` | GitHub Packages 和 npm |
-| 推送 `v1.2.3` 这样的标签        | `1.2.3`                    | `latest`                | GitHub Packages 和 npm |
+| 事件                   | 版本                       | npm 标签                | 发布到                 |
+| ---------------------- | -------------------------- | ----------------------- | ---------------------- |
+| 推送到 `main`          | `0.0.0-commit-<full hash>` | `sha-<full hash>`       | GitHub Packages        |
+| `v1.2.3-beta.0` 类标签 | `1.2.3-beta.0`             | `alpha`、`beta` 或 `rc` | GitHub Packages 和 npm |
+| `v1.2.3` 类标签        | `1.2.3`                    | `latest`                | GitHub Packages 和 npm |
 
 ### 安装预发布版本或快照
 
@@ -143,17 +174,28 @@ Packages 也需要带 `read:packages`
 
 ## 发布版本
 
-1. 确保 `main` 通过 CI。
-2. 为提交打标签并推送，例如 `v1.2.3`。Graft 处于 0.x 阶段时直接发布普通版本，如
-   `v0.3.0`：0.x 版本号本身就表示 API 可能变化，不需要再加 `-beta` 后缀。
-   `v1.2.3-beta.0` 这样的预发布标签仍然可用：
+1. **合并** Version Packages pull request，等待 `main` 通过 CI。
+2. **标记** 该 commit，标签版本与已提交的包版本相同，然后推送标签：
 
    ```sh
-   git tag v1.2.3
-   git push origin v1.2.3
+   git tag v0.6.0
+   git push origin v0.6.0
    ```
 
-3. 如果 `npm` 环境配置了审批要求，`npm` 任务会等待批准，然后发布。
+3. **检查** 标签的 CI 运行。如果 `npm` 环境需要批准，`npm`
+   工作会先等待；npm 成功后，`github-release` 创建合并的 GitHub Release。
+
+Graft 在 0.x 阶段使用 `v0.6.0` 这样的普通版本。准备 `alpha`、`beta` 或 `rc`
+预发布时，使用 Changesets 的预发布模式，让清单和变更日志先包含准确的预发布版本：
+
+```sh
+devenv shell -- pnpm changeset pre enter beta
+devenv shell -- pnpm changeset-version
+```
+
+审核并合并这些改动后再创建 `v0.6.0-beta.0` 标签。该系列可以发布稳定版时，运行
+`devenv shell -- pnpm changeset pre exit`，让 Version
+Packages 准备稳定版本。不要与自动 pull request 并行手动更新包版本。
 
 ### 可信发布
 
@@ -239,6 +281,6 @@ Pages：[graft-docs-ekb.pages.dev](https://graft-docs-ekb.pages.dev/)。`main`
 - 每个目录中的文件名都相同。
 - 页面之间使用 `../plugins/`
   这样的相对链接，以确保站点设置基础路径后链接仍然有效。
-- 优先使用表格、编号步骤和简短列表，而不是长段落。页面开头说明本页涵盖的内容，结尾指出接下来可以去哪里。
+- 优先使用表格、编号步骤和简短列表，而不是长段落。每个事实只写一次，内容结束即结束。
 - 每个 README 旁边都有 `README.zh-CN.md` 和 `README.zh-TW.md`
   两个译本，根据英文 README 编写。修改英文 README 或英文文档页面时，必须在同一次改动中更新译本。

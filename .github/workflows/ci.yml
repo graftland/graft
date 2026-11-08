@@ -208,3 +208,44 @@ jobs:
           path: .release/
       - name: Publish checked packages
         run: devenv shell -- pnpm packages:publish npm
+
+  github-release:
+    name: Create GitHub Release
+    needs: npm
+    if:
+      github.event_name == 'push' && github.ref_type == 'tag' &&
+      github.repository == 'graftland/graft'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      RELEASE_TAG: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: DeterminateSystems/nix-installer-action@3138316df39ed29be04236d7ffc686fa525866aa # v23
+        with:
+          extra-conf: |
+            extra-substituters = https://devenv.cachix.org
+            extra-trusted-public-keys = devenv.cachix.org-1:w1cLUi8dv3hnoSPGAuibQv+f9TZLr6cv/Hm9XgU50cw=
+      - name: Install devenv
+        run: nix profile add github:cachix/devenv/v2.4.0
+      - name: Assemble release notes
+        run:
+          devenv shell -- node scripts/release-notes.mjs "${RELEASE_TAG#v}" >
+          release-notes.md
+      - name: Create release
+        shell: bash
+        run: |
+          # A successful rerun leaves the existing release untouched. Other API
+          # failures still reach create and fail instead of being treated as success.
+          if gh release view "$RELEASE_TAG" > /dev/null; then
+            exit 0
+          fi
+          args=(--verify-tag --title "$RELEASE_TAG" --notes-file release-notes.md)
+          if [[ "$RELEASE_TAG" == *-* ]]; then
+            args+=(--prerelease)
+          fi
+          gh release create "$RELEASE_TAG" "${args[@]}"

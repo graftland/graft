@@ -9,9 +9,11 @@
 		"url": "git+https://github.com/graftland/graft.git"
 	},
 	"private": true,
-	"packageManager": "pnpm@9.15.9",
+	"packageManager": "pnpm@10.34.9",
 	"type": "module",
 	"devDependencies": {
+		"@changesets/changelog-github": "1.0.1",
+		"@changesets/cli": "3.0.3",
 		"@effect/tsgo": "0.64.1",
 		"@effect/vitest": "4.1.2",
 		"@ianvs/prettier-plugin-sort-imports": "4.7.1",
@@ -28,9 +30,11 @@
 		"typecheck": "tsc -b",
 		"test": "vitest run",
 		"format": "treefmt",
-		"test:packages": "node --test scripts/packages.test.mjs",
+		"test:packages": "node --test scripts/packages.test.mjs scripts/release-notes.test.mjs",
 		"packages:pack": "pnpm build && node scripts/packages.mjs pack",
 		"packages:publish": "node scripts/packages.mjs publish",
-		"bench": "pnpm --filter @graftland/benchmarks bench"
+		"bench": "pnpm --filter @graftland/benchmarks bench",
+		"changeset": "changeset",
+		"changeset-version": "changeset version && pnpm format"
 	}
 }

@@ -1,0 +1,34 @@
+{
+	"$schema": "https://unpkg.com/@changesets/config@4.0.1/schema.json",
+	"changelog": [
+		"@changesets/changelog-github",
+		{
+			"repo": "graftland/graft"
+		}
+	],
+	"commit": false,
+	"fixed": [
+		[
+			"@graftland/cli",
+			"@graftland/graft",
+			"@graftland/create",
+			"@graftland/loader",
+			"@graftland/package-manager",
+			"@graftland/plugin-http",
+			"@graftland/plugin-http-api",
+			"@graftland/plugin-mcp-server",
+			"@graftland/plugin-otlp",
+			"@graftland/plugin-release",
+			"@graftland/plugin-remote"
+		]
+	],
+	"linked": [],
+	"access": "public",
+	"baseBranch": "main",
+	"updateInternalDependencies": "patch",
+	"ignore": [],
+	"privatePackages": {
+		"version": false,
+		"tag": false
+	}
+}
