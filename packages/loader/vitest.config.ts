@@ -6,5 +6,7 @@ export default defineProject({
 	test: {
 		globalSetup: ["../../scripts/isolated-home.mjs"],
 		include: ["test/**/*.test.ts"],
+		// Integration tests build, spawn and watch files; shared CI runners are slow.
+		testTimeout: 30_000,
 	},
 })
