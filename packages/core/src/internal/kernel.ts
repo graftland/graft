@@ -367,8 +367,19 @@ const close = Effect.fnUntraced(function* (runtime: Runtime) {
 						),
 				) ||
 				Arr.some(Arr.fromIterable(state.active), (id) =>
-					Option.exists(HashMap.get(state.changes, id), (c) =>
-						Option.isNone(c.conclusion),
+					Option.exists(
+						HashMap.get(state.changes, id),
+						(c) =>
+							Option.isNone(c.conclusion) &&
+							// Finished execution whose record can no longer be acknowledged stays
+							// visibly recording-blocked; shutdown does not wait for it.
+							!(
+								Option.contains(c.recordingGate, "Conclusion") &&
+								Option.exists(
+									Core.get(state, id),
+									(status) => status.recording.blocked,
+								)
+							),
 					),
 				)
 			)

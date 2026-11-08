@@ -438,6 +438,8 @@ export interface RequestIdentity {
 }
 
 export interface Request {
+	/** A supervisor restart: a busy admission defers it instead of dropping it. */
+	readonly supervised?: PendingRestart
 	readonly boundary?: PlacementRequirement
 	readonly member?: MemberDeclaration
 	readonly operations?: ReadonlyArray<DeploymentOperation>
@@ -615,6 +617,8 @@ export interface Change {
 	readonly released: boolean
 	readonly recorded: boolean
 	readonly recordingGate: Option.Option<RecordStage>
+	/** Member facts when execution finished; the conclusion reports these, not later faults. */
+	readonly executed: Option.Option<HashMap.HashMap<string, MemberFact>>
 }
 export type CommandKind =
 	| "ServeMembers"
@@ -743,6 +747,10 @@ export interface State {
 	readonly recording: Option.Option<RecordingPolicy>
 	readonly recorder: Option.Option<RecorderGrant>
 	readonly records: HashMap.HashMap<string, RecordDuty>
+	/** Unacknowledged duties; kept incrementally so admission reads no other Change. */
+	readonly recordsOutstanding: number
+	/** Stage slots promised to admitted recorded Changes that have not emitted them yet. */
+	readonly recordsPromised: number
 	readonly nextMemberOperation: number
 	readonly memberOperations: HashMap.HashMap<string, MemberOperation>
 	readonly memberOperationsByUnit: HashMap.HashMap<

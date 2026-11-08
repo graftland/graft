@@ -44,6 +44,21 @@ export const attempted = (
 		}),
 	),
 })
+/** Takes back the latest attempt: the restart never ran because admission was busy. */
+export const refunded = (
+	s: Working,
+	instances: HashSet.HashSet<string>,
+): Working => ({
+	...s,
+	supervision: HashSet.reduce(instances, s.supervision, (index, id) =>
+		HashMap.has(index, id)
+			? HashMap.set(index, id, {
+					...get(s, id),
+					attempts: Arr.dropRight(get(s, id).attempts, 1),
+				})
+			: index,
+	),
+})
 /** Stops retrying the instances that exhausted their intensity; they stay observably failed. */
 export const escalate = (
 	s: Working,

@@ -99,8 +99,33 @@ const acknowledge = (
 		content: patch.content ?? d.content,
 		now: s.now,
 	})
-const status = (s: Core.State, id = "change-1") =>
-	Option.getOrThrow(Core.get(s, id))
+/** The incrementally kept counters equal a full recount of records and promised stages. */
+const counted = (s: Core.State) => {
+	const outstanding = Array.filter(
+		Array.fromIterable(HashMap.values(s.records)),
+		(d) => !d.acknowledged,
+	).length
+	const promised = Array.reduce(
+		Array.fromIterable(HashMap.values(s.changes)),
+		0,
+		(total, c) =>
+			c.recorded && Option.isNone(c.conclusion)
+				? total +
+					Array.filter(
+						["Intent", "Commit", "Conclusion"] as const,
+						(stage) => !HashMap.has(s.records, `${c.id}/${stage}`),
+					).length
+				: total,
+	)
+	assert.deepStrictEqual(
+		[s.recordsOutstanding, s.recordsPromised],
+		[outstanding, promised],
+	)
+}
+const status = (s: Core.State, id = "change-1") => {
+	counted(s)
+	return Option.getOrThrow(Core.get(s, id))
+}
 const runtimeKinds = HashSet.fromIterable<Core.CommandKind>([
 	"Resolve",
 	"Spawn",
@@ -345,4 +370,63 @@ it("never reports success when shutdown arrives while the concluding record is m
 			(d) => d.payload.stage === "Conclusion",
 		),
 	)
+})
+
+const atConclusionGate = () => {
+	const admitted = submit(register(initial()).state).state
+	const atCommit = drive(
+		acknowledge(admitted, duty(admitted, "change-1", "Intent")).state,
+	)
+	return drive(
+		acknowledge(atCommit, duty(atCommit, "change-1", "Commit")).state,
+	)
+}
+
+it("concludes with the facts of finished execution and hands a later exit to the supervisor (I8, C8)", () => {
+	const gated = atConclusionGate()
+	const serving = unitOf(gated, "a")
+	const crashed = Core.reduce(gated, {
+		_tag: "Exited",
+		unit: serving.id,
+		incarnation: serving.incarnation,
+		observer: serving.spawn,
+		cleanup: { _tag: "Unknown" },
+		cause: Cause.fail("Crashed after execution finished"),
+		now: gated.now,
+	}).state
+	assert.equal(HashMap.size(crashed.pendingRestarts), 1)
+	const done = acknowledge(crashed, duty(crashed, "change-1", "Conclusion"))
+	const conclusion = Option.getOrThrow(status(done.state).conclusion)
+	assert.equal(conclusion.outcome, "Accepted")
+	assert.isTrue(Option.getOrThrow(HashMap.get(conclusion.members, "a")).healthy)
+	// The deferred restart is taken up once the Change releases its instances. This
+	// fixture's targets carry no deployment data, so the supervisor escalates.
+	assert.equal(HashMap.size(done.state.pendingRestarts), 0)
+	assert.isTrue(
+		Option.exists(HashMap.get(done.state.supervision, "a"), (f) => f.escalated),
+	)
+})
+
+it("lets the kernel finish shutting down while a concluding record can no longer be acknowledged (F22)", () => {
+	const gated = atConclusionGate()
+	const closed = Core.reduce(gated, { _tag: "Shutdown", now: gated.now }).state
+	const ended = Array.reduce(
+		Array.fromIterable(HashMap.values(closed.units)),
+		closed,
+		(s, u) =>
+			u.evidence === "Missing"
+				? Core.reduce(s, {
+						_tag: "Exited",
+						unit: u.id,
+						incarnation: u.incarnation,
+						observer: u.spawn,
+						cleanup: { _tag: "Completed" },
+						cause: Cause.empty,
+						now: s.now,
+					}).state
+				: s,
+	)
+	const current = status(ended)
+	assert.isTrue(Option.isNone(current.conclusion))
+	assert.isTrue(current.recording.blocked)
 })

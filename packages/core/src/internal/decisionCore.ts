@@ -244,6 +244,8 @@ export const make = (options: {
 			),
 			recorder: Option.none(),
 			records: HashMap.empty(),
+			recordsOutstanding: 0,
+			recordsPromised: 0,
 			supervisionPolicy: Supervisor.policy(options.supervision),
 			supervision: HashMap.empty(),
 			pendingRestarts: HashMap.empty(),
@@ -773,7 +775,7 @@ const conclude = (s: Working, c: Change, outcome: Outcome): Working => {
 			? s
 			: gate(
 					disarm(s, c, HashSet.make("Operation", "Trial", "Total", "Evidence")),
-					c,
+					{ ...c, executed: Option.some(members(s, c)) },
 					"Conclusion",
 					Option.some(outcome),
 				)
@@ -783,7 +785,7 @@ const conclude = (s: Working, c: Change, outcome: Outcome): Working => {
 		outcome,
 		phase: Option.getOrElse(c.interrupted, () => c.phase),
 		cause: c.cause,
-		members: members(s, c),
+		members: Option.getOrElse(c.executed, () => members(s, c)),
 		units: c.units,
 	}
 	const next: Change = {
@@ -831,8 +833,8 @@ const conclude = (s: Working, c: Change, outcome: Outcome): Working => {
 			: saved
 	const supervised =
 		outcome === "Accepted"
-			? Supervisor.cleared(recorded, c.plan.members)
-			: recorded
+			? Supervisor.cleared(Recording.settled(recorded, c), c.plan.members)
+			: Recording.settled(recorded, c)
 	return release(transferServing(supervised, next), next)
 }
 const terminate = (
@@ -1841,10 +1843,14 @@ const reserve = (
 		released: false,
 		recorded: Recording.required(s, plan),
 		recordingGate: Option.none(),
+		executed: Option.none(),
 	}
 	const admitted = save(
 		{
 			...checked.state,
+			recordsPromised:
+				checked.state.recordsPromised +
+				(c.recorded ? Recording.stages.length : 0),
 			graph: { ...checked.state.graph, nextGroup: plan.nextGroup },
 			cells: locks,
 			claims: reserved,
@@ -1969,6 +1975,7 @@ const recordingSignal = (
 			const discharged: Working = {
 				...s,
 				records: HashMap.set(s.records, result.duty.id, result.duty),
+				recordsOutstanding: s.recordsOutstanding - 1,
 			}
 			return withChange(discharged, result.duty.payload.change, (s, c) =>
 				resume(save(s, c), c, result.duty.payload.stage),
@@ -2387,10 +2394,19 @@ const endUnit = (
 				return progressSettlement(saved, observed)
 			}),
 	)
-	/** Nothing owned this exit: the supervisor redeploys the group once it has settled. */
+	/**
+	 * Nothing owned this exit, or its Change had finished executing and only waits for
+	 * its concluding record: the supervisor redeploys the group once it has settled.
+	 */
+	const finished = Option.exists(
+		HashMap.get(s.changes, u.owner),
+		(c) =>
+			Option.isNone(c.conclusion) &&
+			Option.contains(c.recordingGate, "Conclusion"),
+	)
 	return u.kind === "Execution" &&
 		evidence === "Exited" &&
-		u.owner === `group:${u.group}`
+		(u.owner === `group:${u.group}` || finished)
 		? superviseUnit(
 				settled,
 				u.id,
@@ -3083,9 +3099,43 @@ const superviseUnit = (
 			),
 		),
 	)
+	const restart: PendingRestart = {
+		kind: "Unit",
+		unit,
+		members: declared,
+		cause,
+	}
 	const submitted = requestedBatch(s, { operations, strategy: "Restart" })
-	return Supervisor.attempted({ ...submitted, reply: s.reply }, declared)
+	const reply = submitted.reply
+	const next: Working = { ...submitted, reply: s.reply }
+	if (reply._tag === "Rejected")
+		return reply.reason === "Busy" || reply.reason === "Capacity"
+			? defer(next, restart)
+			: Supervisor.escalate(next, declared)
+	return Supervisor.attempted(
+		reply._tag === "Preparing"
+			? {
+					...next,
+					preparations: HashMap.modify(
+						next.preparations,
+						reply.preparation,
+						(p) => ({ ...p, request: { ...p.request, supervised: restart } }),
+					),
+				}
+			: next,
+		declared,
+	)
 }
+/** A prepared supervisor restart that admission finds busy is deferred again; the attempt is taken back. */
+const admittedRestart = (s: Working, request: Request): Working =>
+	request.supervised !== undefined &&
+	s.reply._tag === "Rejected" &&
+	(s.reply.reason === "Busy" || s.reply.reason === "Capacity")
+		? defer(
+				Supervisor.refunded(s, request.supervised.members),
+				request.supervised,
+			)
+		: s
 /** Deferred restarts are tried again after every event; one that still conflicts stays deferred. */
 const retryPending = (s: Working): Working =>
 	HashMap.reduce(s.pendingRestarts, s, (next, restart, key) => {
@@ -3366,7 +3416,10 @@ export const reduce = (state: State, incoming: Event): Transition => {
 		appliedEvent.admissions,
 		appliedEvent,
 		(s, ready) =>
-			Preparation.admitResult(submit(s, ready.request), ready.preparation),
+			Preparation.admitResult(
+				admittedRestart(submit(s, ready.request), ready.request),
+				ready.preparation,
+			),
 	)
 	const parents = HashSet.reduce(
 		eventPreparations(state, event),

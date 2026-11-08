@@ -20,7 +20,11 @@ import type {
 
 /** Record deliveries are kernel-owned commands that belong to no Change. */
 export const commands = "$recording"
-const stages: ReadonlyArray<RecordStage> = ["Intent", "Commit", "Conclusion"]
+export const stages: ReadonlyArray<RecordStage> = [
+	"Intent",
+	"Commit",
+	"Conclusion",
+]
 
 export const policy = (options: RecordingDeclaration): RecordingPolicy => ({
 	recorder: options.recorder,
@@ -37,6 +41,19 @@ export const required = (s: State, plan: GroupPlan): boolean =>
 	)
 const outstanding = (s: State): HashMap.HashMap<string, RecordDuty> =>
 	HashMap.filter(s.records, (duty) => !duty.acknowledged)
+/** A concluded Change gives back the stage slots it never used. */
+export const settled = (s: Working, c: Change): Working =>
+	c.recorded
+		? {
+				...s,
+				recordsPromised:
+					s.recordsPromised -
+					Arr.filter(
+						stages,
+						(stage) => !HashMap.has(s.records, dutyId(c.id, stage)),
+					).length,
+			}
+		: s
 const running = (u: Unit): boolean =>
 	u.evidence === "Missing" && u.phase === "Running"
 /** The grant counts only while its incarnation is live and still hosts the policy instance. */
@@ -52,17 +69,6 @@ const liveOwner = (s: State, p: RecordingPolicy): Option.Option<Unit> =>
 				),
 		),
 	)
-/** Stage slots promised to admitted Changes that have not yet emitted them. */
-const promised = (s: State): number =>
-	HashMap.reduce(s.changes, 0, (total, c) =>
-		c.recorded && Option.isNone(c.conclusion)
-			? total +
-				Arr.filter(
-					stages,
-					(stage) => !HashMap.has(s.records, dutyId(c.id, stage)),
-				).length
-			: total,
-	)
 export interface Refusal {
 	readonly reason: Rejection
 	readonly conflicts: HashSet.HashSet<string>
@@ -73,7 +79,7 @@ export const admission = (s: State, plan: GroupPlan): Option.Option<Refusal> =>
 		const needs = required(s, plan)
 		if (
 			HashSet.has(plan.members, p.instance) &&
-			(needs || HashMap.size(outstanding(s)) > 0)
+			(needs || s.recordsOutstanding > 0)
 		)
 			return Option.some({
 				reason: "SelfReplacement" as const,
@@ -85,7 +91,7 @@ export const admission = (s: State, plan: GroupPlan): Option.Option<Refusal> =>
 				reason: "RecordingUnavailable" as const,
 				conflicts: HashSet.make(p.instance),
 			})
-		return HashMap.size(outstanding(s)) + promised(s) + stages.length >
+		return s.recordsOutstanding + s.recordsPromised + stages.length >
 			p.maxRecords
 			? Option.some({
 					reason: "RecordingCapacity" as const,
@@ -190,9 +196,14 @@ export const request = (
 		acknowledged: false,
 	}
 	const duty: RecordDuty = { ...draft, content: content(draft) }
+	const counted: Working = {
+		...s,
+		recordsOutstanding: s.recordsOutstanding + 1,
+		recordsPromised: s.recordsPromised - 1,
+	}
 	return duty.unit === ""
-		? { ...s, records: HashMap.set(s.records, duty.id, duty) }
-		: deliver(s, duty)
+		? { ...counted, records: HashMap.set(s.records, duty.id, duty) }
+		: deliver(counted, duty)
 }
 const stringOrder = (a: string, b: string): -1 | 0 | 1 =>
 	a < b ? -1 : a > b ? 1 : 0

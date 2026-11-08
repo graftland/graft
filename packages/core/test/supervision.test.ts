@@ -5,6 +5,7 @@ import * as Core from "../src/internal/decisionCore"
 import * as Executions from "../src/internal/executionState"
 import { report } from "./change-model/scenarios"
 import { declaredMembers, rootRealms } from "./member-fact"
+import * as Prepared from "./preparation-fixture"
 import { target } from "./preparation-fixture"
 
 const initial = (supervision?: Core.SupervisionDeclaration) =>
@@ -229,4 +230,39 @@ it("keeps a revocation when only reference values change afterwards (C7)", () =>
 	const after = settle(signal(refreshed, "MemberFailed").state)
 	assert.isFalse(Executions.healthy(after, "a"))
 	assert.equal(fact(after).attempts.length, 0)
+})
+
+it("defers a supervisor restart that admission finds busy and does not count it (C8)", () => {
+	const state = initial({ intensity: 1, period: 60_000 })
+	const unit = Option.getOrThrow(HashMap.get(state.units, "a@0"))
+	const crashed = Core.reduce(state, {
+		_tag: "Exited",
+		unit: unit.id,
+		incarnation: unit.incarnation,
+		observer: unit.spawn,
+		cleanup: { _tag: "Unknown" },
+		cause: Cause.fail("Native crash"),
+		now: state.now,
+	})
+	assert.equal(crashed.reply._tag, "None")
+	const supervisor = Option.getOrThrow(
+		Array.head(Array.fromIterable(HashMap.keys(crashed.state.preparations))),
+	)
+	// An operator Change for the same instance is admitted first.
+	const operator = Prepared.prepare(crashed.state, Prepared.input())
+	const q = Prepared.id(operator)
+	const admitted = Prepared.exit(Prepared.described(operator.state, q), q)
+	assert.equal(admitted.reply._tag, "Admitted")
+	const busy = Prepared.exit(
+		Prepared.described(
+			admitted.state,
+			supervisor,
+			Prepared.description(target("a"), "a"),
+		),
+		supervisor,
+	)
+	assert.equal(busy.reply._tag, "Rejected")
+	assert.equal(HashMap.size(busy.state.pendingRestarts), 1)
+	assert.equal(fact(busy.state).attempts.length, 0)
+	assert.isFalse(fact(busy.state).escalated)
 })
