@@ -16,6 +16,9 @@ const hold = (port) =>
 				return yield* Effect.die("Gate closed without release")
 		}),
 	)
+/** Static deployment data: every Change runs these probes before a version serves. */
+export const deployment = { probes: ["health"] }
+
 export const make = (version, healthy = true) =>
 	Plugin.make({
 		name: "integration",

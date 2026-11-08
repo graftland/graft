@@ -33,14 +33,14 @@ export const upgrade = Effect.gen(function* () {
 
 ## Request fields
 
-| Field                 | Meaning                                                                                                                             | Default                                         |
-| --------------------- | ----------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------- |
-| `operations`          | `Deploy` (instance, target, optional realm, colocation and placement) and `Remove`.                                                 | Required                                        |
-| `key`                 | Request key: the same key with the same request returns the same Change.                                                            | None                                            |
-| `strategy`            | `Restart` stops the old generation before the new one starts; `Overlap` serves both during the switch. Runners only take `Restart`. | `Restart`                                       |
-| `budget`              | Milliseconds for `total`, `startup`, `probe`, `drain`, `stop` and `terminate`.                                                      | 300 000 total, 30 000 startup, 5 000 each other |
-| `requirements.probes` | [Probes](../probes/) the new generation must pass before it serves. A failure aborts or recovers the Change.                        | None                                            |
-| `requirements.trial`  | Milliseconds the new generation must keep serving before the Change concludes.                                                      | 0                                               |
+| Field                 | Meaning                                                                                                                                                | Default                                         |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------- |
+| `operations`          | `Deploy` (instance, target, optional realm, colocation and placement) and `Remove`.                                                                    | Required                                        |
+| `key`                 | Request key: the same key with the same request returns the same Change.                                                                               | None                                            |
+| `strategy`            | `Restart` stops the old generation before the new one starts; `Overlap` serves both during the switch. Runners only take `Restart`.                    | `Restart`                                       |
+| `budget`              | Milliseconds for `total`, `startup`, `probe`, `drain`, `stop` and `terminate`.                                                                         | 300 000 total, 30 000 startup, 5 000 each other |
+| `requirements.probes` | [Probes](../probes/) the new generation must pass before it serves, in addition to those its plugins declare. A failure aborts or recovers the Change. | None                                            |
+| `requirements.trial`  | Milliseconds the new generation must keep serving before the Change concludes.                                                                         | 0                                               |
 
 ## Observe
 

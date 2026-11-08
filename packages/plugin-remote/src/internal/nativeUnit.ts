@@ -1337,8 +1337,17 @@ const perform = Effect.fnUntraced(function* (
 						const fork = yield* Ref.get(member.fork).pipe(
 							Effect.flatMap(Effect.fromOption),
 						)
+						// The probes the Change requires, plus those the member declares itself.
+						const declared: ReadonlyArray<string> = Option.match(
+							Array.findFirst(
+								member.metadata.description.members,
+								(declaration: Kernel.MemberDeclaration) =>
+									declaration.instance === instance,
+							),
+							{ onNone: () => [], onSome: (declaration) => declaration.probes },
+						)
 						yield* Effect.forEach(
-							command.probes ?? [],
+							Array.dedupe([...(command.probes ?? []), ...declared]),
 							(name) => fork.probe(name),
 							{ discard: true },
 						)
