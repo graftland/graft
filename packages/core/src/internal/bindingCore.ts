@@ -117,8 +117,12 @@ const declaration = (
 	d: Description,
 	key: string,
 	side: "requires" | "provides",
+	instance: string,
 ): Option.Option<BindingDeclaration> =>
-	Array.findFirst(d[side], (d) => d.key === key)
+	Option.flatMap(
+		Array.findFirst(d.members, (m) => m.instance === instance),
+		(m) => Array.findFirst(m[side], (d) => d.key === key),
+	)
 const between = (
 	required: Option.Option<BindingDeclaration>,
 	provided: Option.Option<BindingDeclaration>,
@@ -150,8 +154,12 @@ const checkBinding = (
 		)
 		? Option.none()
 		: between(
-				Option.flatMap(consumer, (d) => declaration(d, b.service, "requires")),
-				Option.flatMap(provider, (d) => declaration(d, b.service, "provides")),
+				Option.flatMap(consumer, (d) =>
+					declaration(d, b.service, "requires", b.consumer),
+				),
+				Option.flatMap(provider, (d) =>
+					declaration(d, b.service, "provides", b.provider),
+				),
 				b.service,
 			)
 }
@@ -205,7 +213,7 @@ export const plan = (
 ): Result.Result<Request, BindingFault> => {
 	if (r.description === undefined) return Result.succeed(r)
 	const required = Array.findFirst(
-		r.description.requires,
+		Array.flatMap(r.description.members, (m) => m.requires),
 		(d) => !HashMap.has(s.bindings, key(r.instance, d.key)),
 	)
 	if (Option.isSome(required))

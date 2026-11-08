@@ -16,6 +16,7 @@ import {
 	submit,
 	succeed,
 } from "./change-model/scenarios"
+import { oneMember } from "./member-fact"
 
 const kinds: ReadonlyArray<Core.CommandKind> = [
 	"Resolve",
@@ -59,9 +60,9 @@ for (const kind of [
 			candidate(waiting),
 		)
 		assertSettled(ended, "Aborted")
-		assert.equal(status(ended).member.healthy, true)
+		assert.equal(oneMember(status(ended)).healthy, true)
 		assert.equal(
-			Option.getOrThrow(status(ended).member.actual).identity,
+			Option.getOrThrow(oneMember(status(ended)).actual).identity,
 			"original",
 		)
 	})
@@ -78,7 +79,7 @@ for (const kind of [
 		const ended = fire(trial, "change-1", "Trial")
 		assertSettled(ended, "Recovered")
 		assert.equal(
-			Option.getOrThrow(status(ended).member.actual).identity,
+			Option.getOrThrow(oneMember(status(ended)).actual).identity,
 			"original",
 		)
 	})
@@ -97,7 +98,7 @@ for (const kind of [
 		assert.isTrue(Option.isNone(status(expired).conclusion))
 		const ended = exit(expired, candidate(waiting))
 		assertSettled(ended, "RecoveryFailed")
-		assert.isFalse(status(ended).member.healthy)
+		assert.isFalse(oneMember(status(ended)).healthy)
 		assert.include(
 			Cause.pretty(conclusion(ended).cause),
 			"Forward startup failed",
@@ -118,7 +119,7 @@ it("settles an expired recovery trial as RecoveryFailed with no serving target a
 	const total = fire(trial, "change-1", "Total")
 	const ended = exit(total, candidate(trial))
 	assertSettled(ended, "RecoveryFailed")
-	assert.isFalse(status(ended).member.healthy)
+	assert.isFalse(oneMember(status(ended)).healthy)
 })
 
 it("rejects invalid and insufficient two-trial budgets before inspection or Change admission (I1, I2, I11)", () => {

@@ -1,5 +1,5 @@
 /** Records real collection operations while delegating every operation to Effect. */
-import { Array, HashMap, HashSet, Order } from "effect"
+import { Array, HashMap, HashSet, Order, Record } from "effect"
 
 import { vi } from "vitest"
 
@@ -69,6 +69,11 @@ const recordings = () => [
 const collections = (
 	s: Core.State,
 ): ReadonlyArray<readonly [string, object]> => [
+	...Array.flatMap(Record.toEntries(s.graph), ([key, value]) =>
+		HashMap.isHashMap(value)
+			? [["graph." + key, value] satisfies readonly [string, object]]
+			: [],
+	),
 	["instances", s.instances],
 	["cells", s.cells],
 	["units", s.units],
@@ -79,7 +84,6 @@ const collections = (
 	["commands", s.commands],
 	["timers", s.timers],
 	["keys", s.keys],
-	["accesses", s.accesses],
 	["policies", s.policies],
 	["preparations", s.preparations],
 	["preparationKeys", s.preparationKeys],

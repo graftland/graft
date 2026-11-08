@@ -129,7 +129,8 @@ test("preserves core exports, re-exports, overloads, and local Schema fields", a
 			fields("Status", [
 				"id",
 				"sequence",
-				"member",
+				"members",
+				"plan",
 				"remaining",
 				"leaseHolders",
 				"unconfirmedUnits",

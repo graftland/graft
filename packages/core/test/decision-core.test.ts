@@ -16,6 +16,7 @@ import {
 	submit,
 	succeed,
 } from "./change-model/scenarios.ts"
+import { declaredMembers, oneMember } from "./member-fact"
 
 describe("production decision core", () => {
 	it("records intent, a fresh term and capacity before dispatch (I1, I2, I5)", () => {
@@ -45,14 +46,14 @@ describe("production decision core", () => {
 			assert.strictEqual(conclusion(done, "change-1").outcome, "Accepted")
 			assert.strictEqual(conclusion(done, "change-2").outcome, "Accepted")
 			assert.strictEqual(
-				status(done).member.actual.pipe(
+				oneMember(status(done)).actual.pipe(
 					Option.map((t) => t.identity),
 					Option.getOrUndefined,
 				),
 				"next",
 			)
 			assert.strictEqual(
-				status(done, "change-2").member.actual.pipe(
+				oneMember(status(done, "change-2")).actual.pipe(
 					Option.map((t) => t.identity),
 					Option.getOrUndefined,
 				),
@@ -230,7 +231,7 @@ describe("production decision core", () => {
 		const recovered = fire(trial, "change-1", "Trial")
 		assert.strictEqual(conclusion(recovered).outcome, "Recovered")
 		assert.strictEqual(
-			status(recovered).member.actual.pipe(
+			oneMember(status(recovered)).actual.pipe(
 				Option.map((t) => t.identity),
 				Option.getOrUndefined,
 			),
@@ -258,7 +259,7 @@ describe("production decision core", () => {
 			creation: "Unknown",
 		})
 		assert.strictEqual(conclusion(denied).outcome, "RecoveryFailed")
-		assert.isFalse(status(denied).member.healthy)
+		assert.isFalse(oneMember(status(denied)).healthy)
 		assert.isAtLeast(conclusion(denied).cause.reasons.length, 2)
 	})
 
@@ -268,13 +269,13 @@ describe("production decision core", () => {
 		const serving = Option.getOrThrow(Core.cell(accepted, "instance-0").value)
 		const dead = exit(accepted, serving)
 		assert.strictEqual(conclusion(dead), old)
-		assert.isFalse(status(dead).member.healthy)
+		assert.isFalse(oneMember(status(dead)).healthy)
 		const recreated = accept(submit(dead), "change-2")
 		const late = exit(recreated, serving)
 		assert.strictEqual(conclusion(late), old)
-		assert.isTrue(status(late).member.healthy)
+		assert.isTrue(oneMember(status(late)).healthy)
 		assert.strictEqual(
-			status(late).member.actual.pipe(
+			oneMember(status(late)).actual.pipe(
 				Option.map((t) => t.identity),
 				Option.getOrUndefined,
 			),
@@ -328,17 +329,27 @@ describe("production decision core", () => {
 		)
 	})
 
-	it("rejects group, cross-unit local dependencies and runner Overlap before execution (I12)", () => {
+	it("rejects runner Overlap before execution (I3, I5)", () => {
 		const s = initial()
 		const r = request(s)
-		for (const bad of Arr.make(
-			{ ...r, members: HashSet.make("instance-0", "instance-1") },
-			{ ...r, localDependencies: HashSet.make("instance-1") },
-			{
-				...r,
-				target: { ...r.target, placement: "Runner" } satisfies Core.Target,
+		for (const bad of Arr.make({
+			...r,
+			target: { ...r.target, placement: "Runner" } satisfies Core.Target,
+			proposal: {
+				members: Arr.map(
+					declaredMembers([{ id: "instance-0", target: r.target }]),
+					(m) => ({
+						...m,
+						placement: Option.some<Core.PlacementRequirement>({
+							kind: "Runner",
+						}),
+					}),
+				),
+				explicit: HashSet.make("instance-0"),
+				removed: HashSet.empty(),
+				realms: [],
 			},
-		)) {
+		})) {
 			const result = Core.reduce(s, { _tag: "Submit", request: bad, now: 0 })
 			assert.strictEqual(result.reply._tag, "Rejected")
 			assert.strictEqual(HashMap.size(result.state.changes), 0)

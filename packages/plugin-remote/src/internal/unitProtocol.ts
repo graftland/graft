@@ -1,5 +1,5 @@
 /** Fixed control data. This module imports no business contract or implementation. */
-import { Schema } from "effect"
+import { Effect, Schema } from "effect"
 
 export const Token = Schema.Struct({
 	authority: Schema.String,
@@ -60,6 +60,61 @@ export const Binding = Schema.Struct({
 		}),
 	),
 })
+export const PlacementRequirement = Schema.Struct({
+	kind: Schema.Literals(["Worker", "Process", "Runner"]),
+	destination: Schema.optionalKey(Schema.String),
+	security: Schema.optionalKey(Schema.String),
+})
+export const DeclarationOptions = Schema.Struct({
+	resources: Schema.optionalKey(
+		Schema.Array(
+			Schema.Struct({
+				key: Schema.String,
+				mode: Schema.Literals(["Shared", "Exclusive"]),
+				overlap: Schema.Boolean,
+			}),
+		),
+	),
+	placement: Schema.optionalKey(PlacementRequirement),
+	probes: Schema.optionalKey(Schema.Array(Schema.String)),
+})
+export const MemberDeclaration = Schema.Struct({
+	instance: Schema.String,
+	declaration: Schema.String,
+	parent: Schema.Option(Schema.String),
+	realm: Schema.String,
+	target: Target,
+	localProvides: Schema.Array(Schema.String),
+	localRequires: Schema.Array(
+		Schema.Struct({ key: Schema.String, optional: Schema.Boolean }),
+	),
+	provides: Schema.Array(Binding),
+	requires: Schema.Array(
+		Schema.Struct({ ...Binding.fields, optional: Schema.Boolean }),
+	),
+	resources: Schema.Array(
+		Schema.Struct({
+			key: Schema.String,
+			mode: Schema.Literals(["Shared", "Exclusive"]),
+			overlap: Schema.Boolean,
+		}),
+	),
+	colocate: Schema.Array(Schema.String),
+	placement: Schema.Option(PlacementRequirement),
+	overlap: Schema.Boolean,
+	probes: Schema.Array(Schema.String),
+})
+export const UnitMember = Schema.Struct({
+	declaration: Schema.String,
+	parent: Schema.Option(Schema.String),
+	realm: Schema.String,
+	placement: Schema.Option(PlacementRequirement),
+	colocate: Schema.Array(Schema.String),
+	instance: Schema.String,
+	target: Target,
+	term: Schema.Int,
+	generation: Schema.Int,
+})
 export const Description = Schema.Struct({
 	inspectionData: Schema.optionalKey(Schema.Json),
 	moduleExport: Schema.optionalKey(Schema.Literals(["default", "plugin"])),
@@ -67,11 +122,7 @@ export const Description = Schema.Struct({
 	configuration: Schema.String,
 	environment: Schema.String,
 	protocol: Schema.Literal(1),
-	overlap: Schema.Boolean,
-	members: Schema.Int,
-	requires: Schema.Array(Binding),
-	provides: Schema.Array(Binding),
-	probes: Schema.Array(Schema.String),
+	members: Schema.Array(MemberDeclaration),
 })
 export const Endpoint = Schema.Struct({
 	host: Schema.String,
@@ -131,6 +182,7 @@ export const CallMessage = Schema.Union([
 ])
 export type CallMessage = typeof CallMessage.Type
 export const Command = Schema.Struct({
+	members: Schema.HashMap(Schema.String, UnitMember),
 	call: Schema.optionalKey(CallControl),
 	id: Schema.String,
 	kind: Schema.Literals([
@@ -205,3 +257,21 @@ export const Outgoing = Schema.Union([
 	Schema.TaggedStruct("Progress", { stage: Schema.String }),
 ])
 export type Outgoing = typeof Outgoing.Type
+
+const encodeIncomingJson = Schema.encodeEffect(Schema.toCodecJson(Incoming))
+const encodeOutgoingJson = Schema.encodeEffect(Schema.toCodecJson(Outgoing))
+/** Encodes one complete fixed control frame before crossing an isolate boundary. */
+export const encodeIncoming = (frame: Incoming) =>
+	encodeIncomingJson(frame).pipe(
+		Effect.flatMap(Schema.decodeUnknownEffect(Schema.JsonObject)),
+	)
+export const decodeIncoming = Schema.decodeUnknownEffect(
+	Schema.toCodecJson(Incoming),
+)
+export const encodeOutgoing = (frame: Outgoing) =>
+	encodeOutgoingJson(frame).pipe(
+		Effect.flatMap(Schema.decodeUnknownEffect(Schema.JsonObject)),
+	)
+export const decodeOutgoing = Schema.decodeUnknownEffect(
+	Schema.toCodecJson(Outgoing),
+)

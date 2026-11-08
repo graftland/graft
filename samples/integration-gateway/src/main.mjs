@@ -286,7 +286,12 @@ const upgrade = Effect.fnUntraced(function* (f, client, strategy) {
 			"Old call changed provider",
 		)
 	}
-	yield* accepted(client, { instance: "unrelated", target: f.unrelated })
+	yield* accepted(client, {
+		instance: "unrelated",
+		realm: "other",
+		realms: [{ id: "other", parent: Option.none(), isolated: HashSet.empty() }],
+		target: f.unrelated,
+	})
 	yield* client.close
 	return handle.id
 })
@@ -344,10 +349,14 @@ export const prove = Effect.fnUntraced(function* (
 			Array.every(calls, (call) => !call.credit),
 		"Settled Change retained execution obligations",
 	)
+	const member = Option.getOrThrow(HashMap.get(status.members, "integration"))
 	yield* requireFact(
-		status.member.healthy &&
-			status.member.matchesTarget &&
-			status.member.reason === "ExplicitTarget",
+		member.healthy &&
+			member.matchesTarget &&
+			HashSet.some(
+				member.reasons,
+				(r) => r.kind === "ExplicitTarget" && r.from === "integration",
+			),
 		"Current target is unhealthy or selection is incorrect",
 	)
 	const report = {
@@ -360,9 +369,9 @@ export const prove = Effect.fnUntraced(function* (
 		sessions: yield* f.u.sessions,
 		gatewayUnits: gateways.length,
 		oldExit: old.evidence,
-		selection: status.member.reason,
-		healthy: status.member.healthy,
-		matchesTarget: status.member.matchesTarget,
+		selection: Array.fromIterable(member.reasons),
+		healthy: member.healthy,
+		matchesTarget: member.matchesTarget,
 		leases: HashSet.size(status.leaseHolders),
 		unconfirmed: HashSet.size(status.unconfirmedUnits),
 		remainingBudget: status.remaining,

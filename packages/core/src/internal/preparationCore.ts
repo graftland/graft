@@ -4,7 +4,9 @@ import type {
 	Command,
 	CommandKind,
 	Description,
+	DescriptionKey,
 	Event,
+	GraphProposal,
 	Policy,
 	Preparation,
 	PreparationResult,
@@ -18,8 +20,10 @@ import type {
 	Timer,
 	TimerPurpose,
 	Unit,
+	UnitMember,
 	Working,
 } from "./decisionState"
+import * as Grants from "./memberGrant"
 
 const timerPurposes = (
 	...values: ReadonlyArray<TimerPurpose>
@@ -39,12 +43,53 @@ export const authorized = (
 		onNone: () => true,
 		onSome: (allowed) => HashSet.has(allowed, target.identity),
 	})
-export const cached = (s: State, target: Target, resolution?: ResolvedInput) =>
+const descriptionKey = (request: Request): DescriptionKey => ({
+	target: { ...request.target, overlap: false },
+	instance: request.instance,
+	realm: request.realm ?? "root",
+	colocate: request.colocate ?? [],
+	placement: Option.fromNullishOr(request.placement),
+})
+export const cached = (
+	s: State,
+	request: Request,
+	resolution?: ResolvedInput,
+) =>
 	Option.filter(
-		HashMap.get(s.verified, { ...target, overlap: false }),
+		HashMap.get(s.verified, descriptionKey(request)),
 		(value) =>
 			resolution === undefined || Equal.equals(value.resolution, resolution),
 	)
+/** Compile inspected declarations into intent; the reducer derives the closure. */
+export const proposal = (
+	s: State,
+	r: Request,
+	d: Description,
+): GraphProposal => {
+	const retained = HashSet.fromIterable(Array.map(d.members, (m) => m.instance))
+	const descendants = (
+		ids: HashSet.HashSet<string>,
+	): HashSet.HashSet<string> => {
+		const next = HashSet.reduce(ids, ids, (all, id) =>
+			HashSet.union(
+				all,
+				Option.getOrElse(HashMap.get(s.graph.children, id), () =>
+					HashSet.empty<string>(),
+				),
+			),
+		)
+		return HashSet.size(next) === HashSet.size(ids) ? next : descendants(next)
+	}
+	return {
+		members: d.members,
+		removed: HashSet.difference(
+			descendants(HashSet.make(r.instance)),
+			retained,
+		),
+		explicit: HashSet.make(r.instance),
+		realms: r.realms ?? [],
+	}
+}
 export const get = (s: State, id: string): Option.Option<PreparationStatus> =>
 	Option.map(HashMap.get(s.preparations, id), (p) => {
 		const unit = HashMap.get(s.units, p.unit)
@@ -96,6 +141,10 @@ const emit = (
 	const unit = HashMap.get(s.units, p.unit)
 	const id = fixedId ?? `${p.id}/${p.nextCommand}`
 	const command: Command = {
+		members: Option.getOrElse(
+			Option.map(unit, (u) => u.members),
+			HashMap.empty<string, UnitMember>,
+		),
 		id,
 		dispatched,
 		change: p.id,
@@ -363,6 +412,22 @@ const fail = (
 		s.now + p.request.budget.terminate,
 	)
 }
+const identified = (p: Preparation, d: Description): boolean => {
+	const ids = HashSet.fromIterable(Array.map(d.members, (m) => m.instance))
+	if (HashSet.size(ids) !== d.members.length) return false
+	const descends = (id: string, seen: HashSet.HashSet<string>): boolean => {
+		if (id === p.request.instance) return true
+		if (HashSet.has(seen, id)) return false
+		return Option.exists(
+			Array.findFirst(d.members, (m) => m.instance === id),
+			(m) =>
+				Option.exists(m.parent, (parent) =>
+					descends(parent, HashSet.add(seen, id)),
+				),
+		)
+	}
+	return Array.every(d.members, (m) => descends(m.instance, HashSet.empty()))
+}
 const valid = (p: Preparation, d: Description): boolean =>
 	Option.exists(
 		p.resolution,
@@ -371,8 +436,13 @@ const valid = (p: Preparation, d: Description): boolean =>
 			d.configuration === r.identity &&
 			d.environment === r.environment &&
 			d.protocol === 1 &&
-			d.members ===
-				(p.request.target.deployment?.moduleKind !== undefined ? 0 : 1),
+			(p.request.target.deployment?.moduleKind !== undefined
+				? d.members.length === 0
+				: identified(p, d) &&
+					Array.some(
+						d.members,
+						(member) => member.instance === p.request.instance,
+					)),
 	)
 const finish = (s: Working, p: Preparation): Working => {
 	if (!ended(s, p)) return s
@@ -384,7 +454,7 @@ const finish = (s: Working, p: Preparation): Working => {
 		return reject(s, p, "Unauthorized")
 	if (policy(s, p.request.instance).version !== p.policyVersion)
 		return reject(s, p, "Stale")
-	const cacheTarget = { ...p.request.target, overlap: false }
+	const cacheTarget = descriptionKey(p.request)
 	const cacheHistory = Array.append(
 		Array.filter(s.verifiedHistory, (t) => !Equal.equals(t, cacheTarget)),
 		cacheTarget,
@@ -399,7 +469,7 @@ const finish = (s: Working, p: Preparation): Working => {
 						onSome: (t) => HashMap.remove(s.verified, t),
 					})
 				: s.verified,
-			{ ...p.request.target, overlap: false },
+			cacheTarget,
 			{
 				target: p.request.target,
 				policyValues: policy(s, p.request.instance).values,
@@ -420,13 +490,8 @@ const finish = (s: Working, p: Preparation): Working => {
 		policyVersion: p.policyVersion,
 		resolution: p.resolution.value,
 		description: p.description.value,
-		target: { ...p.request.target, overlap: p.description.value.overlap },
-		strategy:
-			p.request.identity?.strategy === "Auto"
-				? p.description.value.overlap && p.request.target.placement !== "Runner"
-					? "Overlap"
-					: "Restart"
-				: p.request.strategy,
+		proposal: proposal(s, p.request, p.description.value),
+		strategy: p.request.strategy,
 	}
 	return {
 		...release(cachedState, p),
@@ -533,6 +598,8 @@ export const start = (
 		timerIds: HashSet.empty(),
 	}
 	const unit: Unit = {
+		group: unitId,
+		members: HashMap.make([request.instance, Grants.requested(request, 0, 0)]),
 		id: unitId,
 		kind: "Inspection",
 		description: Option.none(),

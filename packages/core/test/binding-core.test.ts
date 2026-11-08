@@ -12,6 +12,7 @@ import {
 	request,
 	succeed,
 } from "./change-model/scenarios"
+import { declaredMembers, oneMember, rootRealms } from "./member-fact"
 
 const operation = (
 	identity: string,
@@ -96,17 +97,25 @@ const descriptor = (
 	configuration: "config",
 	environment: "node",
 	protocol: 1,
-	overlap: true,
-	members: 1,
-	provides,
-	requires,
-	probes: [],
+	members: Array.map(
+		declaredMembers([
+			{
+				id: provides.length > 0 ? "provider" : "consumer",
+				target: { identity: "next", placement: "Worker", overlap: true },
+			},
+		]),
+		(m) => ({
+			...m,
+			provides,
+			requires: Array.map(requires, (r) => ({ ...r, optional: false })),
+		}),
+	),
 })
 const topology = (provided = service("forecast@1", "alerts@1")): Core.State => {
 	const s = Core.make({
 		authority: "bindings",
 		maxUnits: 4,
-		instances: [
+		declarations: declaredMembers([
 			{
 				id: "provider",
 				target: { identity: "old", placement: "Worker", overlap: true },
@@ -115,7 +124,8 @@ const topology = (provided = service("forecast@1", "alerts@1")): Core.State => {
 				id: "consumer",
 				target: { identity: "consumer", placement: "Process", overlap: true },
 			},
-		],
+		]),
+		realms: rootRealms,
 		bindings: [
 			{ consumer: "consumer", provider: "provider", service: "weather" },
 		],
@@ -332,7 +342,9 @@ it("discards partial staged views after a missing install acknowledgement withou
 		Option.getOrThrow(Core.get(ended, "change-1")).conclusion,
 	)
 	assert.equal(result.outcome, "Aborted")
-	assert.isTrue(Option.getOrThrow(Core.get(ended, "change-1")).member.healthy)
+	assert.isTrue(
+		oneMember(Option.getOrThrow(Core.get(ended, "change-1"))).healthy,
+	)
 	assert.isTrue(
 		Option.isNone(
 			HashMap.get(ended.routes, Bindings.key("consumer", "weather")),

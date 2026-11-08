@@ -1,4 +1,4 @@
-import { Array, Cause, Effect, Fiber, HashSet, Option } from "effect"
+import { Array, Cause, Effect, Fiber, HashMap, HashSet, Option } from "effect"
 import { TestClock } from "effect/testing"
 import { NodeServices } from "@effect/platform-node"
 import { assert, it } from "@effect/vitest"
@@ -61,7 +61,16 @@ for (const placement of ["Worker", "Process"] as const)
 						)
 						const unrelated = yield* client.submit({
 							instance: "unrelated",
+							realm: "other",
+							realms: [
+								{
+									id: "other",
+									parent: Option.none(),
+									isolated: HashSet.empty(),
+								},
+							],
 							target: f.target(3),
+							strategy: "Overlap",
 							budget,
 						})
 						yield* consistent(client, unrelated.id, "Accepted")
@@ -119,6 +128,7 @@ it.effect(
 				const trial = yield* client.submit({
 					instance: "integration",
 					target: f.target(2, "trial"),
+					strategy: "Overlap",
 					budget,
 					requirements: { trial: 1000 },
 				})
@@ -130,7 +140,9 @@ it.effect(
 				})
 				const crashing = yield* f.call("crash").pipe(Effect.forkScoped)
 				const result = yield* consistent(client, trial.id, "RecoveryFailed")
-				assert.isFalse(result.member.healthy)
+				assert.isFalse(
+					Option.getOrThrow(HashMap.get(result.members, "integration")).healthy,
+				)
 				assert.isAbove(result.cause.reasons.length, 0)
 				yield* Fiber.interrupt(crashing)
 				const units = yield* client.units
@@ -169,13 +181,19 @@ for (const fault of ["handler", "finalizer"] as const)
 					const change = yield* client.submit({
 						instance: "integration",
 						target: f.target(2),
+						strategy: "Overlap",
 						budget,
 						requirements: { trial: 1000 },
 					})
 					yield* phase(client, change.id, "Trial")
 					const unrelated = yield* client.submit({
 						instance: "unrelated",
+						realm: "other",
+						realms: [
+							{ id: "other", parent: Option.none(), isolated: HashSet.empty() },
+						],
 						target: f.target(3),
+						strategy: "Overlap",
 						budget,
 					})
 					yield* consistent(client, unrelated.id, "Accepted")
@@ -252,13 +270,22 @@ it.effect(
 				assert.isAbove(HashSet.size(status.unconfirmedUnits), 0)
 				assert.equal(HashSet.size(status.leaseHolders), 0)
 				const busy = yield* client
-					.submit({ instance: "integration", target: f.target(2), budget })
+					.submit({
+						instance: "integration",
+						target: f.target(2),
+						strategy: "Restart",
+						budget,
+					})
 					.pipe(Effect.flip)
 				assert.equal(busy.reason, "Busy")
 				assert.isTrue(Array.contains(busy.conflicts ?? [], "integration"))
 				assert.deepEqual(Option.getOrThrow(status.conclusion), result)
 				const b = yield* client.submit({
 					instance: "unrelated",
+					realm: "other",
+					realms: [
+						{ id: "other", parent: Option.none(), isolated: HashSet.empty() },
+					],
 					target: f.unrelated,
 					budget,
 				})

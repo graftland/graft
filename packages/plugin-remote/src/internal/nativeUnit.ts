@@ -9,6 +9,7 @@ import {
 	Context,
 	Deferred,
 	Effect,
+	Equal,
 	Exit,
 	FiberMap,
 	FiberSet,
@@ -72,7 +73,7 @@ interface UnitRuntime {
 	readonly replies: Ref.Ref<HashMap.HashMap<string, Wire.Report>>
 	readonly emit: (frame: Wire.Outgoing) => Effect.Effect<void>
 }
-const transmitUnchecked = (frame: Wire.Outgoing): Effect.Effect<void> =>
+const transmitUnchecked = (frame: Schema.JsonObject): Effect.Effect<void> =>
 	Effect.callback<void>((resume) => {
 		if (parentPort !== null) {
 			parentPort.postMessage(frame)
@@ -88,10 +89,15 @@ const transmitUnchecked = (frame: Wire.Outgoing): Effect.Effect<void> =>
 		)
 	})
 const transmit = (frame: Wire.Outgoing): Effect.Effect<void> =>
-	EncodedLimit.check(frame).pipe(
+	Wire.encodeOutgoing(frame).pipe(
+		Effect.flatMap((encoded) =>
+			EncodedLimit.check(encoded).pipe(
+				Effect.andThen(transmitUnchecked(encoded)),
+			),
+		),
 		Effect.orDie,
-		Effect.andThen(transmitUnchecked(frame)),
 	)
+
 const input = Effect.fnUntraced(function* () {
 	const queue = yield* Queue.bounded<unknown>(256)
 	const callbacks = yield* FiberSet.make()
@@ -270,6 +276,75 @@ const grantedDeployment = Effect.fnUntraced(function* (command: Wire.Command) {
 	yield* Artifact.verify(deployment.artifact)
 	return { deployment, resolution }
 })
+const describePlugin = Effect.fnUntraced(function* (
+	command: Wire.Command,
+	plugin: Plugin.Plugin,
+	contract: Metadata["contract"],
+	contractArtifact: Kernel.ArtifactData,
+	environment: Context.Context<never>,
+	module: unknown,
+): Effect.fn.Return<Kernel.MemberDeclaration, UnitFault | Schema.SchemaError> {
+	const grant = Array.findFirst(HashMap.values(command.members), (member) =>
+		Equal.equals(member.target, command.target),
+	)
+	if (Option.isNone(grant))
+		return yield* UnitFault.make({
+			detail: "The command has no matching identified member grant",
+		})
+	const options = yield* Schema.decodeUnknownEffect(Wire.DeclarationOptions)(
+		Predicate.hasProperty(module, "deployment") ? module.deployment : {},
+	)
+	const infrastructure = yield* Effect.context<never>()
+	const context = Context.merge(infrastructure, environment)
+	const contracts = Option.isSome(contract) ? contract.value : undefined
+	const localRequires = Array.flatMap(plugin.inject, (dependency) => {
+		const key = Plugin.isOptional(dependency) ? dependency.key : dependency
+		if (
+			contracts !== undefined &&
+			Array.some(contracts.inject, (service) => service.key.key === key.key)
+		)
+			return []
+		return [
+			{
+				key: key.key,
+				optional:
+					Plugin.isOptional(dependency) ||
+					Option.isSome(Context.getOption(context, key)),
+			},
+		]
+	})
+	const localProvides = Array.flatMap(plugin.provides, (provided) => {
+		const key = "operations" in provided ? provided.key.key : provided.key
+		return contracts !== undefined &&
+			Array.some(contracts.provides, (service) => service.key.key === key)
+			? []
+			: [key]
+	})
+	return {
+		...grant.value,
+		placement:
+			options.placement === undefined
+				? grant.value.placement
+				: Option.some(options.placement),
+		localRequires,
+		localProvides,
+		requires: Array.map(contracts?.inject ?? [], (service) => ({
+			...serviceDescription(service, contractArtifact.identity.digest),
+			optional: Array.some(
+				plugin.inject,
+				(dependency) =>
+					Plugin.isOptional(dependency) &&
+					dependency.key.key === service.key.key,
+			),
+		})),
+		provides: Array.map(contracts?.provides ?? [], (service) =>
+			serviceDescription(service, contractArtifact.identity.digest),
+		),
+		resources: options.resources ?? [],
+		overlap: plugin.overlap && Option.isSome(contract),
+		probes: options.probes ?? [],
+	}
+})
 const load = Effect.fnUntraced(function* (
 	runtime: UnitRuntime,
 	command: Wire.Command,
@@ -309,19 +384,18 @@ const load = Effect.fnUntraced(function* (
 		configuration: resolution.identity,
 		environment: resolution.environment,
 		protocol: 1,
-		overlap: plugin.overlap && Option.isSome(contract),
-		members: 1,
-		requires: Array.map(
-			Option.isSome(contract) ? contract.value.inject : [],
-			(s) => serviceDescription(s, contractArtifact.identity.digest),
-		),
-		provides: Array.map(
-			Option.isSome(contract) ? contract.value.provides : [],
-			(s) => serviceDescription(s, contractArtifact.identity.digest),
-		),
-		probes: [],
+		members: [
+			yield* describePlugin(
+				command,
+				plugin,
+				contract,
+				contractArtifact,
+				environment,
+				module,
+			),
+		],
 	}
-	yield* Schema.decodeEffect(Wire.Description)(descriptor)
+	yield* Schema.decodeEffect(Schema.toType(Wire.Description))(descriptor)
 	return {
 		plugin,
 		contract,
@@ -387,11 +461,7 @@ const describeModule = Effect.fnUntraced(function* (
 		configuration: resolution.identity,
 		environment: resolution.environment,
 		protocol: 1,
-		overlap: false,
-		members: 0,
-		requires: [],
-		provides: [],
-		probes: [],
+		members: [],
 	}
 	return description
 })
@@ -797,7 +867,7 @@ const main = Effect.gen(function* () {
 	}
 	yield* runtime.emit({ _tag: "Online" })
 	yield* Queue.take(queue).pipe(
-		Effect.flatMap(Schema.decodeUnknownEffect(Wire.Incoming)),
+		Effect.flatMap(Wire.decodeIncoming),
 		Effect.flatMap((message) => dispatch(runtime, message)),
 		Effect.forever,
 		Effect.raceFirst(Deferred.await(runtime.stopped)),

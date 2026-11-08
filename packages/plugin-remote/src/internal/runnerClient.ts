@@ -39,7 +39,7 @@ interface Link {
 }
 const receiveFrame = Effect.fnUntraced(function* (link: Link, line: string) {
 	const frame = yield* Schema.decodeEffect(
-		Schema.fromJsonString(Frames.Outgoing),
+		Schema.fromJsonString(Schema.toCodecJson(Frames.Outgoing)),
 	)(line)
 	if (frame._tag === "Evidence" || frame._tag === "CallEvidence") {
 		const event = yield* Frames.decodeEvent(frame)
@@ -92,7 +92,7 @@ const writeCommand = Effect.fnUntraced(function* (
 	yield* Deferred.await(link.connected)
 	const encoded = yield* Schema.decodeEffect(Wire.Command)(command)
 	const line = yield* Schema.encodeEffect(
-		Schema.fromJsonString(Frames.Incoming),
+		Schema.fromJsonString(Schema.toCodecJson(Frames.Incoming)),
 	)({ owner: link.address.owner, command: encoded })
 	yield* EncodedLimit.check({ owner: link.address.owner, command: encoded })
 	yield* Lines.write(link.socket, line)

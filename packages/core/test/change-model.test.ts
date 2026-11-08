@@ -5,7 +5,6 @@ import * as Core from "../src/internal/decisionCore.ts"
 import { checked, invariant } from "./change-model/assertions.ts"
 import { explore, reachable, type Stimulus } from "./change-model/explore.ts"
 import {
-	accept,
 	conclusion,
 	exitEvent,
 	initial,
@@ -18,6 +17,7 @@ import {
 	submit,
 	timerEvent,
 } from "./change-model/scenarios.ts"
+import { oneMember } from "./member-fact"
 
 const reportStimulus = (id: string, kind: Core.CommandKind): Stimulus => ({
 	name: `${id}:${kind}`,
@@ -141,11 +141,11 @@ it("explores exclusive recovery alongside an unrelated commit without overwritin
 			assert.strictEqual(conclusion(s).outcome, "Recovered")
 			assert.strictEqual(conclusion(s, "change-2").outcome, "Accepted")
 			assert.strictEqual(
-				Option.getOrThrow(status(s).member.actual).identity,
+				Option.getOrThrow(oneMember(status(s)).actual).identity,
 				"original",
 			)
 			assert.strictEqual(
-				Option.getOrThrow(status(s, "change-2").member.actual).identity,
+				Option.getOrThrow(oneMember(status(s, "change-2")).actual).identity,
 				"next",
 			)
 		},
@@ -208,19 +208,6 @@ it("explores repeated exit, timer, failure, cancellation and shutdown reports to
 	for (const s of stats.states) invariant(s)
 	assert.strictEqual(HashSet.size(stats.states), 238)
 	assert.strictEqual(stats.transitions, 648)
-})
-
-it("touches only the admitted footprint with 0, 20 and 200 unrelated instances (I3)", () => {
-	const counts = Arr.map([0, 20, 200], (extra) => {
-		const base = initial(extra + 2, extra + 4)
-		const admitted = submit({ ...base, accesses: HashMap.empty() })
-		const accepted = accept(admitted, "change-1")
-		assert.isTrue(
-			HashMap.every(accepted.accesses, (_, key) => key === "instance-0"),
-		)
-		return HashMap.reduce(accepted.accesses, 0, (n, count) => n + count)
-	})
-	assert.deepStrictEqual(counts, [2, 2, 2])
 })
 
 it("detects a lost owned version before recovery and retains the conflicting accepted state (I3, I7)", () => {

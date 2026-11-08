@@ -3,6 +3,7 @@ import {
 	Cause,
 	Effect,
 	Fiber,
+	HashMap,
 	HashSet,
 	Layer,
 	Option,
@@ -79,8 +80,14 @@ for (const placement of ["Worker", "Process"] as const) {
 						inspected.result.value._tag !== "Described"
 					)
 						return
-					assert.deepEqual(inspected.result.value.description.requires, [])
-					assert.deepEqual(inspected.result.value.description.provides, [])
+					assert.deepEqual(
+						inspected.result.value.description.members[0]?.requires,
+						[],
+					)
+					assert.deepEqual(
+						inspected.result.value.description.members[0]?.provides,
+						[],
+					)
 					const accepted = yield* Change.run({
 						instance: "a",
 						target,
@@ -227,7 +234,9 @@ for (const placement of ["Worker", "Process"] as const) {
 					assert.equal(outcome.outcome, "Accepted", Cause.pretty(outcome.cause))
 					const current = yield* Change.get(handle.id)
 					const status = Option.getOrThrow(current)
-					assert.isTrue(status.member.healthy)
+					assert.isTrue(
+						Option.getOrThrow(HashMap.get(status.members, "a")).healthy,
+					)
 					const units = yield* kernel.units
 					assert.isTrue(
 						Array.some(units, (u) => u.term === 1 && u.evidence === "Missing"),
@@ -281,7 +290,7 @@ for (const placement of ["Worker", "Process"] as const) {
 						),
 					)
 					assert.equal(
-						result.member.actual.pipe(
+						Option.getOrThrow(HashMap.get(result.members, "a")).actual.pipe(
 							Option.map((t) => t.identity),
 							Option.getOrElse(() => "Missing"),
 						),

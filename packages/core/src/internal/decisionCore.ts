@@ -23,15 +23,19 @@ import type {
 	Conclusion,
 	Event,
 	FixedBinding,
+	GroupPlan,
 	Input,
 	Instance,
+	MemberDeclaration,
 	MemberFact,
 	Outcome,
 	Phase,
+	RealmDeclaration,
 	Rejection,
 	Request,
 	RequestIdentity,
 	ResolvedInput,
+	SelectionReason,
 	Settlement,
 	State,
 	Status,
@@ -40,9 +44,12 @@ import type {
 	TimerPurpose,
 	Transition,
 	Unit,
+	UnitMember,
 	Working,
 } from "./decisionState.ts"
 import { deploymentIdentity } from "./deploymentIdentity"
+import * as Graph from "./groupGraph"
+import * as Grants from "./memberGrant"
 import * as Preparation from "./preparationCore"
 
 export const getPreparation = Preparation.get
@@ -84,14 +91,6 @@ const live = (s: State, id: string): boolean =>
 	Option.exists(HashMap.get(s.units, id), (u) => u.evidence === "Missing")
 const keys = (r: Request): HashSet.HashSet<string> =>
 	HashSet.union(r.writes, HashSet.fromIterable(HashMap.keys(r.reads)))
-const touch = (s: Working, key: string): Working => ({
-	...s,
-	accesses: HashMap.set(
-		s.accesses,
-		key,
-		Option.getOrElse(HashMap.get(s.accesses, key), () => 0) + 1,
-	),
-})
 const expired = (c: Change, s: State): boolean =>
 	s.now >= c.deadline - c.request.budget.terminate
 
@@ -128,39 +127,74 @@ export const classify = (s: State, c: Change): Settlement => {
 		: "Satisfied"
 }
 
-const member = (s: State, c: Change): MemberFact => {
-	const instance = HashMap.get(s.instances, c.request.instance)
-	const current = Option.flatMap(instance, (i) =>
-		Option.flatMap(i.current, (id) => HashMap.get(s.units, id)),
+const member = (s: State, c: Change, id: string): MemberFact => {
+	const instance = HashMap.get(s.instances, id)
+	const current = Option.flatMap(instance, (member) =>
+		Option.flatMap(member.current, (key) => HashMap.get(s.units, key)),
+	)
+	const execution = Option.flatMap(current, (unit) =>
+		HashMap.get(unit.members, id),
 	)
 	const healthy =
-		Option.exists(instance, (i) => i.healthy && i.authorized) &&
+		Option.exists(instance, (member) => member.healthy && member.authorized) &&
 		Option.exists(
 			current,
-			(u) => u.evidence === "Missing" && u.phase === "Running",
+			(unit) => unit.evidence === "Missing" && unit.phase === "Running",
 		)
+	const desired = Option.map(
+		HashMap.get(c.plan.desired, id),
+		(member) => member.target,
+	)
 	return {
-		instance: c.request.instance,
-		reason: "ExplicitTarget",
-		starting: c.previous,
-		startingVersion: c.startingVersion,
-		desired: c.request.target,
-		actual: Option.map(current, (u) => u.target),
+		instance: id,
+		reasons: Option.getOrElse(
+			HashMap.get(c.plan.reasons, id),
+			HashSet.empty<SelectionReason>,
+		),
+		starting: Option.map(
+			HashMap.get(c.plan.previous, id),
+			(member) => member.target,
+		),
+		startingVersion: Option.getOrElse(
+			HashMap.get(c.startingVersions, id),
+			() => 0,
+		),
+		desired,
+		actual: Option.map(execution, (member) => member.target),
 		healthy,
-		matchesTarget:
-			healthy &&
-			Option.exists(current, (u) => Equal.equals(u.target, c.request.target)),
+		matchesTarget: Option.match(desired, {
+			onNone: () => Option.isNone(current),
+			onSome: (target) =>
+				healthy &&
+				Option.exists(execution, (member) =>
+					Equal.equals(member.target, target),
+				) &&
+				Option.exists(current, (unit) =>
+					Option.exists(
+						Arr.findFirst(HashMap.values(c.plan.newGroups), (group) =>
+							HashSet.has(group.members, id),
+						),
+						(group) => group.id === unit.group,
+					),
+				),
+		}),
 	}
 }
+const members = (s: State, c: Change): HashMap.HashMap<string, MemberFact> =>
+	HashMap.fromIterable(
+		Arr.map(Arr.fromIterable(c.plan.members), (id) => [id, member(s, c, id)]),
+	)
+
 export const get = (s: State, id: string): Option.Option<Status> =>
 	Option.map(HashMap.get(s.changes, id), (c) => ({
 		id,
+		plan: c.plan,
 		outstandingCalls: Calls.outstanding(s, c.requiredExits),
 		sequence: c.sequence,
 		phase: c.phase,
 		oldChanged: c.oldChanged,
 		recovering: c.recovering,
-		member: member(s, c),
+		members: members(s, c),
 		remaining: Num.max(0, c.deadline - s.now),
 		leaseHolders: HashSet.filter(c.units, (id) =>
 			Option.exists(
@@ -175,18 +209,32 @@ export const get = (s: State, id: string): Option.Option<Status> =>
 	}))
 
 export const make = (options: {
+	readonly declarations: ReadonlyArray<MemberDeclaration>
+	readonly realms: ReadonlyArray<RealmDeclaration>
 	readonly authority: string
 	readonly maxUnits: number
 	readonly callLimits?: Partial<CallLimits>
 	readonly bindings?: ReadonlyArray<FixedBinding>
-	readonly instances: ReadonlyArray<{
-		readonly id: string
-		readonly target: Target
-	}>
-}): State =>
-	Arr.reduce(
-		options.instances,
+}): State => {
+	const graph = Graph.initialize(options.declarations, options.realms)
+	return Arr.reduce(
+		Arr.fromIterable(
+			HashMap.values(
+				Result.match(graph, {
+					onSuccess: (g) => g.groups,
+					onFailure: () => Graph.empty().groups,
+				}),
+			),
+		),
 		{
+			graph: Result.match(graph, {
+				onSuccess: (value) => value,
+				onFailure: Graph.empty,
+			}),
+			graphIssue: Result.match(graph, {
+				onSuccess: () => Option.none(),
+				onFailure: Option.some,
+			}),
 			...Bindings.index(options.bindings ?? []),
 			...Calls.initial(),
 			callLimits: { ...Calls.initial().callLimits, ...options.callLimits },
@@ -215,20 +263,38 @@ export const make = (options: {
 			commands: HashMap.empty<string, Command>(),
 			timers: HashMap.empty(),
 			keys: HashMap.empty(),
-			accesses: HashMap.empty(),
 		} satisfies State,
-		(s: State, entry): State => {
-			const id = `${entry.id}@0`
+		(s: State, group): State => {
+			const hosted = HashMap.fromIterable(
+				Arr.flatMap(Arr.fromIterable(group.members), (id) =>
+					Option.toArray(
+						Option.map(
+							HashMap.get(s.graph.declarations, id),
+							(m) =>
+								[id, Grants.declared(m, 0, 0)] satisfies readonly [
+									string,
+									UnitMember,
+								],
+						),
+					),
+				),
+			)
+			const first = Arr.head(Arr.fromIterable(HashMap.values(hosted)))
+			if (Option.isNone(first)) return s
+			const entry = first.value
+			const id = `${entry.instance}@0`
 			const unit: Unit = {
 				kind: "Execution",
 				description: Option.none(),
 				endpoint: Option.none(),
 				id,
 				incarnation: `${options.authority}/${id}`,
-				instance: entry.id,
+				group: group.id,
+				members: hosted,
+				instance: entry.instance,
 				term: 0,
-				target: InputSnapshot.target(entry.target),
-				owner: instanceOwner(entry.id),
+				target: entry.target,
+				owner: `group:${group.id}`,
 				claim: id,
 				spawn: `${id}/initial`,
 				phase: "Running",
@@ -237,31 +303,44 @@ export const make = (options: {
 				cause: Cause.empty,
 				leases: HashSet.empty(),
 			}
-			return {
-				...s,
-				instances: HashMap.set(s.instances, entry.id, {
-					id: entry.id,
+			const initialized = HashMap.reduce(hosted, s, (out, member) => ({
+				...out,
+				instances: HashMap.set(out.instances, member.instance, {
+					id: member.instance,
 					established: true,
-					desired: InputSnapshot.target(entry.target),
+					desired: member.target,
 					current: Option.some(id),
 					term: 0,
 					healthy: true,
 					authorized: true,
 				}),
-				cells: HashMap.set(s.cells, entry.id, {
+				cells: HashMap.set(
+					HashMap.set(out.cells, member.instance, {
+						...emptyCell,
+						version: 1,
+						value: Option.some(id),
+					}),
+					Graph.memberSlot(member.instance),
+					{ ...emptyCell, version: 1, value: Option.some(group.id) },
+				),
+			}))
+			return {
+				...initialized,
+				cells: HashMap.set(initialized.cells, Graph.membership(group.id), {
 					...emptyCell,
-					version: 1,
-					value: Option.some(id),
+					version: group.version,
+					value: Option.some(group.id),
 				}),
-				units: HashMap.set(s.units, id, unit),
-				claims: HashMap.set(s.claims, id, {
+				units: HashMap.set(initialized.units, id, unit),
+				claims: HashMap.set(initialized.claims, id, {
 					id,
-					owner: instanceOwner(entry.id),
+					owner: `group:${group.id}`,
 					unit: Option.some(id),
 				}),
 			}
 		},
 	)
+}
 
 const participantView = (
 	s: State,
@@ -284,6 +363,11 @@ const emit = (
 ): Working => {
 	const u = HashMap.get(s.units, unit)
 	const command: Command = {
+		members: Option.getOrElse(
+			Option.map(u, (unit) => unit.members),
+			() =>
+				HashMap.make([c.request.instance, Grants.requested(c.request, 0, 0)]),
+		),
 		dispatched: true,
 		id: `${c.id}/${c.nextCommand}`,
 		change: c.id,
@@ -555,11 +639,12 @@ const conclude = (s: Working, c: Change, outcome: Outcome): Working => {
 	if (classification === "Failed" && outcome === "Accepted")
 		return fail(s, c, Cause.fail("Required retirement cleanup failed"))
 	const conclusion: Conclusion = {
+		plan: c.plan,
 		calls: Calls.outstanding(s, c.requiredExits),
 		outcome,
 		phase: Option.getOrElse(c.interrupted, () => c.phase),
 		cause: c.cause,
-		member: member(s, c),
+		members: members(s, c),
 		units: c.units,
 	}
 	const next: Change = {
@@ -583,7 +668,10 @@ const conclude = (s: Working, c: Change, outcome: Outcome): Working => {
 					...s,
 					instances: HashMap.modify(s.instances, c.request.instance, (i) => ({
 						...i,
-						established: true,
+						established: HashMap.has(
+							c.recovering ? c.plan.previous : c.plan.desired,
+							c.request.instance,
+						),
 					})),
 				}
 			: s
@@ -620,7 +708,9 @@ const terminate = (
 		}),
 	)
 const resolve = (s: Working, c: Change): Working =>
-	operation(s, c, "Resolve", "Resolving", "", c.request.budget.startup)
+	HashMap.size(c.recovering ? c.plan.oldGroups : c.plan.newGroups) === 0
+		? install(s, c, "")
+		: operation(s, c, "Resolve", "Resolving", "", c.request.budget.startup)
 const progressSettlement = (s: Working, c: Change): Working => {
 	if (Option.isSome(c.conclusion)) return release(s, c)
 	if (
@@ -797,7 +887,44 @@ const spawn = (s: Working, c: Change): Working => {
 		return fail(s, c, Cause.fail("Reserved execution capacity is unavailable"))
 	const term = instance.value.term + 1
 	const id = `${c.request.instance}@${term}`
+	const group = Arr.findFirst(
+		HashMap.values(c.recovering ? c.plan.oldGroups : c.plan.newGroups),
+		(group) => HashSet.has(group.members, c.request.instance),
+	)
+	if (Option.isNone(group))
+		return fail(
+			s,
+			c,
+			Cause.fail("The admitted attempt has no deployment group"),
+		)
+	const hosted = HashMap.fromIterable(
+		Arr.flatMap(Arr.fromIterable(group.value.members), (id) =>
+			Option.toArray(
+				Option.map(
+					HashMap.get(c.recovering ? c.plan.previous : c.plan.desired, id),
+					(member) =>
+						[
+							id,
+							Grants.declared(
+								member,
+								Option.getOrElse(
+									Option.map(HashMap.get(s.instances, id), (i) => i.term),
+									() => 0,
+								) + 1,
+								Option.getOrElse(
+									Option.map(HashMap.get(s.instances, id), (i) => i.term),
+									() => 0,
+								) + 1,
+							),
+						] satisfies readonly [string, UnitMember],
+				),
+			),
+		),
+	)
+
 	const unit: Unit = {
+		group: group.value.id,
+		members: hosted,
 		kind: "Execution",
 		description: c.description,
 		endpoint: Option.none(),
@@ -818,10 +945,12 @@ const spawn = (s: Working, c: Change): Working => {
 	const next = save(
 		{
 			...s,
-			instances: HashMap.set(s.instances, instance.value.id, {
-				...instance.value,
-				term,
-			}),
+			instances: HashMap.reduce(hosted, s.instances, (index, grant) =>
+				HashMap.modify(index, grant.instance, (member) => ({
+					...member,
+					term: grant.term,
+				})),
+			),
 			units: HashMap.set(s.units, id, unit),
 			claims: HashMap.modify(s.claims, free.value, (claim) => ({
 				...claim,
@@ -835,7 +964,10 @@ const spawn = (s: Working, c: Change): Working => {
 	)
 }
 const install = (s: Working, c: Change, unit: string): Working => {
-	const required = HashSet.add(c.request.participants, unit)
+	const required =
+		unit === ""
+			? c.request.participants
+			: HashSet.add(c.request.participants, unit)
 	const staged: Change = {
 		...c,
 		phase: "Installing" satisfies Phase,
@@ -843,6 +975,7 @@ const install = (s: Working, c: Change, unit: string): Working => {
 		installed: HashSet.empty<string>(),
 	}
 	const saved = save(disarm(s, c, HashSet.make("Operation")), staged)
+	if (HashSet.size(required) === 0) return commit(saved, staged)
 	const installed = HashSet.reduce(required, saved, (s, participant) =>
 		issue(s, c.id, "Install", participant, participant),
 	)
@@ -900,20 +1033,23 @@ const commit = (s: Working, c: Change): Working => {
 		return fail(s, c, Cause.fail(invalidBinding.value))
 	if (!owned(s, c))
 		return fail(s, c, Cause.fail("Commit lost a version or reservation"))
-	if (Option.isNone(c.candidate) || !live(s, c.candidate.value))
+	if (
+		HashMap.size(c.recovering ? c.plan.previous : c.plan.desired) > 0 &&
+		(Option.isNone(c.candidate) || !live(s, c.candidate.value))
+	)
 		return fail(s, c, Cause.fail("Candidate is unavailable"))
-	const candidate = c.candidate.value
+	const candidate = c.candidate
 	const applied = HashSet.reduce(
 		c.request.writes,
 		forgetEndedCurrent(s, c.request.instance),
 		(s, key) => {
 			const current = cell(s, key)
 			return {
-				...touch(s, key),
+				...s,
 				cells: HashMap.set(s.cells, key, {
 					...current,
 					version: current.version + 1,
-					value: Option.some(candidate),
+					value: candidate,
 				}),
 			}
 		},
@@ -929,15 +1065,18 @@ const commit = (s: Working, c: Change): Working => {
 	const next = save(
 		{
 			...applied,
+			graph: Graph.commit(applied.graph, c.plan, c.recovering),
 			routes: Bindings.commit(s, c),
 			instances: HashMap.modify(applied.instances, c.request.instance, (i) => ({
 				...i,
 				desired: c.request.target,
-				current: Option.some(candidate),
-				authorized: Option.exists(HashMap.get(s.units, candidate), (u) =>
-					Preparation.authorized(s, c.request.instance, u.target),
+				current: candidate,
+				authorized: Option.exists(candidate, (id) =>
+					Option.exists(HashMap.get(s.units, id), (u) =>
+						Preparation.authorized(s, c.request.instance, u.target),
+					),
 				),
-				healthy: true,
+				healthy: Option.isSome(candidate),
 			})),
 		},
 		committed,
@@ -969,21 +1108,27 @@ const requested = (s: Working, input: Input, inspect = false): Working => {
 	const budget: Budget = { ...defaultBudget, ...input.budget }
 	const target = InputSnapshot.target(input.target)
 	const identity = {
+		realm: input.realm ?? "root",
+		realms: Arr.copy(input.realms ?? []),
+		colocate: Arr.copy(input.colocate ?? []),
+		placement: Option.fromNullishOr(input.placement),
 		instance: input.instance,
 		target,
-		strategy: input.strategy ?? "Auto",
+		strategy: input.strategy ?? "Restart",
 		expected: Option.fromNullishOr(input.expected),
 		budget,
 		probes: Arr.copy(input.requirements?.probes ?? []),
 		trial: input.requirements?.trial ?? 0,
 	} satisfies RequestIdentity
 	const request: Request = {
+		realm: identity.realm,
+		realms: identity.realms,
+		colocate: identity.colocate,
+		...(input.placement === undefined ? {} : { placement: input.placement }),
 		instance: input.instance,
 		target,
 		identity,
-		strategy:
-			input.strategy ??
-			(target.overlap && target.placement !== "Runner" ? "Overlap" : "Restart"),
+		strategy: input.strategy ?? "Restart",
 		reads: HashMap.make([
 			input.instance,
 			input.expected ?? cell(s, input.instance).version,
@@ -1021,7 +1166,7 @@ const requested = (s: Working, input: Input, inspect = false): Working => {
 		return reject(s, "UnsupportedTarget")
 	if (!Preparation.authorized(s, input.instance, input.target))
 		return reject(s, "Unauthorized")
-	const known = Preparation.cached(s, input.target)
+	const known = Preparation.cached(s, request)
 	if (
 		!inspect &&
 		Option.isSome(known) &&
@@ -1036,12 +1181,8 @@ const requested = (s: Working, input: Input, inspect = false): Working => {
 			policyVersion: Preparation.policy(s, input.instance).version,
 			description: known.value.description,
 			resolution: known.value.resolution,
-			target: { ...request.target, overlap: known.value.description.overlap },
-			strategy:
-				input.strategy ??
-				(known.value.description.overlap && input.target.placement !== "Runner"
-					? "Overlap"
-					: "Restart"),
+			proposal: Preparation.proposal(s, request, known.value.description),
+			strategy: input.strategy ?? "Restart",
 		})
 	return Preparation.start(s, request, inspect)
 }
@@ -1055,7 +1196,11 @@ export const empty = (options: {
 		readonly target: Target
 	}>
 }): State => {
-	const base = make({ ...options, instances: [] })
+	const base = make({
+		...options,
+		declarations: [],
+		realms: [{ id: "root", parent: Option.none(), isolated: HashSet.empty() }],
+	})
 	return Arr.reduce(options.instances, base, (s, entry) => ({
 		...s,
 		instances: HashMap.set(s.instances, entry.id, {
@@ -1117,23 +1262,49 @@ const submit = (s: Working, r: Request): Working => {
 				cause: Cause.fail(fault),
 			},
 		}),
-		onSuccess: (r) => admit(s, r),
+		onSuccess: (planned) => admit(s, planned, r),
 	})
 }
-const admit = (s: Working, r: Request): Working => {
+const admit = (s: Working, r: Request, identityRequest: Request): Working => {
+	if (Option.isSome(s.graphIssue))
+		return { ...s, reply: { _tag: "Rejected", ...s.graphIssue.value } }
+	if (r.proposal === undefined) return reject(s, "InvalidDeclaration")
+	return Result.match(Graph.plan(s, r.proposal, r.strategy), {
+		onFailure: (issue) => ({ ...s, reply: { _tag: "Rejected", ...issue } }),
+		onSuccess: (plan) =>
+			HashMap.some(
+				plan.desired,
+				(m) => !Preparation.authorized(s, m.instance, m.target),
+			)
+				? reject(s, "Unauthorized")
+				: reserve(
+						s,
+						{
+							...r,
+							proposal: plan.proposal,
+							reads: HashSet.reduce(plan.reads, r.reads, (reads, key) =>
+								HashMap.has(reads, key)
+									? reads
+									: HashMap.set(reads, key, cell(s, key).version),
+							),
+							writes: HashSet.union(r.writes, plan.writes),
+							leases: HashSet.union(r.leases, plan.leases),
+							participants: HashSet.union(r.participants, plan.participants),
+						},
+						plan,
+						identityRequest,
+					),
+	})
+}
+const reserve = (
+	s: Working,
+	r: Request,
+	plan: GroupPlan,
+	identityRequest: Request,
+): Working => {
 	if (!s.open) return reject(s, "Closing")
 	const instance = HashMap.get(s.instances, r.instance)
-	if (Option.isNone(instance)) return reject(s, "UnsupportedTarget")
-	if (
-		(r.members !== undefined &&
-			(HashSet.size(r.members) !== 1 || !HashSet.has(r.members, r.instance))) ||
-		(r.localDependencies !== undefined &&
-			HashSet.size(r.localDependencies) > 0) ||
-		!HashSet.has(r.writes, r.instance) ||
-		(r.strategy === "Overlap" &&
-			(!r.target.overlap || r.target.placement === "Runner"))
-	)
-		return reject(s, "Unsupported")
+
 	if (
 		!validBudget(
 			{
@@ -1153,7 +1324,7 @@ const admit = (s: Working, r: Request): Working => {
 		(acc, key) => {
 			const current = cell(acc.state, key)
 			return {
-				state: touch(acc.state, key),
+				state: acc.state,
 				busy:
 					Option.isSome(current.writer) ||
 					(HashSet.has(r.writes, key) && HashSet.size(current.readers) > 0)
@@ -1169,28 +1340,44 @@ const admit = (s: Working, r: Request): Working => {
 		return reject(checked.state, "Busy", checked.busy)
 	if (HashSet.size(checked.stale) > 0)
 		return reject(checked.state, "Stale", checked.stale)
-	const old = Option.filter(instance.value.current, (id) => live(s, id))
-	const extra = Option.isNone(old) || r.strategy === "Overlap" ? 1 : 0
+	const oldUnits = HashSet.fromIterable(
+		Arr.flatMap(Arr.fromIterable(plan.members), (id) =>
+			Option.toArray(
+				Option.filter(
+					Option.flatMap(
+						HashMap.get(s.instances, id),
+						(member) => member.current,
+					),
+					(unit) => live(s, unit),
+				),
+			),
+		),
+	)
+	const old = Option.filter(
+		Option.flatMap(instance, (member) => member.current),
+		(id) => live(s, id),
+	)
+	const oldClaims = HashSet.fromIterable(
+		Arr.flatMap(Arr.fromIterable(oldUnits), (id) =>
+			Option.toArray(
+				Option.map(HashMap.get(s.units, id), (unit) => unit.claim),
+			),
+		),
+	)
+	const extra = Num.max(0, plan.peakUnits - HashSet.size(oldClaims))
 	if (HashMap.size(s.claims) + extra > s.maxUnits)
 		return reject(checked.state, "Capacity")
 	const id = `change-${s.nextChange}`
-	const oldClaim = Option.flatMap(old, (id) =>
-		Option.map(HashMap.get(s.units, id), (u) => u.claim),
+	const claims = HashSet.reduce(oldClaims, s.claims, (out, key) =>
+		HashMap.modify(out, key, (claim) => ({ ...claim, owner: id })),
 	)
-	const claims = Option.match(oldClaim, {
-		onNone: () => s.claims,
-		onSome: (claim) =>
-			HashMap.modify(s.claims, claim, (claim) => ({ ...claim, owner: id })),
-	})
-	const claimId = `${id}/capacity`
-	const reserved =
-		extra > 0
-			? HashMap.set(claims, claimId, {
-					id: claimId,
-					owner: id,
-					unit: Option.none(),
-				})
-			: claims
+	const addedClaims = HashSet.fromIterable(
+		extra === 0 ? [] : Arr.makeBy(extra, (index) => `${id}/capacity-${index}`),
+	)
+	const reserved = HashSet.reduce(addedClaims, claims, (out, key) =>
+		HashMap.set(out, key, { id: key, owner: id, unit: Option.none() }),
+	)
+
 	const locks = HashSet.reduce(keys(r), checked.state.cells, (cells, key) => {
 		const current = cell(s, key)
 		return HashMap.set(
@@ -1202,24 +1389,31 @@ const admit = (s: Working, r: Request): Working => {
 		)
 	})
 	const c: Change = {
-		hadServing: instance.value.established,
+		plan,
+		hadServing: Option.exists(instance, (member) => member.established),
 		resolved: Option.fromNullishOr(r.resolution),
 		description: Option.fromNullishOr(r.description),
 		policyVersion: r.policyVersion ?? 0,
 		id,
 		request: r,
-		previous: instance.value.desired,
+		previous: Option.getOrElse(
+			Option.map(instance, (member) => member.desired),
+			() => r.target,
+		),
 		startingVersion: cell(s, r.instance).version,
+		startingVersions: HashMap.fromIterable(
+			Arr.map(Arr.fromIterable(plan.members), (member) => [
+				member,
+				cell(s, member).version,
+			]),
+		),
 		phase: "Resolving",
 		interrupted: Option.none(),
 		old,
 		candidate: Option.none(),
-		units: HashSet.fromIterable(Option.toArray(old)),
+		units: oldUnits,
 		requiredExits: HashSet.empty(),
-		claims: HashSet.union(
-			HashSet.fromIterable(Option.toArray(oldClaim)),
-			extra > 0 ? HashSet.make(claimId) : HashSet.empty(),
-		),
+		claims: HashSet.union(oldClaims, addedClaims),
 		premises: r.reads,
 		oldChanged: false,
 		recovering: false,
@@ -1245,13 +1439,29 @@ const admit = (s: Working, r: Request): Working => {
 	const admitted = save(
 		{
 			...checked.state,
+			graph: { ...checked.state.graph, nextGroup: plan.nextGroup },
 			cells: locks,
 			claims: reserved,
-			units: Option.match(old, {
-				onNone: () => s.units,
-				onSome: (unit) =>
-					HashMap.modify(s.units, unit, (u) => ({ ...u, owner: id })),
-			}),
+			units: HashSet.reduce(oldUnits, s.units, (out, key) =>
+				HashMap.modify(out, key, (unit) => ({ ...unit, owner: id })),
+			),
+			instances: HashSet.reduce(plan.members, s.instances, (out, member) =>
+				HashMap.has(out, member)
+					? out
+					: Option.match(HashMap.get(plan.desired, member), {
+							onNone: () => out,
+							onSome: (declaration) =>
+								HashMap.set(out, member, {
+									id: member,
+									established: false,
+									desired: declaration.target,
+									current: Option.none(),
+									term: 0,
+									healthy: false,
+									authorized: true,
+								}),
+						}),
+			),
 			active: HashSet.add(s.active, id),
 			observers: HashSet.reduce(keys(r), s.observers, (observers, key) =>
 				HashMap.set(
@@ -1269,7 +1479,10 @@ const admit = (s: Working, r: Request): Working => {
 			keys:
 				r.key === undefined
 					? s.keys
-					: HashMap.set(s.keys, r.key, { request: r, change: id }),
+					: HashMap.set(s.keys, r.key, {
+							request: identityRequest,
+							change: id,
+						}),
 			reply: { _tag: "Admitted", change: id },
 		},
 		c,
@@ -1346,7 +1559,11 @@ const reportSuccess = (s: Working, c: Change, command: Command): Working => {
 					policyVersion: Preparation.policy(s, c.request.instance).version,
 				}
 				const target = c.recovering ? c.previous : c.request.target
-				const known = Preparation.cached(s, target, command.report.value.value)
+				const known = Preparation.cached(
+					s,
+					{ ...c.request, target },
+					command.report.value.value,
+				)
 				if (target.deployment === undefined)
 					return spawn(save(s, resolved), resolved)
 				if (Option.isSome(known)) {
@@ -1387,7 +1604,8 @@ const reportSuccess = (s: Working, c: Change, command: Command): Working => {
 						evidence,
 						(r) =>
 							r._tag === "Started" &&
-							(r.value.provides.length === 0 || r.endpoint !== undefined) &&
+							(!Arr.some(r.value.members, (m) => m.provides.length > 0) ||
+								r.endpoint !== undefined) &&
 							Equal.equals(r.value, c.description.pipe(Option.getOrUndefined)),
 					)
 				)
@@ -1512,7 +1730,8 @@ const endUnit = (
 		claims: Option.match(claim, {
 			onNone: () => s.claims,
 			onSome: (claim) =>
-				claim.owner === instanceOwner(u.instance)
+				claim.owner === instanceOwner(u.instance) ||
+				claim.owner === `group:${u.group}`
 					? HashMap.remove(s.claims, u.claim)
 					: HashMap.set(s.claims, u.claim, { ...claim, unit: Option.none() }),
 		}),
@@ -1758,7 +1977,7 @@ const invalidated = (
 ): Working => {
 	const current = cell(s, event.object)
 	const next = {
-		...touch(s, event.object),
+		...s,
 		instances: HashMap.modify(s.instances, event.object, (i) => ({
 			...i,
 			healthy: false,
@@ -1784,6 +2003,7 @@ const shutdownUnit = (s: Working, u: Unit): Working => {
 	if (u.evidence !== "Missing" || u.phase === "Terminating") return s
 	const id = `${s.authority}/shutdown/${u.id}`
 	const command: Command = {
+		members: u.members,
 		dispatched: true,
 		id,
 		change: "$runtime",
@@ -1867,8 +2087,13 @@ const policyChanged = (
 	event: Extract<Event, { _tag: "PolicyChanged" }>,
 ): Working => {
 	const previous = Preparation.policy(s, event.instance)
+	const current = cell(s, `authorization:${event.instance}`)
 	const next: Working = {
 		...s,
+		cells: HashMap.set(s.cells, `authorization:${event.instance}`, {
+			...current,
+			version: current.version + 1,
+		}),
 		policies: HashMap.set(s.policies, event.instance, {
 			version: previous.version + 1,
 			allowed: Option.some(HashSet.fromIterable(event.allowed)),
@@ -1970,7 +2195,7 @@ const unitFailed = (
 							),
 				),
 		)
-		return u.owner === instanceOwner(u.instance)
+		return !HashMap.has(s.changes, u.owner)
 			? withUnit(failed, u.id, shutdownUnit)
 			: failed
 	})
@@ -2089,7 +2314,7 @@ const apply = (s: Working, event: Event): Working => {
 		case "Observed":
 			return withChange(s, event.change, save)
 		case "Submit":
-			return submit(s, event.request)
+			return submit(s, InputSnapshot.request(event.request))
 		case "Reported":
 			return Option.exists(HashMap.get(s.commands, event.command), (c) =>
 				HashMap.has(s.preparations, c.change),

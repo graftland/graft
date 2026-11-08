@@ -33,6 +33,132 @@ export interface ResolvedInput {
 	readonly identity: string
 	readonly environment: string
 }
+/** A realm is a lookup boundary, independent of structural configuration containers. */
+export interface RealmDeclaration {
+	readonly id: string
+	readonly parent: Option.Option<string>
+	readonly isolated: HashSet.HashSet<string>
+}
+export interface PlacementRequirement {
+	readonly kind: Placement
+	readonly destination?: string
+	readonly security?: string
+}
+export interface LocalRequirement {
+	readonly key: string
+	readonly optional: boolean
+}
+export interface ResourceDeclaration {
+	readonly key: string
+	readonly mode: "Shared" | "Exclusive"
+	readonly overlap: boolean
+}
+export interface MemberDeclaration {
+	readonly instance: string
+	readonly declaration: string
+	readonly parent: Option.Option<string>
+	readonly realm: string
+	readonly target: Target
+	readonly localProvides: ReadonlyArray<string>
+	readonly localRequires: ReadonlyArray<LocalRequirement>
+	readonly provides: ReadonlyArray<BindingDeclaration>
+	readonly requires: ReadonlyArray<
+		BindingDeclaration & { readonly optional: boolean }
+	>
+	readonly resources: ReadonlyArray<ResourceDeclaration>
+	readonly colocate: ReadonlyArray<string>
+	readonly placement: Option.Option<PlacementRequirement>
+	readonly overlap: boolean
+	readonly probes: ReadonlyArray<string>
+}
+export interface ResolvedDependency {
+	readonly ambiguous: boolean
+	readonly kind: "Local" | "Contract"
+	readonly service: string
+	readonly provider: Option.Option<string>
+	readonly optional: boolean
+	readonly slots: HashSet.HashSet<string>
+}
+export interface DeploymentGroup {
+	readonly id: string
+	readonly version: number
+	readonly members: HashSet.HashSet<string>
+	readonly placement: PlacementRequirement
+}
+export interface GraphTopology {
+	readonly resourceOwners: HashMap.HashMap<string, HashSet.HashSet<string>>
+	readonly declarations: HashMap.HashMap<string, MemberDeclaration>
+	readonly realms: HashMap.HashMap<string, RealmDeclaration>
+	readonly providers: HashMap.HashMap<string, HashSet.HashSet<string>>
+	readonly slotConsumers: HashMap.HashMap<string, HashSet.HashSet<string>>
+	readonly dependencies: HashMap.HashMap<
+		string,
+		ReadonlyArray<ResolvedDependency>
+	>
+	readonly localConsumers: HashMap.HashMap<string, HashSet.HashSet<string>>
+	readonly contractConsumers: HashMap.HashMap<string, HashSet.HashSet<string>>
+	readonly children: HashMap.HashMap<string, HashSet.HashSet<string>>
+	readonly colocations: HashMap.HashMap<string, HashSet.HashSet<string>>
+	readonly membersByRealm: HashMap.HashMap<string, HashSet.HashSet<string>>
+	readonly childRealms: HashMap.HashMap<string, HashSet.HashSet<string>>
+	readonly groups: HashMap.HashMap<string, DeploymentGroup>
+	readonly memberships: HashMap.HashMap<string, string>
+	readonly nextGroup: number
+}
+export interface GraphProposal {
+	readonly members: ReadonlyArray<MemberDeclaration>
+	readonly removed: HashSet.HashSet<string>
+	readonly explicit: HashSet.HashSet<string>
+	readonly realms: ReadonlyArray<RealmDeclaration>
+}
+export interface SelectionReason {
+	readonly kind:
+		| "ExplicitTarget"
+		| "OldGroup"
+		| "NewGroup"
+		| "LocalDependency"
+		| "ContractProviderLost"
+		| "StructuralChild"
+	readonly from: string
+}
+export interface GroupPlan {
+	readonly previousDependencies: HashMap.HashMap<
+		string,
+		ReadonlyArray<ResolvedDependency>
+	>
+	readonly previousRealms: HashMap.HashMap<
+		string,
+		Option.Option<RealmDeclaration>
+	>
+	readonly desiredRealms: HashMap.HashMap<
+		string,
+		Option.Option<RealmDeclaration>
+	>
+	readonly members: HashSet.HashSet<string>
+	readonly reasons: HashMap.HashMap<string, HashSet.HashSet<SelectionReason>>
+	readonly oldGroups: HashMap.HashMap<string, DeploymentGroup>
+	readonly newGroups: HashMap.HashMap<string, DeploymentGroup>
+	readonly previous: HashMap.HashMap<string, MemberDeclaration>
+	readonly desired: HashMap.HashMap<string, MemberDeclaration>
+	readonly dependencies: HashMap.HashMap<
+		string,
+		ReadonlyArray<ResolvedDependency>
+	>
+	readonly membershipCells: HashSet.HashSet<string>
+	readonly absenceCells: HashSet.HashSet<string>
+	readonly reads: HashSet.HashSet<string>
+	readonly writes: HashSet.HashSet<string>
+	readonly leases: HashSet.HashSet<string>
+	readonly participants: HashSet.HashSet<string>
+	readonly startWaves: ReadonlyArray<HashSet.HashSet<string>>
+	readonly stopWaves: ReadonlyArray<HashSet.HashSet<string>>
+	readonly recoveryWaves: ReadonlyArray<HashSet.HashSet<string>>
+	readonly peakUnits: number
+	readonly oldUnitCount: number
+	readonly newUnitCount: number
+	readonly nextGroup: number
+	readonly proposal: GraphProposal
+}
 export interface BindingDeclaration {
 	readonly unary: boolean
 	readonly key: string
@@ -81,11 +207,7 @@ export interface Description {
 	readonly configuration: string
 	readonly environment: string
 	readonly protocol: 1
-	readonly overlap: boolean
-	readonly members: number
-	readonly requires: ReadonlyArray<BindingDeclaration>
-	readonly provides: ReadonlyArray<BindingDeclaration>
-	readonly probes: ReadonlyArray<string>
+	readonly members: ReadonlyArray<MemberDeclaration>
 }
 export interface Policy {
 	readonly version: number
@@ -144,6 +266,13 @@ export interface PreparationStatus {
 	readonly cause: Cause.Cause<unknown>
 	readonly result: Option.Option<PreparationResult>
 }
+export interface DescriptionKey {
+	readonly target: Target
+	readonly instance: string
+	readonly realm: string
+	readonly colocate: ReadonlyArray<string>
+	readonly placement: Option.Option<PlacementRequirement>
+}
 export interface VerifiedDescription {
 	readonly policyValues?: Readonly<Record<string, Schema.Json>>
 	readonly target: Target
@@ -185,6 +314,10 @@ export interface Requirements {
 	readonly trial: number
 }
 export interface Input {
+	readonly realm?: string
+	readonly realms?: ReadonlyArray<RealmDeclaration>
+	readonly colocate?: ReadonlyArray<string>
+	readonly placement?: PlacementRequirement
 	readonly key?: string | undefined
 	readonly instance: string
 	readonly target: Target
@@ -194,15 +327,24 @@ export interface Input {
 	readonly requirements?: Partial<Requirements> | undefined
 }
 export interface RequestIdentity {
+	readonly realm: string
+	readonly realms: ReadonlyArray<RealmDeclaration>
+	readonly colocate: ReadonlyArray<string>
+	readonly placement: Option.Option<PlacementRequirement>
 	readonly instance: string
 	readonly target: Target
-	readonly strategy: Strategy | "Auto"
+	readonly strategy: Strategy
 	readonly expected: Option.Option<number>
 	readonly budget: Budget
 	readonly probes: ReadonlyArray<string>
 	readonly trial: number
 }
 export interface Request {
+	readonly realm?: string
+	readonly realms?: ReadonlyArray<RealmDeclaration>
+	readonly colocate?: ReadonlyArray<string>
+	readonly placement?: PlacementRequirement
+	readonly proposal?: GraphProposal
 	readonly submitted?: number
 	readonly preparation?: string
 	readonly policyVersion?: number
@@ -220,8 +362,6 @@ export interface Request {
 	readonly budget: Budget
 	readonly trial: number
 	readonly key?: string
-	readonly members?: HashSet.HashSet<string>
-	readonly localDependencies?: HashSet.HashSet<string>
 }
 export interface Cell {
 	readonly version: number
@@ -242,7 +382,20 @@ export type Cleanup =
 	| { readonly _tag: "Unknown" }
 	| { readonly _tag: "Completed" }
 	| { readonly _tag: "Failed"; readonly cause: Cause.Cause<unknown> }
+export interface UnitMember {
+	readonly declaration: string
+	readonly parent: Option.Option<string>
+	readonly realm: string
+	readonly placement: Option.Option<PlacementRequirement>
+	readonly colocate: ReadonlyArray<string>
+	readonly instance: string
+	readonly target: Target
+	readonly term: number
+	readonly generation: number
+}
 export interface Unit {
+	readonly group: string
+	readonly members: HashMap.HashMap<string, UnitMember>
 	readonly description: Option.Option<Description>
 	readonly endpoint: Option.Option<Endpoint>
 	readonly progress?: string
@@ -286,23 +439,25 @@ export type Settlement =
 	"Unresolved" | "Failed" | "UnknownCleanup" | "Satisfied"
 export interface MemberFact {
 	readonly instance: string
-	readonly reason: "ExplicitTarget"
-	readonly starting: Target
+	readonly reasons: HashSet.HashSet<SelectionReason>
+	readonly starting: Option.Option<Target>
 	readonly startingVersion: number
-	readonly desired: Target
+	readonly desired: Option.Option<Target>
 	readonly actual: Option.Option<Target>
 	readonly healthy: boolean
 	readonly matchesTarget: boolean
 }
 export interface Conclusion {
+	readonly plan: GroupPlan
 	readonly calls: HashSet.HashSet<string>
 	readonly outcome: Outcome
 	readonly phase: Phase
 	readonly cause: Cause.Cause<unknown>
-	readonly member: MemberFact
+	readonly members: HashMap.HashMap<string, MemberFact>
 	readonly units: HashSet.HashSet<string>
 }
 export interface Change {
+	readonly plan: GroupPlan
 	readonly hadServing: boolean
 	readonly resolved: Option.Option<ResolvedInput>
 	readonly description: Option.Option<Description>
@@ -311,6 +466,7 @@ export interface Change {
 	readonly request: Request
 	readonly previous: Target
 	readonly startingVersion: number
+	readonly startingVersions: HashMap.HashMap<string, number>
 	readonly phase: Phase
 	readonly interrupted: Option.Option<Phase>
 	readonly old: Option.Option<string>
@@ -390,6 +546,7 @@ export type Report =
 			readonly delivery?: "Unavailable"
 	  }
 export interface Command {
+	readonly members: HashMap.HashMap<string, UnitMember>
 	readonly call?: CallControl
 	readonly callStatus?: CallFact
 	readonly view?: RouteView
@@ -423,13 +580,14 @@ export interface Timer {
 	readonly command: Option.Option<string>
 }
 export interface Status {
+	readonly plan: GroupPlan
 	readonly outstandingCalls: HashSet.HashSet<string>
 	readonly id: string
 	readonly sequence: number
 	readonly phase: Phase
 	readonly oldChanged: boolean
 	readonly recovering: boolean
-	readonly member: MemberFact
+	readonly members: HashMap.HashMap<string, MemberFact>
 	readonly remaining: number
 	readonly leaseHolders: HashSet.HashSet<string>
 	readonly unconfirmedUnits: HashSet.HashSet<string>
@@ -437,7 +595,14 @@ export interface Status {
 	readonly cause: Cause.Cause<unknown>
 	readonly conclusion: Option.Option<Conclusion>
 }
+export interface GraphIssue {
+	readonly reason: Rejection
+	readonly conflicts: HashSet.HashSet<string>
+	readonly cause: Cause.Cause<unknown>
+}
 export interface State {
+	readonly graphIssue: Option.Option<GraphIssue>
+	readonly graph: GraphTopology
 	readonly activeCalls: HashSet.HashSet<string>
 	readonly calls: HashMap.HashMap<string, CallFact>
 	readonly callsByUnit: HashMap.HashMap<string, HashSet.HashSet<string>>
@@ -460,10 +625,10 @@ export interface State {
 	readonly nextChange: number
 	readonly nextPreparation: number
 	readonly preparationHistory: ReadonlyArray<string>
-	readonly verifiedHistory: ReadonlyArray<Target>
+	readonly verifiedHistory: ReadonlyArray<DescriptionKey>
 	readonly preparations: HashMap.HashMap<string, Preparation>
 	readonly preparationKeys: HashMap.HashMap<string, string>
-	readonly verified: HashMap.HashMap<Target, VerifiedDescription>
+	readonly verified: HashMap.HashMap<DescriptionKey, VerifiedDescription>
 	readonly policies: HashMap.HashMap<string, Policy>
 	readonly historyLimit: number
 	readonly history: ReadonlyArray<string>
@@ -481,7 +646,6 @@ export interface State {
 		string,
 		{ readonly request: Request; readonly change: string }
 	>
-	readonly accesses: HashMap.HashMap<string, number>
 }
 export type Event =
 	| (CallEvidence & { readonly now: number })
@@ -594,6 +758,13 @@ export type Event =
 	  }
 	| { readonly _tag: "Shutdown"; readonly now: number }
 export type Rejection =
+	| "PlacementConflict"
+	| "MissingProvider"
+	| "AmbiguousProvider"
+	| "DependencyCycle"
+	| "IneligibleOverlap"
+	| "InvalidDeclaration"
+	| "ResourceConflict"
 	| "PluginExportMissing"
 	| "IncompatibleBinding"
 	| "DescriptionFailed"

@@ -9,6 +9,7 @@ import {
 	report,
 	submit,
 } from "./change-model/scenarios.ts"
+import { oneMember } from "./member-fact"
 
 it("records idle serving failure without releasing its native capacity before exit (I2, I5, I6)", () => {
 	const s = initial()
@@ -66,7 +67,7 @@ it("keeps a transferred conclusion immutable when its serving generation later f
 	}).state
 	const after = Option.getOrThrow(Core.get(failed, "change-1"))
 	assert.strictEqual(after.conclusion, before.conclusion)
-	assert.isFalse(after.member.healthy)
+	assert.isFalse(oneMember(after).healthy)
 })
 it("does not let stale execution failure change a recreated incarnation (I2, I10)", () => {
 	const s = accept(submit(initial()), "change-1")

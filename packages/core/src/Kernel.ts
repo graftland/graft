@@ -21,6 +21,17 @@ export { deploymentIdentity } from "./internal/deploymentIdentity"
 export { UnknownChange } from "./internal/observation"
 
 export type {
+	MemberDeclaration,
+	RealmDeclaration,
+	PlacementRequirement,
+	LocalRequirement,
+	ResourceDeclaration,
+	ResolvedDependency,
+	DeploymentGroup,
+	GraphProposal,
+	GroupPlan,
+	SelectionReason,
+	UnitMember,
 	CallMessage,
 	CallEvidence,
 	CallFact,

@@ -262,9 +262,17 @@ it.live(
 					).length,
 					1,
 				)
-				assert.isTrue(recovered.member.healthy)
-				assert.isFalse(recovered.member.matchesTarget)
-				assert.isTrue(Option.isSome(recovered.member.actual))
+				assert.isTrue(
+					Option.getOrThrow(HashMap.get(recovered.members, "a")).healthy,
+				)
+				assert.isFalse(
+					Option.getOrThrow(HashMap.get(recovered.members, "a")).matchesTarget,
+				)
+				assert.isTrue(
+					Option.isSome(
+						Option.getOrThrow(HashMap.get(recovered.members, "a")).actual,
+					),
+				)
 			}).pipe(Effect.provide(runtime(target)))
 		}).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 	30000,

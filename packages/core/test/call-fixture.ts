@@ -2,12 +2,13 @@ import { Array, Cause, HashMap, Option } from "effect"
 
 import * as Bindings from "../src/internal/bindingCore"
 import * as Core from "../src/internal/decisionCore"
+import { declaredMembers, rootRealms } from "./member-fact"
 
 export const setup = () => {
 	const initial = Core.make({
 		authority: "calls",
 		maxUnits: 4,
-		instances: [
+		declarations: declaredMembers([
 			{
 				id: "provider",
 				target: { identity: "provider", placement: "Worker", overlap: true },
@@ -20,7 +21,8 @@ export const setup = () => {
 				id: "other",
 				target: { identity: "other", placement: "Worker", overlap: true },
 			},
-		],
+		]),
+		realms: rootRealms,
 		bindings: [
 			{ consumer: "consumer", provider: "provider", service: "weather" },
 			{ consumer: "consumer", provider: "other", service: "other" },

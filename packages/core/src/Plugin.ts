@@ -26,6 +26,7 @@ import * as Probes from "./internal/probes"
 import { RuntimeContext } from "./internal/runtimeContext"
 import * as TaskGroup from "./internal/tasks"
 import type { Tasks } from "./internal/tasks"
+import type { PlacementRequirement, ResourceDeclaration } from "./Kernel"
 import type { ManagedFork } from "./Transition"
 
 export type { Tasks } from "./internal/tasks"
@@ -148,6 +149,13 @@ export type Plugin<Config = any, Input = any, E = any> = 0 extends 1 & Input
 		: Definition<Config, Input, E | Schema.SchemaError>
 	: Definition<Config, Input, E | Schema.SchemaError>
 
+/** Static data exported as `deployment` beside a plugin's implementation. */
+export interface DeploymentMetadata {
+	readonly resources?: ReadonlyArray<ResourceDeclaration>
+	readonly placement?: PlacementRequirement
+	readonly probes?: ReadonlyArray<string>
+}
+export type { ResourceDeclaration, PlacementRequirement } from "./Kernel"
 export interface Definition<in out Config, in out Input, in out E> {
 	readonly [TypeId]: typeof TypeId
 	readonly [Contract]: {

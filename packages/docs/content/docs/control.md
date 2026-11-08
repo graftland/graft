@@ -47,6 +47,25 @@ business schemas.
 | `client.units`, `client.preparations` | Expose native exit evidence, cleanup classification, causes and residual reservations, including rejection before admission.             |
 | `client.waiters`                      | Returns bounded queued calls before generation selection; no provider credit is assigned yet.                                            |
 
+## Read a deployment plan
+
+Status and conclusions contain a `members` map and a `plan`. A removed member
+has no desired target; an initial member has no starting target. Every selected
+member retains all selection reasons and their predecessors.
+
+| Plan fact             | Rule                                                                                                                                          |
+| --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| Local dependencies    | Resolve concrete providers within realms; local edges and explicit co-location determine groups.                                              |
+| Contract dependencies | A compatible consumer remains outside replacement unless another reason selects it.                                                           |
+| Closure               | Repeatedly expand old and new groups, local captures and declared descendants. A split or merge does not turn the closure into one new group. |
+| Placement             | Default to Worker for an unconstrained group; reject incompatible explicit requirements before lifecycle actions.                             |
+| Reservations          | Include old/new membership, consulted realm/provider slots, optional absences, resources and distinct forward/recovery capacity.              |
+| Concurrent work       | Commit and recovery apply the reserved patch; unrelated accepted deployments remain intact.                                                   |
+
+Restart is the default strategy. Explicit Overlap requires every moved member,
+resource and placement to permit it. A plan with a missing provider, dependency
+cycle or placement conflict is rejected before old units are stopped.
+
 ## Retention
 
 Settled unkeyed history is bounded. Keyed requests and unresolved facts remain

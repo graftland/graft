@@ -53,7 +53,7 @@ Evidence abbreviations name exact test titles:
 | `packages/loader/test/candidate-scope.test.ts`      | releases missing candidates before fallback and retains the successful lease         | Replaced    | D9, D10, C1, C2: native inspection/exit replaces callback resource ownership.                                                                                                                                 |
 | `packages/loader/test/candidate-scope.test.ts`      | resolves a short name to a third-party package alone                                 | Replaced    | D7                                                                                                                                                                                                            |
 | `packages/loader/test/candidate-scope.test.ts`      | fails when a short name matches packages of both conventions                         | Replaced    | D2                                                                                                                                                                                                            |
-| `packages/loader/test/candidate-scope.test.ts`      | prefers the name as written over both conventions                                    | Replaced    | D2                                                                                                                                                                                                            |
+| `packages/loader/test/candidate-scope.test.ts`      | prefers the name as written over both conventions                                    | Replaced    | D1                                                                                                                                                                                                            |
 | `packages/loader/test/candidate-scope.test.ts`      | combines candidate failure and cleanup before deciding whether to fall back          | Replaced    | `settles custom resolver complete/defect/blocked cleanup through owned native exit evidence (F2)` (three expanded cases); C2 retains complete causes; native exit, not scope interruption, settles ownership. |
 | `packages/loader/test/candidate-scope.test.ts`      | releases a candidate with an invalid export before returning its error               | Replaced    | D9, D10, C1, C2: native inspection/exit replaces callback resource ownership.                                                                                                                                 |
 | `packages/loader/test/candidate-scope.test.ts`      | cancellation releases the current candidate while its parent stays open              | Replaced    | C1, D10: cancellation/rejection cannot erase a dispatched inspection; only matching late exit settles its owned unit. The importer callback/result generation no longer exists.                               |
@@ -134,3 +134,25 @@ Evidence abbreviations name exact test titles:
 | `packages/cli/test/start-integration.test.ts`: reads !env from an env file after the process environment (watch)       | Deferred    | `rejects watch before loading an invalid application revision (O6)`; O6 explicitly rejects live editing on start. Deployment edit policy is Phase 4. Direct embedded HMR APIs and tests remain. |
 | `packages/cli/test/start-integration.test.ts`: reads !env from an env file after the process environment (symlink)     | Deferred    | `rejects watch before loading an invalid application revision (O6)`; O6 explicitly rejects live editing on start. Deployment edit policy is Phase 4. Direct embedded HMR APIs and tests remain. |
 | `packages/cli/test/start-integration.test.ts`: recovers an initially invalid module through polling alone              | Deferred    | `rejects watch before loading an invalid application revision (O6)`; O6 explicitly rejects live editing on start. Deployment edit policy is Phase 4. Direct embedded HMR APIs and tests remain. |
+
+## Step 2 removed cases
+
+Baseline: `3e0e324`. Existing single-member lifecycle and fault cases retain
+their behavior and project the sole row of `members`; their assertions no longer
+depend on a scalar status field. Native fixtures also retain their behavior with
+identified descriptions. No test is deferred in this step.
+
+| File                                       | Removed case                                                                           | Disposition | Evidence                                                                                                                                                                                                                                                                     |
+| ------------------------------------------ | -------------------------------------------------------------------------------------- | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `packages/core/test/change-model.test.ts`  | touches only the admitted footprint with 0, 20 and 200 unrelated instances (I3)        | Replaced    | `decision-access.test.ts` records real Effect collection operations, including every graph index, across admission, commit, recovery, settlement and observation with 2,000 unrelated active Changes. The self-reported `State.accesses` counter and its writes are deleted. |
+| `packages/core/test/decision-core.test.ts` | rejects group, cross-unit local dependencies and runner Overlap before execution (I12) | Replaced    | `group-planning.test.ts` accepts and closes local groups, splits, merges and descendants. `rejects runner Overlap before execution (I3, I5)` retains the unsupported Runner strategy case using actual proposed member placement.                                            |
+
+The previous unsupported-group assertion is deleted; there is no singleton-only
+admission switch, count-based description or scalar `Status.member` alias.
+
+The retained
+`retains the absolute deadline and consumes a fresh term across Overlap failure and Restart-only recovery (I7, I11)`
+case uses an eligible old Process placement instead of an ineligible old Runner
+placement. Its deadline, fresh term, exclusive retirement and old-placement
+recovery assertions remain; the removed impossible premise is covered by the
+old-Runner Overlap rejection in `group-planning.test.ts`.

@@ -3,8 +3,8 @@ title: Units
 description: Run kernel instances behind a native execution boundary.
 ---
 
-A **unit** owns one fixed plugin member outside the kernel. Worker units provide
-a fault boundary. Use a sandboxed process deployment for untrusted work.
+A **unit** is a native execution boundary outside the kernel. Worker units
+provide a fault boundary. Use a sandboxed process deployment for untrusted work.
 
 ## Select captured code
 

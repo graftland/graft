@@ -70,7 +70,7 @@ interface Position {
 const run = (unrelated: number) => {
 	const base = initial(unrelated + 1, 3 * unrelated + 10)
 	const busy = Array.reduce(
-		Array.makeBy(unrelated, (i) => i + 1),
+		unrelated === 0 ? [] : Array.makeBy(unrelated, (i) => i + 1),
 		base,
 		(state, i) => {
 			const next = Core.reduce(state, {
@@ -117,6 +117,7 @@ const run = (unrelated: number) => {
 	const id = Option.getOrThrow(
 		HashMap.get(admitted.state.changes, "change-" + (unrelated + 1)),
 	).id
+
 	const oldStop = reportEvent(admitted.state, id, "Stop")
 	const retired = step(admitted, exitEvent(admitted.state, "instance-0@0"))
 	const serving = Array.reduce(kinds, retired, (r, kind) =>

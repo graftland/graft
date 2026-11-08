@@ -45,6 +45,7 @@ const issue = (
 		onNone: () => s,
 		onSome: (u) => {
 			const command: Command = {
+				members: u.members,
 				id: `call-command/${s.nextCallCommand}`,
 				change: "$calls",
 				unit,
@@ -237,12 +238,17 @@ const admit = (
 	}
 	const tags = Option.getOrElse(
 		Option.map(u.description, (d) =>
-			Array.flatMap(d.requires, (b) =>
-				b.key === message.service ? Array.map(b.operations, (o) => o.tag) : [],
+			Array.flatMap(d.members, (m) =>
+				Array.flatMap(m.requires, (b) =>
+					b.key === message.service
+						? Array.map(b.operations, (o) => o.tag)
+						: [],
+				),
 			),
 		),
 		() => [],
 	)
+
 	return issue(
 		save(
 			{

@@ -3,6 +3,7 @@ import { assert, it } from "@effect/vitest"
 
 import * as Core from "../src/internal/decisionCore.ts"
 import { deploymentIdentity } from "../src/internal/deploymentIdentity"
+import { declaredMembers, rootRealms } from "./member-fact"
 import {
 	command,
 	described,
@@ -143,7 +144,13 @@ it("requires inspection exit before admission and charges it to the original tot
 it("rejects an expanded member footprint before candidate execution and retains inspection settlement (I3, I12)", () => {
 	const first = prepare()
 	const p = id(first)
-	const bad = described(first.state, p, { ...description(), members: 2 })
+	const bad = described(first.state, p, {
+		...description(),
+		members: declaredMembers([
+			{ id: "a", target: target() },
+			{ id: "undeclared", target: target() },
+		]),
+	})
 	const rejected = exit(bad, p)
 	assert.equal(rejected.reply._tag, "Rejected")
 	assert.equal(HashMap.size(rejected.state.changes), 0)
@@ -153,7 +160,8 @@ it("rejects uncached inspection at full capacity before stopping an old unit (I2
 	const base = Core.make({
 		authority: "full",
 		maxUnits: 1,
-		instances: [{ id: "a", target: target("old") }],
+		declarations: declaredMembers([{ id: "a", target: target("old") }]),
+		realms: rootRealms,
 	})
 	const denied = prepare(base)
 	assert.equal(denied.reply._tag, "Rejected")
@@ -235,7 +243,13 @@ it("validates execution declarations before Serve and retains its native exit ob
 	)
 	const failed = report(running, command(running, change, "Start"), {
 		_tag: "Started",
-		value: { ...description(), overlap: false },
+		value: {
+			...description(),
+			members: Array.map(description().members, (m) => ({
+				...m,
+				overlap: !m.overlap,
+			})),
+		},
 	})
 	assert.isFalse(
 		Array.some(
@@ -313,7 +327,8 @@ it("uses the reserved recovery claim for a fresh Describe of a previously servin
 	const known = Core.make({
 		authority: "preparation-test",
 		maxUnits: 3,
-		instances: [{ id: "a", target: target("old") }],
+		declarations: declaredMembers([{ id: "a", target: target("old") }]),
+		realms: rootRealms,
 	})
 	const old = HashMap.get(known.units, "a@0").pipe(Option.getOrThrow)
 	const unavailable = Core.reduce(known, {
@@ -395,11 +410,16 @@ it("snapshots unit declarations before retaining inspection evidence (I1, I4)", 
 	const first = prepare()
 	const p = id(first)
 	const probes = ["health"]
-	const d = { ...description(), probes }
+	const d = {
+		...description(),
+		members: Array.map(description().members, (m) => ({ ...m, probes })),
+	}
 	const prepared = described(first.state, p, d)
 	probes.push("late")
 	const fact = HashMap.get(prepared.preparations, p).pipe(Option.getOrThrow)
-	assert.deepEqual(Option.getOrThrow(fact.description).probes, ["health"])
+	assert.deepEqual(Option.getOrThrow(fact.description).members[0]?.probes, [
+		"health",
+	])
 })
 
 it("finds a pending preparation key before closing or changed authorization (I2, I7)", () => {
@@ -425,6 +445,12 @@ it("retains admission conflict objects in a rejected preparation (I1, I3)", () =
 		_tag: "Submit",
 		request: {
 			instance: "a",
+			proposal: {
+				members: declaredMembers([{ id: "a", target: target("busy") }]),
+				removed: HashSet.empty(),
+				explicit: HashSet.make("a"),
+				realms: [],
+			},
 			target: target("busy"),
 			strategy: "Restart",
 			reads: HashMap.make(["a", 0]),
@@ -449,7 +475,10 @@ it("retains admission conflict objects in a rejected preparation (I1, I3)", () =
 	)
 	assert.equal(result._tag, "Rejected")
 	if (result._tag === "Rejected")
-		assert.deepEqual(Array.fromIterable(result.conflicts), ["a"])
+		assert.sameMembers(Array.fromIterable(result.conflicts), [
+			"a",
+			"membership-of:a",
+		])
 })
 
 it("keeps an inspection execution failure with its own preparation and preserves the complete native cause (I2, I3, I4)", () => {
@@ -555,4 +584,20 @@ it("snapshots native environment recipes and resolved module options before reta
 		resolution.environmentModules?.[0]?.artifact.identity.digest,
 		"changed",
 	)
+})
+
+it("never reuses an identified description for another instance with the same artifact and configuration (I2, I4, F3)", () => {
+	const before = Core.empty({
+		authority: "description-coordinates",
+		maxUnits: 4,
+		instances: [
+			{ id: "a", target: target() },
+			{ id: "b", target: target() },
+		],
+	})
+	const first = prepare(before, input(), true)
+	const cached = exit(described(first.state, id(first)), id(first)).state
+	const next = prepare(cached, { ...input(), instance: "b" })
+	assert.equal(next.reply._tag, "Preparing")
+	assert.equal(HashMap.size(next.state.changes), 0)
 })

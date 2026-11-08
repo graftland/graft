@@ -11,6 +11,7 @@ import {
 	setup,
 } from "./call-fixture"
 import { exit, fire, request, succeed } from "./change-model/scenarios"
+import { oneMember } from "./member-fact"
 
 it("records the selected provider and credit before sending a grant (I1, I2, I8, I9)", () => {
 	const s = requested()
@@ -435,7 +436,7 @@ it("projects recovery authorization from the actual generation under the current
 		Option.getOrThrow(Core.get(settled, "change-1")).conclusion,
 	)
 	assert.equal(outcome.outcome, "Recovered")
-	assert.isTrue(outcome.member.healthy)
+	assert.isTrue(oneMember(outcome).healthy)
 })
 
 it("retains cancellation that overtakes admission on the reserved control channel (I2, I8, I9)", () => {

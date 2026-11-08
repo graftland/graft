@@ -26,6 +26,7 @@ it("snapshots caller-owned probe arrays before retaining normalized identity (I1
 })
 it("finds normalized keyed identity before changed versions or closed admission (I2, I3)", () => {
 	const input: Core.Input = {
+		strategy: "Overlap",
 		instance: "instance-0",
 		key: "deployment",
 		target: target("next"),

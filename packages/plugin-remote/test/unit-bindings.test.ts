@@ -7,6 +7,7 @@ import {
 	Effect,
 	Fiber,
 	FiberSet,
+	HashMap,
 	HashSet,
 	Layer,
 	Option,
@@ -86,7 +87,9 @@ for (const placement of ["Worker", "Process", "Runner"] as const)
 						budget,
 					})
 					assert.equal(started.outcome, "Accepted", Cause.pretty(started.cause))
-					assert.isTrue(started.member.healthy)
+					assert.isTrue(
+						Option.getOrThrow(HashMap.get(started.members, "consumer")).healthy,
+					)
 				}).pipe(Effect.provide(layer))
 			}).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 		45000,

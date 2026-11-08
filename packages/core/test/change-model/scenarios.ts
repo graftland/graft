@@ -1,6 +1,7 @@
 import { Array as Arr, Cause, HashMap, HashSet, Option } from "effect"
 
 import * as Core from "../../src/internal/decisionCore.ts"
+import { declaredMembers, rootRealms } from "../member-fact"
 
 export const target = (identity: string): Core.Target => ({
 	identity,
@@ -11,10 +12,13 @@ export const initial = (count = 2, maxUnits = count + 2): Core.State =>
 	Core.make({
 		authority: "test",
 		maxUnits,
-		instances: Arr.makeBy(count, (i) => ({
-			id: `instance-${i}`,
-			target: target("original"),
-		})),
+		declarations: declaredMembers(
+			Arr.makeBy(count, (i) => ({
+				id: `instance-${i}`,
+				target: target("original"),
+			})),
+		),
+		realms: rootRealms,
 	})
 export const request = (
 	s: Core.State,
@@ -24,6 +28,12 @@ export const request = (
 	instance,
 	target: target("next"),
 	strategy,
+	proposal: {
+		members: declaredMembers([{ id: instance, target: target("next") }]),
+		removed: HashSet.empty(),
+		explicit: HashSet.make(instance),
+		realms: [],
+	},
 	reads: HashMap.make([instance, Core.cell(s, instance).version]),
 	writes: HashSet.make(instance),
 	leases: HashSet.empty(),

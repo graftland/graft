@@ -29,7 +29,11 @@ import {
 	target,
 } from "./preparation-fixture"
 
-const publicInput: Core.Input = { instance: "instance-0", target: target() }
+const publicInput: Core.Input = {
+	instance: "instance-0",
+	target: target(),
+	strategy: "Overlap",
+}
 const withDescription = (s: Core.State): Core.State => {
 	const p = prepare(s, publicInput, true)
 	return exit(described(p.state, id(p)), id(p)).state

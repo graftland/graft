@@ -1,4 +1,4 @@
-import { Array, Effect, Fiber, Option, Stream } from "effect"
+import { Array, Effect, Fiber, HashMap, HashSet, Option, Stream } from "effect"
 import { TestClock } from "effect/testing"
 import { NodeServices } from "@effect/platform-node"
 import { assert, it } from "@effect/vitest"
@@ -115,7 +115,12 @@ it.effect(
 				yield* phase(client, upgrade.id, "Trial")
 				const unrelated = yield* client.submit({
 					instance: "unrelated",
+					realm: "other",
+					realms: [
+						{ id: "other", parent: Option.none(), isolated: HashSet.empty() },
+					],
 					target: f.target(3),
+					strategy: "Overlap",
 					budget,
 				})
 				yield* consistent(client, unrelated.id, "Accepted")
@@ -158,6 +163,7 @@ it.effect(
 				const bad = yield* client.submit({
 					instance: "integration",
 					target: f.target(2, "startup"),
+					strategy: "Overlap",
 					budget,
 				})
 				yield* consistent(client, bad.id, "Aborted")
@@ -165,6 +171,7 @@ it.effect(
 				const trial = yield* client.submit({
 					instance: "integration",
 					target: f.target(2, "trial"),
+					strategy: "Overlap",
 					budget,
 					requirements: { trial: 1000 },
 				})
@@ -177,7 +184,11 @@ it.effect(
 				yield* TestClock.adjust(1000)
 				const recovered = yield* consistent(client, trial.id, "Recovered")
 				yield* Fiber.interrupt(crashing)
-				assert.equal(recovered.member.matchesTarget, false)
+				assert.equal(
+					Option.getOrThrow(HashMap.get(recovered.members, "integration"))
+						.matchesTarget,
+					false,
+				)
 				const reply = yield* f.call("recovered")
 				assert.equal(reply.version, 1)
 				assert.isAbove(reply.term, 2)

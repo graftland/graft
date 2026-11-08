@@ -17,6 +17,7 @@ import {
 	submit,
 	succeed,
 } from "./change-model/scenarios.ts"
+import { declaredMembers, oneMember, rootRealms } from "./member-fact"
 
 it("does not activate a partially installed view or accept another view token (I8)", () => {
 	const base = initial()
@@ -167,12 +168,13 @@ it("retains the absolute deadline and consumes a fresh term across Overlap failu
 	const base = Core.make({
 		authority: "test",
 		maxUnits: 3,
-		instances: [
+		declarations: declaredMembers([
 			{
 				id: "instance-0",
-				target: { identity: "original", placement: "Runner", overlap: false },
+				target: { identity: "original", placement: "Process", overlap: true },
 			},
-		],
+		]),
+		realms: rootRealms,
 	})
 	const s = installed(submit(base), "change-1")
 	const deadline = Option.getOrThrow(
@@ -188,7 +190,7 @@ it("retains the absolute deadline and consumes a fresh term across Overlap failu
 	const recovery = installed(ended, "change-1")
 	assert.strictEqual(
 		pending(recovery, "change-1", "Activate").target.placement,
-		"Runner",
+		"Process",
 	)
 	assert.strictEqual(
 		Option.getOrThrow(HashMap.get(recovery.changes, "change-1")).deadline,
@@ -435,7 +437,7 @@ it("terminates settled and idle serving units on shutdown without inventing Chan
 			)
 		}
 	}
-	assert.isFalse(status(closing.state).member.healthy)
+	assert.isFalse(oneMember(status(closing.state)).healthy)
 	assert.strictEqual(Core.capacity(closing.state).used, 2)
 })
 
@@ -443,12 +445,13 @@ it("keeps instance and Change ownership identities disjoint for arbitrary instan
 	const base = Core.make({
 		authority: "test",
 		maxUnits: 2,
-		instances: [
+		declarations: declaredMembers([
 			{
 				id: "change-1",
 				target: { identity: "original", placement: "Worker", overlap: true },
 			},
-		],
+		]),
+		realms: rootRealms,
 	})
 	const accepted = accept(submit(base, request(base, "change-1")), "change-1")
 	const serving = Option.getOrThrow(Core.cell(accepted, "change-1").value)
@@ -510,7 +513,7 @@ it("settles newly invalidated old execution before starting exclusive recovery (
 	}).state
 	const ended = exit(invalid, candidate)
 	assert.isTrue(status(ended).oldChanged)
-	assert.isFalse(status(ended).member.healthy)
+	assert.isFalse(oneMember(status(ended)).healthy)
 	assert.isFalse(
 		Arr.some(
 			Arr.fromIterable(HashMap.values(ended.commands)),
@@ -548,6 +551,6 @@ it("reclaims an orphaned ended current unit when unrelated history already evict
 	assert.isTrue(Option.isNone(Core.get(b, "change-1")))
 	const replacement = accept(submit(b), "change-3")
 	assert.strictEqual(HashMap.size(replacement.units), 2)
-	assert.isTrue(status(replacement, "change-3").member.healthy)
+	assert.isTrue(oneMember(status(replacement, "change-3")).healthy)
 	capacity(replacement)
 })

@@ -3,6 +3,7 @@ import { assert } from "@effect/vitest"
 
 import * as Core from "../src/internal/decisionCore.ts"
 import { deploymentIdentity } from "../src/internal/deploymentIdentity"
+import { declaredMembers } from "./member-fact"
 
 export const target = (identity = "next"): Core.Target => {
 	const deployment: Core.DeploymentData = {
@@ -93,16 +94,18 @@ export const resolved: Core.ResolvedInput = {
 	identity: "config-1",
 	environment: "test-runtime",
 }
-export const description = (t = target()): Core.Description => ({
+export const description = (
+	t = target(),
+	instance = "a",
+): Core.Description => ({
 	artifact: t.deployment?.artifact.identity.digest ?? "Missing artifact",
 	configuration: resolved.identity,
 	environment: resolved.environment,
 	protocol: 1,
-	overlap: true,
-	members: 1,
-	requires: [],
-	provides: [],
-	probes: [],
+	members: Array.map(declaredMembers([{ id: instance, target: t }]), (m) => ({
+		...m,
+		overlap: true,
+	})),
 })
 export const spawned = (s: Core.State, preparation: string) =>
 	report(
@@ -120,7 +123,14 @@ export const spawned = (s: Core.State, preparation: string) =>
 		),
 		{ _tag: "Succeeded" },
 	)
-export const described = (s: Core.State, p: string, d = description()) =>
+export const described = (
+	s: Core.State,
+	p: string,
+	d = description(
+		target(),
+		Option.getOrThrow(HashMap.get(s.preparations, p)).request.instance,
+	),
+) =>
 	report(spawned(s, p), command(spawned(s, p), p, "Describe"), {
 		_tag: "Described",
 		value: d,

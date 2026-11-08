@@ -62,6 +62,13 @@ const Outcome = Schema.Literals([
 ])
 const Rejection = Schema.Literals([
 	"IncompatibleBinding",
+	"PlacementConflict",
+	"MissingProvider",
+	"AmbiguousProvider",
+	"DependencyCycle",
+	"IneligibleOverlap",
+	"InvalidDeclaration",
+	"ResourceConflict",
 	"DescriptionFailed",
 	"PluginExportMissing",
 	"Unauthorized",
@@ -79,32 +86,96 @@ const Cleanup = Schema.Union([
 	Schema.TaggedStruct("Completed", {}),
 	Schema.TaggedStruct("Failed", { cause: Cause }),
 ])
+const Reason = Schema.Struct({
+	kind: Schema.Literals([
+		"ExplicitTarget",
+		"OldGroup",
+		"NewGroup",
+		"LocalDependency",
+		"ContractProviderLost",
+		"StructuralChild",
+	]),
+	from: Schema.String,
+})
+const Dependency = Schema.Struct({
+	kind: Schema.Literals(["Local", "Contract"]),
+	service: Schema.String,
+	provider: Schema.Option(Schema.String),
+	optional: Schema.Boolean,
+	slots: Strings,
+	ambiguous: Schema.Boolean,
+})
+const Group = Schema.Struct({
+	id: Schema.String,
+	version: Schema.Int,
+	members: Strings,
+	placement: Unit.PlacementRequirement,
+})
+const Realm = Schema.Struct({
+	id: Schema.String,
+	parent: Schema.Option(Schema.String),
+	isolated: Strings,
+})
+const Proposal = Schema.Struct({
+	members: Schema.Array(Unit.MemberDeclaration),
+	removed: Strings,
+	explicit: Strings,
+	realms: Schema.Array(Realm),
+})
+const Plan = Schema.Struct({
+	previousDependencies: Schema.HashMap(Schema.String, Schema.Array(Dependency)),
+	previousRealms: Schema.HashMap(Schema.String, Schema.Option(Realm)),
+	desiredRealms: Schema.HashMap(Schema.String, Schema.Option(Realm)),
+	members: Strings,
+	reasons: Schema.HashMap(Schema.String, Schema.HashSet(Reason)),
+	oldGroups: Schema.HashMap(Schema.String, Group),
+	newGroups: Schema.HashMap(Schema.String, Group),
+	previous: Schema.HashMap(Schema.String, Unit.MemberDeclaration),
+	desired: Schema.HashMap(Schema.String, Unit.MemberDeclaration),
+	dependencies: Schema.HashMap(Schema.String, Schema.Array(Dependency)),
+	membershipCells: Strings,
+	absenceCells: Strings,
+	reads: Strings,
+	writes: Strings,
+	leases: Strings,
+	participants: Strings,
+	startWaves: Schema.Array(Strings),
+	stopWaves: Schema.Array(Strings),
+	recoveryWaves: Schema.Array(Strings),
+	peakUnits: Schema.Int,
+	oldUnitCount: Schema.Int,
+	newUnitCount: Schema.Int,
+	nextGroup: Schema.Int,
+	proposal: Proposal,
+})
 const Member = Schema.Struct({
 	instance: Schema.String,
-	reason: Schema.Literal("ExplicitTarget"),
-	starting: Unit.Target,
+	reasons: Schema.HashSet(Reason),
+	starting: Schema.Option(Unit.Target),
 	startingVersion: Schema.Int,
-	desired: Unit.Target,
+	desired: Schema.Option(Unit.Target),
 	actual: Schema.Option(Unit.Target),
 	healthy: Schema.Boolean,
 	matchesTarget: Schema.Boolean,
 })
 const Conclusion = Schema.Struct({
+	plan: Plan,
 	calls: Strings,
 	outcome: Outcome,
 	phase: Phase,
 	cause: Cause,
-	member: Member,
+	members: Schema.HashMap(Schema.String, Member),
 	units: Strings,
 })
 const Status = Schema.Struct({
+	plan: Plan,
 	outstandingCalls: Strings,
 	id: Schema.String,
 	sequence: Schema.Int,
 	phase: Phase,
 	oldChanged: Schema.Boolean,
 	recovering: Schema.Boolean,
-	member: Member,
+	members: Schema.HashMap(Schema.String, Member),
 	remaining: Schema.Finite,
 	leaseHolders: Strings,
 	unconfirmedUnits: Strings,
@@ -118,6 +189,8 @@ const Status = Schema.Struct({
 	conclusion: Schema.Option(Conclusion),
 })
 const Fact = Schema.Struct({
+	group: Schema.String,
+	members: Schema.HashMap(Schema.String, Unit.UnitMember),
 	description: Schema.Option(Unit.Description),
 	endpoint: Schema.Option(Unit.Endpoint),
 	progress: Schema.optionalKey(Schema.String),
@@ -214,6 +287,10 @@ const Budget = Schema.Struct({
 	terminate: Schema.optionalKey(Schema.Finite),
 })
 const Input = Schema.Struct({
+	realm: Schema.optionalKey(Schema.String),
+	realms: Schema.optionalKey(Schema.Array(Realm)),
+	colocate: Schema.optionalKey(Schema.Array(Schema.String)),
+	placement: Schema.optionalKey(Unit.PlacementRequirement),
 	key: Schema.optional(Schema.String),
 	instance: Schema.String,
 	target: Unit.Target,

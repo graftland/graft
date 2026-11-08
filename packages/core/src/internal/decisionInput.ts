@@ -1,11 +1,16 @@
-import { Array, Record, type Schema } from "effect"
+import { Array, HashMap, HashSet, Option, Record, type Schema } from "effect"
 
 import type {
 	ArtifactData,
 	BindingDeclaration,
 	ConfigurationModule,
 	Description,
+	GraphProposal,
+	MemberDeclaration,
+	RealmDeclaration,
 	Report,
+	Request,
+	ResolvedInput,
 	Target,
 } from "./decisionState"
 
@@ -78,15 +83,101 @@ const binding = (value: BindingDeclaration): BindingDeclaration =>
 			Array.map(value.operations, (o) => Object.freeze({ ...o })),
 		),
 	})
+export const declaration = (value: MemberDeclaration): MemberDeclaration =>
+	Object.freeze({
+		...value,
+		target: target(value.target),
+		placement: Option.map(value.placement, (p) => Object.freeze({ ...p })),
+		localProvides: Object.freeze(Array.copy(value.localProvides)),
+		localRequires: Object.freeze(
+			Array.map(value.localRequires, (entry) => Object.freeze({ ...entry })),
+		),
+		provides: Object.freeze(Array.map(value.provides, binding)),
+		requires: Object.freeze(
+			Array.map(value.requires, (entry) =>
+				Object.freeze({ ...binding(entry), optional: entry.optional }),
+			),
+		),
+		resources: Object.freeze(
+			Array.map(value.resources, (entry) => Object.freeze({ ...entry })),
+		),
+		colocate: Object.freeze(Array.copy(value.colocate)),
+		probes: Object.freeze(Array.copy(value.probes)),
+	})
+const realm = (value: RealmDeclaration): RealmDeclaration =>
+	Object.freeze({ ...value, isolated: HashSet.fromIterable(value.isolated) })
+export const proposal = (value: GraphProposal): GraphProposal =>
+	Object.freeze({
+		members: Object.freeze(Array.map(value.members, declaration)),
+		explicit: HashSet.fromIterable(value.explicit),
+		removed: HashSet.fromIterable(value.removed),
+		realms: Object.freeze(Array.map(value.realms, realm)),
+	})
+export const resolution = (value: ResolvedInput): ResolvedInput =>
+	Object.freeze({
+		...value,
+		input: json(value.input),
+		...(value.environmentModules === undefined
+			? {}
+			: {
+					environmentModules: Object.freeze(
+						Array.map(value.environmentModules, configuration),
+					),
+				}),
+	})
+export const request = (value: Request): Request =>
+	Object.freeze({
+		...value,
+		target: target(value.target),
+		budget: Object.freeze({ ...value.budget }),
+		...(value.realms === undefined
+			? {}
+			: { realms: Object.freeze(Array.map(value.realms, realm)) }),
+		...(value.colocate === undefined
+			? {}
+			: { colocate: Object.freeze(Array.copy(value.colocate)) }),
+		...(value.placement === undefined
+			? {}
+			: { placement: Object.freeze({ ...value.placement }) }),
+		reads: HashMap.fromIterable(value.reads),
+		writes: HashSet.fromIterable(value.writes),
+		leases: HashSet.fromIterable(value.leases),
+		participants: HashSet.fromIterable(value.participants),
+		...(value.proposal === undefined
+			? {}
+			: { proposal: proposal(value.proposal) }),
+		...(value.resolution === undefined
+			? {}
+			: { resolution: resolution(value.resolution) }),
+		...(value.description === undefined
+			? {}
+			: { description: description(value.description) }),
+		...(value.probes === undefined
+			? {}
+			: { probes: Object.freeze(Array.copy(value.probes)) }),
+		...(value.identity === undefined
+			? {}
+			: {
+					identity: Object.freeze({
+						...value.identity,
+						target: target(value.identity.target),
+						realms: Object.freeze(Array.map(value.identity.realms, realm)),
+						colocate: Object.freeze(Array.copy(value.identity.colocate)),
+						placement: Option.map(value.identity.placement, (p) =>
+							Object.freeze({ ...p }),
+						),
+						budget: Object.freeze({ ...value.identity.budget }),
+						probes: Object.freeze(Array.copy(value.identity.probes)),
+					}),
+				}),
+	})
 export const description = (value: Description): Description =>
 	Object.freeze({
 		...value,
 		...(value.inspectionData === undefined
 			? {}
 			: { inspectionData: json(value.inspectionData) }),
-		requires: Object.freeze(Array.map(value.requires, binding)),
-		provides: Object.freeze(Array.map(value.provides, binding)),
-		probes: Object.freeze(Array.copy(value.probes)),
+		members: Object.freeze(Array.map(value.members, declaration)),
 	})
 export const report = (value: Report): Report => {
 	switch (value._tag) {

@@ -77,9 +77,7 @@ const decodeReport = Effect.fnUntraced(function* (
 const message = Effect.fnUntraced(
 	function* (runtime: Runtime, handle: Handle, value: unknown) {
 		yield* EncodedLimit.check(value)
-		const decoded = yield* Schema.decodeUnknownEffect(Wire.Outgoing)(
-			value,
-		).pipe(Effect.exit)
+		const decoded = yield* Wire.decodeOutgoing(value).pipe(Effect.exit)
 		if (Exit.isFailure(decoded)) {
 			yield* Queue.offer(runtime.events, {
 				_tag: "UnitFailed",
@@ -226,7 +224,13 @@ const worker = Effect.fnUntraced(function* (
 	}).pipe(Effect.orDie)
 	const handle: Handle = {
 		...state,
-		send: (message) => Effect.sync(() => native.postMessage(message)),
+		send: (message) =>
+			Wire.encodeIncoming(message).pipe(
+				Effect.orDie,
+				Effect.flatMap((encoded) =>
+					Effect.sync(() => native.postMessage(encoded)),
+				),
+			),
 		terminate: Effect.sync(() => {
 			native.terminate().then(
 				() => undefined,
@@ -276,15 +280,20 @@ const child = Effect.fnUntraced(function* (runtime: Runtime, command: Command) {
 	const handle: Handle = {
 		...state,
 		send: (message) =>
-			Effect.callback<void>((resume) => {
-				if (!native.connected) {
-					resume(Effect.die("Native unit control is disconnected"))
-					return
-				}
-				native.send(message, (error) =>
-					resume(error === null ? Effect.void : Effect.die(error)),
-				)
-			}),
+			Wire.encodeIncoming(message).pipe(
+				Effect.orDie,
+				Effect.flatMap((encoded) =>
+					Effect.callback<void>((resume) => {
+						if (!native.connected) {
+							resume(Effect.die("Native unit control is disconnected"))
+							return
+						}
+						native.send(encoded, (error) =>
+							resume(error === null ? Effect.void : Effect.die(error)),
+						)
+					}),
+				),
+			),
 		terminate: Effect.sync(() => {
 			native.kill("SIGKILL")
 		}),
@@ -383,9 +392,9 @@ const create = Effect.fnUntraced(function* (
 			),
 		),
 	)
-	const encoded = yield* Schema.decodeEffect(Wire.Command)(command).pipe(
-		Effect.orDie,
-	)
+	const encoded = yield* Schema.decodeEffect(Schema.toType(Wire.Command))(
+		command,
+	).pipe(Effect.orDie)
 	yield* handle.send({ _tag: "Init", command: encoded })
 	yield* Deferred.await(handle.initialized).pipe(
 		Effect.raceFirst(
@@ -407,9 +416,9 @@ const request = Effect.fnUntraced(function* (
 		return failed(Cause.fail("Native incarnation is unavailable"))
 	const reply = yield* Deferred.make<Report>()
 	yield* Ref.update(handle.value.pending, HashMap.set(command.id, reply))
-	const encoded = yield* Schema.decodeEffect(Wire.Command)(command).pipe(
-		Effect.orDie,
-	)
+	const encoded = yield* Schema.decodeEffect(Schema.toType(Wire.Command))(
+		command,
+	).pipe(Effect.orDie)
 	yield* handle.value.send({ _tag: "Run", command: encoded })
 	return yield* Deferred.await(reply)
 })

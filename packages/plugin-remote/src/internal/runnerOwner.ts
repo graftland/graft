@@ -46,7 +46,7 @@ const send = Effect.fnUntraced(function* (
 	frame: Frames.Outgoing,
 ) {
 	const line = yield* Schema.encodeEffect(
-		Schema.fromJsonString(Frames.Outgoing),
+		Schema.fromJsonString(Schema.toCodecJson(Frames.Outgoing)),
 	)(frame)
 	yield* Lines.write(socket, line)
 })
@@ -69,7 +69,7 @@ export const serveRunner = Effect.fnUntraced(function* (
 					yield* Stream.runForEach(incoming, (line) =>
 						Effect.gen(function* () {
 							const request = yield* Schema.decodeEffect(
-								Schema.fromJsonString(Frames.Incoming),
+								Schema.fromJsonString(Schema.toCodecJson(Frames.Incoming)),
 							)(line)
 							if (request.owner !== address.owner)
 								return yield* Effect.die("Runner owner identity mismatch")
