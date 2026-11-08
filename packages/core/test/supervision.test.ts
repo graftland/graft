@@ -217,3 +217,16 @@ it("does not redeploy a crashed unit with a revoked target (C7, C8)", () => {
 	assert.equal(fact(crashed).attempts.length, 0)
 	assert.isFalse(Executions.healthy(crashed, "a"))
 })
+
+it("keeps a revocation when only reference values change afterwards (C7)", () => {
+	const revoked = revoke(initial())
+	const refreshed = Core.reduce(revoked, {
+		_tag: "PolicyChanged",
+		instance: "a",
+		values: { TOKEN: "rotated" },
+		now: revoked.now,
+	}).state
+	const after = settle(signal(refreshed, "MemberFailed").state)
+	assert.isFalse(Executions.healthy(after, "a"))
+	assert.equal(fact(after).attempts.length, 0)
+})

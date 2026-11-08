@@ -330,6 +330,8 @@ export interface RecorderGrant {
 }
 /** The immutable payload a recorder stores before acknowledging. */
 export interface RecordPayload {
+	/** The kernel run: Change ids restart at change-1 in every run. */
+	readonly run: string
 	readonly change: string
 	readonly stage: RecordStage
 	readonly members: ReadonlyArray<string>
@@ -766,6 +768,8 @@ export interface State {
 	readonly consumerBindings: HashMap.HashMap<string, HashSet.HashSet<string>>
 	readonly routes: HashMap.HashMap<string, BindingRoute>
 	readonly authority: string
+	/** Unique per kernel start; namespaces durable records across restarts. */
+	readonly run: string
 	readonly open: boolean
 	readonly now: number
 	readonly nextChange: number
@@ -918,7 +922,8 @@ export type Event =
 	| {
 			readonly _tag: "PolicyChanged"
 			readonly instance: string
-			readonly allowed: ReadonlyArray<string>
+			/** Omitted: keep the current allowed set; only values change. */
+			readonly allowed?: ReadonlyArray<string>
 			readonly values: Readonly<Record<string, Schema.Json>>
 			readonly now: number
 	  }

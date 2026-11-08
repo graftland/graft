@@ -164,9 +164,9 @@ const operation = Effect.fnUntraced(function* (
 		const values = yield* Effect.forEach(Array.dedupe(names), (name) =>
 			Effect.map(Config.String(name), (v) => [name, v] as const),
 		)
+		// Only reference values: the operator's allowed set, and any revocation, stays as it is.
 		yield* control.setPolicy({
 			instance: entry.id,
-			allowed: [planned.identity],
 			values: Record.fromEntries(values),
 		})
 	}

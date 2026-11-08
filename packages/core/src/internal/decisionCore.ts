@@ -219,6 +219,8 @@ export const make = (options: {
 	readonly declarations: ReadonlyArray<MemberDeclaration>
 	readonly realms: ReadonlyArray<RealmDeclaration>
 	readonly authority: string
+	/** Unique per kernel start; tests may leave it out. */
+	readonly run?: string
 	readonly maxUnits: number
 	readonly callLimits?: Partial<CallLimits>
 	readonly bindings?: ReadonlyArray<FixedBinding>
@@ -261,6 +263,7 @@ export const make = (options: {
 			callLimits: { ...Calls.initial().callLimits, ...options.callLimits },
 			routes: HashMap.empty(),
 			authority: options.authority,
+			run: options.run ?? "",
 			open: true,
 			now: 0,
 			nextChange: 1,
@@ -1569,6 +1572,8 @@ const requestedBatch = (s: Working, input: Input): Working => {
 }
 export const empty = (options: {
 	readonly authority: string
+	/** Unique per kernel start; tests may leave it out. */
+	readonly run?: string
 	readonly maxUnits: number
 	readonly callLimits?: Partial<CallLimits>
 	readonly bindings?: ReadonlyArray<FixedBinding>
@@ -2749,7 +2754,10 @@ const policyChanged = (
 		}),
 		policies: HashMap.set(s.policies, event.instance, {
 			version: previous.version + 1,
-			allowed: Option.some(HashSet.fromIterable(event.allowed)),
+			allowed:
+				event.allowed === undefined
+					? previous.allowed
+					: Option.some(HashSet.fromIterable(event.allowed)),
 			values: InputSnapshot.values(event.values),
 		}),
 	}
@@ -2762,7 +2770,15 @@ const policyChanged = (
 			withChange(s, id, (s, c) =>
 				Option.isSome(c.conclusion)
 					? s
-					: fail(s, c, Cause.fail("Current authorization premise changed")),
+					: fail(
+							s,
+							c,
+							Cause.fail(
+								event.allowed === undefined
+									? "Current reference values changed"
+									: "Current authorization premise changed",
+							),
+						),
 			),
 	)
 }

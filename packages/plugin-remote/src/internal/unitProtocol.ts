@@ -266,6 +266,7 @@ export const RecordDuty = Schema.Struct({
 	incarnation: Schema.String,
 	content: Schema.String,
 	payload: Schema.Struct({
+		run: Schema.String,
 		change: Schema.String,
 		stage: Schema.Literals(["Intent", "Commit", "Conclusion"]),
 		members: Schema.Array(Schema.String),

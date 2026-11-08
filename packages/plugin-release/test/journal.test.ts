@@ -17,8 +17,10 @@ const line = (
 	change: string,
 	stage: Journal.Line["stage"],
 	outcome: string | null = null,
+	run = "run-1",
 ): Journal.Line => ({
-	id: `${change}/${stage}`,
+	id: `${run}/${change}/${stage}`,
+	run,
 	change,
 	stage,
 	content: `${change}|${stage}|${outcome ?? ""}`,
@@ -198,4 +200,89 @@ it.effect(
 				assert.isAtLeast(reopened.length, 1)
 			}).pipe(Effect.provide(flakySync(failing)))
 		}).pipe(Effect.scoped),
+)
+
+/** A file system whose next append writes only the first 12 bytes, then fails. */
+const tornWrite = (tearing: Ref.Ref<boolean>) =>
+	Layer.effect(
+		FileSystem.FileSystem,
+		Effect.map(FileSystem.FileSystem, (fs) => ({
+			...fs,
+			open: (
+				file: string,
+				options?: Parameters<FileSystem.FileSystem["open"]>[1],
+			) =>
+				Effect.map(fs.open(file, options), (handle) => ({
+					...handle,
+					sync: handle.sync,
+					writeAll: (bytes: Uint8Array) =>
+						Effect.flatMap(Ref.getAndSet(tearing, false), (tear) =>
+							tear
+								? handle.writeAll(bytes.slice(0, 12)).pipe(
+										Effect.andThen(
+											Effect.fail(
+												PlatformError.systemError({
+													_tag: "Unknown",
+													module: "FileSystem",
+													method: "write",
+													description: "Injected partial write",
+												}),
+											),
+										),
+									)
+								: handle.writeAll(bytes),
+						),
+				})),
+		})),
+	).pipe(Layer.provideMerge(NodeServices.layer))
+
+it.effect(
+	"cuts a partial write back to the last acknowledged line before retrying (C4)",
+	() =>
+		Effect.gen(function* () {
+			const tearing = yield* Ref.make(false)
+			yield* Effect.gen(function* () {
+				const { directory } = yield* scratch
+				yield* Effect.scoped(
+					Effect.gen(function* () {
+						const journal = yield* Journal.open(directory)
+						yield* journal.append(line("change-1", "Intent"))
+						yield* Ref.set(tearing, true)
+						const failed = yield* Effect.flip(
+							journal.append(line("change-1", "Commit")),
+						)
+						assert.equal(failed.reason, "Storage")
+						const retried = yield* journal.append(line("change-1", "Commit"))
+						assert.equal(retried, "Appended")
+					}),
+				)
+				const history = yield* Journal.history(directory)
+				assert.deepStrictEqual(history[0]!.stages, ["Intent", "Commit"])
+			}).pipe(Effect.provide(tornWrite(tearing)))
+		}).pipe(Effect.scoped),
+)
+
+it.effect(
+	"keeps a Change id reused by a later kernel run apart from the earlier one (C4)",
+	() =>
+		Effect.gen(function* () {
+			const { directory } = yield* scratch
+			for (const run of ["run-1", "run-2"])
+				yield* Effect.scoped(
+					Effect.flatMap(Journal.open(directory), (journal) =>
+						journal.append({
+							...line("change-1", "Intent", null, run),
+							content: `${run} plans other work`,
+						}),
+					),
+				)
+			const history = yield* Journal.history(directory)
+			assert.deepStrictEqual(
+				Array.map(history, (s) => [s.run, s.change]),
+				[
+					["run-1", "change-1"],
+					["run-2", "change-1"],
+				],
+			)
+		}).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 )

@@ -2,11 +2,13 @@
 import {
 	Array,
 	Cause,
+	Clock,
 	Context,
 	Effect,
 	HashMap,
 	Layer,
 	Option,
+	Random,
 	Schema,
 	Stream,
 } from "effect"
@@ -159,9 +161,10 @@ export class Kernel extends Context.Service<
 			readonly grant: Option.Option<Core.RecorderGrant>
 			readonly outstanding: ReadonlyArray<Core.RecordDuty>
 		}>
+		/** Sets reference values and, when `allowed` is given, the target identities the instance may run. */
 		readonly setPolicy: (policy: {
 			readonly instance: string
-			readonly allowed: ReadonlyArray<string>
+			readonly allowed?: ReadonlyArray<string>
 			readonly values: Readonly<Record<string, Schema.Json>>
 		}) => Effect.Effect<void>
 		readonly shutdown: Effect.Effect<void>
@@ -197,7 +200,13 @@ export const layer = (
 	Layer.effect(
 		Kernel,
 		Effect.gen(function* () {
-			const controller = yield* Interpreter.make(Core.empty(deployment))
+			// Change ids restart in every run, so durable records carry the run as well.
+			const started = yield* Clock.currentTimeMillis
+			const salt = yield* Random.nextIntBetween(0, 2 ** 31)
+			const run = `${started.toString(36)}-${salt.toString(36)}`
+			const controller = yield* Interpreter.make(
+				Core.empty({ ...deployment, run }),
+			)
 			return Kernel.of({
 				await: controller.await,
 				cancel: (id) =>

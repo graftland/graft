@@ -173,6 +173,7 @@ export const request = (
 			onSome: (g) => g.incarnation,
 		}),
 		payload: {
+			run: s.run,
 			change: c.id,
 			stage,
 			members: Arr.sort(Arr.fromIterable(c.plan.members), stringOrder),

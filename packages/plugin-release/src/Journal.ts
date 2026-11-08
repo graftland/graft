@@ -1,6 +1,7 @@
 /** The release recorder's append-only journal: each record is on disk before it is acknowledged. */
 import {
 	Array,
+	ByteSize,
 	Cause,
 	Effect,
 	FileSystem,
@@ -31,6 +32,8 @@ const Stage = Schema.Literals(["Intent", "Commit", "Conclusion"])
 /** One journal line: a record exactly as the kernel delivered it. */
 export const Line = Schema.Struct({
 	id: Schema.String,
+	/** The kernel run; a Change id is unique only within its run. */
+	run: Schema.String,
 	change: Schema.String,
 	stage: Stage,
 	content: Schema.String,
@@ -43,7 +46,8 @@ const encodeLine = Schema.encodeEffect(Schema.fromJsonString(Line))
 const decodeLine = Schema.decodeUnknownEffect(Schema.fromJsonString(Line))
 
 export const fromDuty = (duty: RecordDuty): Line => ({
-	id: duty.id,
+	id: `${duty.payload.run}/${duty.id}`,
+	run: duty.payload.run,
 	change: duty.payload.change,
 	stage: duty.payload.stage,
 	content: duty.content,
@@ -70,6 +74,7 @@ export interface Options {
 }
 /** What the journal shows about one Change. */
 export interface Summary {
+	readonly run: string
 	readonly change: string
 	readonly stages: ReadonlyArray<Line["stage"]>
 	readonly members: ReadonlyArray<string>
@@ -192,16 +197,18 @@ export const open = Effect.fnUntraced(function* (
 	})
 	if (Option.isNone(read.last)) yield* syncDirectory
 	const lock = yield* Semaphore.make(1)
-	const write = (segment: number, bytes: Uint8Array) =>
+	/** Appends after `valid`, the last acknowledged boundary of the segment. */
+	const write = (segment: number, valid: number, bytes: Uint8Array) =>
 		Effect.scoped(
 			Effect.gen(function* () {
-				const handle = yield* fs.open(
-					path.join(directory, segmentName(segment)),
-					{
-						flag: "a",
-						mode: 0o600,
-					},
-				)
+				const file = path.join(directory, segmentName(segment))
+				// A failed append may have left a partial or unsynced line; cut back to the boundary first.
+				if (yield* fs.exists(file)) {
+					const info = yield* fs.stat(file)
+					if (ByteSize.toBigInt(info.size) > BigInt(valid))
+						yield* fs.truncate(file, valid)
+				}
+				const handle = yield* fs.open(file, { flag: "a", mode: 0o600 })
 				yield* handle.writeAll(bytes)
 				yield* handle.sync
 			}),
@@ -230,7 +237,7 @@ export const open = Effect.fnUntraced(function* (
 				const bytes = new TextEncoder().encode(text + "\n")
 				const rotate = current.size > 0 && current.size + bytes.length > limit
 				const segment = rotate ? current.segment + 1 : current.segment
-				yield* write(segment, bytes)
+				yield* write(segment, rotate ? 0 : current.size, bytes)
 				if (rotate || current.size === 0) yield* syncDirectory
 				yield* Ref.set(state, {
 					lines: Array.append(current.lines, line),
@@ -248,20 +255,22 @@ export const open = Effect.fnUntraced(function* (
 	}
 })
 
-/** Groups journaled lines by Change id, in the order each Change first appeared. */
+/** Groups journaled lines by kernel run and Change id, in the order each Change first appeared. */
 export const summarize = (
 	lines: ReadonlyArray<Line>,
 ): ReadonlyArray<Summary> => {
-	const order = Array.dedupe(Array.map(lines, (line) => line.change))
+	const key = (line: Line) => `${line.run}/${line.change}`
+	const order = Array.dedupe(Array.map(lines, key))
 	return Array.map(order, (change) => {
-		const own = Array.filter(lines, (line) => line.change === change)
+		const own = Array.filter(lines, (line) => key(line) === change)
 		const conclusion = Array.findFirst(
 			own,
 			(line) => line.stage === "Conclusion",
 		)
 		const first = Array.headNonEmpty(own as [Line, ...Array<Line>])
 		return {
-			change,
+			run: first.run,
+			change: first.change,
 			stages: Array.map(own, (line) => line.stage),
 			members: first.members,
 			targets: first.targets,
