@@ -50,6 +50,7 @@ Remote 执行单元通过控制通道接受探针请求。描述实现不会运�
 或探针。开始服务会运行普通的
 `apply`；就绪检查等待插件及其导出的服务就绪。探针成功、服务就绪和进程确认退出是不同的事实。
 
-`fork.probe` 访问该 fork 自己的注册。宿主 Remote
-fork 不会将此 API 转发给子进程。对于受管理的直接 Worker 和子进程部署，协调器会在切换前和恢复期间请求
-`policy.probes`。候选探针失败会中止切换，并在结局中保留其 cause。参阅[执行转换](../transitions/)。
+`fork.probe`
+访问嵌入式运行时中该 fork 自己的注册。Change 会在新代开始服务前、以及对恢复的代，运行
+`requirements.probes`
+中列出的探针。探针失败时 Change 中止或恢复，并在结局中保留其 cause。参阅[变更](../transitions/#请求字段)。

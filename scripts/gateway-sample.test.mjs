@@ -17,4 +17,6 @@ for (const [placement, strategy] of [
 		assert.include(output, "Exited")
 		assert.match(output, /sessions: 1/)
 		assert.match(output, /after: 2/)
+		assert.match(output, /brokenUpgrade: '(Aborted|Recovered)'/)
+		assert.match(output, /afterBroken: 2/)
 	}, 60000)

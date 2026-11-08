@@ -29,6 +29,17 @@ export const upgrade = Effect.gen(function* () {
 })
 ```
 
+## 請求欄位
+
+| 欄位                  | 含義                                                                                      | 預設值                                  |
+| --------------------- | ----------------------------------------------------------------------------------------- | --------------------------------------- |
+| `operations`          | `Deploy`（實例、目標，可選的領域、同駐與放置）和 `Remove`。                               | 必填                                    |
+| `key`                 | 請求鍵：相同的鍵與相同的請求回傳同一個 Change。                                           | 無                                      |
+| `strategy`            | `Restart` 先停舊代再啟動新代；`Overlap` 在切換期間新舊並行服務。runner 只接受 `Restart`。 | `Restart`                               |
+| `budget`              | `total`、`startup`、`probe`、`drain`、`stop` 與 `terminate` 的毫秒數。                    | 總計 300 000，啟動 30 000，其餘各 5 000 |
+| `requirements.probes` | 新代開始服務前必須通過的[探針](../probes/)。失敗時 Change 中止或恢復。                    | 無                                      |
+| `requirements.trial`  | 新代在 Change 結束前必須持續服務的毫秒數。                                                | 0                                       |
+
 ## 觀察
 
 `Change.get` 回傳目前事實。`Change.changes` 發佈帶序號的快照。發現序號缺口時透過

@@ -16,7 +16,7 @@ const hold = (port) =>
 				return yield* Effect.die("Gate closed without release")
 		}),
 	)
-export const make = (version) =>
+export const make = (version, healthy = true) =>
 	Plugin.make({
 		name: "integration",
 		config: Config,
@@ -25,7 +25,12 @@ export const make = (version) =>
 		apply: (config) =>
 			Effect.gen(function* () {
 				const term = yield* Plugin.term
-				yield* Plugin.probe("health", Effect.void)
+				yield* Plugin.probe(
+					"health",
+					healthy
+						? Effect.void
+						: Effect.fail("Version 3 is deliberately broken"),
+				)
 				yield* Graft.provide(Integration, {
 					read: (city) =>
 						Effect.gen(function* () {

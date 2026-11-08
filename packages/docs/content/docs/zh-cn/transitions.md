@@ -29,6 +29,17 @@ export const upgrade = Effect.gen(function* () {
 })
 ```
 
+## 请求字段
+
+| 字段                  | 含义                                                                                      | 默认值                                  |
+| --------------------- | ----------------------------------------------------------------------------------------- | --------------------------------------- |
+| `operations`          | `Deploy`（实例、目标，可选的领域、同驻与放置）和 `Remove`。                               | 必填                                    |
+| `key`                 | 请求键：相同的键与相同的请求返回同一个 Change。                                           | 无                                      |
+| `strategy`            | `Restart` 先停旧代再启动新代；`Overlap` 在切换期间新旧并行服务。runner 只接受 `Restart`。 | `Restart`                               |
+| `budget`              | `total`、`startup`、`probe`、`drain`、`stop` 与 `terminate` 的毫秒数。                    | 总计 300 000，启动 30 000，其余各 5 000 |
+| `requirements.probes` | 新代开始服务前必须通过的[探针](../probes/)。失败时 Change 中止或恢复。                    | 无                                      |
+| `requirements.trial`  | 新代在 Change 结束前必须持续服务的毫秒数。                                                | 0                                       |
+
 ## 观察
 
 `Change.get` 返回当前事实。`Change.changes` 发布带序号的快照。发现序号缺口时通过

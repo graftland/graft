@@ -69,7 +69,12 @@ export const instances = (
 		entry.disabled === true || entry["cli"] === true
 			? Effect.succeed<ReadonlyArray<Entry>>([])
 			: entry.group === true
-				? instances(Option.getOrElse(children(entry.config), () => []))
+				? // A group's own isolate, inject and intercept would apply to its children; reject them too.
+					supported(entry).pipe(
+						Effect.andThen(
+							instances(Option.getOrElse(children(entry.config), () => [])),
+						),
+					)
 				: supported(entry).pipe(Effect.as<ReadonlyArray<Entry>>([entry])),
 	).pipe(Effect.map(Array.flatten))
 const children = Schema.decodeUnknownOption(Schema.Array(EntrySchema))

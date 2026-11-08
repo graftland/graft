@@ -124,8 +124,8 @@ embedded editing service.
 ## Load a config file
 
 An embedded program can use `Include.Include` to read and edit YAML. Its
-`watch: true` option observes file edits cooperatively. `graft start` reads one
-revision and rejects `--watch`:
+`watch: true` option observes file edits cooperatively. `graft start --watch`
+instead turns each save into a Change (see [CLI](../cli/#watch-mode)):
 
 ```ts
 import { Effect } from "effect"

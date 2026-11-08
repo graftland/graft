@@ -118,7 +118,8 @@ export const run = () =>
 ## 加载配置文件
 
 嵌入式程序可通过 `Include.Include` 读取和编辑 YAML，`watch: true`
-协作式监听文件修改。`graft start` 只读取一个版本，不支持 `--watch`。
+协作式监听文件修改。`graft start --watch` 则把每次保存变成一个 Change（见
+[CLI](../cli/#监听模式)）。
 
 ```ts
 import { Effect } from "effect"

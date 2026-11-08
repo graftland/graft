@@ -194,6 +194,7 @@ const prepare = Effect.fnUntraced(function* (placement) {
 	const contractArtifact = yield* capture("provider-contract.mjs")
 	const first = yield* capture("v1.mjs")
 	const second = yield* capture("v2.mjs")
+	const third = yield* capture("broken.mjs")
 	const gateway = yield* capture("gateway.mjs")
 	const u = yield* upstream()
 	const g = yield* gate()
@@ -222,6 +223,7 @@ const prepare = Effect.fnUntraced(function* (placement) {
 	})
 	const old = target(first)
 	const next = target(second)
+	const broken = target(third)
 	const unrelated = target(second, "Worker")
 	const address = yield* boot(directory, {
 		authority: "sample",
@@ -239,7 +241,7 @@ const prepare = Effect.fnUntraced(function* (placement) {
 			},
 		],
 	})
-	return { address, old, next, consumer, unrelated, u, g }
+	return { address, old, next, broken, consumer, unrelated, u, g }
 })
 const upgrade = Effect.fnUntraced(function* (f, client, strategy) {
 	const held = yield* f.u.call("held").pipe(Effect.forkScoped)
@@ -248,7 +250,7 @@ const upgrade = Effect.fnUntraced(function* (f, client, strategy) {
 		operations: [{ _tag: "Deploy", instance: "integration", target: f.next }],
 		strategy,
 		budget,
-		requirements: { trial: 5000 },
+		requirements: { trial: 5000, probes: ["health"] },
 	})
 	if (strategy === "Restart") {
 		yield* phase(client, handle.id, "Draining")
@@ -370,10 +372,33 @@ export const prove = Effect.fnUntraced(function* (
 			),
 		"Current target is unhealthy or selection is incorrect",
 	)
+	// A deliberately broken upgrade ends within its budget, reports why, and
+	// leaves version 2 serving the same gateway session.
+	const failing = yield* reconnected.submit({
+		operations: [{ _tag: "Deploy", instance: "integration", target: f.broken }],
+		strategy,
+		budget,
+		requirements: { trial: 5000, probes: ["health"] },
+	})
+	const failed = yield* failing.await
+	const still = yield* f.u.call("still")
+	yield* requireFact(
+		(failed.outcome === "Aborted" || failed.outcome === "Recovered") &&
+			Cause.pretty(failed.cause).includes("deliberately broken") &&
+			still.version === 2 &&
+			still.session === session &&
+			(yield* f.u.sessions) === 1,
+		"The broken upgrade did not leave version 2 serving: " +
+			failed.outcome +
+			" " +
+			Cause.pretty(failed.cause),
+	)
 	const report = {
 		placement,
 		strategy,
 		outcome: result.outcome,
+		brokenUpgrade: failed.outcome,
+		afterBroken: still.version,
 		before: before.version,
 		after: after.version,
 		session,

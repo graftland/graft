@@ -52,8 +52,8 @@ Describing an implementation does not run `apply` or probes. Serving runs
 ordinary `apply`; readiness waits for the plugin and its exported services. A
 successful probe is separate from readiness and from confirmed process exit.
 
-`fork.probe` addresses that fork's own registrations. A host Remote fork does
-not forward this API to its child. For managed direct Worker and child-process
-deployments, the coordinator requests `policy.probes` before cutover and during
-recovery. A failed candidate probe aborts cutover and preserves its cause in the
-outcome. See [execution transitions](../transitions/).
+`fork.probe` addresses the fork's own registrations in the embedded runtime. A
+Change runs the probes named in `requirements.probes` on the new generation
+before it serves, and on a recovered generation. A failed probe aborts or
+recovers the Change and keeps its cause in the outcome. See
+[Changes](../transitions/#request-fields).

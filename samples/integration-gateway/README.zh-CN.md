@@ -13,11 +13,12 @@ devenv shell -- pnpm --filter @graftland/sample-integration-gateway start Runner
 ```
 
 命令启动独立内核进程，捕获已构建的 JavaScript，保持一个旧代一元调用，升级到版本 2，并按 Change
-id 重连控制通道。
+id 重连控制通道，然后尝试一个健康探针会失败的版本 3。
 
 ## 观察
 
-报告显示 Accepted、版本 1 与 2、一个网关单元和上游会话、ExplicitTarget 选择原因、当前代码健康状态、旧单元原生退出、零剩余 Change 租约与未确认单元、剩余预算和原始 cause。
+报告显示 Accepted、版本 1 与 2、故意出错的升级以 `Aborted`（Overlap）或
+`Recovered`（Restart）结束且版本 2 继续服务、一个网关单元和上游会话、ExplicitTarget 选择原因、当前代码健康状态、旧单元原生退出、零剩余 Change 租约与未确认单元、剩余预算和原始 cause。
 
 ## 边界
 
