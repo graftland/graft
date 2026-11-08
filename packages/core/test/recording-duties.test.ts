@@ -2,6 +2,7 @@ import { Array, Cause, HashMap, HashSet, Option } from "effect"
 import { assert, it } from "@effect/vitest"
 
 import * as Core from "../src/internal/decisionCore"
+import * as Recording from "../src/internal/recordingCore"
 import { exit, fire, report, request } from "./change-model/scenarios"
 import { declaredMembers, rootRealms } from "./member-fact"
 
@@ -481,4 +482,64 @@ it("accepts a recording role declared after start once, and refuses a different 
 	// Work in scope is now recorded: it waits for the intent before acting.
 	const admitted = submit(register(declared.state).state).state
 	assert.isTrue(Option.contains(status(admitted).recording.gate, "Intent"))
+})
+
+it("answers a key journaled in an earlier run from its record and concludes that run's unfinished work (K6)", () => {
+	const request: Core.Input = {
+		operations: [
+			{
+				_tag: "Deploy",
+				instance: "a",
+				target: { identity: "a-next", placement: "Worker", overlap: true },
+			},
+		],
+		key: "deploy-a",
+	}
+	const text = Recording.requestText(Core.normalizedIdentity(request))
+	const s = initial()
+	const unit = unitOf(s, "release")
+	const registered = Core.reduce(s, {
+		_tag: "RecorderRegistered",
+		unit: unit.id,
+		incarnation: unit.incarnation,
+		recorder: "release",
+		recovered: {
+			keys: [
+				{ key: "deploy-a", request: text, run: "earlier", change: "change-7" },
+			],
+			unfinished: [{ run: "earlier", change: "change-8", members: ["a"] }],
+		},
+		now: s.now,
+	})
+	const concluding = Option.getOrThrow(
+		HashMap.get(registered.state.records, "prior/earlier/change-8/Conclusion"),
+	)
+	assert.equal(concluding.payload.run, "earlier")
+	assert.equal(concluding.payload.phase, "Interrupted")
+	assert.isTrue(Option.isNone(concluding.payload.outcome))
+	assert.deepStrictEqual(
+		Array.map(concluding.payload.facts, (f) => f.instance),
+		["a"],
+	)
+	assert.isTrue(Array.some(registered.commands, (c) => c.kind === "Record"))
+	const repeated = Core.reduce(registered.state, {
+		_tag: "Requested",
+		request,
+		now: s.now,
+	})
+	assert.deepStrictEqual(
+		repeated.reply._tag === "Rejected"
+			? [repeated.reply.reason, Array.fromIterable(repeated.reply.conflicts)]
+			: [],
+		["AlreadyRecorded", ["earlier/change-7"]],
+	)
+	const different = Core.reduce(registered.state, {
+		_tag: "Requested",
+		request: { ...request, strategy: "Overlap" },
+		now: s.now,
+	})
+	assert.equal(
+		different.reply._tag === "Rejected" ? different.reply.reason : "",
+		"KeyConflict",
+	)
 })

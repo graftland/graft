@@ -100,6 +100,7 @@ const Rejection = Schema.Literals([
 	"RecordingCapacity",
 	"SelfReplacement",
 	"RecordingConflict",
+	"AlreadyRecorded",
 ])
 const Cleanup = Schema.Union([
 	Schema.TaggedStruct("Unknown", {}),

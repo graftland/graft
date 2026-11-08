@@ -66,9 +66,12 @@ See [Units](../units/) for inspection, capacity and native exit evidence.
 
 Budgets are milliseconds and cover the whole submission. Request keys retain
 their identity for the runtime lifetime; another normalized request under the
-same key is rejected. Unknown cleanup after forced exit does not establish
-successful finalizers. Missing exit evidence retains unit capacity and
-reservations. Unrelated instances may progress within capacity.
+same key is rejected. With a durable recorder, keys survive a kernel restart:
+the same request is rejected as `AlreadyRecorded` naming the earlier run and
+Change, and Changes left unconcluded get a concluding record with no outcome.
+Unknown cleanup after forced exit does not establish successful finalizers.
+Missing exit evidence retains unit capacity and reservations. Unrelated
+instances may progress within capacity.
 
 ## Embedded lifecycle
 

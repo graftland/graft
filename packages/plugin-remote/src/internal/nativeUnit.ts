@@ -880,8 +880,12 @@ const processStdio = (runtime: UnitRuntime): ProcessStdio["Service"] => ({
 })
 /** Deliveries are queued for whichever plugin in this unit holds the role; identity comes from the channel. */
 const recorder = (runtime: UnitRuntime): Recorder["Service"] => ({
-	register: (name) =>
-		runtime.emit({ _tag: "RecorderRegister", recorder: name }),
+	register: (name, recovered) =>
+		runtime.emit({
+			_tag: "RecorderRegister",
+			recorder: name,
+			...(recovered === undefined ? {} : { recovered }),
+		}),
 	records: Stream.fromQueue(runtime.records),
 	acknowledge: (record) =>
 		runtime.emit({

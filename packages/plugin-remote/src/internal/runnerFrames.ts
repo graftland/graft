@@ -53,6 +53,7 @@ const RecordingEvidence = Schema.Union([
 		unit: Schema.String,
 		incarnation: Schema.String,
 		recorder: Schema.String,
+		recovered: Schema.optionalKey(Wire.Recovered),
 	}),
 	Schema.TaggedStruct("RecordAcknowledged", {
 		unit: Schema.String,

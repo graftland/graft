@@ -305,6 +305,8 @@ export const make = (options: {
 			records: HashMap.empty(),
 			recordsOutstanding: 0,
 			recordsPromised: 0,
+			priorKeys: HashMap.empty(),
+			recovered: false,
 			supervisionPolicy: Supervisor.policy(options.supervision),
 			supervision: HashMap.empty(),
 			pendingRestarts: HashMap.empty(),
@@ -1397,7 +1399,7 @@ export const defaultBudget: Budget = {
 	stop: 5000,
 	terminate: 5000,
 }
-const normalizedIdentity = (
+export const normalizedIdentity = (
 	input: Input,
 	inspect = false,
 ): RequestIdentity => ({
@@ -1433,16 +1435,28 @@ const keyedReply = (
 				: reject(s, "KeyConflict"),
 		),
 		() =>
-			Option.flatMap(HashMap.get(s.preparationKeys, key), (id) =>
-				Option.map(HashMap.get(s.preparations, id), (preparation) =>
-					!preparation.inspect &&
-					Equal.equals(preparation.request.identity, identity)
-						? ({
-								...s,
-								reply: { _tag: "Preparing", preparation: id },
-							} satisfies Working)
+			Option.orElse(
+				Option.map(HashMap.get(s.priorKeys, key), (prior) =>
+					prior.request === Recording.requestText(identity)
+						? reject(
+								s,
+								"AlreadyRecorded",
+								HashSet.make(`${prior.run}/${prior.change}`),
+							)
 						: reject(s, "KeyConflict"),
 				),
+				() =>
+					Option.flatMap(HashMap.get(s.preparationKeys, key), (id) =>
+						Option.map(HashMap.get(s.preparations, id), (preparation) =>
+							!preparation.inspect &&
+							Equal.equals(preparation.request.identity, identity)
+								? ({
+										...s,
+										reply: { _tag: "Preparing", preparation: id },
+									} satisfies Working)
+								: reject(s, "KeyConflict"),
+						),
+					),
 			),
 	)
 const requested = (

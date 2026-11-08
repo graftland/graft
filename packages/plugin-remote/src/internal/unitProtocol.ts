@@ -260,6 +260,24 @@ export const CallMessage = Schema.Union([
 	}),
 ])
 export type CallMessage = typeof CallMessage.Type
+/** What a durable recorder reports from its journal when it registers. */
+export const Recovered = Schema.Struct({
+	keys: Schema.Array(
+		Schema.Struct({
+			key: Schema.String,
+			request: Schema.String,
+			run: Schema.String,
+			change: Schema.String,
+		}),
+	),
+	unfinished: Schema.Array(
+		Schema.Struct({
+			run: Schema.String,
+			change: Schema.String,
+			members: Schema.Array(Schema.String),
+		}),
+	),
+})
 export const RecordDuty = Schema.Struct({
 	id: Schema.String,
 	recorder: Schema.String,
@@ -296,6 +314,8 @@ export const RecordDuty = Schema.Struct({
 				]),
 			}),
 		),
+		key: Schema.Option(Schema.String),
+		request: Schema.String,
 		phase: Schema.String,
 		diagnostic: Schema.String,
 	}),
@@ -439,7 +459,10 @@ export const Outgoing = Schema.Union([
 	Schema.TaggedStruct("Diagnostic", { cause: Schema.Json }),
 	Schema.TaggedStruct("Cleanup", { cause: Schema.optionalKey(Schema.Json) }),
 	Schema.TaggedStruct("Progress", { stage: Schema.String }),
-	Schema.TaggedStruct("RecorderRegister", { recorder: Schema.String }),
+	Schema.TaggedStruct("RecorderRegister", {
+		recorder: Schema.String,
+		recovered: Schema.optionalKey(Recovered),
+	}),
 	Schema.TaggedStruct("StdioClaim", {}),
 	Schema.TaggedStruct("StdioOut", { bytes: Schema.Uint8Array }),
 	Schema.TaggedStruct("StdioClose", {}),
