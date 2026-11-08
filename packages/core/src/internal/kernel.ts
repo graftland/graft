@@ -30,6 +30,8 @@ export interface Submission {
 	readonly inspection: Option.Option<Core.PreparationStatus>
 }
 export interface Controller {
+	readonly calls: Effect.Effect<ReadonlyArray<Core.CallFact>>
+	readonly callChanges: Stream.Stream<Core.CallFact>
 	readonly time: Effect.Effect<number>
 	readonly apply: (event: Core.Event) => Effect.Effect<Core.Reply>
 	readonly submit: (request: Core.Input) => Effect.Effect<Submission>
@@ -47,6 +49,7 @@ export interface Controller {
 interface Runtime {
 	readonly state: TxRef.TxRef<Core.State>
 	readonly outbox: TxQueue.TxQueue<Core.Command>
+	readonly callEvents: TxPubSub.TxPubSub<Core.CallFact>
 	readonly events: TxPubSub.TxPubSub<Core.Status>
 	readonly preparations: TxPubSub.TxPubSub<Core.PreparationStatus>
 	readonly submissions: TxRef.TxRef<
@@ -262,6 +265,30 @@ const execute = Effect.fnUntraced(function* (
 	command: Core.Command,
 ): Effect.fn.Return<Core.Report> {
 	switch (command.kind) {
+		case "PublishCall":
+			if (command.callStatus !== undefined)
+				yield* TxPubSub.publish(runtime.callEvents, command.callStatus)
+			return { _tag: "Succeeded" }
+		case "CallArmTimer":
+			if (command.call?.deadline !== undefined) {
+				const call = command.call
+				yield* FiberMap.run(
+					runtime.timers,
+					`call:${call.key}`,
+					Effect.gen(function* () {
+						const now = yield* time(runtime)
+						yield* Effect.sleep(Math.max(0, (call.deadline ?? now) - now))
+						const observed = yield* time(runtime)
+						yield* consume(runtime, {
+							_tag: "CallExpired",
+							key: call.key,
+							now: observed,
+						})
+					}),
+					{ onlyIfMissing: true },
+				)
+			}
+			return { _tag: "Succeeded" }
 		case "PublishPreparation":
 			yield* publishPreparation(runtime, command)
 			return { _tag: "Succeeded" }
@@ -437,8 +464,9 @@ export const make = Effect.fnUntraced(function* (
 ): Effect.fn.Return<Controller, never, Scope.Scope | UnitControl> {
 	const runtime: Runtime = {
 		state: yield* TxRef.make(initial),
-		outbox: yield* TxQueue.unbounded<Core.Command>(),
+		outbox: yield* TxQueue.bounded<Core.Command>(1024 + initial.maxUnits * 256),
 		events: yield* TxPubSub.sliding<Core.Status>(64),
+		callEvents: yield* TxPubSub.sliding<Core.CallFact>(64),
 		preparations: yield* TxPubSub.sliding<Core.PreparationStatus>(64),
 		submissions: yield* TxRef.make(
 			HashMap.empty<string, Deferred.Deferred<Submission>>(),
@@ -462,6 +490,14 @@ export const make = Effect.fnUntraced(function* (
 	).pipe(Effect.forkScoped)
 	yield* Effect.addFinalizer(() => close(runtime))
 	return {
+		calls: TxRef.get(runtime.state).pipe(
+			Effect.map((s) => Arr.fromIterable(HashMap.values(s.calls))),
+		),
+		callChanges: Stream.unwrap(
+			Effect.map(TxPubSub.subscribe(runtime.callEvents), (queue) =>
+				Stream.fromEffectRepeat(TxQueue.take(queue)),
+			),
+		),
 		time: time(runtime),
 		apply: (event) => consume(runtime, event),
 		submit: (request) => submit(runtime, request),

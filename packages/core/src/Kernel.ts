@@ -15,6 +15,12 @@ import * as Interpreter from "./internal/kernel"
 import { UnitControl } from "./internal/unitControl"
 
 export type {
+	CallMessage,
+	CallEvidence,
+	CallFact,
+	CallControl,
+	CallLimits,
+	CallWaiter,
 	Input as Request,
 	Target,
 	Budget,
@@ -69,6 +75,7 @@ export interface Handle {
 	readonly cancel: Effect.Effect<void>
 }
 export interface Deployment {
+	readonly callLimits?: Partial<Core.CallLimits>
 	readonly bindings?: ReadonlyArray<Core.FixedBinding>
 	readonly authority: string
 	readonly maxUnits: number
@@ -80,6 +87,8 @@ export interface Deployment {
 export class Kernel extends Context.Service<
 	Kernel,
 	{
+		readonly calls: Effect.Effect<ReadonlyArray<Core.CallFact>>
+		readonly callChanges: Stream.Stream<Core.CallFact>
 		readonly submit: (
 			request: Core.Input,
 		) => Effect.Effect<Handle, ChangeRejected>
@@ -134,6 +143,8 @@ export const layer = (
 		Effect.gen(function* () {
 			const controller = yield* Interpreter.make(Core.empty(deployment))
 			return Kernel.of({
+				calls: controller.calls,
+				callChanges: controller.callChanges,
 				submit: (request) => submit(controller, request),
 				get: controller.get,
 				changes: controller.changes,

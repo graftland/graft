@@ -218,6 +218,7 @@ export interface Cell {
 	readonly readers: HashSet.HashSet<string>
 }
 export interface Instance {
+	readonly established: boolean
 	readonly id: string
 	readonly desired: Target
 	readonly current: Option.Option<string>
@@ -255,6 +256,7 @@ export interface Claim {
 	readonly unit: Option.Option<string>
 }
 export type Phase =
+	| "Draining"
 	| "Resolving"
 	| "Spawning"
 	| "Starting"
@@ -281,6 +283,7 @@ export interface MemberFact {
 	readonly matchesTarget: boolean
 }
 export interface Conclusion {
+	readonly calls: HashSet.HashSet<string>
 	readonly outcome: Outcome
 	readonly phase: Phase
 	readonly cause: Cause.Cause<unknown>
@@ -288,6 +291,7 @@ export interface Conclusion {
 	readonly units: HashSet.HashSet<string>
 }
 export interface Change {
+	readonly hadServing: boolean
 	readonly resolved: Option.Option<ResolvedInput>
 	readonly description: Option.Option<Description>
 	readonly policyVersion: number
@@ -325,6 +329,14 @@ export interface Change {
 	readonly released: boolean
 }
 export type CommandKind =
+	| "RetireRoute"
+	| "CallRegister"
+	| "CallGrant"
+	| "CallReject"
+	| "CallCancel"
+	| "CallCompleteAck"
+	| "CallArmTimer"
+	| "PublishCall"
 	| "Resolve"
 	| "Describe"
 	| "PublishPreparation"
@@ -365,6 +377,8 @@ export type Report =
 			readonly delivery?: "Unavailable"
 	  }
 export interface Command {
+	readonly call?: CallControl
+	readonly callStatus?: CallFact
 	readonly view?: RouteView
 	readonly dispatched: boolean
 	readonly resolution?: ResolvedInput
@@ -396,6 +410,7 @@ export interface Timer {
 	readonly command: Option.Option<string>
 }
 export interface Status {
+	readonly outstandingCalls: HashSet.HashSet<string>
 	readonly id: string
 	readonly sequence: number
 	readonly phase: Phase
@@ -410,6 +425,17 @@ export interface Status {
 	readonly conclusion: Option.Option<Conclusion>
 }
 export interface State {
+	readonly activeCalls: HashSet.HashSet<string>
+	readonly calls: HashMap.HashMap<string, CallFact>
+	readonly callsByUnit: HashMap.HashMap<string, HashSet.HashSet<string>>
+	readonly callWaiters: HashMap.HashMap<string, CallWaiter>
+	readonly waitingByBinding: HashMap.HashMap<string, HashSet.HashSet<string>>
+	readonly callRequests: HashMap.HashMap<string, string>
+	readonly cancelledCalls: HashSet.HashSet<string>
+	readonly callSeen: HashSet.HashSet<string>
+	readonly callHistory: ReadonlyArray<string>
+	readonly callLimits: CallLimits
+	readonly nextCallCommand: number
 	readonly bindings: HashMap.HashMap<string, FixedBinding>
 	readonly bindingConflicts: HashSet.HashSet<string>
 	readonly providerBindings: HashMap.HashMap<string, HashSet.HashSet<string>>
@@ -445,6 +471,8 @@ export interface State {
 	readonly accesses: HashMap.HashMap<string, number>
 }
 export type Event =
+	| (CallEvidence & { readonly now: number })
+	| { readonly _tag: "CallExpired"; readonly key: string; readonly now: number }
 	| {
 			readonly _tag: "UnitDiagnostic"
 			readonly unit: string
@@ -583,4 +611,79 @@ export interface Transition {
 	readonly state: State
 	readonly commands: ReadonlyArray<Command>
 	readonly reply: Reply
+}
+
+export interface CallLimits {
+	readonly concurrency: number
+	readonly waiters: number
+	readonly wait: number
+}
+export type CallMessage =
+	| {
+			readonly _tag: "Lost"
+			readonly session: string
+			readonly request: string
+			readonly cause: Cause.Cause<unknown>
+	  }
+	| {
+			readonly _tag: "Request"
+			readonly session: string
+			readonly request: string
+			readonly service: string
+			readonly lifecycle: boolean
+			readonly nested: boolean
+			readonly wait: number
+	  }
+	| {
+			readonly _tag: "Cancel" | "Result"
+			readonly session: string
+			readonly request: string
+	  }
+	| {
+			readonly _tag: "Complete"
+			readonly key: string
+			readonly cleanup: Cleanup
+			readonly cause: Cause.Cause<unknown>
+	  }
+export interface CallFact {
+	readonly key: string
+	readonly consumer: string
+	readonly consumerIncarnation: string
+	readonly provider: string
+	readonly providerIncarnation: string
+	readonly session: string
+	readonly request: string
+	readonly service: string
+	readonly route: BindingRoute
+	readonly credit: boolean
+	readonly dispatched: boolean
+	readonly cancelled: boolean
+	readonly result: "Pending" | "Received" | "Unknown"
+	readonly completion: Option.Option<Cleanup>
+	readonly cause: Cause.Cause<unknown>
+	readonly sequence: number
+}
+export interface CallWaiter {
+	readonly key: string
+	readonly consumer: string
+	readonly incarnation: string
+	readonly message: Extract<CallMessage, { _tag: "Request" }>
+	readonly deadline: number
+}
+export interface CallControl {
+	readonly key: string
+	readonly session: string
+	readonly request: string
+	readonly service: string
+	readonly route?: BindingRoute
+	readonly reason?: string
+	readonly deadline?: number
+	readonly tags?: ReadonlyArray<string>
+}
+export interface CallEvidence {
+	readonly _tag: "CallObserved"
+	readonly unit: string
+	readonly incarnation: string
+	readonly observer: string
+	readonly message: CallMessage
 }

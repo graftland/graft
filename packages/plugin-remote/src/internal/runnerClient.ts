@@ -8,7 +8,6 @@ import {
 	FiberSet,
 	HashMap,
 	Option,
-	Queue,
 	Ref,
 	Schema,
 	Scope,
@@ -17,6 +16,7 @@ import {
 
 import type { Command, Report, UnitEvent } from "@graftland/graft/Kernel"
 
+import * as EncodedLimit from "./encodedLimit"
 import * as Lines from "./jsonLines"
 import * as Frames from "./runnerFrames"
 import * as Wire from "./unitProtocol"
@@ -32,7 +32,7 @@ const unavailable = (cause: Cause.Cause<unknown>): Report => ({
 interface Link {
 	readonly address: { readonly socket: string; readonly owner: string }
 	readonly socket: Socket
-	readonly events: Queue.Queue<UnitEvent>
+	readonly events: (event: UnitEvent) => Effect.Effect<void>
 	readonly connected: Deferred.Deferred<void>
 	readonly pending: Ref.Ref<HashMap.HashMap<string, Deferred.Deferred<Report>>>
 	readonly units: Ref.Ref<HashMap.HashMap<string, Command>>
@@ -41,9 +41,9 @@ const receiveFrame = Effect.fnUntraced(function* (link: Link, line: string) {
 	const frame = yield* Schema.decodeEffect(
 		Schema.fromJsonString(Frames.Outgoing),
 	)(line)
-	if (frame._tag === "Evidence") {
+	if (frame._tag === "Evidence" || frame._tag === "CallEvidence") {
 		const event = yield* Frames.decodeEvent(frame)
-		yield* Queue.offer(link.events, event)
+		yield* link.events(event)
 		if (event._tag === "Exited")
 			yield* Ref.update(link.units, HashMap.remove(event.incarnation))
 		return
@@ -69,7 +69,7 @@ const failLink = Effect.fnUntraced(function* (
 	yield* Effect.forEach(
 		HashMap.values(owned),
 		(c) =>
-			Queue.offer(link.events, {
+			link.events({
 				_tag: "UnitDisconnected",
 				unit: c.unit,
 				incarnation: c.token.incarnation,
@@ -94,6 +94,7 @@ const writeCommand = Effect.fnUntraced(function* (
 	const line = yield* Schema.encodeEffect(
 		Schema.fromJsonString(Frames.Incoming),
 	)({ owner: link.address.owner, command: encoded })
+	yield* EncodedLimit.check({ owner: link.address.owner, command: encoded })
 	yield* Lines.write(link.socket, line)
 })
 const request = Effect.fnUntraced(function* (
@@ -113,7 +114,7 @@ const request = Effect.fnUntraced(function* (
 })
 const connect = Effect.fnUntraced(function* (
 	address: Link["address"],
-	events: Queue.Queue<UnitEvent>,
+	events: (event: UnitEvent) => Effect.Effect<void>,
 ) {
 	const socket = yield* Effect.sync(() => new Socket())
 	const incoming = yield* Lines.receive(socket)
@@ -144,7 +145,7 @@ const connect = Effect.fnUntraced(function* (
 	} satisfies Connection
 })
 export const make = Effect.fnUntraced(function* (
-	events: Queue.Queue<UnitEvent>,
+	events: (event: UnitEvent) => Effect.Effect<void>,
 ) {
 	const connections = yield* Ref.make(HashMap.empty<string, Connection>())
 	const scope = yield* Effect.scope

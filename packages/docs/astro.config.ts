@@ -93,6 +93,7 @@ export default defineConfig({
 						"transitions",
 						"units",
 						"bindings",
+						"calls",
 						"application-releases",
 						"trust",
 					],

@@ -31,7 +31,7 @@ const pull = Effect.fnUntraced(function* (
 	if (chunk._tag === "Closed")
 		return yield* ConnectionEnded.make({ cause: chunk.cause })
 	const value = remainder + chunk.value
-	if (value.length > limit)
+	if (new TextEncoder().encode(value).byteLength > limit)
 		return yield* ConnectionEnded.make({
 			cause: Cause.fail("Runner control frame exceeds its byte limit"),
 		})
@@ -42,17 +42,27 @@ const pull = Effect.fnUntraced(function* (
 	]
 })
 export const receive = Effect.fnUntraced(function* (socket: Socket) {
-	const queue = yield* Queue.unbounded<Chunk>()
+	const queue = yield* Queue.bounded<Chunk>(64)
 	const fibers = yield* FiberSet.make()
 	const run = yield* FiberSet.runtime(fibers)()
 	yield* Effect.acquireRelease(
 		Effect.sync(() => {
 			socket.setEncoding("utf8")
-			socket.on("data", (data) =>
+			socket.on("data", (data) => {
+				socket.pause()
 				run(
-					Queue.offer(queue, { _tag: "Data", value: globalThis.String(data) }),
-				),
-			)
+					Queue.offer(queue, {
+						_tag: "Data",
+						value: globalThis.String(data),
+					}).pipe(
+						Effect.andThen(
+							Effect.sync(() => {
+								socket.resume()
+							}),
+						),
+					),
+				)
+			})
 			socket.on("error", (error) =>
 				run(Queue.offer(queue, { _tag: "Closed", cause: Cause.die(error) })),
 			)

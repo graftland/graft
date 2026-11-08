@@ -30,6 +30,8 @@ import {
 	type UnitEvent,
 } from "@graftland/graft/Kernel"
 
+import * as CallFrames from "./callFrames"
+import * as EncodedLimit from "./encodedLimit"
 import * as RunnerClient from "./runnerClient"
 import * as Wire from "./unitProtocol"
 import * as Resolution from "./unitResolution"
@@ -51,6 +53,7 @@ interface Runtime {
 	readonly scope: Scope.Scope
 	readonly handles: Ref.Ref<HashMap.HashMap<string, Handle>>
 	readonly prevented: Ref.Ref<HashSet.HashSet<string>>
+	readonly requests: Queue.Queue<UnitEvent>
 	readonly events: Queue.Queue<UnitEvent>
 	readonly callbacks: FiberSet.FiberSet<void, never>
 	readonly run: (effect: Effect.Effect<void>) => unknown
@@ -73,6 +76,7 @@ const decodeReport = Effect.fnUntraced(function* (
 })
 const message = Effect.fnUntraced(
 	function* (runtime: Runtime, handle: Handle, value: unknown) {
+		yield* EncodedLimit.check(value)
 		const decoded = yield* Schema.decodeUnknownEffect(Wire.Outgoing)(
 			value,
 		).pipe(Effect.exit)
@@ -86,6 +90,16 @@ const message = Effect.fnUntraced(
 		}
 		const frame = decoded.value
 		switch (frame._tag) {
+			case "Call":
+				yield* Queue.offer(
+					frame.message._tag === "Request" ? runtime.requests : runtime.events,
+					{
+						_tag: "CallObserved",
+						...unitEvent(handle.command),
+						message: yield* CallFrames.decode(frame.message),
+					},
+				)
+				return
 			case "Online":
 				yield* Deferred.succeed(handle.online, undefined)
 				return
@@ -329,6 +343,16 @@ const create = Effect.fnUntraced(function* (
 			Cause.fail("Native deployment data is required"),
 			"NotStarted",
 		)
+	const size = yield* Effect.exit(EncodedLimit.check(command))
+	if (Exit.isFailure(size)) {
+		const existing = yield* Ref.get(runtime.handles)
+		return failed(
+			size.cause,
+			HashMap.has(existing, command.token.incarnation)
+				? "Unknown"
+				: "NotStarted",
+		)
+	}
 	const prevented = yield* Ref.get(runtime.prevented)
 	if (HashSet.has(prevented, command.token.incarnation))
 		return failed(Cause.fail("Spawn was prevented"), "NotStarted")
@@ -420,7 +444,8 @@ const placementLayer = (withRunner: boolean) =>
 				scope: yield* Effect.scope,
 				handles: yield* Ref.make(HashMap.empty<string, Handle>()),
 				prevented: yield* Ref.make(HashSet.empty<string>()),
-				events: yield* Queue.unbounded<UnitEvent>(),
+				requests: yield* Queue.bounded<UnitEvent>(128),
+				events: yield* Queue.bounded<UnitEvent>(256),
 				callbacks,
 				run,
 			}
@@ -444,9 +469,19 @@ const placementLayer = (withRunner: boolean) =>
 					)
 				}),
 			)
-			const runner = yield* RunnerClient.make(runtime.events)
+			const runner = yield* RunnerClient.make((event) =>
+				Queue.offer(
+					event._tag === "CallObserved" && event.message._tag === "Request"
+						? runtime.requests
+						: runtime.events,
+					event,
+				).pipe(Effect.asVoid),
+			)
 			return UnitControl.of({
-				events: Stream.fromQueue(runtime.events),
+				events: Stream.merge(
+					Stream.fromQueue(runtime.events),
+					Stream.fromQueue(runtime.requests),
+				),
 				send: (command) =>
 					(withRunner &&
 					command.target.placement === "Runner" &&

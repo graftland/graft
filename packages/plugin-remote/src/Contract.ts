@@ -13,7 +13,12 @@ import type { Graft, Plugin } from "@graftland/graft"
 
 import * as Operations from "./internal/operations"
 
-export { service } from "./internal/services"
+export {
+	service,
+	OwnedRequest,
+	type UnitRequirements,
+	type UnitServices,
+} from "./internal/services"
 export {
 	operation,
 	identity,
@@ -26,11 +31,27 @@ export type { OperationComparison } from "@graftland/graft/Plugin"
 /** Brands a remote contract descriptor. */
 export const TypeId = "~@graftland/plugin-remote/Contract"
 
+export interface RequestOwner {
+	readonly run: <A, E, R>(
+		effect: Effect.Effect<A, E, R>,
+		ticket: string,
+		tag: string,
+	) => Effect.Effect<A, E, R>
+}
 /** RPC types stay inside the descriptor; Graft supplies its dynamic activation context. */
-export interface Service<R = never, ClientR = never>
+export interface Service<R = never, ClientR = never, UnitR = R>
 	extends Plugin.ProvidedContract {
 	readonly key: Context.Key<unknown, unknown>
 	readonly group: Pick<RpcGroup.RpcGroup<Rpc.Any>, "requests">
+	/** Serves encoded unary requests using a Graft-owned handler Scope. */
+	readonly serveUnit: (
+		port: {
+			readonly serverProtocol: (
+				endpoint: string,
+			) => RpcServer.Protocol["Service"]
+		},
+		owner: RequestOwner,
+	) => Effect.Effect<never, never, UnitR>
 	readonly serve: (port: {
 		readonly serverProtocol: (endpoint: string) => RpcServer.Protocol["Service"]
 	}) => Effect.Effect<never, never, R>

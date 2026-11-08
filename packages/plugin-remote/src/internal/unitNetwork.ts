@@ -12,6 +12,7 @@ import type { Kernel } from "@graftland/graft"
 import type * as Contract from "../Contract"
 import { TransportError } from "../Errors"
 import type { Channel } from "../Transport"
+import type { Owner } from "./ownedCalls"
 import * as Port from "./port"
 import * as Services from "./services"
 
@@ -45,6 +46,7 @@ const connection = Effect.fnUntraced(function* (
 	socket: NativeSocket,
 	credential: string,
 	services: ReadonlyArray<Contract.Service>,
+	owner: Owner,
 ): Effect.fn.Return<never, Socket.SocketError, Scope.Scope> {
 	const adapted = yield* NodeSocket.fromDuplex(Effect.succeed(socket))
 	const bytes = yield* channel(adapted)
@@ -55,7 +57,7 @@ const connection = Effect.fnUntraced(function* (
 	})
 	yield* Effect.forEach(
 		services,
-		(service) => service.serve(port).pipe(Effect.forkScoped),
+		(service) => service.serveUnit(port, owner).pipe(Effect.forkScoped),
 		{ discard: true },
 	)
 	return yield* port.await.pipe(Effect.orDie)
@@ -63,6 +65,7 @@ const connection = Effect.fnUntraced(function* (
 export const provider = Effect.fnUntraced(function* (
 	services: ReadonlyArray<Contract.Service>,
 	diagnostic: (cause: Cause.Cause<unknown>) => Effect.Effect<void>,
+	owner: Owner,
 ): Effect.fn.Return<Provider, never, Scope.Scope | SecureRandom.SecureRandom> {
 	const random = yield* SecureRandom.SecureRandom
 	const credential = yield* random.uuidV4()
@@ -86,7 +89,7 @@ export const provider = Effect.fnUntraced(function* (
 		return yield* Effect.die("Unit endpoint did not bind a TCP address")
 	const serve: Effect.Effect<never> = Queue.take(accepted).pipe(
 		Effect.flatMap((socket) =>
-			connection(socket, credential, services).pipe(
+			connection(socket, credential, services, owner).pipe(
 				Effect.scoped,
 				Effect.catchCause(diagnostic),
 				Effect.forkScoped,

@@ -2,6 +2,7 @@ import { Cause, Effect, Option, Schema } from "effect"
 
 import type { Command, Report, UnitEvent } from "@graftland/graft/Kernel"
 
+import * as Calls from "./callFrames"
 import * as Wire from "./unitProtocol"
 
 export const Incoming = Schema.Struct({
@@ -28,6 +29,14 @@ const Evidence = Schema.Struct({
 	),
 })
 export const Outgoing = Schema.Union([
+	Schema.TaggedStruct("CallEvidence", {
+		event: Schema.Struct({
+			unit: Schema.String,
+			incarnation: Schema.String,
+			observer: Schema.String,
+			message: Wire.CallMessage,
+		}),
+	}),
 	Schema.TaggedStruct("Reply", {
 		command: Schema.String,
 		result: Wire.Report,
@@ -43,6 +52,11 @@ export const encodeReport = Effect.fnUntraced(function* (report: Report) {
 export const encodeEvent = Effect.fnUntraced(function* (
 	event: UnitEvent,
 ): Effect.fn.Return<Outgoing, Schema.SchemaError> {
+	if (event._tag === "CallObserved")
+		return {
+			_tag: "CallEvidence",
+			event: { ...event, message: yield* Calls.encode(event.message) },
+		}
 	if (event._tag === "UnitProgress") return { _tag: "Evidence", event }
 	return {
 		_tag: "Evidence",
@@ -59,8 +73,14 @@ export const encodeEvent = Effect.fnUntraced(function* (
 	}
 })
 export const decodeEvent = Effect.fnUntraced(function* (
-	frame: Extract<Outgoing, { _tag: "Evidence" }>,
+	frame: Extract<Outgoing, { _tag: "Evidence" | "CallEvidence" }>,
 ): Effect.fn.Return<UnitEvent, Schema.SchemaError> {
+	if (frame._tag === "CallEvidence")
+		return {
+			_tag: "CallObserved",
+			...frame.event,
+			message: yield* Calls.decode(frame.event.message),
+		}
 	const e = frame.event
 	const token = {
 		unit: e.unit,

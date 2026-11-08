@@ -23,33 +23,24 @@ drained using either of the first two facts.
 
 ## Reproduction
 
-The executable reproduction is
-[`encoded-channel.prototype.test.ts`](../../packages/plugin-remote/test/encoded-channel.prototype.test.ts),
-with fixtures under
-[`encoded-channel/`](../../packages/plugin-remote/test/fixtures/encoded-channel/).
-It starts real consumer and provider Workers and transfers the two endpoints of
-a `MessageChannel` to them. Each Worker builds its own typed RPC endpoint using
-the public `RpcClient.Protocol` or `RpcServer.Protocol` service and the JSON
-serialization codec. The host imports no contract module and sees no request or
-response payload.
-
-Run from the Graft repository after installing dependencies and building its
-workspace package dependencies:
+The Effect-only reproduction is
+[`rpc-scope-limit.test.ts`](../../packages/plugin-remote/test/rpc-scope-limit.test.ts).
+It connects public encoded RpcClient and RpcServer protocols with queues and
+JSON codecs. It contains no Graft coordinator, route selection, completion
+protocol or second decision model.
 
 ```sh
-devenv shell -- pnpm vitest run --project @graftland/plugin-remote packages/plugin-remote/test/encoded-channel.prototype.test.ts
+devenv shell -- pnpm --filter @graftland/plugin-remote test test/rpc-scope-limit.test.ts
 ```
 
-| Test                                                                                            | Observed order                                                                                                                              |
-| ----------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| `stops the client before an ensuring finalizer finishes and retains the remote exit obligation` | Caller stops; an `Effect.ensuring` finalizer blocks; no server `Exit` is sent until that finalizer is released                              |
-| `sends the RPC exit before a request scope finalizer finishes`                                  | Caller cancels; server sends `Exit`; a finalizer registered with `Effect.addFinalizer` starts and blocks                                    |
-| `returns a unary result before its request scope cleanup completes`                             | Server sends `Exit`; request scope cleanup starts and blocks; consumer receives the decoded successful result while cleanup remains blocked |
+| Test                                                                                | Observed order                                                               |
+| ----------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| `Effect RPC interruption does not await a provider ensuring finalizer`              | Caller stops; ensuring finalizer blocks; server Exit follows that finalizer. |
+| `Effect RPC sends Exit before a cancelled private request Scope finalizer finishes` | Caller cancels; RPC Exit precedes the end of Scope cleanup.                  |
+| `Effect RPC returns a unary result before its private request Scope closes`         | Caller receives the result while Scope cleanup remains blocked.              |
 
-The cleanup latch is controlled by the test over a separate control port. These
-orderings use explicit events and a latch, not timing sleeps. The
-`cleanup-finished` event is fixture instrumentation, not a proposed production
-completion mechanism. A generic runtime cannot require each handler to emit it.
+Deferred latches establish each ordering. These latches are test evidence for
+the public API limit, not a product completion mechanism.
 
 The distinction can be reproduced by replacing a handler whose body is
 `Effect.never.pipe(Effect.ensuring(cleanup))` with one that registers `cleanup`
@@ -110,6 +101,10 @@ rollback of external effects. Reliable completion delivery, duplicate handling,
 authority fencing, route installation, and admission accounting belong to the
 runtime protocol and are not supplied by this draft.
 
-Graft has not added a workaround or changed its product paths. Its next-stage
-drain guarantee must remain unimplemented for general unary request scopes until
-this lifecycle observation exists.
+Graft's unit runtime separately supplies and closes a single-hop handler Scope.
+Its retained completion protocol covers that Scope only; it does not claim
+completion of RpcServer's private request Scope. `owned-completion.test.ts` and
+`unit-bindings.test.ts` establish this narrower behavior. The Effect-only
+reproductions above still pass. No Effect implementation or private RPC map has
+been patched. General unary request-Scope drain remains outside that guarantee
+until an upstream lifecycle observation exists.

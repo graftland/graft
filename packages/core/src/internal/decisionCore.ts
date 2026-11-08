@@ -10,9 +10,11 @@ import {
 } from "effect"
 
 import * as Bindings from "./bindingCore"
+import * as Calls from "./callCore"
 import * as InputSnapshot from "./decisionInput"
 import type {
 	Budget,
+	CallLimits,
 	Cell,
 	Change,
 	Claim,
@@ -103,6 +105,8 @@ export const capacity = (
 	return { used, reserved: HashMap.size(s.claims) - used }
 }
 export const classify = (s: State, c: Change): Settlement => {
+	if (HashSet.size(Calls.outstanding(s, c.requiredExits)) > 0)
+		return "Unresolved"
 	if (HashSet.some(c.requiredExits, (id) => live(s, id))) return "Unresolved"
 	if (
 		HashSet.some(c.requiredExits, (id) =>
@@ -150,6 +154,7 @@ const member = (s: State, c: Change): MemberFact => {
 export const get = (s: State, id: string): Option.Option<Status> =>
 	Option.map(HashMap.get(s.changes, id), (c) => ({
 		id,
+		outstandingCalls: Calls.outstanding(s, c.requiredExits),
 		sequence: c.sequence,
 		phase: c.phase,
 		oldChanged: c.oldChanged,
@@ -171,6 +176,7 @@ export const get = (s: State, id: string): Option.Option<Status> =>
 export const make = (options: {
 	readonly authority: string
 	readonly maxUnits: number
+	readonly callLimits?: Partial<CallLimits>
 	readonly bindings?: ReadonlyArray<FixedBinding>
 	readonly instances: ReadonlyArray<{
 		readonly id: string
@@ -181,6 +187,8 @@ export const make = (options: {
 		options.instances,
 		{
 			...Bindings.index(options.bindings ?? []),
+			...Calls.initial(),
+			callLimits: { ...Calls.initial().callLimits, ...options.callLimits },
 			routes: HashMap.empty(),
 			authority: options.authority,
 			open: true,
@@ -232,6 +240,7 @@ export const make = (options: {
 				...s,
 				instances: HashMap.set(s.instances, entry.id, {
 					id: entry.id,
+					established: true,
 					desired: InputSnapshot.target(entry.target),
 					current: Option.some(id),
 					term: 0,
@@ -545,6 +554,7 @@ const conclude = (s: Working, c: Change, outcome: Outcome): Working => {
 	if (classification === "Failed" && outcome === "Accepted")
 		return fail(s, c, Cause.fail("Required retirement cleanup failed"))
 	const conclusion: Conclusion = {
+		calls: Calls.outstanding(s, c.requiredExits),
 		outcome,
 		phase: Option.getOrElse(c.interrupted, () => c.phase),
 		cause: c.cause,
@@ -564,9 +574,25 @@ const conclude = (s: Working, c: Change, outcome: Outcome): Working => {
 					? c.old
 					: Option.none(),
 	}
+	const established: Working =
+		outcome === "Accepted" ||
+		outcome === "Recovered" ||
+		(!c.failure && c.trialPassed)
+			? {
+					...s,
+					instances: HashMap.modify(s.instances, c.request.instance, (i) => ({
+						...i,
+						established: true,
+					})),
+				}
+			: s
 	const saved = save(
 		obsolete(
-			disarm(s, c, HashSet.make("Operation", "Trial", "Total", "Evidence")),
+			disarm(
+				established,
+				c,
+				HashSet.make("Operation", "Trial", "Total", "Evidence"),
+			),
 			c,
 		),
 		next,
@@ -596,14 +622,36 @@ const resolve = (s: Working, c: Change): Working =>
 	operation(s, c, "Resolve", "Resolving", "", c.request.budget.startup)
 const progressSettlement = (s: Working, c: Change): Working => {
 	if (Option.isSome(c.conclusion)) return release(s, c)
-	if (!settled(s, c.requiredExits)) return s
+	if (
+		c.phase === "Draining" &&
+		!Option.exists(c.old, (id) => Calls.providerOutstanding(s, id))
+	)
+		return Option.match(c.old, {
+			onNone: () =>
+				progressSettlement(save(s, { ...c, phase: "Retiring" }), {
+					...c,
+					phase: "Retiring",
+				}),
+			onSome: (id) =>
+				live(s, id)
+					? operation(s, c, "Stop", "Retiring", id, c.request.budget.stop)
+					: progressSettlement(save(s, { ...c, phase: "Retiring" }), {
+							...c,
+							phase: "Retiring",
+						}),
+		})
+	if (
+		!settled(s, c.requiredExits) ||
+		HashSet.size(Calls.outstanding(s, c.requiredExits)) > 0
+	)
+		return s
 	if (!c.failure) {
 		if (c.phase === "Retiring" && c.trialPassed)
 			return conclude(s, c, c.recovering ? "Recovered" : "Accepted")
 		if (c.phase === "Retiring") return resolve(s, c)
 		return s
 	}
-	if (c.shuttingDown) return conclude(s, c, "RecoveryFailed")
+	if (c.shuttingDown || !c.hadServing) return conclude(s, c, "RecoveryFailed")
 	if (availableOld(s, c)) return conclude(s, c, "Aborted")
 	if (
 		c.recovering ||
@@ -715,14 +763,24 @@ const stopOld = (s: Working, c: Change): Working => {
 		onNone: () => progressSettlement(saved, stopping),
 		onSome: (id) =>
 			live(s, id)
-				? operation(
-						saved,
-						stopping,
-						"Stop",
-						"Retiring",
-						id,
-						c.request.budget.stop,
-					)
+				? Calls.providerOutstanding(s, id)
+					? arm(
+							phase(saved, stopping, "Draining"),
+							c.id,
+							"Operation",
+							Num.min(
+								s.now + c.request.budget.drain,
+								c.deadline - c.request.budget.terminate,
+							),
+						)
+					: operation(
+							saved,
+							stopping,
+							"Stop",
+							"Retiring",
+							id,
+							c.request.budget.stop,
+						)
 				: progressSettlement(saved, stopping),
 	})
 }
@@ -875,6 +933,9 @@ const commit = (s: Working, c: Change): Working => {
 				...i,
 				desired: c.request.target,
 				current: Option.some(candidate),
+				authorized: Option.exists(HashMap.get(s.units, candidate), (u) =>
+					Preparation.authorized(s, c.request.instance, u.target),
+				),
 				healthy: true,
 			})),
 		},
@@ -883,7 +944,10 @@ const commit = (s: Working, c: Change): Working => {
 	return arm(
 		HashSet.reduce(
 			c.requiredParticipants,
-			disarm(next, c, HashSet.make("Operation")),
+			Calls.resume(
+				disarm(next, c, HashSet.make("Operation")),
+				c.request.instance,
+			),
 			(s, participant) => issue(s, c.id, "Activate", participant, participant),
 		),
 		c.id,
@@ -979,6 +1043,7 @@ const requested = (s: Working, input: Input, inspect = false): Working => {
 export const empty = (options: {
 	readonly authority: string
 	readonly maxUnits: number
+	readonly callLimits?: Partial<CallLimits>
 	readonly bindings?: ReadonlyArray<FixedBinding>
 	readonly instances: ReadonlyArray<{
 		readonly id: string
@@ -990,6 +1055,7 @@ export const empty = (options: {
 		...s,
 		instances: HashMap.set(s.instances, entry.id, {
 			id: entry.id,
+			established: false,
 			desired: InputSnapshot.target(entry.target),
 			current: Option.none(),
 			term: 0,
@@ -1131,6 +1197,7 @@ const admit = (s: Working, r: Request): Working => {
 		)
 	})
 	const c: Change = {
+		hadServing: instance.value.established,
 		resolved: Option.fromNullishOr(r.resolution),
 		description: Option.fromNullishOr(r.description),
 		policyVersion: r.policyVersion ?? 0,
@@ -1396,6 +1463,14 @@ const reportSuccess = (s: Working, c: Change, command: Command): Working => {
 		case "PublishPreparation":
 		case "Publish":
 		case "CancelTimer":
+		case "RetireRoute":
+		case "CallRegister":
+		case "CallGrant":
+		case "CallReject":
+		case "CallCancel":
+		case "CallCompleteAck":
+		case "CallArmTimer":
+		case "PublishCall":
 			return s
 	}
 }
@@ -1411,15 +1486,19 @@ const endUnit = (
 		...u,
 		evidence,
 		phase: evidence === "NotStarted" ? "NotStarted" : "Exited",
-		cleanup: cleanup._tag === "Unknown" ? u.cleanup : cleanup,
+		cleanup:
+			u.cleanup._tag === "Failed" || cleanup._tag === "Unknown"
+				? u.cleanup
+				: cleanup,
 		cause: Cause.combine(u.cause, cause),
 		leases: HashSet.empty(),
 	}
 	const claim = HashMap.get(s.claims, u.claim)
+	const endedCalls = Calls.ended(s, ended)
 	const next: Working = {
-		...s,
+		...endedCalls,
 		changed: HashSet.union(
-			s.changed,
+			endedCalls.changed,
 			Option.getOrElse(HashMap.get(s.observers, u.instance), () =>
 				HashSet.empty(),
 			),
@@ -1507,6 +1586,11 @@ const reported = (
 					report: Option.some(event.result),
 				}),
 			}
+			if (command.change === "$calls")
+				return Calls.reported(recorded, {
+					...command,
+					report: Option.some(event.result),
+				})
 			if (command.change === "$runtime")
 				return event.result._tag === "Failed"
 					? withUnit(recorded, command.unit, (s, u) => ({
@@ -1608,6 +1692,19 @@ const timerFired = (
 							: stopOld(save(s, passed), passed)
 					}
 					case "Operation": {
+						if (c.phase === "Draining")
+							return Option.match(c.old, {
+								onNone: () => progressSettlement(s, c),
+								onSome: (id) =>
+									operation(
+										Calls.cancelProvider(s, id),
+										c,
+										"Stop",
+										"Retiring",
+										id,
+										c.request.budget.stop,
+									),
+							})
 						if (c.phase === "Installing") return expiredInstallation(s, c)
 						if (c.phase === "Retiring" && c.trialPassed && !c.failure) {
 							const forced = {
@@ -1776,7 +1873,12 @@ const policyChanged = (
 			...i,
 			authorized: HashSet.has(
 				HashSet.fromIterable(event.allowed),
-				i.desired.identity,
+				Option.getOrElse(
+					Option.flatMap(i.current, (id) =>
+						Option.map(HashMap.get(s.units, id), (u) => u.target.identity),
+					),
+					() => i.desired.identity,
+				),
 			),
 		})),
 	}
@@ -1878,7 +1980,7 @@ const unitCleanup = (
 					...s,
 					units: HashMap.set(s.units, u.id, {
 						...u,
-						cleanup: event.cleanup,
+						cleanup: u.cleanup._tag === "Failed" ? u.cleanup : event.cleanup,
 						cause: Cause.combine(u.cause, event.cause),
 					}),
 				},
@@ -1921,6 +2023,10 @@ const disconnected = (
 	})
 const apply = (s: Working, event: Event): Working => {
 	switch (event._tag) {
+		case "CallObserved":
+			return Calls.observed(s, event)
+		case "CallExpired":
+			return Calls.expired(s, event.key)
 		case "UnitDiagnostic":
 			return withUnit(s, event.unit, (s, u) =>
 				u.incarnation !== event.incarnation || u.spawn !== event.observer
@@ -1941,7 +2047,7 @@ const apply = (s: Working, event: Event): Working => {
 				(u) => u.kind === "Inspection",
 			)
 				? Preparation.nativeFailure(s, event)
-				: disconnected(s, event)
+				: disconnected(Calls.disconnected(s, event), event)
 		case "UnitProgress":
 			return withUnit(s, event.unit, (s, u) =>
 				u.incarnation !== event.incarnation || u.spawn !== event.observer
@@ -2014,11 +2120,14 @@ const apply = (s: Working, event: Event): Working => {
 		case "Invalidated":
 			return invalidated(s, event)
 		case "Shutdown":
-			return Preparation.shutdown(shutdown(s))
+			return Preparation.shutdown(shutdown(Calls.closed(s)))
 	}
 }
 const eventOwners = (s: State, event: Event): HashSet.HashSet<string> => {
 	switch (event._tag) {
+		case "CallObserved":
+		case "CallExpired":
+			return HashSet.empty()
 		case "Observed":
 			return HashSet.make(event.change)
 		case "InspectRequested":
@@ -2143,7 +2252,19 @@ export const reduce = (state: State, incoming: Event): Transition => {
 		settledParents,
 		descriptionReady,
 	)
-	const revised = HashSet.reduce(described.changed, described, (s, id) =>
+	const callSettled =
+		event._tag === "CallObserved" ||
+		event._tag === "CallExpired" ||
+		(event._tag === "Reported" &&
+			Option.exists(
+				HashMap.get(state.commands, event.command),
+				(c) => c.change === "$calls",
+			))
+			? HashSet.reduce(described.changed, described, (s, id) =>
+					withChange(s, id, progressSettlement),
+				)
+			: described
+	const revised = HashSet.reduce(callSettled.changed, callSettled, (s, id) =>
 		withChange(s, id, (s, c) => {
 			const previous = HashMap.get(state.changes, id)
 			return Option.isNone(previous) ||

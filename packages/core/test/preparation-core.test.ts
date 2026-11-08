@@ -280,8 +280,23 @@ it("bounds settled preparation history while retaining unresolved inspection evi
 	assert.equal(HashMap.size(completed.preparations), 2)
 })
 
-it("uses the reserved recovery claim for a fresh Describe when current resolution changes (I2, I7, I11)", () => {
-	const first = prepare()
+it("uses the reserved recovery claim for a fresh Describe of a previously serving instance when current resolution changes (I2, I7, I11)", () => {
+	const known = Core.make({
+		authority: "preparation-test",
+		maxUnits: 3,
+		instances: [{ id: "a", target: target("old") }],
+	})
+	const old = HashMap.get(known.units, "a@0").pipe(Option.getOrThrow)
+	const unavailable = Core.reduce(known, {
+		_tag: "Exited",
+		unit: old.id,
+		incarnation: old.incarnation,
+		observer: old.spawn,
+		cleanup: { _tag: "Unknown" },
+		cause: Cause.empty,
+		now: 0,
+	}).state
+	const first = prepare(unavailable)
 	const p = id(first)
 	const admitted = exit(described(first.state, p), p)
 	if (admitted.reply._tag !== "Admitted")

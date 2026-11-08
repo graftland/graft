@@ -1,0 +1,25 @@
+import { Cause, Effect, Schema } from "effect"
+
+export const maxBytes = 1024 * 1024
+export class LimitExceeded extends Schema.TaggedError<
+	LimitExceeded,
+	{ readonly brand: unique symbol }
+>()("UnitMessageLimit", {
+	reason: Schema.Literals(["TooLarge", "Encoding"]),
+	cause: Schema.Cause(Schema.Unknown, Schema.Unknown),
+}) {}
+const encode = Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))
+export const check = (value: unknown): Effect.Effect<void, LimitExceeded> =>
+	encode(value).pipe(
+		Effect.mapError((error) =>
+			LimitExceeded.make({ reason: "Encoding", cause: Cause.fail(error) }),
+		),
+		Effect.flatMap((encoded) =>
+			new TextEncoder().encode(encoded).byteLength > maxBytes
+				? LimitExceeded.make({
+						reason: "TooLarge",
+						cause: Cause.fail("The encoded unit message exceeds 1 MiB"),
+					})
+				: Effect.void,
+		),
+	)

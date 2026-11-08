@@ -80,9 +80,56 @@ export const BindingRoute = Schema.Struct({
 })
 export const RouteView = Schema.Struct({ routes: Schema.Array(BindingRoute) })
 export type RouteView = typeof RouteView.Type
+export const CallControl = Schema.Struct({
+	key: Schema.String,
+	session: Schema.String,
+	request: Schema.String,
+	service: Schema.String,
+	route: Schema.optionalKey(BindingRoute),
+	reason: Schema.optionalKey(Schema.String),
+	deadline: Schema.optionalKey(Schema.Finite),
+	tags: Schema.optionalKey(Schema.Array(Schema.String)),
+})
+export type CallControl = typeof CallControl.Type
+export const CallMessage = Schema.Union([
+	Schema.TaggedStruct("Lost", {
+		session: Schema.String,
+		request: Schema.String,
+		cause: Schema.Json,
+	}),
+	Schema.TaggedStruct("Request", {
+		session: Schema.String,
+		request: Schema.String,
+		service: Schema.String,
+		lifecycle: Schema.Boolean,
+		nested: Schema.Boolean,
+		wait: Schema.Finite,
+	}),
+	Schema.Struct({
+		_tag: Schema.Literals(["Cancel", "Result"]),
+		session: Schema.String,
+		request: Schema.String,
+	}),
+	Schema.TaggedStruct("Complete", {
+		key: Schema.String,
+		cleanup: Schema.Literals(["Completed", "Failed", "Unknown"]),
+		cause: Schema.Json,
+		cleanupCause: Schema.optionalKey(Schema.Json),
+	}),
+])
+export type CallMessage = typeof CallMessage.Type
 export const Command = Schema.Struct({
+	call: Schema.optionalKey(CallControl),
 	id: Schema.String,
 	kind: Schema.Literals([
+		"RetireRoute",
+		"CallRegister",
+		"CallGrant",
+		"CallReject",
+		"CallCancel",
+		"CallCompleteAck",
+		"CallArmTimer",
+		"PublishCall",
 		"Resolve",
 		"Describe",
 		"Spawn",
@@ -135,6 +182,7 @@ export const Incoming = Schema.Union([
 ])
 export type Incoming = typeof Incoming.Type
 export const Outgoing = Schema.Union([
+	Schema.TaggedStruct("Call", { message: CallMessage }),
 	Schema.TaggedStruct("Online", {}),
 	Schema.TaggedStruct("Initialized", {}),
 	Schema.TaggedStruct("Result", { command: Schema.String, result: Report }),

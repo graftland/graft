@@ -31,7 +31,9 @@ import { Fork, Graft, Plugin, Transition, type Kernel } from "@graftland/graft"
 
 import * as Artifact from "../Artifact"
 import * as Contract from "../Contract"
+import * as EncodedLimit from "./encodedLimit"
 import * as Operations from "./operations"
+import * as Owned from "./ownedCalls"
 import * as Network from "./unitNetwork"
 import * as Wire from "./unitProtocol"
 import * as Resolution from "./unitResolution"
@@ -51,6 +53,7 @@ interface Metadata {
 	readonly input: Schema.Json
 }
 interface UnitRuntime {
+	readonly calls: Owned.Owner
 	readonly initial: Ref.Ref<Option.Option<Wire.Command>>
 	readonly metadata: Ref.Ref<Option.Option<Metadata>>
 	readonly member: Ref.Ref<Option.Option<Fork.Fork>>
@@ -64,7 +67,7 @@ interface UnitRuntime {
 	readonly replies: Ref.Ref<HashMap.HashMap<string, Wire.Report>>
 	readonly emit: (frame: Wire.Outgoing) => Effect.Effect<void>
 }
-const transmit = (frame: Wire.Outgoing): Effect.Effect<void> =>
+const transmitUnchecked = (frame: Wire.Outgoing): Effect.Effect<void> =>
 	Effect.callback<void>((resume) => {
 		if (parentPort !== null) {
 			parentPort.postMessage(frame)
@@ -79,8 +82,13 @@ const transmit = (frame: Wire.Outgoing): Effect.Effect<void> =>
 			resume(error === null ? Effect.void : Effect.die(error)),
 		)
 	})
+const transmit = (frame: Wire.Outgoing): Effect.Effect<void> =>
+	EncodedLimit.check(frame).pipe(
+		Effect.orDie,
+		Effect.andThen(transmitUnchecked(frame)),
+	)
 const input = Effect.fnUntraced(function* () {
-	const queue = yield* Queue.unbounded<unknown>()
+	const queue = yield* Queue.bounded<unknown>(256)
 	const callbacks = yield* FiberSet.make()
 	const run = yield* FiberSet.runtime(callbacks)()
 	const receive = (value: unknown) => {
@@ -218,13 +226,15 @@ const startNetwork = Effect.fnUntraced(function* (
 	runtime: UnitRuntime,
 	loaded: Metadata,
 ) {
-	const router = yield* Routing.make(loaded.contract.inject).pipe(
-		Scope.provide(runtime.scope),
-	)
+	const router = yield* Routing.make(loaded.contract.inject, (message) =>
+		runtime.emit({ _tag: "Call", message }),
+	).pipe(Scope.provide(runtime.scope))
 	yield* Ref.set(runtime.router, Option.some(router))
 	if (loaded.contract.provides.length === 0) return Option.none<Wire.Endpoint>()
-	const server = yield* Network.provider(loaded.contract.provides, (cause) =>
-		diagnostic(runtime, cause),
+	const server = yield* Network.provider(
+		loaded.contract.provides,
+		(cause) => diagnostic(runtime, cause),
+		runtime.calls,
 	).pipe(Scope.provide(runtime.scope))
 	yield* Ref.set(runtime.provider, Option.some(server))
 	return Option.some(server.endpoint)
@@ -371,6 +381,32 @@ const perform = Effect.fnUntraced(function* (
 			detail: "Inspection has no serving authority",
 		})
 	switch (command.kind) {
+		case "RetireRoute": {
+			const router = yield* Ref.get(runtime.router).pipe(
+				Effect.flatMap(Effect.fromOption),
+			)
+			if (command.call !== undefined) yield* router.retire(command.call.key)
+			return { _tag: "Succeeded" }
+		}
+		case "CallRegister":
+			if (command.call !== undefined)
+				yield* runtime.calls.register(command.call)
+			return { _tag: "Succeeded" }
+		case "CallCancel":
+			if (command.call !== undefined)
+				yield* runtime.calls.cancel(command.call.key)
+			return { _tag: "Succeeded" }
+		case "CallCompleteAck":
+			if (command.call !== undefined) yield* runtime.calls.ack(command.call.key)
+			return { _tag: "Succeeded" }
+		case "CallGrant":
+		case "CallReject": {
+			const router = yield* Ref.get(runtime.router).pipe(
+				Effect.flatMap(Effect.fromOption),
+			)
+			yield* router.decide(command)
+			return { _tag: "Succeeded" }
+		}
 		case "Describe":
 			return {
 				_tag: "Described",
@@ -506,14 +542,37 @@ const dispatch = Effect.fnUntraced(function* (
 const main = Effect.gen(function* () {
 	const queue = yield* input()
 	const owner = yield* Effect.scope
+	const unitScope = yield* Scope.fork(owner)
+	const calls = yield* Owned.make((message) =>
+		transmit({ _tag: "Call", message }),
+	).pipe(Scope.provide(unitScope))
+	yield* Stream.runForEach(calls.failures, (cause) =>
+		Schema.encodeEffect(Wire.Cause)(cause).pipe(
+			Effect.flatMap((encoded) =>
+				transmit({ _tag: "Failure", cause: encoded }),
+			),
+			Effect.catchCause((report) =>
+				Effect.logError(
+					"Unit completion reporting failed",
+					Cause.combine(cause, report),
+				),
+			),
+		),
+	).pipe(Effect.forkScoped)
+	yield* calls.reconcile.pipe(
+		Effect.andThen(Effect.sleep("1 second")),
+		Effect.forever,
+		Effect.forkScoped,
+	)
 	const runtime: UnitRuntime = {
+		calls,
 		initial: yield* Ref.make(Option.none<Wire.Command>()),
 		metadata: yield* Ref.make(Option.none<Metadata>()),
 		member: yield* Ref.make(Option.none<Fork.Fork>()),
 		support: yield* Ref.make(HashMap.empty<string, Fork.Fork>()),
 		provider: yield* Ref.make(Option.none<Network.Provider>()),
 		router: yield* Ref.make(Option.none<Routing.Router>()),
-		scope: yield* Scope.fork(owner),
+		scope: unitScope,
 		views: yield* Ref.make(HashMap.empty<string, Wire.Token>()),
 		stopped: yield* Deferred.make<void>(),
 		commands: yield* FiberMap.make<string, void, never>(),

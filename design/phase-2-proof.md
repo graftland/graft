@@ -460,3 +460,110 @@ Final logs: `phase2-step4-typecheck-final4.log`,
 `.cache/`. Two preceding full runs passed 2,298 cases with only the same
 permitted failures, before the final endpoint case. No check was interrupted.
 Steps 5–7 remain required.
+
+## Step 5: owned single-hop calls
+
+Production call admission, exact provider selection, session-qualified credits,
+Restart waiters, cancellation, completion classification, expiry and native-exit
+settlement now belong to the reducer. A fixed provider registration precedes the
+consumer dispatch grant. Business values remain on the encoded direct channel.
+Required call credits participate in Change settlement; results and cancellation
+alone cannot release them. Provider exit settles only that incarnation's calls;
+consumer exit preserves provider execution.
+
+`call-core.test.ts` contains 23 cases covering I1–I3 and I5–I12. Its cells
+include result-before-cleanup, pre-registration and post-dispatch cancellation,
+cancellation overtaking the admission queue, duplicate/lost completion, reused
+ids across sessions, independent providers, missing exit and immutable Stuck,
+drain expiry, waiter exit/shutdown/expiry/overflow, control failures, known
+cleanup failure, first startup, current-policy recovery, and serving ownership
+transfer. `call-exploration.test.ts` imports the production reducer: 60 causal
+shuffles / 189 state visits / 188 transitions; repeated evidence at depth 3 with
+alphabet 5 reaches 93 distinct states and 135 transitions. Every explored state
+checks credit conservation and exact provider ownership. The complete core suite
+passes 80 files / 851 cases before final workspace verification.
+
+Native evidence: `unit-bindings.test.ts` has 8 cases, including a received
+result with blocked owned cleanup, real nested second-hop rejection, and runner
+control disconnect during drain producing Stuck with the call and exact missing
+unit retained. `owned-completion.test.ts` has 7 cases for original Exit, blocked
+cleanup, cancellation before registration, retained/duplicate/lost delivery,
+finalizer defects, deferred rejection and reporter failure. The existing 11
+native fault cases remain. `rpc-scope-limit.test.ts` preserves three Effect-only
+counterexamples. The old prototype routing coordinator and its four fixtures are
+deleted, rather than retained as an oracle. The upstream draft now links these
+minimal reproductions and states the narrower Graft-owned guarantee.
+
+Interpretations (phase-2.md lines 241–258): the supported completion boundary is
+the Graft-supplied handler Scope, not RpcServer's private Scope. No Effect
+implementation, private request map or diagnostic parsing is used. Unary handler
+effects and all contract middleware run inside the owned Scope. Deferred
+replies, discarded calls, streams and nested cross-unit completion cannot
+silently gain the guarantee. Live credits and gate waiters have independent
+global limits; cancellation, native exit and completion use reserved control
+traffic. Encoded frames retain the existing 1 MiB limit. The kernel outbox,
+native input and evidence queues are bounded. Runtime-lifetime request identity
+tombstones are retained independently of bounded settled call history. These
+bounds do not promise universal process-memory limits.
+
+Two earlier omissions were found while completing the native call cells.
+Phase-2.md lines 227–230 excludes a restoration generation for an instance which
+has never served; the core now records that starting fact and rejects that
+spurious recovery. The old preparation recovery case was initialized as a new
+instance; it now starts from a previously serving instance with native exit
+evidence. Recovery health and call authorization follow the actual generation
+under current policy, rather than a denied desired target. New red reducer tests
+prove both corrections. Call failures after serving ownership transfers cannot
+attach to old concluded Changes.
+
+Development failures: the initial call and owned-Scope acceptance files failed
+before implementation. Subsequent red cases found retirement starting before
+completion, cancellation joining a blocked finalizer, immediate fiber start
+racing registration, cancellation overtaking its request, missing
+pre-registration cancellation fencing, control failure Causes being discarded,
+consumer-exit Pending results, known cleanup failure being overwritten, and
+deferred reply escape. Typechecks rejected wrong Reference construction,
+non-finite number schemas, missing public generic requirements and exports,
+inferred fixture types, inline test yields, and missing resource fields. These
+were fixed without casts or disabled diagnostics. A new native drain fixture
+initially exceeded the total reserve budget; its total budget is corrected. A
+runner fixture initially omitted the owner identity and correctly failed schema
+validation. The minimal RPC reproduction initially supplied an Effect instead of
+a handler function. Exploration count assertions changed as the production state
+gained cancellation and retirement facts; final counts above are asserted. No
+check was deliberately interrupted and no packed script was run directly. Full
+workspace results follow after verification.
+
+The first full step 5 run passed 315 files / 2,330 cases, with 45 skipped and
+only the two permitted failures. Docs passed 25 Node checks and 41 Vitest cases.
+Its build generated 92 entries / 2,632 pages and formatting changed zero of
+1,211 files. A final byte-boundary audit then added `encoded-limit.test.ts`:
+logical unary size is checked before dispatch, including UTF-8 expansion and
+unencodable input with its original Cause. Control framing uses a bounded queue
+with socket backpressure and counts UTF-8 bytes. Fixed native frames are bounded
+before send and validated on receipt. Full checks are repeated after these
+changes.
+
+The byte-boundary rerun initially failed typecheck/build and the root public-API
+setup: the serializer used JSON.stringify inside Effect and a fixture used the
+uncurried String.repeat form. The implementation now uses
+Schema.fromJsonString(Schema.Unknown), retaining its typed SchemaError Cause;
+fixtures use Effect String.repeat. All three new size cases pass, including
+UTF-8 bytes and an unencodable bigint. The failed root run stopped in global
+setup and has no passed-case count. No check was deliberately interrupted.
+
+### Step 5 final verification
+
+| Check                     | Result                                                                                         |
+| ------------------------- | ---------------------------------------------------------------------------------------------- |
+| Core                      | 80 files / 851 cases passed, including 23 call cases and 2 exploration cases                   |
+| Native and Scope evidence | 11 native faults, 8 bindings, 7 owned completion, 3 Effect-only limits and 3 size cases passed |
+| Typecheck and build       | Passed; 92 entries and 2,632 pages                                                             |
+| Root tests                | 316 files / 2,333 cases passed; 45 skipped; only the two permitted benchmark failures          |
+| Independent docs          | 25 Node checks and 41 Vitest cases in 21 files passed                                          |
+| Formatting                | 1,213 files, zero changes; diff checks passed                                                  |
+
+Final logs under `.cache/`: `phase2-step5-typecheck-final5.log`,
+`phase2-step5-build-final3.log`, `phase2-step5-test-final3.log`,
+`phase2-step5-docs-final3.log` and `phase2-step5-format-final3.log`. Steps 6–7
+remain required.
