@@ -66,7 +66,7 @@ it.effect(
 				Effect.gen(function* () {
 					const journal = yield* Journal.open(directory)
 					for (const next of [
-						line("change-1", "Intent"),
+						{ ...line("change-1", "Intent"), key: "deploy-once" },
 						line("change-2", "Intent"),
 						line("change-1", "Commit"),
 						line("change-1", "Conclusion", "Accepted"),
@@ -85,6 +85,7 @@ it.effect(
 				],
 			)
 			assert.isTrue(Option.contains(history[0]!.outcome, "Accepted"))
+			assert.isTrue(Option.contains(history[0]!.key, "deploy-once"))
 			assert.deepStrictEqual(
 				Array.map(history[0]!.facts, (f) => [f.instance, f.actual, f.attempt]),
 				[["a", "next", "Ready"]],

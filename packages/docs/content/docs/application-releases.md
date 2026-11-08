@@ -11,7 +11,7 @@ metadata. The workflow uses the public [kernel control client](../units/) and
 | Operation  | Result                                                                          |
 | ---------- | ------------------------------------------------------------------------------- |
 | `build`    | A content-addressed release id; no plugin activation                            |
-| `load`     | Verified targets with input references resolved for planning                    |
+| `load`     | Verified targets with environment references preserved for planning             |
 | `plan`     | Pure Change operations and an `Added`, `Changed` or `Removed` reason per member |
 | `apply`    | One Change id, its outcome, phase and diagnostic                                |
 | `observe`  | Current Change status by id, or `None` if unknown                               |
@@ -49,15 +49,15 @@ const deploy = Effect.gen(function* () {
 })
 ```
 
-| Rule              | Behavior                                                                                                                                                                                                         |
-| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Current instances | Supply all instances owned by this release workflow, with their current targets. Omit infrastructure such as the recorder. Instances absent from the release are removed.                                        |
-| Comparison        | Code, contract, placement, input or probe changes deploy the member. Relocating identical captured bytes does not.                                                                                               |
-| Request identity  | The release id determines the apply key. The first plan and options are retained; a repeated completed apply returns the original result, including failures. Build a new release to request another deployment. |
-| References        | `load` and a new application resolve environment references. Stored plans contain member names and reasons, not resolved configuration values.                                                                   |
-| Empty plan        | `apply` fails with `ReleaseError` code `NoChanges` when no earlier application exists and the supplied current targets already match.                                                                            |
-| Placement         | `Worker` uses a Worker; `Local` uses a Process unit. Custom commands and Worker arguments are rejected.                                                                                                          |
-| Older artifacts   | Releases without captured contracts must be rebuilt for this workflow. `metadataOnly` skips publication inspection during build; applying still verifies publication metadata.                                   |
+| Rule              | Behavior                                                                                                                                                                                                             |
+| ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Current instances | Supply all instances owned by this release workflow, with their current targets. Omit infrastructure such as the recorder. Instances absent from the release are removed.                                            |
+| Comparison        | Code, contract, placement, input or probe changes deploy the member. Relocating identical captured bytes does not.                                                                                                   |
+| Request identity  | The release id determines the apply key. The first plan and options are retained; a repeated completed apply returns the original result, including failures. Build a new release to request another deployment.     |
+| References        | `load` keeps environment references in the input. `apply` resolves their values through per-instance policy values only; deployment requests, status and history keep references. Target permissions stay unchanged. |
+| Empty plan        | `apply` fails with `ReleaseError` code `NoChanges` when no earlier application exists and the supplied current targets already match.                                                                                |
+| Placement         | `Worker` uses a Worker; `Local` uses a Process unit. Custom commands and Worker arguments are rejected.                                                                                                              |
+| Older artifacts   | Releases without captured contracts must be rebuilt for this workflow. `metadataOnly` skips publication inspection during build; applying still verifies publication metadata.                                       |
 
 Keep the store at a stable location. Captured packages may still import external
 runtime dependencies; see [package publication](../publishing/).
@@ -78,9 +78,13 @@ check each member before treating a failed application as unchanged.
 `history` works without a running kernel and verifies the referenced release
 bytes. Keep the release store's application receipts with its journal. A result
 saved only by the applying client has `recorded: false`; durable kernel recovery
-requires the recorder. Repeated results read diagnostics from the journal;
-receipts do not keep a second copy. Cancelling a wait does not cancel an
-admitted Change.
+requires the recorder. Journaled request keys recover applications even if no
+receipt was saved. After a restart, retrying `apply` restores the original run,
+Change id and outcome from the journal without executing it again. An
+interrupted record with no known outcome produces `RecordedOutcomeUnknown`;
+inspect `history` for its facts. Repeated results read diagnostics from the
+journal; receipts do not keep a second copy. Cancelling a wait does not cancel
+an admitted Change.
 
 ## Roll back
 
@@ -89,8 +93,8 @@ selects the distinct accepted release before the latest accepted application;
 failed applications do not become rollback targets. With fewer than two distinct
 accepted releases, it fails with `ReleaseError` code `NoPreviousRelease`.
 
-Rollback resolves references again and submits a fresh Change through normal
-admission. It does not modify policy or reuse the target release's old apply
-result. A revoked target remains rejected with `Unauthorized`; release
+Rollback refreshes reference values and submits a fresh Change through normal
+admission. It does not change target permissions or reuse the target release's
+old apply result. A revoked target remains rejected with `Unauthorized`; release
 `revocations` metadata cannot grant permissions. The returned outcome describes
 the rollback attempt, including any failure or recovery.

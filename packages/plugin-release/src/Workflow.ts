@@ -3,13 +3,17 @@ import {
 	Array,
 	Cause,
 	Clock,
+	Config,
 	Effect,
 	Equal,
 	FileSystem,
 	HashMap,
+	HashSet,
 	Option,
 	Order,
 	Path,
+	Record,
+	Result,
 	Schema,
 	String,
 } from "effect"
@@ -102,7 +106,39 @@ export interface ReleaseHistory {
 	readonly diagnostic: string
 }
 
-/** Verifies captured bytes and resolves input references without activating a plugin. */
+const isJsonArray = (input: Schema.Json): input is Schema.JsonArray =>
+	Array.isArray(input)
+
+/** Converts release environment references to kernel references without reading their values. */
+const referencedInput = Effect.fnUntraced(function* (
+	input: Schema.Json,
+): Effect.fn.Return<Schema.Json, ReleaseError> {
+	if (isJsonArray(input)) return yield* Effect.forEach(input, referencedInput)
+	if (input === null || typeof input !== "object") return input
+	if (typeof input["$env"] === "string") {
+		if (Record.keys<string, Schema.Json>(input).length !== 1)
+			return yield* Storage.failure(
+				"Reference",
+				"An environment reference must contain only $env",
+			)
+		return { $reference: input["$env"] }
+	}
+	const fields = yield* Effect.forEach(
+		Record.toEntries(input),
+		Effect.fnUntraced(function* ([key, value]) {
+			return [key, yield* referencedInput(value)] as const
+		}),
+	)
+	return Record.fromEntries(fields)
+})
+const referenceNames = (input: Schema.Json): ReadonlyArray<string> => {
+	if (isJsonArray(input)) return Array.flatMap(input, referenceNames)
+	if (input === null || typeof input !== "object") return []
+	if (typeof input["$reference"] === "string") return [input["$reference"]]
+	return Array.flatMap(Record.values(input), referenceNames)
+}
+
+/** Verifies captured bytes and preserves input references without activating a plugin. */
 export const load = Effect.fn("Release.load")(function* (
 	store: string,
 	id: string,
@@ -140,7 +176,7 @@ export const load = Effect.fn("Release.load")(function* (
 						directory: path.join(directory, entry.contractArtifact.directory),
 					},
 					contract: entry.contractArtifact.identity.module,
-					input: yield* Storage.resolveInput(entry.input),
+					input: yield* referencedInput(entry.input),
 					placement: entry.target._tag === "Worker" ? "Worker" : "Process",
 				}),
 			}
@@ -269,20 +305,45 @@ const receipts = Effect.fnUntraced(function* (store: WorkflowStore) {
 		(name) => Storage.read(path.join(directory, name), Receipt),
 	)
 })
-/** Joins operator receipts to the durable journal by kernel run and Change id. */
+/** Only the workflow's request-key namespaces identify release applications. */
+const releaseFromKey = (key: string): Option.Option<string> => {
+	const match = /^(?:release-([a-f0-9]{64})|rollback-([a-f0-9]{64})-.+)$/.exec(
+		key,
+	)
+	return match === null
+		? Option.none()
+		: Option.fromUndefinedOr(match[1] ?? match[2])
+}
+/** Reads recorded applications in journal order, including those whose local receipt was never saved. */
 export const history = Effect.fn("Release.history")(function* (
 	store: WorkflowStore,
 ) {
 	const records = yield* Journal.history(store.journal)
+	const journaled: ReadonlyArray<ReleaseHistory> = Array.getSomes(
+		Array.map(records, (record) =>
+			Option.flatMap(record.key, (key) =>
+				Option.map(releaseFromKey(key), (release) => ({
+					release,
+					key,
+					change: record.change,
+					run: Option.some(record.run),
+					outcome: record.outcome,
+					recorded: record.concluded,
+					diagnostic: record.diagnostic,
+				})),
+			),
+		),
+	)
+	const keys = HashSet.fromIterable(Array.map(journaled, (entry) => entry.key))
 	const stored = yield* receipts(store)
 	const saved = Array.sort(
-		stored,
+		Array.filter(stored, (receipt) => !HashSet.has(keys, receipt.intent.key)),
 		Order.mapInput(
 			Order.Number,
 			(receipt: typeof Receipt.Type) => receipt.intent.started,
 		),
 	)
-	return yield* Effect.forEach(
+	const unrecorded = yield* Effect.forEach(
 		saved,
 		Effect.fnUntraced(function* (receipt): Effect.fn.Return<
 			ReleaseHistory,
@@ -316,7 +377,43 @@ export const history = Effect.fn("Release.history")(function* (
 			}
 		}),
 	)
+	for (const entry of journaled)
+		yield* Storage.verify(store.releases, entry.release)
+	return [...journaled, ...unrecorded]
 }, Storage.protect)
+
+/** Saves the original run and Change without duplicating retained diagnostic text. */
+const recoverReceipt = Effect.fnUntraced(function* (
+	file: string,
+	intent: typeof Intent.Type,
+	record: Journal.Summary,
+	cause?: Cause.Cause<unknown>,
+) {
+	const pending = {
+		intent,
+		change: record.change,
+		run: record.run,
+		result: null,
+	}
+	if (!record.concluded || Option.isNone(record.outcome)) {
+		yield* save(file, pending)
+		return yield* ReleaseError.make({
+			code: "RecordedOutcomeUnknown",
+			message: `Recorded Change ${record.run}/${record.change} has no known outcome; inspect release history`,
+			...(cause === undefined ? {} : { cause }),
+		})
+	}
+	const result = yield* Schema.decodeUnknownEffect(Applied)({
+		release: intent.release,
+		change: record.change,
+		run: record.run,
+		outcome: record.outcome.value,
+		phase: record.phase,
+		diagnostic: record.diagnostic,
+	})
+	yield* save(file, { ...pending, result: { ...result, diagnostic: "" } })
+	return result
+})
 
 const execute = Effect.fnUntraced(function* (
 	client: Control.Client,
@@ -347,21 +444,12 @@ const execute = Effect.fnUntraced(function* (
 					onSome: (record) => record.diagnostic,
 				}),
 			}
-		if (Option.isSome(recorded) && Option.isSome(recorded.value.outcome)) {
-			const result = yield* Schema.decodeUnknownEffect(Applied)({
-				release: id,
-				change: receipt.change,
-				run: receipt.run,
-				outcome: recorded.value.outcome.value,
-				phase: recorded.value.phase,
-				diagnostic: recorded.value.diagnostic,
-			})
-			yield* save(files.receipt, {
-				...receipt,
-				result: { ...result, diagnostic: "" },
-			})
-			return result
-		}
+		if (Option.isSome(recorded))
+			return yield* recoverReceipt(
+				files.receipt,
+				receipt.intent,
+				recorded.value,
+			)
 	}
 	const release = yield* load(store.releases, id)
 	if (!(yield* fs.exists(files.intent))) {
@@ -385,7 +473,22 @@ const execute = Effect.fnUntraced(function* (
 	}
 	const intent = yield* Storage.read(files.intent, Intent)
 	const proposed = materialize(release, intent.members)
-	const handle = yield* client
+	for (const operation of proposed.operations) {
+		if (operation._tag !== "Deploy") continue
+		const names = Array.dedupe(
+			referenceNames(operation.target.deployment?.input ?? null),
+		)
+		if (names.length === 0) continue
+		const values = yield* Effect.forEach(names, (name) =>
+			Effect.map(Config.String(name), (value) => [name, value] as const),
+		)
+		// Reference updates cannot grant targets or undo an operator's revocation.
+		yield* client.setPolicy({
+			instance: operation.instance,
+			values: Record.fromEntries(values),
+		})
+	}
+	const submitted = yield* client
 		.submit({
 			operations: proposed.operations,
 			key: intent.key,
@@ -395,15 +498,41 @@ const execute = Effect.fnUntraced(function* (
 				trial: intent.options.trial ?? 0,
 			},
 		})
-		.pipe(
-			Effect.mapError((error) =>
-				ReleaseError.make({
-					code: error.reason,
-					message: "Release admission failed",
-					cause: Cause.fail(error),
-				}),
-			),
-		)
+		.pipe(Effect.result)
+	if (Result.isFailure(submitted)) {
+		const error = submitted.failure
+		if (error.reason === "AlreadyRecorded") {
+			const records = yield* Journal.history(store.journal)
+			const recorded = Array.findFirst(
+				records,
+				(record) =>
+					Option.contains(record.key, intent.key) &&
+					Array.contains(
+						error.conflicts ?? [],
+						`${record.run}/${record.change}`,
+					),
+			)
+			if (Option.isSome(recorded))
+				return yield* recoverReceipt(
+					files.receipt,
+					intent,
+					recorded.value,
+					Cause.fail(error),
+				)
+			return yield* ReleaseError.make({
+				code: "MissingRecord",
+				message:
+					"The previously recorded release Change is missing from this journal",
+				cause: Cause.fail(error),
+			})
+		}
+		return yield* ReleaseError.make({
+			code: error.reason,
+			message: "Release admission failed",
+			cause: Cause.fail(error),
+		})
+	}
+	const handle = submitted.success
 	const observed = yield* client.get(handle.id)
 	const status = yield* Effect.fromOption(observed, () =>
 		Storage.failure(

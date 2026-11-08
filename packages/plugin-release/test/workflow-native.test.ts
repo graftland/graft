@@ -1,15 +1,22 @@
+import process from "node:process"
+
 import {
 	Array,
 	Cause,
+	ConfigProvider,
 	Effect,
+	Fiber,
 	FileSystem,
 	HashMap,
 	Layer,
 	Option,
 	Path,
+	Ref,
 	Schedule,
 	Schema,
+	Stream,
 } from "effect"
+import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import { NodeServices } from "@effect/platform-node"
 import { assert, it } from "@effect/vitest"
 
@@ -30,7 +37,12 @@ const budget = {
 	terminate: 1000,
 }
 
-const fixture = Effect.fnUntraced(function* () {
+const fixture = Effect.fnUntraced(function* (
+	options: {
+		readonly secret?: boolean
+		readonly versions?: ReadonlyArray<number>
+	} = {},
+) {
 	const fs = yield* FileSystem.FileSystem
 	const path = yield* Path.Path
 	const cache = new URL("../.cache/workflow-tests/", import.meta.url).pathname
@@ -60,7 +72,7 @@ const fixture = Effect.fnUntraced(function* () {
 	yield* fs.writeFileString(
 		path.join(contracts, "contract.js"),
 		`import { Schema } from "effect"; import { Contract } from "@graftland/plugin-remote";
-export const Config = Schema.Struct({ output: Schema.String });
+export const Config = Schema.Struct({ output: Schema.String, credentials: Schema.optionalKey(Schema.Struct({ token: Schema.String, repeated: Schema.Array(Schema.String) })) });
 export default Contract.make({ name: "release-business", config: Config });`,
 	)
 	yield* write(source, [
@@ -72,13 +84,23 @@ export default Contract.make({ name: "release-business", config: Config });`,
 				entry: ".",
 				contract: contractUrl,
 				target: { _tag: "Worker" },
-				config: { output: serving },
+				config: {
+					output: serving,
+					...(options.secret === true
+						? {
+								credentials: {
+									token: { $env: "RELEASE_TOKEN" },
+									repeated: [{ $env: "RELEASE_TOKEN" }],
+								},
+							}
+						: {}),
+				},
 				probes: [],
 			},
 		},
 	])
 	const releases = yield* Effect.forEach(
-		[1, 2, 3],
+		options.versions ?? [1, 2, 3],
 		Effect.fnUntraced(function* (version) {
 			yield* write(path.join(business, "package.json"), {
 				name: "@example/release-business",
@@ -110,6 +132,7 @@ export default Plugin.make({ name: "release-business", config: Config, overlap: 
 if (${version} === 3) return yield* Effect.die("Deliberately failing release");
 const fs = yield* FileSystem.FileSystem;
 yield* fs.writeFileString(config.output, "${version}");
+if (config.credentials !== undefined) yield* fs.writeFileString(config.output + ".resolved", String(config.credentials.token.length) + ":" + String(config.credentials.repeated[0] === config.credentials.token));
 }).pipe(Effect.provide(NodeFileSystem.layer)) });`,
 			)
 			const id = yield* build(store.releases, {
@@ -141,7 +164,7 @@ yield* fs.writeFileString(config.output, "${version}");
 		},
 		instances: [{ id: "recorder", target: recorder }],
 	}).pipe(Layer.provide(Units.layer), Layer.provide(NodeServices.layer))
-	return { store, releases, recorder, layer, serving }
+	return { directory, store, releases, recorder, layer, serving }
 })
 
 it.live(
@@ -291,6 +314,16 @@ it.live(
 						(entry) => entry.recorded && Option.isSome(entry.run),
 					),
 				)
+				const rollbackKey = Option.getOrThrow(Array.last(recorded)).key
+				yield* fs.remove(
+					path.join(
+						f.store.releases,
+						".applications",
+						`${rollbackKey}.receipt.json`,
+					),
+				)
+				const recoveredHistory = yield* history(f.store)
+				assert.deepEqual(recoveredHistory, recorded)
 				// The next rollback would select the second release. Revocation must be checked again.
 				yield* client.setPolicy({
 					instance: "business",
@@ -321,4 +354,284 @@ it.live(
 			assert.equal(offline.length, 4)
 		}).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 	90000,
+)
+
+const startRecorder = Effect.fnUntraced(function* (
+	client: Control.Client,
+	target: Kernel.Target,
+) {
+	const handle = yield* client.submit({
+		operations: [{ _tag: "Deploy", instance: "recorder", target }],
+		budget,
+	})
+	const result = yield* handle.await
+	assert.equal(result.outcome, "Accepted", Cause.pretty(result.cause))
+	yield* client.recording.pipe(
+		Effect.repeat({
+			schedule: Schedule.spaced("10 millis"),
+			until: (value) => Option.isSome(value.grant),
+		}),
+		Effect.timeout("10 seconds"),
+	)
+})
+
+it.live(
+	"keeps environment secrets out of release requests, Change status and every journal file without undoing revocation",
+	() =>
+		Effect.gen(function* () {
+			// Loading and planning must work without the secret's environment provider.
+			const f = yield* fixture({ secret: true, versions: [1, 2] })
+			const fs = yield* FileSystem.FileSystem
+			const path = yield* Path.Path
+			const first = f.releases[0]!
+			const second = f.releases[1]!
+			const secret = "release-fixture-secret-do-not-record"
+			const input = first.entries[0]!.target.deployment?.input
+			assert.deepEqual(input, {
+				output: f.serving,
+				credentials: {
+					token: { $reference: "RELEASE_TOKEN" },
+					repeated: [{ $reference: "RELEASE_TOKEN" }],
+				},
+			})
+			yield* Effect.gen(function* () {
+				const address = yield* Control.serve()
+				const client = yield* Control.connect(address)
+				yield* client.setPolicy({
+					instance: "business",
+					allowed: [
+						first.entries[0]!.target.identity,
+						second.entries[0]!.target.identity,
+					],
+					values: {},
+				})
+				yield* startRecorder(client, f.recorder)
+				const updates = yield* Ref.make<ReadonlyArray<Control.Policy>>([])
+				const requests = yield* Ref.make<ReadonlyArray<Kernel.Request>>([])
+				const tracked: Control.Client = {
+					...client,
+					setPolicy: (policy) =>
+						Ref.update(updates, Array.append(policy)).pipe(
+							Effect.andThen(client.setPolicy(policy)),
+						),
+					submit: (request) =>
+						Ref.update(requests, Array.append(request)).pipe(
+							Effect.andThen(client.submit(request)),
+						),
+				}
+				const values = ConfigProvider.layer(
+					ConfigProvider.fromUnknown({ RELEASE_TOKEN: secret }),
+				)
+				const result = yield* apply(tracked, f.store, first.id, [], {
+					budget,
+				}).pipe(Effect.provide(values))
+				assert.equal(result.outcome, "Accepted", result.diagnostic)
+				const resolved = yield* fs.readFileString(f.serving + ".resolved")
+				assert.equal(resolved, `${secret.length}:true`)
+				const policies = yield* Ref.get(updates)
+				assert.deepEqual(policies, [
+					{ instance: "business", values: { RELEASE_TOKEN: secret } },
+				])
+				const submitted = yield* Ref.get(requests)
+				const submittedText = yield* Schema.encodeEffect(
+					Schema.fromJsonString(Schema.Unknown),
+				)(submitted)
+				assert.notInclude(submittedText, secret)
+				assert.include(submittedText, "$reference")
+				const observed = yield* observe(client, result.change)
+				const status = yield* Schema.encodeEffect(
+					Schema.fromJsonString(Schema.Unknown),
+				)(Option.getOrThrow(observed))
+				assert.include(status, "RELEASE_TOKEN")
+				assert.notInclude(status, secret)
+				const names = yield* fs.readDirectory(f.store.journal, {
+					recursive: true,
+				})
+				for (const name of names) {
+					const file = path.join(f.store.journal, name)
+					if ((yield* fs.stat(file)).type === "File") {
+						const text = yield* fs.readFileString(file)
+						assert.notInclude(text, secret, `The secret leaked into ${name}`)
+					}
+				}
+				yield* client.setPolicy({
+					instance: "business",
+					allowed: [],
+					values: {},
+				})
+				const denied = yield* apply(
+					tracked,
+					f.store,
+					second.id,
+					first.entries,
+					{ budget },
+				).pipe(Effect.provide(values), Effect.flip)
+				assert.equal(denied.code, "Unauthorized")
+			}).pipe(Effect.provide(f.layer))
+		}).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+	60000,
+)
+
+/** An external kernel can be killed without running its shutdown finalizers. */
+const startKernel = Effect.fnUntraced(function* (
+	f: Effect.Success<ReturnType<typeof fixture>>,
+	name: string,
+) {
+	const fs = yield* FileSystem.FileSystem
+	const path = yield* Path.Path
+	const deployment = path.join(f.directory, `${name}-deployment.json`)
+	const ready = path.join(f.directory, `${name}-ready.json`)
+	const text = yield* Schema.encodeEffect(
+		Schema.fromJsonString(Control.Deployment),
+	)({
+		authority: "release-workflow-restart",
+		maxUnits: 8,
+		recording: {
+			recorder: "release",
+			instance: "recorder",
+			scope: ["business"],
+		},
+		instances: [
+			{ id: "recorder", target: f.recorder },
+			...Array.map(f.releases[0]!.entries, ({ id, target }) => ({
+				id,
+				target,
+			})),
+		],
+	})
+	yield* fs.writeFileString(deployment, text)
+	const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+	const child = yield* spawner.spawn(
+		ChildProcess.make(
+			process.execPath,
+			[
+				new URL(
+					"../../plugin-remote/dist/internal/kernelMain.js",
+					import.meta.url,
+				).pathname,
+				deployment,
+				ready,
+			],
+			{ stdout: "pipe", stderr: "pipe", killSignal: "SIGKILL" },
+		),
+	)
+	const stderr = yield* Stream.mkString(Stream.decodeText(child.stderr)).pipe(
+		Effect.forkScoped,
+	)
+	yield* Stream.runDrain(child.stdout).pipe(
+		Effect.catchCause((cause) =>
+			Effect.logError("Release restart fixture stdout failed", cause),
+		),
+		Effect.forkScoped,
+	)
+	yield* Effect.raceFirst(
+		fs.exists(ready).pipe(
+			Effect.repeat({
+				schedule: Schedule.spaced("10 millis"),
+				until: (exists) => exists,
+			}),
+		),
+		child.exitCode.pipe(
+			Effect.flatMap((code) =>
+				Fiber.join(stderr).pipe(
+					Effect.flatMap((output) =>
+						Effect.die(`Kernel exited before readiness: ${code}: ${output}`),
+					),
+				),
+			),
+		),
+	).pipe(Effect.timeout("10 seconds"))
+	const address = yield* fs
+		.readFileString(ready)
+		.pipe(
+			Effect.flatMap(
+				Schema.decodeEffect(Schema.fromJsonString(Control.Address)),
+			),
+		)
+	return { child, client: yield* Control.connect(address) }
+})
+
+it.live(
+	"recovers a journaled release after a kernel crash before its receipt was saved, without executing it again",
+	() =>
+		Effect.gen(function* () {
+			const f = yield* fixture({ secret: true, versions: [1] })
+			const fs = yield* FileSystem.FileSystem
+			const path = yield* Path.Path
+			const release = f.releases[0]!
+			const first = yield* startKernel(f, "first")
+			yield* startRecorder(first.client, f.recorder)
+			const original = yield* apply(first.client, f.store, release.id, [], {
+				budget,
+			}).pipe(
+				Effect.provide(
+					ConfigProvider.layer(
+						ConfigProvider.fromUnknown({
+							RELEASE_TOKEN: "first-release-credential",
+						}),
+					),
+				),
+			)
+			assert.equal(original.outcome, "Accepted", original.diagnostic)
+			const receipt = path.join(
+				f.store.releases,
+				".applications",
+				`release-${release.id}.receipt.json`,
+			)
+			// Reproduce the durable state left when the operator dies before saving any receipt.
+			yield* fs.remove(receipt)
+			yield* first.client.close
+			yield* first.child.kill({ killSignal: "SIGKILL" })
+			const firstExit = yield* first.child.exitCode.pipe(Effect.flip)
+			assert.include(Cause.pretty(Cause.fail(firstExit)), "SIGKILL")
+			const second = yield* startKernel(f, "second")
+			yield* startRecorder(second.client, f.recorder)
+			const before = yield* history(f.store)
+			assert.lengthOf(before, 1)
+			assert.equal(before[0]!.release, release.id)
+			assert.equal(before[0]!.change, original.change)
+			assert.isTrue(Option.contains(before[0]!.run, original.run!))
+			assert.isTrue(Option.contains(before[0]!.outcome, "Accepted"))
+			const absent = yield* fs.exists(receipt)
+			assert.isFalse(absent)
+			const rejections = yield* Ref.make<ReadonlyArray<string>>([])
+			const tracked: Control.Client = {
+				...second.client,
+				submit: (request) =>
+					second.client
+						.submit(request)
+						.pipe(
+							Effect.tapError((error) =>
+								Ref.update(rejections, Array.append(error.reason)),
+							),
+						),
+			}
+			const recovered = yield* apply(tracked, f.store, release.id, [], {
+				budget,
+			}).pipe(
+				Effect.provide(
+					ConfigProvider.layer(
+						ConfigProvider.fromUnknown({
+							RELEASE_TOKEN: "rotated-release-credential",
+						}),
+					),
+				),
+			)
+			assert.deepEqual(recovered, original)
+			const rejected = yield* Ref.get(rejections)
+			assert.deepEqual(rejected, ["AlreadyRecorded"])
+			const saved = yield* fs.exists(receipt)
+			assert.isTrue(saved)
+			const units = yield* second.client.units
+			assert.isFalse(
+				Array.some(units, (unit) => HashMap.has(unit.members, "business")),
+			)
+			const after = yield* history(f.store)
+			assert.deepEqual(after, before)
+			yield* second.client.close
+			yield* second.child.kill({ killSignal: "SIGKILL" })
+			const secondExit = yield* second.child.exitCode.pipe(Effect.flip)
+			assert.include(Cause.pretty(Cause.fail(secondExit)), "SIGKILL")
+		}).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+	60000,
 )
