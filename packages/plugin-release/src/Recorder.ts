@@ -1,5 +1,6 @@
 /** The release recorder: an ordinary unit plugin that holds the recording role through the public protocol. */
 import {
+	Duration,
 	Effect,
 	FileSystem,
 	HashMap,
@@ -9,6 +10,7 @@ import {
 	Schema,
 	Stream,
 } from "effect"
+import { Digest, SecureRandom } from "effect/crypto"
 
 import { Plugin } from "@graftland/graft"
 import type { RecordDuty } from "@graftland/graft/Kernel"
@@ -21,6 +23,16 @@ export const Config = Schema.Struct({
 	recorder: Schema.String,
 	/** With a directory, each record is appended and synced to the journal there before it is acknowledged. */
 	directory: Schema.optionalKey(Schema.String),
+	/** How long full rendered causes are retained beside the journal. Default 30 days. */
+	diagnosticRetention: Schema.optionalKey(
+		Schema.DurationFromString.check(
+			Schema.makeFilter(
+				(duration) =>
+					Duration.isFinite(duration) && !Duration.isNegative(duration),
+				{ expected: "a finite nonnegative duration" },
+			),
+		),
+	),
 })
 export type Config = typeof Config.Type
 
@@ -31,8 +43,19 @@ const inMemory = Effect.fnUntraced(function* () {
 		Ref.update(stored, HashMap.set(record.id, record))
 })
 /** A record that cannot be stored is never acknowledged; the append is retried while the unit runs. */
-const durable = Effect.fnUntraced(function* (directory: string) {
-	const journal = yield* Journal.open(directory)
+const durable = Effect.fnUntraced(function* (
+	directory: string,
+	diagnosticRetention: Duration.Duration,
+) {
+	const journal = yield* Journal.open(directory, { diagnosticRetention })
+	yield* journal.prune.pipe(
+		Effect.andThen(journal.compact),
+		Effect.catchTag("JournalError", (error) =>
+			Effect.logError("Maintaining the release journal failed", error),
+		),
+		Effect.repeat(Schedule.spaced("1 hour")),
+		Effect.forkScoped,
+	)
 	if (journal.recovered.truncated > 0)
 		yield* Effect.logWarning(
 			`Removed a torn final journal line of ${journal.recovered.truncated} bytes`,
@@ -56,13 +79,22 @@ const durable = Effect.fnUntraced(function* (directory: string) {
 export const plugin = Plugin.make({
 	name: "@graftland/plugin-release/Recorder",
 	config: Config,
-	inject: [Recorder, FileSystem.FileSystem, Path.Path],
+	inject: [
+		Recorder,
+		FileSystem.FileSystem,
+		Path.Path,
+		Digest.Digest,
+		SecureRandom.SecureRandom,
+	],
 	apply: Effect.fn(function* (config) {
 		const recorder = yield* Recorder
 		const store =
 			config.directory === undefined
 				? yield* inMemory()
-				: yield* durable(config.directory)
+				: yield* durable(
+						config.directory,
+						config.diagnosticRetention ?? Duration.days(30),
+					)
 		yield* recorder.records.pipe(
 			Stream.runForEach((record) =>
 				store(record).pipe(

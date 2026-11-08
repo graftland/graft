@@ -58,7 +58,11 @@ const fixture = Effect.fn(function* (
 	const recorder = Units.target({
 		artifact: recorderArtifact,
 		input: durable
-			? { recorder: "release", directory: path.join(directory, "journal") }
+			? {
+					recorder: "release",
+					directory: path.join(directory, "journal"),
+					diagnosticRetention: "2 hours",
+				}
 			: { recorder: "release" },
 		placement: "Worker",
 	})
