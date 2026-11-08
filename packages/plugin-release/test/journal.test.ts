@@ -32,6 +32,8 @@ const line = (
 	run,
 	change,
 	stage,
+	key: null,
+	request: "A normalized request",
 	content: `${change}|${stage}|${outcome ?? ""}`,
 	members: ["a"],
 	targets: ["a=next"],

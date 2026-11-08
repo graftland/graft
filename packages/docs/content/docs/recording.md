@@ -98,6 +98,22 @@ rendered cause.
 | The process stopped mid-Change | The Change shows an intent without a conclusion: `concluded` is `false`; its member facts show what had run.                                      |
 | The kernel restarted           | Change ids start again at `change-1`; the run id keeps the two apart.                                                                             |
 
+## Recover after a kernel restart
+
+With `directory`, the recorder reads its journal before registering with a new
+kernel. Journal lines retain each request's key and canonical request text.
+
+| Journaled state                         | After restart                                                                                                                                                                                                     |
+| --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A keyed intent, concluded or unfinished | The same key and normalized request are rejected with `AlreadyRecorded`; `conflicts` names the earlier `"<run>/<change>"`. A different request under that key is rejected with `KeyConflict`. No work runs again. |
+| An intent without a conclusion          | The kernel records a conclusion under the original run and Change id. History shows `concluded: true`, no outcome and phase `Interrupted`, with the members' current facts. Unknown targets remain unknown.       |
+| Records in compacted segments           | Recovery retains their request keys and unfinished-Change information.                                                                                                                                            |
+| An in-memory recorder                   | No keys or records survive a kernel restart.                                                                                                                                                                      |
+
+An `Interrupted` conclusion does not claim that the earlier work succeeded or
+failed, and does not resume or undo its actions. Diagnostic expiry does not
+remove request keys or durable member facts.
+
 ## Retain diagnostics
 
 A **diagnostic reference** is an opaque identifier for a full rendered cause in
@@ -140,5 +156,6 @@ maintenance. A journal opened with `Journal.open` also exposes `compact` and
 
 `status.recording` shows the gate, outstanding records and whether they are
 blocked. `kernel.recording` and [`client.recording`](../control/) list every
-outstanding record, including those of a recorder that exited. Kernel process
-loss loses them.
+outstanding record, including those of a recorder that exited. The outstanding
+delivery queue is lost with the kernel process; the durable journal remains
+available for recovery.

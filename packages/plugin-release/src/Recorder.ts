@@ -1,5 +1,6 @@
 /** The release recorder: an ordinary unit plugin that holds the recording role through the public protocol. */
 import {
+	Array,
 	Duration,
 	Effect,
 	FileSystem,
@@ -13,7 +14,7 @@ import {
 import { Digest, SecureRandom } from "effect/crypto"
 
 import { Plugin } from "@graftland/graft"
-import type { RecordDuty } from "@graftland/graft/Kernel"
+import type { RecordDuty, RecoveredRecords } from "@graftland/graft/Kernel"
 import { Recorder } from "@graftland/plugin-remote/Recording"
 
 import * as Journal from "./Journal"
@@ -48,6 +49,32 @@ const durable = Effect.fnUntraced(function* (
 	diagnosticRetention: Duration.Duration,
 ) {
 	const journal = yield* Journal.open(directory, { diagnosticRetention })
+	const lines = yield* journal.lines
+	const recovered: RecoveredRecords = {
+		keys: Array.flatMap(lines, (line) =>
+			line.stage === "Intent" && line.key !== null
+				? [
+						{
+							key: line.key,
+							request: line.request,
+							run: line.run,
+							change: line.change,
+						},
+					]
+				: [],
+		),
+		unfinished: Array.flatMap(Journal.summarize(lines), (summary) =>
+			!summary.concluded && Array.contains(summary.stages, "Intent")
+				? [
+						{
+							run: summary.run,
+							change: summary.change,
+							members: summary.members,
+						},
+					]
+				: [],
+		),
+	}
 	yield* journal.prune.pipe(
 		Effect.andThen(journal.compact),
 		Effect.catchTag("JournalError", (error) =>
@@ -60,7 +87,7 @@ const durable = Effect.fnUntraced(function* (
 		yield* Effect.logWarning(
 			`Removed a torn final journal line of ${journal.recovered.truncated} bytes`,
 		)
-	return (record: RecordDuty) =>
+	const store = (record: RecordDuty) =>
 		journal.append(Journal.fromDuty(record)).pipe(
 			Effect.tapError((error) =>
 				Effect.logError(
@@ -74,6 +101,7 @@ const durable = Effect.fnUntraced(function* (
 			}),
 			Effect.asVoid,
 		)
+	return { store, recovered }
 })
 
 export const plugin = Plugin.make({
@@ -88,13 +116,15 @@ export const plugin = Plugin.make({
 	],
 	apply: Effect.fn(function* (config) {
 		const recorder = yield* Recorder
-		const store =
+		const durableStore =
 			config.directory === undefined
-				? yield* inMemory()
+				? undefined
 				: yield* durable(
 						config.directory,
 						config.diagnosticRetention ?? Duration.days(30),
 					)
+		const store =
+			durableStore === undefined ? yield* inMemory() : durableStore.store
 		yield* recorder.records.pipe(
 			Stream.runForEach((record) =>
 				store(record).pipe(
@@ -109,7 +139,8 @@ export const plugin = Plugin.make({
 			),
 			Effect.forkScoped,
 		)
-		yield* recorder.register(config.recorder)
+		if (durableStore === undefined) yield* recorder.register(config.recorder)
+		else yield* recorder.register(config.recorder, durableStore.recovered)
 	}),
 })
 export default plugin

@@ -40,6 +40,9 @@ export const Line = Schema.Struct({
 	run: Schema.String,
 	change: Schema.String,
 	stage: Stage,
+	/** Request identity retained for deduplication across kernel runs. */
+	key: Schema.NullOr(Schema.String),
+	request: Schema.String,
 	content: Schema.String,
 	members: Schema.Array(Schema.String),
 	targets: Schema.Array(Schema.String),
@@ -84,10 +87,12 @@ const decodeDiagnostic = Schema.decodeUnknownEffect(
 )
 
 export const fromDuty = (duty: RecordDuty): Line => ({
-	id: `${duty.payload.run}/${duty.id}`,
+	id: `${duty.payload.run}/${duty.payload.change}/${duty.payload.stage}`,
 	run: duty.payload.run,
 	change: duty.payload.change,
 	stage: duty.payload.stage,
+	key: Option.getOrNull(duty.payload.key),
+	request: duty.payload.request,
 	content: duty.content,
 	members: duty.payload.members,
 	targets: duty.payload.targets,
