@@ -114,7 +114,7 @@ it.effect(
 				`import { copyFileSync } from "node:fs"; copyFileSync(${yield* Schema.encodeEffect(Schema.fromJsonString(Schema.String))(secret)}, ${yield* Schema.encodeEffect(Schema.fromJsonString(Schema.String))(marker)}); throw new Error("Untrusted import executed")`,
 			)
 			yield* h.fs.writeFileString(
-				h.path.join(h.store, "contract.js"),
+				h.path.join(directory, "contract.js"),
 				"export default null",
 			)
 			yield* write(h.path.join(directory, "package.json"), {
@@ -149,7 +149,7 @@ it.effect(
 					config: {
 						package: "./untrusted",
 						entry: ".",
-						contract: "./contract.js",
+						contract: "./untrusted/contract.js",
 						target: { _tag: "Local" },
 						config: {},
 						probes: [],

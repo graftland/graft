@@ -32,6 +32,8 @@ export const Entry = Schema.Struct({
 	input: Schema.Json,
 	probes: Schema.Array(Schema.NonEmptyString),
 	artifact: Artifact.Artifact,
+	/** Captured contract bytes; releases built before the native workflow must be rebuilt. */
+	contractArtifact: Schema.optionalKey(Artifact.Artifact),
 	package: Manifest.Package,
 	entry: Manifest.PublicEntry,
 	provenance: Publication.Provenance,
