@@ -38,10 +38,6 @@ description: 用 graft.yml 描述應用程式，並在執行期間修改設定�
 | 儲存檔案時會發生什麼       | [執行期間的變更](#執行期間的變更) |
 | 從外掛或程式碼編輯設定項目 | [Loader API](../loader-api/)      |
 
-設定項目也可以讓它的外掛在子行程、worker 或另一台機器上執行：寫上
-`name: remote`，再把外掛的設定包一層，見
-[從 YAML 載入](../remote/hosts/#從-yaml-載入)。它仍然是一般的設定項目，同樣有 id、`disabled`、`inject`、`isolate`，也能在執行期間編輯。儲存的項目 id 同時也是 runner 上的實例名稱。
-
 從項目載入的外掛可從 `@graftland/loader` 匯入 `Entry`，讀取
 `yield* Entry.CurrentId`。它是
 `Context.Reference<Option<string>>`，值為目前項目的 id，巢狀 group 中也一樣；不經過項目載入時預設為
@@ -52,7 +48,7 @@ description: 用 graft.yml 描述應用程式，並在執行期間修改設定�
 在最外層宣告命令外掛項目：
 
 ```yaml
-- name: remote/cli
+- name: ./commands.ts
   cli: true
 ```
 
@@ -152,9 +148,6 @@ description: 用 graft.yml 描述應用程式，並在執行期間修改設定�
 | 以 `/` 開頭             | 絕對路徑。                                                                                                                                                                                                                                                                           |
 | 以 `@` 開頭，或包含 `:` | 原樣使用。                                                                                                                                                                                                                                                                           |
 | 其他（例如 `review`）   | 先照原樣嘗試，再試 `@graftland/plugin-<name>` 和 `graft-plugin-<name>`；原名稱對應的模組若沒有匯出外掛（例如 Node 的 `http`），會被略過。兩種命名慣例地位相同：兩者都已安裝時，該項目以 `AmbiguousPluginName` 失敗。判斷時兩者都會被匯入，因此第二個匯入失敗時，該項目以該錯誤失敗。 |
-
-套件從應用程式目錄解析。例如，`name: remote` 會找到
-`@graftland/plugin-remote`，`name: remote/runner` 會找到它的 `runner` 匯出。
 
 ### 模組無法載入時
 

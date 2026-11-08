@@ -70,16 +70,6 @@ Graft 会保留每次失败的完整 `Cause`
 
 ## Remote
 
-通过 [Remote](../remote/overview/) 运行的插件会以下列错误失败，它们来自
-`@graftland/plugin-remote`：
+单元契约通过编码通道保留已声明的业务错误。在契约的 fromClient 映射中处理 RpcClientError 传输失败。
 
-| 名称                         | 触发时机                                                                        |
-| ---------------------------- | ------------------------------------------------------------------------------- |
-| 已声明的错误                 | 插件以契约 `error` 中声明的错误失败。                                           |
-| `Contract.UndeclaredFailure` | 插件以契约未声明的错误失败。                                                    |
-| `RemoteError`                | Remote 本身失败：进程退出、连接断开或 runner 拒绝。`cause` 说明具体原因。       |
-| `RemoteWithdrawn`            | 调用方使用插件的服务时，这些服务被撤回。                                        |
-| `RemoteEntryError`           | `graft.yml` 中的 `remote` 或 `remote/runner` 条目无效。`field` 指出是哪个字段。 |
-
-defect 仍然是 defect。`RemoteError` 中可能包含哪些错误、该如何处理，见
-[Remote 错误](../remote/hosts/#调用方看到的错误)。
+[调用完成](../calls/)和[原生退出证据](../units/)独立于业务结果。公开 Change 状态和结果保留 Cause。

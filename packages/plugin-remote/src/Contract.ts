@@ -44,7 +44,7 @@ export interface Service<R = never, ClientR = never, UnitR = R>
 	readonly key: Context.Key<unknown, unknown>
 	readonly group: Pick<RpcGroup.RpcGroup<Rpc.Any>, "requests">
 	/** Serves encoded unary requests using a Graft-owned handler Scope. */
-	readonly serveUnit: (
+	readonly serve: (
 		port: {
 			readonly serverProtocol: (
 				endpoint: string,
@@ -52,14 +52,8 @@ export interface Service<R = never, ClientR = never, UnitR = R>
 		},
 		owner: RequestOwner,
 	) => Effect.Effect<never, never, UnitR>
-	readonly serve: (port: {
-		readonly serverProtocol: (endpoint: string) => RpcServer.Protocol["Service"]
-	}) => Effect.Effect<never, never, R>
 	/** Whether every declared operation is unary. */
 	readonly unary: boolean
-	readonly clients: (port: {
-		readonly clientProtocol: (endpoint: string) => RpcClient.Protocol["Service"]
-	}) => Effect.Effect<Context.Context<never>, never, Scope.Scope | ClientR>
 	readonly publish: (port: {
 		readonly clientProtocol: (endpoint: string) => RpcClient.Protocol["Service"]
 	}) => Effect.Effect<

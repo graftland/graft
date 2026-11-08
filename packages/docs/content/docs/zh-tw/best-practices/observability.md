@@ -176,11 +176,6 @@ message // => Option.some(["Listening on 8080"])
 `Logger.layer`，或在 `Layer.mergeAll` 中列在 `Graft.layer` 之後的
 `Logger.layer`，會取代這個收集器，`Graft.logs` 就什麼都收不到。
 
-[遠端外掛](../../remote/overview/)的日誌以它們自己的層級送到宿主的 logger，外掛的註解放在
-`remote.annotations` 中，並帶有 `remote.pid` 或
-`remote.threadId`。高負載下遺失的日誌會顯示為
-[`Remote logs were dropped`](../../remote/transport-auth/#警告)。轉發只是盡力而為：一次突發可能遺失幾乎全部日誌。在外掛中對高頻訊息取樣或彙總，不能遺失的記錄應寫入儲存，而不是日誌。
-
 ## 在外掛中收集日誌
 
 `Graft.logs`
@@ -333,15 +328,14 @@ spans // => ["graft.plugin app/feed", "graft.plugin app/feed > feed.apply", "fee
         name: ./src/bot.ts
 ```
 
-| 修改                       | 效果                                                                                                                                                                                                                              |
-| -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| HTTP exporter 設定         | 新 span 交給新的 exporter；已開始的 span 留在舊 exporter；這些 span 結束後刷新並關閉舊 exporter。等待最長為舊設定的 `shutdownTimeout`；Effect 隨後為刷新單獨提供一個 `shutdownTimeout` 時限（總計最長為兩倍時限）。子樹繼續執行。 |
-| `exporter.config`          | 轉交給 exporter 的更新函式；相容的更新保持子樹執行。                                                                                                                                                                              |
-| `plugins`                  | 像群組一樣協調：未變更的項目繼續執行。exporter 設定未變時，不呼叫其更新函式。                                                                                                                                                     |
-| `exporter.name`            | 使用新的 provider 重新啟動被追蹤的子樹。                                                                                                                                                                                          |
-| 將項目移入或移出 `plugins` | 這些項目會重新啟動，因為父層和 intercept 改變了。                                                                                                                                                                                 |
-| Exporter 失敗              | 子樹等待 `Exporter` 服務；exporter 自身重試成功後，子樹恢復執行，無需修改設定。                                                                                                                                                   |
-| 卸載該項目                 | 先停止子樹，再並行刷新並關閉所有剩餘 exporter。                                                                                                                                                                                   |
+| 修改                       | 效果                                                                            |
+| -------------------------- | ------------------------------------------------------------------------------- |
+| `exporter.config`          | 轉交給 exporter 的更新函式；相容的更新保持子樹執行。                            |
+| `plugins`                  | 像群組一樣協調：未變更的項目繼續執行。exporter 設定未變時，不呼叫其更新函式。   |
+| `exporter.name`            | 使用新的 provider 重新啟動被追蹤的子樹。                                        |
+| 將項目移入或移出 `plugins` | 這些項目會重新啟動，因為父層和 intercept 改變了。                               |
+| Exporter 失敗              | 子樹等待 `Exporter` 服務；exporter 自身重試成功後，子樹恢復執行，無需修改設定。 |
+| 卸載該項目                 | 先停止子樹，再並行刷新並關閉所有剩餘 exporter。                                 |
 
 `plugins` 之外的外掛不會被追蹤。Graft 會像處理最外層項目一樣，把 `plugins`
 中缺少的 id 寫回檔案，調整順序時保留身分。

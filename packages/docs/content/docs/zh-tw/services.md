@@ -83,7 +83,7 @@ state // => Option.some(Fork.ForkState.Active())
 發布方不一定在你的行程裡執行。用 [Remote](../remote/overview/)
 移到子行程、worker 或另一台機器上的外掛，仍然在這裡發布它的服務，`uptime`
 也照樣注入
-`Clock`。只是呼叫會經過一條連線，失敗時呼叫端看到的是[遠端錯誤](../remote/hosts/#呼叫端看到的錯誤)。
+`Clock`。只是呼叫會經過一條連線，失敗時呼叫端看到的是[遠端錯誤](../units/)。
 
 ## 服務撤回流程
 

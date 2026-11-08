@@ -8,14 +8,13 @@
 
 刚接触 Graft？请按顺序阅读。每个示例都是一个简短的文件，只讲一个概念，会打印运行过程，并给出可以动手试试的建议。
 
-| 示例                                       | 你将学到                                                               |
-| ------------------------------------------ | ---------------------------------------------------------------------- |
-| [01 · Hello](01-hello)                     | 定义插件、加载插件、修改它的配置、卸载它。                             |
-| [02 · Services](02-services)               | 在一个插件中发布服务，在另一个插件中使用它，后者会等待服务出现。       |
-| [03 · Events](03-events)                   | 插件卸载时会自动消失的事件处理器。                                     |
-| [04 · Failures](04-failures)               | 失败的插件、重试计划，以及属于插件的后台任务。                         |
-| [05 · Config file](05-config-file)         | 用 `graft start --watch` 从 `graft.yml` 运行插件，并在运行时编辑它们。 |
-| [06 · 远程插件](06-remote/README.zh-CN.md) | 不改调用方，把服务放到子进程、worker 或 runner。                       |
+| 示例                               | 你将学到                                                               |
+| ---------------------------------- | ---------------------------------------------------------------------- |
+| [01 · Hello](01-hello)             | 定义插件、加载插件、修改它的配置、卸载它。                             |
+| [02 · Services](02-services)       | 在一个插件中发布服务，在另一个插件中使用它，后者会等待服务出现。       |
+| [03 · Events](03-events)           | 插件卸载时会自动消失的事件处理器。                                     |
+| [04 · Failures](04-failures)       | 失败的插件、重试计划，以及属于插件的后台任务。                         |
+| [05 · Config file](05-config-file) | 用 `graft start --watch` 从 `graft.yml` 运行插件，并在运行时编辑它们。 |
 
 部署和认证方式见
 [Remote 文档](../packages/docs/content/docs/zh-cn/remote/overview.md)。
@@ -43,7 +42,6 @@ devenv shell -- pnpm build
 devenv shell -- pnpm --filter @graftland/sample-hello start
 ```
 
-每个示例的 README 都给出了它的具体命令。`05-config-file`、`06-remote` 和
 `http-gateway` 会一直运行，直到你按下
 <kbd>Ctrl</kbd>+<kbd>C</kbd>。其他示例打印完过程后就会退出。
 

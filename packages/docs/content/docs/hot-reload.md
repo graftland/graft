@@ -123,13 +123,12 @@ Details:
 
 ## Limits
 
-| Limit                              | Detail                                                                                                                                                                                                                                                                                                                                                                  |
-| ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Memory grows in long sessions**  | Node's ESM cache does not evict versioned module instances. Incremental reload creates fewer instances, but they still accumulate. HMR reclaims source digests, dependency observations and reachability caches according to leases and the current import view; compact routing views remain until the session closes. There is no hard upper bound on process memory. |
-| **No supervision**                 | HMR does not supervise or restart a child process. Restart the process when needed.                                                                                                                                                                                                                                                                                     |
-| **Not for production**             | Do not use `--watch` in production.                                                                                                                                                                                                                                                                                                                                     |
-| **Remote plugins restart instead** | With `graft start --watch`, local/worker [remote entries](../remote/hosts/#config-changes-and-hot-reload) restart when their contract or implementation file changes. The host does not watch implementations installed on a network runner.                                                                                                                            |
-| **Hung imports block reloads**     | An import that never finishes, such as a top-level `await` that never resolves, holds up later reloads and shutdown, because a dynamic import cannot be cancelled.                                                                                                                                                                                                      |
+| Limit                             | Detail                                                                                                                                                                                                                                                                                                                                                                  |
+| --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Memory grows in long sessions** | Node's ESM cache does not evict versioned module instances. Incremental reload creates fewer instances, but they still accumulate. HMR reclaims source digests, dependency observations and reachability caches according to leases and the current import view; compact routing views remain until the session closes. There is no hard upper bound on process memory. |
+| **No supervision**                | HMR does not supervise or restart a child process. Restart the process when needed.                                                                                                                                                                                                                                                                                     |
+| **Not for production**            | Do not use `--watch` in production.                                                                                                                                                                                                                                                                                                                                     |
+| **Hung imports block reloads**    | An import that never finishes, such as a top-level `await` that never resolves, holds up later reloads and shutdown, because a dynamic import cannot be cancelled.                                                                                                                                                                                                      |
 
 ## Change detection
 
@@ -185,8 +184,5 @@ separate from the candidate resource scope that closes immediately on failure.
 Fixing the module can therefore recover through polling even when the native
 notification is lost. Retry replaces the observation generation; removal or
 disabling closes it.
-
-Remote entries keep their observation collection across activation and retry
-failures; see [remote recovery](../remote/hosts/#config-changes-and-hot-reload).
 
 To use HMR outside the CLI, see [HMR API](../hmr-api/).

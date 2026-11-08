@@ -15,7 +15,7 @@ import {
 	type PlatformError,
 } from "effect"
 
-import { Manifest } from "@graftland/graft"
+import type * as Manifest from "@graftland/graft/Manifest"
 
 export const Identity = Schema.Struct({
 	version: Schema.Literal(1),
@@ -279,11 +279,11 @@ export const directoryIdentity = Effect.fnUntraced(
 			directory,
 			"graft-directory-sha256-v1\0",
 		)
-		return Manifest.DirectoryIdentity.make({
+		return {
 			version: 1,
 			algorithm: "sha256",
 			digest,
-		})
+		} satisfies Manifest.DirectoryIdentity
 	},
 	Effect.catchTag("PlatformError", filesystemError),
 )

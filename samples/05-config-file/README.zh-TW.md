@@ -42,5 +42,3 @@ tick
 按 <kbd>Ctrl</kbd>+<kbd>C</kbd> 停止。Graft 會卸載所有外掛。
 
 ## 下一步
-
-[06 · 遠端外掛](../06-remote/README.zh-TW.md)：不改呼叫端，把外掛放到別處執行。

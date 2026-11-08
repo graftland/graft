@@ -9,11 +9,10 @@ import { SecureRandom } from "effect/crypto"
 import { NodeRuntime, NodeServices } from "@effect/platform-node"
 
 import { Graft, type Fork } from "@graftland/graft"
-import * as Remote from "@graftland/plugin-remote"
 
 import { receive } from "./Chat.ts"
-import { contract } from "./forecastContract.ts"
 import dice from "./plugins/dice.ts"
+import forecasts from "./plugins/forecasts.ts"
 import help from "./plugins/help.ts"
 import moderation from "./plugins/moderation.ts"
 import weather from "./plugins/weather.ts"
@@ -58,16 +57,7 @@ const program = Effect.gen(function* () {
 	yield* say("bob", "/weather Paris")
 
 	yield* step("3. Load the forecasts provider; /weather starts on its own")
-	const forecastsFork = yield* Graft.plugin(
-		Remote.plugin(contract, {
-			contractModule: new URL("../dist/forecastContract.js", import.meta.url)
-				.href,
-			implementation: new URL("../dist/plugins/forecasts.js", import.meta.url)
-				.href,
-			connect: { local: {} },
-		}),
-		{ units: "celsius" },
-	)
+	const forecastsFork = yield* Graft.plugin(forecasts, { units: "celsius" })
 	yield* reach(weatherFork, "Active")
 	yield* Effect.log(`weather is ${yield* state(weatherFork)}`)
 	yield* say("bob", "/weather Paris")

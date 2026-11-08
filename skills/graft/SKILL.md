@@ -107,10 +107,9 @@ updating, the failures it handles) has a test.
 
 ### 5. Run
 
-Add entries to `graft.yml` and run `graft start --watch`, or load the plugins
-from code. Done when each fork reaches `Active` and the logs show the work. If
-the design puts a plugin in another process, switch its entry to `name: remote`
-only after it works in process; see [remote](references/remote.md).
+Use captured native unit targets and public Kernel control when a plugin runs
+outside its caller. Contracts and configuration decoding stay inside units; see
+[native units](references/remote.md).
 
 ## References
 

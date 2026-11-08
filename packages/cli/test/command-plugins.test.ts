@@ -151,8 +151,8 @@ for (const global of [false, true]) {
 				yield* fs.makeDirectory(tools)
 				yield* fs.writeFileString(
 					tools + "/npm",
-					// The registry has @graftland/plugin-remote and no graft-plugin-remote.
-					`#!${process.execPath}\nconst [command, name] = process.argv.slice(2);\nif (command === "view" && name !== "@graftland/plugin-remote") { console.error("npm error code E404"); process.exitCode = 1 } else { if (command === "view") console.log(JSON.stringify(name)); process.exitCode = 0 }\n`,
+					// The registry has @graftland/plugin-example and no graft-plugin-example.
+					`#!${process.execPath}\nconst [command, name] = process.argv.slice(2);\nif (command === "view" && name !== "@graftland/plugin-example") { console.error("npm error code E404"); process.exitCode = 1 } else { if (command === "view") console.log(JSON.stringify(name)); process.exitCode = 0 }\n`,
 				)
 				yield* fs.chmod(tools + "/npm", 0o755)
 				yield* fs.writeFileString(
@@ -162,7 +162,7 @@ for (const global of [false, true]) {
 				const result = yield* run(
 					directory,
 					home,
-					["add", "--plugin", "remote", ...(global ? ["--global"] : [])],
+					["add", "--plugin", "example", ...(global ? ["--global"] : [])],
 					{
 						PATH: tools + ":" + searchPath,
 						npm_config_user_agent: "npm/10.0.0",
@@ -172,8 +172,8 @@ for (const global of [false, true]) {
 				const location = global ? home : directory
 				const manifest = yield* fs.readFileString(location + "/package.json")
 				const config = yield* fs.readFileString(location + "/graft.yml")
-				assert.include(manifest, '"@graftland/plugin-remote": "latest"')
-				assert.include(config, "@graftland/plugin-remote/cli")
+				assert.include(manifest, '"@graftland/plugin-example": "latest"')
+				assert.include(config, "@graftland/plugin-example/cli")
 				assert.include(config, "cli: true")
 			}).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 	)

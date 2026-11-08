@@ -785,7 +785,7 @@ const reader = (state: State) =>
 export const make = Effect.fnUntraced(function* (
 	bytes: Channel,
 	options: Options,
-): Effect.fn.Return<Port, never, import("effect").Scope.Scope> {
+): Effect.fn.Return<Port, never, Scope.Scope> {
 	const state = yield* initialize(bytes, options)
 	// The same failure remains observable through Port.await and client requests.
 	// This observer only publishes disconnects, even while the owner closes its scope.

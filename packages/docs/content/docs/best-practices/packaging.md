@@ -62,14 +62,14 @@ export default Plugin.make({
 
 Expose each part as its own entry point:
 
-| Export       | Holds                                                                  | Imported by                                                                                    |
-| ------------ | ---------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| `.`          | The plugin, as the default export or as an export named `plugin`.      | The loader, for `name:` in `graft.yml`.                                                        |
-| `./tokens`   | Service keys, events, references, tagged errors and the config schema. | Consumer plugins, tests, and other packages that implement the same service.                   |
-| `./<plugin>` | A further plugin, one per module.                                      | Entries such as `name: postgres/migrations`.                                                   |
-| `./contract` | A [Remote contract](../../remote/contracts/).                          | Hosts and [runners](../../remote/runners/#set-up-a-runner), when the plugin can run elsewhere. |
-| `./schema`   | The [editor registration](#editor-completion) of the config.           | [`graft schema`](../../cli/#graft-schema), for the application's editor schema.                |
-| `./cli`      | A command plugin that adds `graft` subcommands.                        | [`graft add --plugin <package>`](../../cli/#command-plugins), which enables `<package>/cli`.   |
+| Export       | Holds                                                                  | Imported by                                                                                  |
+| ------------ | ---------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| `.`          | The plugin, as the default export or as an export named `plugin`.      | The loader, for `name:` in `graft.yml`.                                                      |
+| `./tokens`   | Service keys, events, references, tagged errors and the config schema. | Consumer plugins, tests, and other packages that implement the same service.                 |
+| `./<plugin>` | A further plugin, one per module.                                      | Entries such as `name: postgres/migrations`.                                                 |
+| `./contract` | A [Remote contract](../../remote/contracts/).                          | Native units.                                                                                |
+| `./schema`   | The [editor registration](#editor-completion) of the config.           | [`graft schema`](../../cli/#graft-schema), for the application's editor schema.              |
+| `./cli`      | A command plugin that adds `graft` subcommands.                        | [`graft add --plugin <package>`](../../cli/#command-plugins), which enables `<package>/cli`. |
 
 | Rule                                                    | Pitfall it avoids                                                                                                                       |
 | ------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
@@ -232,12 +232,12 @@ plugin. [`graft schema`](../../cli/#graft-schema) finds the module through the
 
 ## Support Graft versions
 
-| Range                | Rule                                                                                                                                                             |
-| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `@graftland/*` peers | While Graft is 0.x, [any release may change the API](../../releases/#release-a-version). `^0.4.0` accepts only 0.4.x; widen it after you test the next minor.    |
-| `effect` peer        | Use the range that the `@graftland/graft` versions you support declare, such as `4.1.*`.                                                                         |
-| `devDependencies`    | Exact versions inside your peer ranges, so your tests run against a release you claim.                                                                           |
-| Your own version     | A breaking config or key change, as above, is a new major. A host can require your version on a runner with [`connect.expect`](../../remote/runners/#instances). |
+| Range                | Rule                                                                                                                                                          |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `@graftland/*` peers | While Graft is 0.x, [any release may change the API](../../releases/#release-a-version). `^0.4.0` accepts only 0.4.x; widen it after you test the next minor. |
+| `effect` peer        | Use the range that the `@graftland/graft` versions you support declare, such as `4.1.*`.                                                                      |
+| `devDependencies`    | Exact versions inside your peer ranges, so your tests run against a release you claim.                                                                        |
+| Your own version     | A breaking config or key change, as above, is a new major.                                                                                                    |
 
 ## Try the package in an application
 

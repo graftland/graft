@@ -10,12 +10,6 @@ import { gzipSync } from "node:zlib"
 
 import { cases, implementations, imports, methodology } from "./catalog.mjs"
 import { supported } from "./dist/model.js"
-import {
-	remoteCases,
-	remoteImplementations,
-	remoteMethodology,
-	remoteSupported,
-} from "./remote-catalog.mjs"
 import { report } from "./report.mjs"
 import { statistics } from "./statistics.mjs"
 
@@ -76,9 +70,7 @@ export const child = (
 		})
 	})
 const version = async (name) => {
-	const resolver = ["ws", "pkijs", "asn1js"].includes(name)
-		? createRequire(require.resolve("@graftland/plugin-remote"))
-		: require
+	const resolver = require
 	let current = dirname(resolver.resolve(name))
 	for (;;) {
 		try {
@@ -186,14 +178,11 @@ export const run = async (args = process.argv.slice(2)) => {
 		if (!Number.isSafeInteger(options.cycles) || options.cycles < 1)
 			throw new Error("--cycles must be a positive integer")
 	}
-	const selected = [...implementations, ...remoteImplementations].filter(
+	const selected = implementations.filter(
 		(name) =>
 			!values.implementation || values.implementation.split(",").includes(name),
 	)
-	const specifications = [
-		...cases(values.quick),
-		...remoteCases(values.quick),
-	].filter(
+	const specifications = cases(values.quick).filter(
 		(spec) =>
 			!values.scenario ||
 			values.scenario.split(",").some((part) => spec.scenario.includes(part)),
@@ -215,7 +204,6 @@ export const run = async (args = process.argv.slice(2)) => {
 		generatedAt: new Date().toISOString(),
 		wallSeconds: 0,
 		options,
-		remoteOptions: remoteMethodology[values.quick ? "quick" : "full"],
 		precisionPolicy:
 			"Original timing rows start with at least 100 samples and 2 seconds measured time after at least 20 warmups and 1 second warmup time. Continue in the same worker in 2-second batches to 4% RME, 24 seconds measured time or 480 seconds worker wall. Retain every sample and capped result. Repeated precision checks make the nominal 95% interval descriptive, not a sequentially valid confidence guarantee. Remote fixed budgets are unchanged.",
 		leftoverExecutions: 0,
@@ -234,12 +222,6 @@ export const run = async (args = process.argv.slice(2)) => {
 				await Promise.all(
 					[
 						"@graftland/graft",
-						"@graftland/plugin-remote",
-						"@effect/platform-node",
-						"@graftland/loader",
-						"ws",
-						"pkijs",
-						"asn1js",
 						"effect",
 						"cordis",
 						"avvio",
@@ -261,12 +243,7 @@ export const run = async (args = process.argv.slice(2)) => {
 	let errors = 0
 	for (const spec of specifications)
 		for (const implementation of selected) {
-			const isRemote = spec.scenario.startsWith("remote-")
-			if (isRemote && !remoteImplementations.includes(implementation)) continue
-			if (!isRemote && remoteImplementations.includes(implementation)) continue
-			const reason = isRemote
-				? remoteSupported(implementation, spec.scenario)
-				: supported(implementation, spec.scenario)
+			const reason = supported(implementation, spec.scenario)
 			if (reason) {
 				data.results.push({ spec, implementation, status: "N/A", reason })
 				continue
@@ -280,7 +257,7 @@ export const run = async (args = process.argv.slice(2)) => {
 								stderr: "",
 							}
 						: await child(
-								isRemote ? "remote-worker.mjs" : "worker.mjs",
+								"worker.mjs",
 								[
 									JSON.stringify({
 										implementation,
@@ -289,9 +266,7 @@ export const run = async (args = process.argv.slice(2)) => {
 										options,
 									}),
 								],
-								spec.scenario === "remote-r7-footprint"
-									? remoteMethodology.footprintTimeoutMs
-									: methodology.workerTimeoutMs,
+								methodology.workerTimeoutMs,
 								runToken,
 							)
 				const measurement = result.result

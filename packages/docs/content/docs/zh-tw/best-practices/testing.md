@@ -336,12 +336,6 @@ it.effect("loads welcome from an entry", () =>
 | `!env`    | 在檔案中會寫 `!env` 的位置改寫 `new Entry.Env({ name })`，並用 `ConfigProvider.fromEnvRecord` 提供變數。                                                |
 | YAML 檔案 | 把 `graft.yml` 寫入 `fs.makeTempDirectoryScoped()` 建立的目錄，載入 `Include.Include`，並在環境中加入 `NodeServices.layer`。                            |
 
-## 測試遠端外掛
-
-[遠端外掛](../../remote/overview/)的實作就是一般的外掛：像上面一樣在行程內測試即可。[06 · Remote](https://github.com/graftland/graft/tree/main/samples/06-remote/test)
-範例的測試跨越了邊界：`globalSetup` 先把它建置成供 Node 匯入的 JavaScript，再由
-`it.live` 測試在 `local` 和 `worker` 上執行它。
-
 ## 測試安裝後的整合
 
 分別打包契約和實作，把 tarball 安裝到隔離的消費者專案，再針對公開匯出編譯和執行。不使用工作區原始碼別名或私有匯入。

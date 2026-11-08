@@ -1,6 +1,7 @@
 /** Kernel control is separate from the embedded plugin runtime. */
 import {
 	Array,
+	Cause,
 	Context,
 	Effect,
 	HashMap,
@@ -12,7 +13,10 @@ import {
 
 import * as Core from "./internal/decisionCore"
 import * as Interpreter from "./internal/kernel"
+import { UnknownChange } from "./internal/observation"
 import { UnitControl } from "./internal/unitControl"
+
+export { UnknownChange } from "./internal/observation"
 
 export type {
 	CallMessage,
@@ -87,6 +91,11 @@ export interface Deployment {
 export class Kernel extends Context.Service<
 	Kernel,
 	{
+		readonly await: (
+			id: string,
+		) => Effect.Effect<Core.Conclusion, UnknownChange>
+		readonly cancel: (id: string) => Effect.Effect<void>
+		readonly waiters: Effect.Effect<ReadonlyArray<Core.CallWaiter>>
 		readonly calls: Effect.Effect<ReadonlyArray<Core.CallFact>>
 		readonly callChanges: Stream.Stream<Core.CallFact>
 		readonly submit: (
@@ -143,6 +152,20 @@ export const layer = (
 		Effect.gen(function* () {
 			const controller = yield* Interpreter.make(Core.empty(deployment))
 			return Kernel.of({
+				await: controller.await,
+				cancel: (id) =>
+					controller.time.pipe(
+						Effect.flatMap((now) =>
+							controller.apply({
+								_tag: "Cancel",
+								change: id,
+								cause: Cause.fail("Cancelled"),
+								now,
+							}),
+						),
+						Effect.asVoid,
+					),
+				waiters: controller.waiters,
 				calls: controller.calls,
 				callChanges: controller.callChanges,
 				submit: (request) => submit(controller, request),

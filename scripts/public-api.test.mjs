@@ -106,17 +106,14 @@ it("emits unannotated consumer declarations using only public entry paths", () =
 		"descriptor",
 		"contract",
 		"declaredError",
-		"remote",
+		"unitTarget",
+		"connectControl",
 		"loader",
 		"include",
 		"group",
 		"resolver",
 		"load",
 		"loadFile",
-		"authenticator",
-		"credentials",
-		"connector",
-		"listener",
 	])
 		assert.include(declaration, `export declare const ${name}:`)
 	const directory = join(root, ".cache/public-api/consumer")

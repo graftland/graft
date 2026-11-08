@@ -17,6 +17,7 @@ import {
 } from "effect"
 
 import * as Core from "./decisionCore"
+import { UnknownChange } from "./observation"
 import { UnitControl } from "./unitControl"
 
 export interface Completion {
@@ -30,6 +31,7 @@ export interface Submission {
 	readonly inspection: Option.Option<Core.PreparationStatus>
 }
 export interface Controller {
+	readonly waiters: Effect.Effect<ReadonlyArray<Core.CallWaiter>>
 	readonly calls: Effect.Effect<ReadonlyArray<Core.CallFact>>
 	readonly callChanges: Stream.Stream<Core.CallFact>
 	readonly time: Effect.Effect<number>
@@ -42,7 +44,7 @@ export interface Controller {
 	readonly preparations: Stream.Stream<Core.PreparationStatus>
 	readonly get: (id: string) => Effect.Effect<Option.Option<Core.Status>>
 	readonly snapshot: Effect.Effect<Core.State>
-	readonly await: (id: string) => Effect.Effect<Core.Conclusion>
+	readonly await: (id: string) => Effect.Effect<Core.Conclusion, UnknownChange>
 	readonly changes: Stream.Stream<Core.Status>
 	readonly shutdown: Effect.Effect<void>
 }
@@ -342,11 +344,13 @@ const dispatch = Effect.fnUntraced(function* (runtime: Runtime) {
 const waitConclusion = (
 	runtime: Runtime,
 	id: string,
-): Effect.Effect<Core.Conclusion> =>
+): Effect.Effect<Core.Conclusion, UnknownChange> =>
 	Effect.tx(
 		Effect.gen(function* () {
 			const state = yield* TxRef.get(runtime.state)
-			const result = Option.flatMap(Core.get(state, id), (s) => s.conclusion)
+			const status = Core.get(state, id)
+			if (Option.isNone(status)) return yield* UnknownChange.make({ id })
+			const result = status.value.conclusion
 			if (Option.isNone(result)) return yield* Effect.txRetry
 			return result.value
 		}),
@@ -490,6 +494,9 @@ export const make = Effect.fnUntraced(function* (
 	).pipe(Effect.forkScoped)
 	yield* Effect.addFinalizer(() => close(runtime))
 	return {
+		waiters: TxRef.get(runtime.state).pipe(
+			Effect.map((s) => Arr.fromIterable(HashMap.values(s.callWaiters))),
+		),
 		calls: TxRef.get(runtime.state).pipe(
 			Effect.map((s) => Arr.fromIterable(HashMap.values(s.calls))),
 		),

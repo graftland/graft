@@ -175,12 +175,6 @@ message // => Option.some(["Listening on 8080"])
 提供在更靠近程序的位置，或在 `Layer.mergeAll` 中排在 `Graft.layer`
 之后，它就会替换掉这个收集器，`Graft.logs` 将收不到任何内容。
 
-[远程插件](../../remote/overview/)的日志按其自身的级别到达宿主的 logger，插件的注解放在
-`remote.annotations` 中，并附带 `remote.pid` 或
-`remote.threadId`。高负载下丢失的日志会以
-[`Remote logs were dropped`](../../remote/transport-auth/#警告)
-报告。转发只是尽力而为：一次突发可能丢掉几乎全部日志。在插件中对高频消息采样或聚合，不能丢的记录应写入存储，而不是日志。
-
 ## 在插件中收集日志
 
 `Graft.logs`
@@ -333,15 +327,14 @@ spans // => ["graft.plugin app/feed", "graft.plugin app/feed > feed.apply", "fee
         name: ./src/bot.ts
 ```
 
-| 修改                         | 效果                                                                                                                                                                                                                              |
-| ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| HTTP exporter 设置           | 新 span 交给新的 exporter；已开始的 span 留在旧 exporter；这些 span 结束后刷新并关闭旧 exporter。等待最长为旧配置的 `shutdownTimeout`；Effect 随后为刷新单独提供一个 `shutdownTimeout` 时限（总计最长为两倍时限）。子树继续运行。 |
-| `exporter.config`            | 转发给 exporter 的更新函数；兼容的更新保持子树运行。                                                                                                                                                                              |
-| `plugins`                    | 像分组一样协调：未变化的配置项继续运行。exporter 配置未变时，不调用其更新函数。                                                                                                                                                   |
-| `exporter.name`              | 使用新的 provider 重启被追踪的子树。                                                                                                                                                                                              |
-| 将配置项移入或移出 `plugins` | 这些配置项会重启，因为父级和 intercept 改变了。                                                                                                                                                                                   |
-| Exporter 失败                | 子树等待 `Exporter` 服务；exporter 自身重试成功后，子树恢复运行，无需修改配置。                                                                                                                                                   |
-| 卸载该配置项                 | 先停止子树，再并发刷新并关闭所有剩余 exporter。                                                                                                                                                                                   |
+| 修改                         | 效果                                                                            |
+| ---------------------------- | ------------------------------------------------------------------------------- |
+| `exporter.config`            | 转发给 exporter 的更新函数；兼容的更新保持子树运行。                            |
+| `plugins`                    | 像分组一样协调：未变化的配置项继续运行。exporter 配置未变时，不调用其更新函数。 |
+| `exporter.name`              | 使用新的 provider 重启被追踪的子树。                                            |
+| 将配置项移入或移出 `plugins` | 这些配置项会重启，因为父级和 intercept 改变了。                                 |
+| Exporter 失败                | 子树等待 `Exporter` 服务；exporter 自身重试成功后，子树恢复运行，无需修改配置。 |
+| 卸载该配置项                 | 先停止子树，再并发刷新并关闭所有剩余 exporter。                                 |
 
 `plugins` 之外的插件不会被追踪。Graft 会像处理顶层条目一样，把 `plugins`
 中缺失的 id 写回文件，调整顺序时保留身份。

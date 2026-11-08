@@ -33,24 +33,6 @@ export const capture = Effect.gen(function* () {
 三種操作都需要明確執行。匯入 `Artifact`
 不會存取檔案系統。擷取後的副本不受後續原始碼修改影響。擷取期間偵測到來源檔案變化會中止操作。相同內容重用同一目錄；既有副本損壞時會拒絕操作，不會覆寫它。
 
-驗證發生在對應 Effect 執行時。傳給 `Remote.plugin`
-的字串仍是一般模組位置，不會請求擷取或後續驗證。再次啟動前需重新執行驗證。
-
-向[受管理 Remote 外掛](../../transitions/)傳入 `artifact`
-後，驅動會在每次啟動前驗證工件，復原時也會驗證。
-
-## 宣告重疊支援
-
-在擷取套件的 `package.json` 中宣告：
-
-```json
-{ "graft": { "overlap": true } }
-```
-
-`Artifact.metadata`
-驗證擷取內容後讀取該宣告，不匯入實作。受管理 Remote 在 Change 准入前使用它。宣告缺少或為 false 時選擇 Restart；明確指定的 Overlap 會在候選執行前被拒絕。執行中的實作仍須在描述合約時宣告
-`overlap: true`。
-
 ## 支援的目錄
 
 | 要求     | 規則                                                                                                                         |

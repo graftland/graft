@@ -567,3 +567,120 @@ Final logs under `.cache/`: `phase2-step5-typecheck-final5.log`,
 `phase2-step5-build-final3.log`, `phase2-step5-test-final3.log`,
 `phase2-step5-docs-final3.log` and `phase2-step5-format-final3.log`. Steps 6–7
 remain required.
+
+## Step 6: public control and the fixed gateway
+
+Public control uses fixed JSON codecs, a loopback TCP endpoint and a connection
+capability. The server forwards submit, inspect, get, await, cancel, policy and
+shutdown requests to Kernel. It holds transport mailboxes and request fibers,
+not writable lifecycle facts. Reconnecting a client never constructs a new
+Change. Unknown or expired unkeyed ids fail with UnknownChange rather than
+waiting forever.
+
+The gateway fixture is an actual Worker with one long-lived upstream TCP
+session. Its injected unary contract reaches native providers. Its business
+replies include the provider version and term and the gateway session identity.
+Changes, preparation failures, residual units and execution credits are observed
+only through Control clients. A separate-process test launches the fixed JSON
+kernel executable and performs submit, await, query and shutdown across TCP.
+
+Acceptance evidence:
+
+| Test file              | Evidence                                                                                                                                                                                                                                                                                                      |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| gateway.test.ts        | Worker, Process and Runner Restart; public waiter facts before dispatch; old native exit; unchanged gateway generation and session; old-call Overlap pinning; new code after commit; B completes during A trial; startup Aborted and fresh Recovered trial                                                    |
+| gateway-faults.test.ts | Worker/Process stalled import and decoder before admission; B progress and unchanged session; current-policy denied recovery; real stalled handler and finalizer with explicit native barriers; Runner disconnect produces immutable Stuck, retains claims and rejects conflicting A while Worker B completes |
+| public-control.test.ts | Keyed dedupe; query/outcome equality; interrupted await and disconnect/reconnect; wrong capability rejection before unit allocation; independent kernel process                                                                                                                                               |
+| deleted-host.test.ts   | No default or plugin activation export, host/runner connection entries, CLI, Config or schema adapter                                                                                                                                                                                                         |
+
+The obsolete ordinary Remote host path, host contract loading, execution
+clients, old connectors, launchers and their dependent test fixtures are
+removed. The Contract descriptor has one owned unit server path. Release
+data/storage and journal models remain unported. The old YAML Remote sample, its
+CLI reload cases, the Remote execution benchmark and the direct author-host
+conformance launcher are removed with their execution path. Independently useful
+embedded and author metadata/codec tests remain.
+
+### Step 6 interpretations
+
+- Phase 2 lines 33–34 and 262–289 require fixed deployment data and external
+  metadata control, not a discovery loader. The executable accepts a JSON
+  deployment and writes its ready address; it never imports a business module.
+- Lines 275–289 require current residual facts and sequenced observation. Public
+  waiters are a projection of core callWaiters, so the Restart fixture can prove
+  queue residence before dispatch without a test protocol adapter.
+- Lines 346–357 distinguish leases from execution claims. A Stuck generation
+  with no captured lease has zero leaseHolders while its unit claim and object
+  reservation remain held. The Runner test checks Missing exit evidence, the
+  retained owner/claim, conflicting Busy and unrelated progress.
+- Lines 286–291 permit bounded observation history and reconciliation. The
+  control transport bounds in-flight requests and notification queues; losing
+  notifications requires querying the same core id. It does not persist history.
+
+### Step 6 development failures
+
+Intentional red checks: missing public control modules; absent gateway fixture;
+removed-export assertions before deletion; missing waiter query; missing fixed
+kernel executable; missing native finalizer barrier; missing independent B
+fixture. The first finalizer assertion passed without a native barrier and was
+strengthened before it was accepted as evidence.
+
+Typecheck failures included PubSub.Subscription passed to Stream.fromQueue,
+Effect 4 filterMap requiring Result rather than Option, optional-key
+assignability, untyped empty HashMap inference, missing SecureRandom service,
+native crypto diagnostics, yield-in-argument diagnostics, old Controller await
+error types, unused imports, stale installed core declarations, native child
+process diagnostics, encoding a typed target with the Json encoder, and an
+optional conflicts assertion. All were corrected without casts or broad
+diagnostic suppression. The fixed executable uses two single-line
+strictEffectProvide exceptions with composition-root reasons.
+
+Runtime checks caught a fixture JavaScript escaping error, the Runner socket
+path, an insufficient total budget for two long trials, a lost reply to the
+deliberate trial crash, a barrier socket left open after a held call, and a test
+clock advanced to Restart's stop deadline before native exit. The fixture now
+owns/closes the barrier socket and waits for native progress; timeout does not
+stand in for completion. The earlier held-call run phase2-step6-gateway9.log was
+interrupted with SIGTERM after timeout while these fixture problems were being
+corrected. Other timed-out debug runs ended through Vitest; two attempted
+signals found that their process had already ended.
+
+The first complete Remote test run failed three obsolete YAML activation cases
+in entries.test.ts; those cases and their dead helper are deleted with that API.
+The first root test run failed in the CLI global setup, which still built four
+deleted host entry points; its dependent Remote reload cases and setup branch
+are deleted. Public declaration expectations for removed exports were updated.
+
+Build attempt 1 failed on 22 stale local documentation links after host guide
+deletion. The links and landing navigation were corrected. Documentation tests
+passed 25 Node cases and 39 doctests after deletion. An offline lockfile-only
+resolution failed because pnpm had no avvio registry metadata. Removing only the
+deleted sample importer followed by frozen offline installation succeeded with
+resolution skipped. One shell entry was stopped by formatting a malformed
+temporary trace string; it was repaired immediately. A malformed shell quote and
+a JavaScript orchestration syntax error executed no requested checks.
+
+Packed proof scripts were not invoked directly. The replacing packed fixture and
+final deletion/proof inventory belong to step 7.
+
+### Step 6 final verification
+
+| Check                                | Result                                                                                                                     |
+| ------------------------------------ | -------------------------------------------------------------------------------------------------------------------------- |
+| Frozen offline install               | Passed after deleting only obsolete dependency/importer declarations; no dependency resolution                             |
+| Typecheck                            | Passed                                                                                                                     |
+| Build                                | Passed; 71 public entries, 2296 documentation pages                                                                        |
+| Full tests                           | 284 files; 2092 passed, 45 skipped; only the permitted benchmark runner /proc failure                                      |
+| Remote acceptance and retained tests | 21 files, 156 cases; includes 5 gateway schedules, 8 gateway fault cases, 4 public control cases and 1 deleted-export case |
+| Documentation tests                  | 25 Node cases and 39 doctests in 19 files                                                                                  |
+| treefmt --no-cache                   | 1039 files, zero changed                                                                                                   |
+
+Final logs are phase2-step6-typecheck-final5.log, build5.log, test4.log,
+docs5.log and format4.log under .cache. The previous full test run also had 2092
+passing cases and the same sole permitted failure. A preceding run found the
+removed chat sample setup had also removed isolated-home registration; the
+independent isolation setup is retained. The last test typecheck edit briefly
+omitted the describing fixture variable and was immediately corrected; the
+subsequent typecheck and complete checks passed.
+
+No spec contradiction or Effect public-API blocker was identified in step 6.

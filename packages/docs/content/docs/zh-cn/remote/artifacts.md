@@ -33,24 +33,6 @@ export const capture = Effect.gen(function* () {
 三种操作都需要显式执行。导入 `Artifact`
 不会访问文件系统。捕获后的副本不受后续源码修改影响。捕获期间检测到源文件变化会中止操作。相同内容复用同一目录；已有副本损坏时会拒绝操作，不会覆盖它。
 
-验证发生在对应 Effect 执行时。传给 `Remote.plugin`
-的字符串仍是普通模块位置，不会请求捕获或后续验证。再次启动前需重新执行验证。
-
-向[受管理 Remote 插件](../../transitions/)传入 `artifact`
-后，驱动会在每次启动前验证工件，恢复时也会验证。
-
-## 声明重叠支持
-
-在捕获包的 `package.json` 中声明：
-
-```json
-{ "graft": { "overlap": true } }
-```
-
-`Artifact.metadata`
-验证捕获内容后读取该声明，不导入实现。受管理 Remote 在 Change 准入前使用它。声明缺失或为 false 时选择 Restart；显式 Overlap 会在候选执行前被拒绝。运行中的实现仍须在描述合约时声明
-`overlap: true`。
-
 ## 支持的目录
 
 | 要求     | 规则                                                                                                                       |

@@ -1,4 +1,4 @@
-import { Context, Effect, Layer, Schema, Sink, Stream } from "effect"
+import { Context, Effect, Layer, Schema } from "effect"
 import { Command } from "effect/cli"
 import { Rpc, RpcGroup } from "effect/rpc"
 
@@ -6,8 +6,6 @@ import { Commands } from "@graftland/cli/Commands"
 import { Event, Graft, Plugin } from "@graftland/graft"
 import { Group, Include, Loader, ModuleResolver } from "@graftland/loader"
 import * as Remote from "@graftland/plugin-remote"
-import { Authenticator, Credentials } from "@graftland/plugin-remote/Auth"
-import { Connector, Listener } from "@graftland/plugin-remote/Transport"
 
 class Word extends Context.Service<Word, string>()("fixture/Word") {}
 class Greeter extends Context.Service<
@@ -81,61 +79,12 @@ export const declaredError = Remote.Contract.make({
 	config,
 	error: Schema.Literal("unavailable"),
 })
-export const remote = Remote.plugin(contract, {
-	connect: { local: {} },
-	contractModule: "./contract.js",
-	implementation: "./greeter.js",
-})
 export const loader = Loader.plugin
 export const include = Include.Include
 export const group = Group.Group
 export const resolver = ModuleResolver.fromRecord({ plain })
 export const load = Graft.plugin(Loader.plugin, [])
 export const loadFile = Graft.plugin(Include.Include, { path: "graft.yml" })
-export const authenticator = Plugin.service(
-	Authenticator,
-	Effect.succeed(Authenticator.of({ _tag: "None", identity: "fixture" })),
-	{ name: "fixture-authenticator" },
-)
-export const credentials = Plugin.service(
-	Credentials,
-	Effect.succeed(
-		Credentials.of({ kind: "None", read: Effect.succeed({ _tag: "None" }) }),
-	),
-	{ name: "fixture-credentials" },
-)
-export const connector = Plugin.service(
-	Connector,
-	Effect.succeed(
-		Connector.of({
-			properties: {
-				protocol: "fixture",
-				encrypted: false,
-				network: false,
-				carries: [],
-			},
-			connect: () =>
-				Effect.succeed({ input: Stream.empty, output: Sink.drain }),
-		}),
-	),
-	{ name: "fixture-connector" },
-)
-export const listener = Plugin.service(
-	Listener,
-	Effect.succeed(
-		Listener.of({
-			properties: {
-				protocol: "fixture",
-				encrypted: false,
-				network: false,
-				carries: [],
-			},
-			bind: () =>
-				Effect.succeed({ ready: Effect.void, serve: () => Effect.void }),
-		}),
-	),
-	{ name: "fixture-listener" },
-)
 export default Plugin.make({ name: "default", apply: () => Effect.void })
 
 export const commands = Plugin.make({
@@ -156,3 +105,19 @@ export const probePlugin = Plugin.make({
 	name: "public-probe",
 	apply: () => Plugin.probe("health", Effect.void),
 })
+
+export const unitTarget = Remote.Units.target({
+	artifact: {
+		identity: {
+			version: 1,
+			algorithm: "sha256",
+			digest: "a".repeat(64),
+			entry: "plugin.js",
+		},
+		directory: "./captured",
+	},
+	contract: "contract.js",
+	input: { greeting: "hello" },
+	placement: "Worker",
+})
+export const connectControl = Remote.Control.connect

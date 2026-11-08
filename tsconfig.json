@@ -56,9 +56,6 @@
 			"path": "./samples/05-config-file"
 		},
 		{
-			"path": "./samples/06-remote"
-		},
-		{
 			"path": "./samples/chat-bot"
 		},
 		{

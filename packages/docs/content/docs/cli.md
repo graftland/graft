@@ -15,16 +15,13 @@ The `@graftland/cli` package provides the `graft` command. It needs Node.js
 | `graft schema`              | Writes the editor schema of `graft.yml`.      | [graft schema](#graft-schema) |
 | `graft check [file]`        | Checks manifests against a host.              | [graft check](#graft-check)   |
 
-`graft start` runs both [remote hosts](../remote/hosts/) and
-[runners](../remote/runners/). Command plugins add subcommands such as
-`graft remote certificates`; they run only when explicitly enabled.
+Command plugins add explicitly enabled subcommands.
 
 ## Command plugins
 
 ```sh
-graft add --plugin remote
-graft remote certificates --out ./certs --server localhost
-graft add --plugin remote --global
+graft add --plugin example
+graft add --plugin example --global
 ```
 
 `add --plugin` installs the plugin package and enables its `/cli` entry. A short
@@ -54,14 +51,8 @@ order.
 
 ### Protocol output
 
-Use `graft start runner.yml --stdio` for a runner with one stdio listener, and
-`graft start --stdio` for an [MCP server](../mcp-server/overview/). The flag
-reserves stdout for protocol bytes before loading plugins or parsing help and
-version flags. Logs, Console output (including worker output), help, version and
-errors go to stderr; interactive wizard and completion output are unavailable in
-this mode. The runner rejects a mismatched listener configuration. At stdin EOF
-it stops its execution units, confirms termination and exits; startup or cleanup
-failure gives a nonzero exit.
+Use `graft start --stdio` for an [MCP server](../mcp-server/overview/). Stdout
+carries protocol bytes; logs, help and errors go to stderr.
 
 ### Options
 

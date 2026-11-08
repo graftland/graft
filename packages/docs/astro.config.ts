@@ -94,6 +94,7 @@ export default defineConfig({
 						"units",
 						"bindings",
 						"calls",
+						"control",
 						"application-releases",
 						"trust",
 					],
@@ -127,16 +128,7 @@ export default defineConfig({
 				{
 					label: "Remote",
 					translations: { "zh-CN": "Remote", "zh-TW": "Remote" },
-					items: [
-						"remote/overview",
-						"remote/hosts",
-						"remote/contracts",
-						"remote/artifacts",
-						"remote/runners",
-						"remote/transport-auth",
-						"remote/lifecycle",
-						"remote/capabilities",
-					],
+					items: ["remote/overview", "remote/contracts", "remote/artifacts"],
 				},
 				{
 					label: "Best practices",

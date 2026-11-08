@@ -60,7 +60,7 @@ const make = Effect.fnUntraced(function* (state: Core.State) {
 const terminal = (
 	kernel: Interpreter.Controller,
 	id: string,
-): Effect.Effect<Core.Conclusion> => kernel.await(id)
+): ReturnType<Interpreter.Controller["await"]> => kernel.await(id)
 
 it.effect(
 	"records command intent before dispatch and projects every notification from core state (I1, I2)",

@@ -23,13 +23,12 @@ devenv shell -- pnpm bench --scenario fanout,events --implementation graft,cordi
 devenv shell -- pnpm bench --scenario memory-cycles --cycles 1000 --output .cache/long-churn
 ```
 
-| Option             | Behavior                                                                                                                                                   |
-| ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--quick`          | Keep the original size matrix; reduce samples. Remote footprint uses N=1. Smoke check only.                                                                |
-| `--scenario`       | Comma-separated substrings of the scenario names below.                                                                                                    |
-| `--implementation` | Comma-separated names: graft, cordis, avvio, effect, node, emittery; in-process, remote-local, remote-worker, remote-unix, remote-ws, raw-worker, raw-ipc. |
-| `--cycles`         | Override the number of persistent-root load/unload cycles.                                                                                                 |
-| `--output`         | Output stem relative to this package; defaults to results/latest or .cache/quick.                                                                          |
+| Option       | Behavior                                                                                    |
+| ------------ | ------------------------------------------------------------------------------------------- |
+| `--quick`    | Keep the original size matrix; reduce samples. Remote footprint uses N=1. Smoke check only. |
+| `--scenario` | Comma-separated substrings of the scenario names below.                                     |
+| `--cycles`   | Override the number of persistent-root load/unload cycles.                                  |
+| `--output`   | Output stem relative to this package; defaults to results/latest or .cache/quick.           |
 
 JSON and Markdown are saved after each completed case. Errors remain in both
 outputs and make the command fail. CI runs equivalence tests and a small runner
@@ -52,72 +51,6 @@ or enforce speed thresholds.
 | memory-cycles                                     | Heap growth after 100 cycles of 10 plugins in one persistent root, with checkpoint slopes.                             |
 | memory-steady                                     | Heap delta for 1000 live plugins relative to an empty root, divided by plugin count.                                   |
 | import                                            | Import each library in a fresh process; record import latency and child-process wall time separately.                  |
-
-## Remote
-
-`@graftland/plugin-remote` is measured against the same in-process service, with
-direct `local`, direct `worker`, a Unix-socket runner, and a loopback `ws`
-runner. Raw worker `postMessage` and child-process IPC supply echo baselines.
-Runner servers are prepared before entry timing. Runner heap and CPU are a
-combined host+runner substitute because the server is embedded in the host
-process. This measures same-machine runner transport, not remote networks, TLS
-or authentication.
-
-```sh
-devenv shell -- pnpm bench --scenario remote-
-devenv shell -- pnpm bench --quick --scenario remote-r2,remote-r8
-devenv shell -- pnpm bench --scenario remote-r4 --implementation remote-unix,remote-ws
-```
-
-| Scenario                         | Measurement                                                                                                                                                                                 |
-| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| remote-r1-start / remote-r1-stop | Entry load to an injected consumer's successful first call; disposal to actual child/worker exit and consumer settlement.                                                                   |
-| remote-r2-call                   | Tiny unary round trip, with mean/p50/p99/p999 and raw Node baselines.                                                                                                                       |
-| remote-r3-throughput             | 256 completed calls at 1, 16 or 256 submitted in flight; compare one contract batch containing the same 256 operations.                                                                     |
-| remote-r4-payload                | Echo 100 B, 10 KB, 1 MB, 1 MiB and 1 MiB+1 B ASCII request/response text. Rejected frames are separate outcomes.                                                                            |
-| remote-r5-stream                 | Complete the supported contract stream, values 0..99.                                                                                                                                       |
-| remote-r6-config                 | In-process update function versus a complete Remote restart, including old native exit and a usable new consumer.                                                                           |
-| remote-r7-footprint              | Host retained heap/entry, child RSS/process, worker isolate heap and aggregate host RSS delta, at 1/10/50 entries. The same run also records time to start N entries sequentially.          |
-| remote-r8-loop                   | Identical 50-million-step CPU loop; host delay histogram and timer-inclusive latency of an unrelated in-process service call.                                                               |
-| remote-r9-logs                   | Zero-log control, 100 paced logs, 10000/100000-log bursts; host CPU, delivery/drop counts and warning frequency. Timing includes graceful drain and stop, an explicitly labeled substitute. |
-| remote-r10-failure               | Acknowledged pre-exit notice to Failed and consumer stop; also native-exit-event to Failed. In-process host death is verified separately.                                                   |
-
-Remote cases use fixed sample budgets: 20 lifecycle samples after 3 warmups;
-5000 unary calls after 500 warmups; 30 hot batches after 3 warmups; 5
-CPU/log/crash repetitions; 3 footprint and rejection repetitions. CPU has one
-discarded loop. Quick mode reduces these to 2–10 samples and footprint size 1.
-Its results are smoke checks. The old size matrix remains intact. Remote timing
-uses native performance clocks and the same conservative 95% estimator as
-import/memory measurements, retaining per-call tails and non-timing
-observations. Persistent hot fixtures keep startup and disposal outside call
-timing. Raw Node baselines include simpler serialization and scheduling;
-subtracting them does not isolate framing alone. p999 from 5000 samples has only
-about five upper-tail observations.
-
-The data admission default is 16. Runner frames allow 1 MiB of protocol payload;
-business data also needs envelope bytes. Direct connections use a different
-path, so their limits are tested separately. Remote never updates in place.
-Individual worker RSS is process-wide and therefore N/A; host RSS delta per
-entry is an aggregate estimate. Log measurements use process.threadCpuUsage for
-host-thread CPU and retain process.cpuUsage as a companion. Native default
-loggers remain active and the executable mains route them to stderr. The stdout
-guard counts unexpected output (zero bytes in this R9 run). Direct-worker stderr
-is captured by the runner; local/runner stderr uses ProcessObservation's bounded
-path. The structured host sink counts in memory; it is not a terminal or
-production disk exporter. Structured counts and full failure causes remain
-available.
-
-Each case owns its scope, children and workers. Native identities and exit
-events are checked, then the runner scans process environments for its unique
-ownership token. Linux `/proc/self/fd` keeps Unix socket paths short while the
-socket inode and state remain inside this worktree. Connection tests use a 300
-ms runner lease to avoid waiting for the production renewal period; benchmarks
-keep all Remote defaults. Tests cover call counts/results, concurrent payloads,
-streams, updates, logs, CPU checksums, crash propagation and native exit at
-small N.
-
-[Remote guidance](results/remote-guidance.md) separates measured facts,
-inference, and proposed edits to the best-practice guides.
 
 ## Methodology
 
@@ -168,7 +101,6 @@ reason and semantic interpretation. [JSON](results/latest.json) records
 environment, exact versions, code hash, sample counts, batch history and
 native-exit audit. Lossless raw samples are linked under ignored
 `.cache/samples/`. Quick output defaults to `.cache/quick.*` and is a smoke
-check. Only latest.json, latest.md and remote-guidance.md belong in results/.
 
 Refresh all three result tables from the canonical full run:
 
@@ -204,21 +136,6 @@ and column labels stay identical across languages.
 | memory-cycles      |   10 | B/batch  |  31828* | 23860* |   N/A |   7649* |   N/A |      N/A |
 | memory-steady      | 1000 | B/plugin |   33908 |  10264 |   821 |    2089 |   N/A |      N/A |
 | import             |    1 | ms       | 242.159 |  4.409 | 6.126 | 230.756 | 0.173 |    1.988 |
-
-| Scenario             |    Size | Unit    | in-process | remote-local | remote-worker | remote-unix | remote-ws | raw-worker | raw-ipc |
-| -------------------- | ------: | ------- | ---------: | -----------: | ------------: | ----------: | --------: | ---------: | ------: |
-| remote-r1-start      |       1 | ms      |     2.673* |      866.756 |       698.801 |    1462.665 |  1459.621 |        N/A |     N/A |
-| remote-r1-stop       |       1 | ms      |     1.032* |       43.707 |       21.003* |      75.011 |    76.665 |        N/A |     N/A |
-| remote-r2-call       |       1 | ms      |     0.007* |        0.626 |         0.568 |       1.195 |     1.346 |     0.028* |   0.051 |
-| remote-r5-stream     |     100 | ms      |     0.038* |       3.077* |        3.366* |      6.536* |    5.278* |        N/A |     N/A |
-| remote-r6-config     |       1 | ms      |     1.084* |      886.988 |       705.356 |    1509.301 |  1528.991 |        N/A |     N/A |
-| remote-r8-loop       |       1 | ms      |     55.592 |      65.366* |        63.998 |      66.895 |    64.864 |        N/A |     N/A |
-| remote-r10-failure   |       1 | ms      |        N/A |      33.348* |       14.718* |     65.278* |   58.348* |        N/A |     N/A |
-| remote-r3-throughput |     256 | ms      |     2.000* |       61.159 |        57.755 |     168.286 |   184.851 |     1.405* |  1.698* |
-| remote-r3-batch      |     256 | ms      |     0.430* |       3.408* |        3.271* |      4.953* |    5.230* |     0.240* |  0.336* |
-| remote-r4-payload    | 1048577 | ms      |     0.021* |       9.842* |        8.187* |    rejected |  rejected |     1.306* |  4.960* |
-| remote-r7-footprint  |      50 | B/entry |     89574* |      551195* |       506719* |    1260698* |  1263234* |        N/A |     N/A |
-| remote-r9-logs       |  100000 | ms      |    63.792* |    1045.619* |      676.101* |   1051.592* |   985.239 |        N/A |     N/A |
 
 <!-- results:end -->
 

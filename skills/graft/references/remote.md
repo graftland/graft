@@ -1,130 +1,37 @@
-# Remote: run a plugin in another process
+# Native unit execution
 
-`@graftland/plugin-remote` runs one plugin in a child process, a Node worker or
-on another machine, while the host keeps its services in the plugin tree.
-Consumers still `inject` the same keys; only the provider's `graft.yml` entry
-changes. Exact behavior: `https://graftland.github.io/graft/remote/overview/`.
+Use the public Kernel, Units and Control entries for captured native
+deployments. Keep the fixed kernel bootstrap separate from contract and
+implementation imports.
 
-## When to reach for it
+| Task                                    | Public entry                            |
+| --------------------------------------- | --------------------------------------- |
+| Capture built bytes                     | Artifact.capture                        |
+| Select Worker, Process or Runner        | Units.target                            |
+| Compose fixed instances and bindings    | Kernel.layer and Units.layer            |
+| Open metadata control                   | Control.serve                           |
+| Submit and observe from another process | Control.connect                         |
+| Define encoded unary operations         | Contract.service and Contract.operation |
 
-| The user wants…                                                    | Use                                                              |
-| ------------------------------------------------------------------ | ---------------------------------------------------------------- |
-| A crash, leak or blocked event loop in one plugin to spare the app | `connect: { local: {} }`, a child process                        |
-| CPU-bound work on another thread                                   | `connect: { worker: {} }`, a Node worker                         |
-| A plugin next to data, hardware or a network on another machine    | A runner (`graft start runner.yml`) and `url`, `unix`, `command` |
-| Separate instances or settings inside one process                  | Not Remote: a [realm](realms.md) or an intercept                 |
-| A permission or security boundary                                  | Not Remote alone: run the runner in a container or a VM          |
+Pass artifact and optional contractArtifact data, a relative contract entry and
+JSON input in the target. Describe imports and validates these inside an
+inspection unit before admission. Configuration decoding and handlers also run
+inside units. A contractArtifact shared by both endpoints establishes binding
+provenance.
 
-Remote isolates execution, not permissions. Every call becomes RPC, config must
-encode to JSON, and a call that fails because the connection broke is not
-retried. Do not move a plugin without one of the reasons above.
+Each admitted call is pinned to its provider incarnation. Results and owned
+cleanup completion are different facts. Cancellation does not release execution
+credit; completion or exact provider exit does. Calls are never retried
+automatically. Only single-hop unary calls use the owned completion guarantee.
 
-## Split the plugin
+Keep the gateway unit unchanged while replacing its integration provider.
+Overlap keeps admitted calls on old code and routes new calls after commit.
+Restart pauses only affected bindings; bounded waiters select the generation on
+dispatch. Runner requires Restart. A missing native exit remains visible and can
+be Stuck.
 
-The host must not import the implementation. Put what both sides agree on in a
-**contract** module, and leave the plugin itself unchanged:
-
-```ts
-// src/contract.ts: imported by the host and by the plugin process
-import { Contract } from "@graftland/plugin-remote"
-
-export const config = Schema.Struct({ greeting: Schema.String })
-
-const greeter = Contract.service(Greeter, api, {
-	toHandlers: (service) => ({ Greet: ({ name }) => service.greet(name) }),
-	fromClient: (client) => ({
-		greet: (name) =>
-			client.Greet({ name }).pipe(
-				// A broken connection becomes the service's own error.
-				Effect.catchTag("RpcClientError", (cause) =>
-					GreetingUnavailable.make({ cause }),
-				),
-			),
-	}),
-})
-
-export const contract = Contract.make({
-	name: "app/greeter",
-	config,
-	provides: [greeter],
-})
-```
-
-- `api` is an Effect `RpcGroup` listing the service's calls. Give each RPC an
-  immutable identity with `Contract.operation(name, version, rpc)`. `fromClient`
-  maps `RpcClientError` into an error callers already handle.
-- `provides` lists services the plugin publishes to the host; `inject` lists
-  host services it uses. Only listed services cross the boundary.
-- `error` is optional and defaults to `Schema.Never`. Leave the contract
-  unannotated; its type is inferred.
-- The entry's `implementation` and `contract` point at **built JavaScript**. The
-  plugin process does not use the host's TypeScript loader, so build both
-  modules before running.
-- The implementation imports `config` and the service key from the contract and
-  stays an ordinary `Plugin.make` default export. Declare exported descriptors
-  in `provides`; `overlap` defaults to false and currently changes no lifecycle
-  behavior.
-
-## Load it
-
-In `graft.yml`, replace only the provider's entry; `name: remote` resolves to
-`@graftland/plugin-remote`, which the app must depend on:
-
-```yaml
-- id: greeter
-  name: remote
-  config:
-    contract: ./dist/contract.js
-    implementation: ./dist/greeter.js
-    connect: { local: {} } # or { worker: {} }, or a runner below
-    config: { greeting: Hello }
-```
-
-From code,
-`Remote.plugin(contract, { contractModule, implementation, connect })` builds
-the same plugin; load it with `Graft.plugin`. Only this form takes `retry` and
-`shutdownTimeout`. When embedding, provide `NodeServices.layer` and
-`SecureRandom.layerWebCrypto`; `graft start` already does.
-
-## Through a runner
-
-On the other machine, install the plugin package under the runner's `root` (the
-host never uploads code), write `runner.yml` and start it:
-
-```yaml
-# runner.yml, started with: graft start runner.yml
-- id: runner
-  name: remote/runner
-  config:
-    root: ./installation
-    state: ./state
-    listen:
-      - url: wss://0.0.0.0:7443
-        cert: ./certs/server.crt
-        key: ./certs/server.key
-        auth: { bearer: { tokens: ./tokens.json } }
-```
-
-The host's `connect` becomes `url: wss://runner:7443` with
-`auth: { bearer: { token: { file: ./token } } }`, plus `ca` for a private CA;
-`contract` and `implementation` must then be package exports. `connect` also
-takes `unix` or `command` (such as SSH), and `auth` takes `mtls`, `bearer`,
-`jwt` or `none`; leaving `auth` out means none. The entry's `id` names the
-runner instance. Use `graft start runner.yml`; a stdio runner requires
-`--stdio`, which reserves stdout for protocol bytes. Enable certificate commands
-with `graft add --plugin remote`, then run `graft remote certificates`.
-
-## What changes for the app
-
-- A config or `connect` edit restarts the plugin process; there is no update in
-  place.
-- Contract and implementation modules are not hot-replaced. After changing the
-  contract, rebuild and restart the host.
-- Callers see a declared error, `Contract.UndeclaredFailure`, `RemoteError`
-  (Remote itself failed; read `cause`) or `RemoteWithdrawn` (normal during
-  stops). Defects stay defects.
-
-Test across the boundary as the samples do: load the remote plugin in a fresh
-runtime, call the service from a consumer, dispose the provider, and check that
-unrelated plugins keep working. `samples/06-remote` and `samples/chat-bot` show
-both.
+Disconnecting public control or interrupting handle.await does not cancel
+Change. Reconnect, query by id and compare sequence numbers. Explicit
+handle.cancel requests cancellation. Keyed requests and unresolved records last
+for the runtime lifetime; unkeyed settled history is bounded. There is no
+persistent kernel history.

@@ -1,0 +1,45 @@
+---
+title: 公开控制接口
+description: 从另一个进程提交并观察单元 Change。
+---
+
+**公开控制接口**通过本机 TCP 端点提供固定元数据。在内核作用域中启动
+`Control.serve()`，把返回的地址交给客户端。地址包含连接能力凭据。
+
+## 提交 Change
+
+```ts
+import { Effect } from "effect"
+
+import type { Request } from "@graftland/graft/Kernel"
+import { Control } from "@graftland/plugin-remote"
+
+declare const address: Control.Address
+declare const request: Request
+
+export const replace = Effect.scoped(
+	Effect.gen(function* () {
+		const client = yield* Control.connect(address)
+		const handle = yield* client.submit({ ...request, key: "deployment-42" })
+		return yield* handle.await
+	}),
+)
+```
+
+调用和配置由[单元](../units/)编码；控制接口不加载业务 Schema。
+
+## 观察
+
+| 读取                                  | 行为                                                                             |
+| ------------------------------------- | -------------------------------------------------------------------------------- |
+| `client.get(id)`                      | 返回带序号的当前状态；无键的已结算历史过期后返回 None。                          |
+| `client.observe(id)`                  | 先查询当前状态，再提供通知。比较序号，发现缺口后重新查询。慢观察者不会阻塞内核。 |
+| `client.handle(id).await`             | 等待保留的结论。重复等待返回相同结论。                                           |
+| 断线或中断等待                        | 停止观察；已准入的 Change 继续执行。重连后按 id 查询。                           |
+| `handle.cancel`                       | 显式请求取消；结算仍需要执行证据。                                               |
+| `client.units`、`client.preparations` | 提供原生退出证据、清理分类、Cause 和剩余预留，包括准入前拒绝留下的事实。         |
+| `client.waiters`                      | 返回选择代之前有数量上限的排队调用；此时尚未分配提供方执行额度。                 |
+
+## 保留期限
+
+无键的已结算历史有数量上限。有键请求和未解决事实保留到运行时结束。内核重启后不保留历史。状态中的成员、剩余预算、租约持有者和未确认单元与结果来自同一状态。

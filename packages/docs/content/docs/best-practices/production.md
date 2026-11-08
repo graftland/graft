@@ -106,72 +106,6 @@ await Effect.runPromise(
 )
 ```
 
-- When to retry one call inside a task instead of the whole fork is on
-  [Let the fork fail and retry](../effect/#let-the-fork-fail-and-retry).
-- Entries have no `retry` field, so the schedule belongs to the plugin. For a
-  `name: remote` entry, see [Contain failures](#contain-failures).
-
-## Contain failures
-
-A failure stops one activation and restarts the consumers of its services
-([How withdrawal works](../../services/#how-withdrawal-works)). Choose the
-boundary by what can go wrong:
-
-| What can fail                                                     | Boundary                                                                                           |
-| ----------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
-| Two resources that fail independently                             | Separate plugins. [One failing task](../../plugins/#when-a-task-fails) fails its whole activation. |
-| One tenant's or instance's dependencies                           | A [realm](../../isolation/) per instance. Only consumers in that realm wait.                       |
-| Crashes, leaks, `process.exit` or code that throws outside Effect | Remote `local`: a [child process](../../remote/overview/).                                         |
-| CPU-heavy work that blocks the event loop                         | Remote `worker`: a Node worker in the same process.                                                |
-| Hardware, data or a network on another machine                    | A [runner](../../remote/runners/).                                                                 |
-| What the code is allowed to do                                    | A runner inside a container or a VM; [Remote](../../remote/overview/) does not limit permissions.  |
-
-An exception thrown outside Effect, such as in a raw callback, can end the whole
-process. Inside the process, only Effect failures are contained.
-
-A `name: remote` YAML entry has no `retry`, so a crashed child stays `Failed`
-until the entry changes or `loader.retry` runs. To restart it, export a
-`Remote.plugin` with `retry` from a module and load that module instead:
-
-```ts title="src/greeterHost.ts"
-import { Schedule, Schema } from "effect"
-
-import * as Remote from "@graftland/plugin-remote"
-
-declare const contract: Remote.Contract.Contract<
-	Schema.Struct<{ readonly greeting: typeof Schema.String }>
->
-
-export default Remote.plugin(contract, {
-	contractModule: new URL("./contract.js", import.meta.url).href,
-	implementation: new URL("./greeter.js", import.meta.url).href,
-	connect: { local: {} },
-	retry: Schedule.spaced("5 seconds"),
-})
-```
-
-```yaml title="graft.yml"
-- id: greeter
-  name: ./dist/greeterHost.js
-  config:
-    greeting: Hello
-```
-
-### What a Remote boundary costs
-
-Moving a plugin keeps its services' API, not their cost. These figures come from
-the
-[benchmark suite](https://github.com/graftland/graft/tree/main/packages/benchmarks)
-on one machine; the ratios carry over, the absolute numbers do not.
-
-| Cost             | Measured                                                                                                                           | What to do                                                                                                                                                  |
-| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Starting         | About 0.7 s for `worker` and `local`, 1.4 s for a runner.                                                                          | Keep entries long-lived. A config change restarts the plugin process and stops its consumers, so it costs as much as a start.                               |
-| One call         | About 0.6 ms round trip for `worker` and `local`, 1.2 ms for a runner. In process: microseconds.                                   | Keep loops on one side of the boundary. Give the contract coarse methods that take batches: 256 items in one call ran 50 to 65 times faster than 256 calls. |
-| Calls in flight  | 256 concurrent calls took about as long as 16.                                                                                     | Bound concurrency, and measure where your connection stops gaining.                                                                                         |
-| Memory           | Each `worker` adds about 40 MiB to the host. Each `local` entry is a whole Node process.                                           | Put operations that may fail together in one remote plugin instead of an entry each.                                                                        |
-| Noticing a crash | Tens of milliseconds for `worker` and `local`, under 100 ms for a runner. Without the runner or its connection, the lease decides. | Do not expect consumers to stop the moment the process exits. Report fork state and failed calls in [health](#report-health).                               |
-
 ## Report health
 
 A failed or pending entry does not stop the process, so a service manager that
@@ -262,23 +196,16 @@ plugin. A plugin that publishes services waits for their consumers to stop
 before it closes, so the consumers' finalizers can still use them; see
 [How withdrawal works](../../services/#how-withdrawal-works).
 
-| Rule                                                                                                               | Why                                                                                                                                                                                                                       |
-| ------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Hold every resource with `Effect.acquireRelease` or `Effect.addFinalizer` in `apply`.                              | Only what `apply` acquires is released at shutdown.                                                                                                                                                                       |
-| Finish work in flight in a finalizer or an uninterruptible region.                                                 | Tasks are interrupted after consumers drain; an interrupted task loses its work.                                                                                                                                          |
-| Set the service manager's stop timeout above your slowest finalizer.                                               | `graft start` has no overall shutdown timeout. Only `SIGKILL` cuts a stuck stop short.                                                                                                                                    |
-| Raise `shutdownTimeout` on `Remote.plugin` when a remote plugin's finalizers need more than the default 5 seconds. | A YAML `remote` entry keeps the fixed 5 s; export a `Remote.plugin` from a module, as in [Contain failures](#contain-failures), to change it. See [Timeouts and defaults](../../remote/lifecycle/#timeouts-and-defaults). |
+| Rule                                                                                  | Why                                                                                    |
+| ------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| Hold every resource with `Effect.acquireRelease` or `Effect.addFinalizer` in `apply`. | Only what `apply` acquires is released at shutdown.                                    |
+| Finish work in flight in a finalizer or an uninterruptible region.                    | Tasks are interrupted after consumers drain; an interrupted task loses its work.       |
+| Set the service manager's stop timeout above your slowest finalizer.                  | `graft start` has no overall shutdown timeout. Only `SIGKILL` cuts a stuck stop short. |
 
 For a stop that hangs, see
 [A stop that does not finish](../troubleshooting/#a-stop-that-does-not-finish).
 
 ## Reconfigure without a restart
-
-Change a running application through the [Loader API](../../loader-api/) instead
-of restarting it. Only the changed entries reload; the rest keep their
-connections and state. Which field change updates and which reloads is on
-[Changes while running](../../config-file/#changes-while-running); a `remote`
-entry always restarts its plugin process.
 
 - Edits are written to `graft.yml`. A deployment that replaces the file discards
   them, so treat the deployed file as state or write the change back to your
@@ -347,39 +274,20 @@ const environment = Layer.mergeAll(
 Then run `Include.Include` in `Layer.provideMerge(Graft.layer, environment)`, as
 in [Load a config file](../../embedding/#load-a-config-file).
 
-| Rule                                                            | Why                                                                                               |
-| --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
-| Put the server's own services in `environment`.                 | Plugins inject them like any service, and they live as long as the program.                       |
-| Run with `NodeRuntime.runMain`.                                 | It turns `SIGINT` and `SIGTERM` into interruption, so the scope closes and plugins stop in order. |
-| Add `SecureRandom.layerWebCrypto` if you load `remote` entries. | Remote needs it; `graft start` provides it for you.                                               |
+| Rule                                            | Why                                                                                               |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| Put the server's own services in `environment`. | Plugins inject them like any service, and they live as long as the program.                       |
+| Run with `NodeRuntime.runMain`.                 | It turns `SIGINT` and `SIGTERM` into interruption, so the scope closes and plugins stop in order. |
 
 ## Keep a gateway session during upgrades
 
-Keep the upstream connection in a host-owned plugin and inject the integration's
-contract into a separate consumer. Use a captured artifact and a direct Worker
-or child process for the integration.
-[Execution transitions](../../transitions/) keep the consumer's service object
-across generations.
+Keep the upstream session in a gateway [unit](../../units/) and inject the
+integration through a fixed [binding](../../bindings/). Replace only the
+integration through [public control](../../control/). The gateway unit and its
+session remain unchanged.
 
-Record the outcome and exit evidence before reporting success. `Recovered` means
-a fresh previous artifact is serving; `RecoveryFailed` leaves the integration
-unavailable while the host can keep its session. `Stuck` requires operator
-intervention. Store the intended artifact for the next host start separately:
-transitions do not persist Loader configuration.
-
-## Version managed deployments
-
-Use [application releases](../../application-releases/) to persist a managed
-integration's artifacts and encoded configuration together. Keep the gateway
-outside the release plugin's subtree. Protect its store and Unix socket
-directory, and give the store one application owner. The journal selects the
-last fully accepted release after a crash. Fleet rollout remains in your
-deployment tooling.
-
-## Untrusted integrations
-
-Use [operator trust policy](../../trust/) for immutable managed entries. Keep
-host code, CLI extensions and contract modules trusted. Test the Linux launcher
-on the deployment host; unavailable isolation fails closed. Protect the policy,
-journal and control socket together. `graft add` disables lifecycle scripts;
-build packages that need scripts in a separate trusted environment.
+Record the outcome and native exit evidence before reporting success. Recovered
+means a fresh previous artifact passed trial. RecoveryFailed leaves the
+integration unavailable. Stuck retains unresolved reservations.
+[Release storage](../../application-releases/) records data independently of
+kernel execution; control does not persist deployment history.

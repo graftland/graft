@@ -2,7 +2,7 @@
 	"name": "@graftland/plugin-remote",
 	"version": "0.0.0",
 	"type": "module",
-	"description": "Local and authenticated network execution for Graft plugins",
+	"description": "Native unit execution and encoded contracts for Graft",
 	"license": "Apache-2.0",
 	"repository": {
 		"type": "git",
@@ -25,21 +25,9 @@
 			"source": "./src/Artifact.ts",
 			"default": "./dist/Artifact.js"
 		},
-		"./Auth": {
-			"source": "./src/Auth.ts",
-			"default": "./dist/Auth.js"
-		},
 		"./Capabilities": {
 			"source": "./src/Capabilities.ts",
 			"default": "./dist/Capabilities.js"
-		},
-		"./cli": {
-			"source": "./src/cli.ts",
-			"default": "./dist/cli.js"
-		},
-		"./Config": {
-			"source": "./src/Config.ts",
-			"default": "./dist/Config.js"
 		},
 		"./Conformance": {
 			"source": "./src/Conformance.ts",
@@ -49,45 +37,13 @@
 			"source": "./src/Contract.ts",
 			"default": "./dist/Contract.js"
 		},
+		"./Control": {
+			"source": "./src/Control.ts",
+			"default": "./dist/Control.js"
+		},
 		"./Errors": {
 			"source": "./src/Errors.ts",
 			"default": "./dist/Errors.js"
-		},
-		"./host/auth/bearer": {
-			"source": "./src/host/auth/bearer.ts",
-			"default": "./dist/host/auth/bearer.js"
-		},
-		"./host/auth/jwt": {
-			"source": "./src/host/auth/jwt.ts",
-			"default": "./dist/host/auth/jwt.js"
-		},
-		"./host/auth/mtls": {
-			"source": "./src/host/auth/mtls.ts",
-			"default": "./dist/host/auth/mtls.js"
-		},
-		"./host/auth/none": {
-			"source": "./src/host/auth/none.ts",
-			"default": "./dist/host/auth/none.js"
-		},
-		"./host/command": {
-			"source": "./src/host/command.ts",
-			"default": "./dist/host/command.js"
-		},
-		"./host/local": {
-			"source": "./src/host/local.ts",
-			"default": "./dist/host/local.js"
-		},
-		"./host/unix": {
-			"source": "./src/host/unix.ts",
-			"default": "./dist/host/unix.js"
-		},
-		"./host/websocket": {
-			"source": "./src/host/websocket.ts",
-			"default": "./dist/host/websocket.js"
-		},
-		"./host/worker": {
-			"source": "./src/host/worker.ts",
-			"default": "./dist/host/worker.js"
 		},
 		"./Policy": {
 			"source": "./src/Policy.ts",
@@ -96,46 +52,6 @@
 		"./Publication": {
 			"source": "./src/Publication.ts",
 			"default": "./dist/Publication.js"
-		},
-		"./runner": {
-			"source": "./src/runner/index.ts",
-			"default": "./dist/runner/index.js"
-		},
-		"./runner/auth/bearer": {
-			"source": "./src/runner/auth/bearer.ts",
-			"default": "./dist/runner/auth/bearer.js"
-		},
-		"./runner/auth/jwt": {
-			"source": "./src/runner/auth/jwt.ts",
-			"default": "./dist/runner/auth/jwt.js"
-		},
-		"./runner/auth/mtls": {
-			"source": "./src/runner/auth/mtls.ts",
-			"default": "./dist/runner/auth/mtls.js"
-		},
-		"./runner/auth/none": {
-			"source": "./src/runner/auth/none.ts",
-			"default": "./dist/runner/auth/none.js"
-		},
-		"./runner/stdio": {
-			"source": "./src/runner/stdio.ts",
-			"default": "./dist/runner/stdio.js"
-		},
-		"./runner/unix": {
-			"source": "./src/runner/unix.ts",
-			"default": "./dist/runner/unix.js"
-		},
-		"./runner/websocket": {
-			"source": "./src/runner/websocket.ts",
-			"default": "./dist/runner/websocket.js"
-		},
-		"./Sandbox": {
-			"source": "./src/Sandbox.ts",
-			"default": "./dist/Sandbox.js"
-		},
-		"./schema": {
-			"source": "./src/schema.ts",
-			"default": "./dist/schema.js"
 		},
 		"./Testing": {
 			"source": "./src/Testing.ts",
@@ -150,11 +66,8 @@
 			"default": "./dist/Units.js"
 		},
 		"./package.json": "./package.json",
-		"./internal/child": "./dist/internal/childMain.js",
+		"./internal/kernel": "./dist/internal/kernelMain.js",
 		"./internal/unit": "./dist/internal/nativeUnitMain.js",
-		"./internal/sandbox": "./dist/sandbox/child.js",
-		"./internal/watchdog": "./dist/internal/watchdogMain.js",
-		"./internal/worker": "./dist/internal/workerMain.js",
 		"./internal/publication": "./dist/internal/publicationMain.js"
 	},
 	"scripts": {
@@ -163,67 +76,34 @@
 	},
 	"peerDependencies": {
 		"effect": "4.1.*",
-		"@graftland/graft": "workspace:^",
-		"@graftland/loader": "workspace:^",
-		"@graftland/cli": "workspace:^"
+		"@graftland/graft": "workspace:^"
 	},
 	"dependencies": {
-		"@effect/platform-node": "4.1.2",
-		"pkijs": "4.0.1",
-		"asn1js": "4.0.0",
-		"ws": "8.22.1"
+		"@effect/platform-node": "4.1.2"
 	},
 	"devDependencies": {
 		"@effect/vitest": "4.1.2",
-		"@graftland/hmr": "workspace:*",
-		"@types/ws": "8.18.2",
 		"effect": "4.1.2",
 		"vitest": "5.1.0",
-		"@graftland/graft": "workspace:*",
-		"@graftland/loader": "workspace:*",
-		"@graftland/cli": "workspace:*"
+		"@graftland/graft": "workspace:*"
 	},
 	"publishConfig": {
 		"exports": {
 			".": "./dist/index.js",
 			"./Artifact": "./dist/Artifact.js",
-			"./Auth": "./dist/Auth.js",
 			"./Capabilities": "./dist/Capabilities.js",
-			"./cli": "./dist/cli.js",
-			"./Config": "./dist/Config.js",
 			"./Conformance": "./dist/Conformance.js",
 			"./Contract": "./dist/Contract.js",
+			"./Control": "./dist/Control.js",
 			"./Errors": "./dist/Errors.js",
-			"./host/auth/bearer": "./dist/host/auth/bearer.js",
-			"./host/auth/jwt": "./dist/host/auth/jwt.js",
-			"./host/auth/mtls": "./dist/host/auth/mtls.js",
-			"./host/auth/none": "./dist/host/auth/none.js",
-			"./host/command": "./dist/host/command.js",
-			"./host/local": "./dist/host/local.js",
-			"./host/unix": "./dist/host/unix.js",
-			"./host/websocket": "./dist/host/websocket.js",
-			"./host/worker": "./dist/host/worker.js",
 			"./Policy": "./dist/Policy.js",
 			"./Publication": "./dist/Publication.js",
-			"./runner": "./dist/runner/index.js",
-			"./runner/auth/bearer": "./dist/runner/auth/bearer.js",
-			"./runner/auth/jwt": "./dist/runner/auth/jwt.js",
-			"./runner/auth/mtls": "./dist/runner/auth/mtls.js",
-			"./runner/auth/none": "./dist/runner/auth/none.js",
-			"./runner/stdio": "./dist/runner/stdio.js",
-			"./runner/unix": "./dist/runner/unix.js",
-			"./runner/websocket": "./dist/runner/websocket.js",
-			"./Sandbox": "./dist/Sandbox.js",
-			"./schema": "./dist/schema.js",
 			"./Testing": "./dist/Testing.js",
 			"./Transport": "./dist/Transport.js",
 			"./Units": "./dist/Units.js",
 			"./package.json": "./package.json",
-			"./internal/child": "./dist/internal/childMain.js",
+			"./internal/kernel": "./dist/internal/kernelMain.js",
 			"./internal/unit": "./dist/internal/nativeUnitMain.js",
-			"./internal/sandbox": "./dist/sandbox/child.js",
-			"./internal/watchdog": "./dist/internal/watchdogMain.js",
-			"./internal/worker": "./dist/internal/workerMain.js",
 			"./internal/publication": "./dist/internal/publicationMain.js"
 		}
 	},

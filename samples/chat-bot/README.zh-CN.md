@@ -63,16 +63,3 @@ devenv shell -- pnpm --filter @graftland/sample-chat-bot start
 | `src/plugins/moderation.ts` | 移除含有违禁词的消息的中间件。                      |
 | `src/main.ts`               | 脚本化的会话。                                      |
 | `test/chat-bot.test.ts`     | 上述行为的测试。                                    |
-
-## 给天气集成一个独立进程
-
-第 3 步用
-`Graft.plugin(Remote.plugin(contract, { contractModule, implementation, connect: { local: {} } }), config)`
-加载普通的 forecasts 插件。天气 SDK 阻塞或退出时，只影响它自己的进程；骰子和审核仍在宿主里运行。天气命令照常注入
-`Forecasts`；RPC 失败会转成
-`ForecastUnavailable`，命令回复一句暂时不可用。撤回提供者时，只移除依赖它的命令。
-
-[`src/forecastContract.ts`](src/forecastContract.ts)描述这个服务。测试跨进程调用
-`/weather`，销毁提供者，再确认 `/roll`
-仍能用。这是故障边界，不是权限沙箱。想自己移动一个服务，先看
-[06 · 远程插件](../06-remote/README.zh-CN.md)。

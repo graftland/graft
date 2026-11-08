@@ -16,7 +16,6 @@ idea, prints what happens, and suggests something to try.
 | [03 · Events](03-events)           | Event handlers that go away when their plugin unloads.                                 |
 | [04 · Failures](04-failures)       | Failed plugins, retry schedules, and background work that belongs to a plugin.         |
 | [05 · Config file](05-config-file) | Run plugins from `graft.yml` with `graft start --watch`, and edit them while they run. |
-| [06 · Remote](06-remote)           | Move a service between local, worker, and runner without changing its caller.          |
 
 For deployment and authentication, see the
 [Remote guide](../packages/docs/content/docs/remote/overview.md).
@@ -47,7 +46,6 @@ devenv shell -- pnpm build
 devenv shell -- pnpm --filter @graftland/sample-hello start
 ```
 
-Each sample's README gives its exact command. `05-config-file`, `06-remote`, and
 `http-gateway` keep running until you press <kbd>Ctrl</kbd>+<kbd>C</kbd>. The
 other samples print their story and exit.
 

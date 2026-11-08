@@ -15,16 +15,13 @@ Node 适配器的要求一致。
 | `graft schema`              | 写入 `graft.yml` 的编辑器 Schema。 | [graft schema](#graft-schema) |
 | `graft check [file]`        | 检查清单是否符合宿主要求。         | [graft check](#graft-check)   |
 
-`graft start` 同时支持 [remote 宿主](../remote/hosts/)和
-[runner](../remote/runners/)。命令插件可以添加 `graft remote certificates`
-这样的子命令，只有显式启用后才会加载。
+命令插件提供显式启用的子命令。
 
 ## 命令插件
 
 ```sh
-graft add --plugin remote
-graft remote certificates --out ./certs --server localhost
-graft add --plugin remote --global
+graft add --plugin example
+graft add --plugin example --global
 ```
 
 `add --plugin` 安装插件包，并启用它的 `/cli`
@@ -51,10 +48,8 @@ graft start [config] [--watch] [--env-file <path>] [--env-dir <path>] [--stdio]
 
 ### 协议输出
 
-只有一个 stdio listener 的 runner 使用
-`graft start runner.yml --stdio`，[MCP 服务器](../mcp-server/overview/)使用
-`graft start --stdio`。加载插件、处理帮助和版本参数之前，stdout 就已保留给协议字节。日志、Console 输出（包括 worker 输出）、帮助、版本和错误都写入 stderr；此模式不提供交互向导和补全输出。runner 会拒绝不匹配的 listener 配置。stdin
-EOF 后，runner 停止执行单元，确认退出后结束进程；启动或清理失败时返回非零退出码。
+对 [MCP 服务器](../mcp-server/overview/)使用
+`graft start --stdio`。标准输出承载协议字节；日志、帮助和错误写到标准错误。
 
 ### 选项
 

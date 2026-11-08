@@ -57,7 +57,7 @@ const connection = Effect.fnUntraced(function* (
 	})
 	yield* Effect.forEach(
 		services,
-		(service) => service.serveUnit(port, owner).pipe(Effect.forkScoped),
+		(service) => service.serve(port, owner).pipe(Effect.forkScoped),
 		{ discard: true },
 	)
 	return yield* port.await.pipe(Effect.orDie)

@@ -8,7 +8,7 @@ describe("public contracts", () => {
 	it.live("depend only on Effect and sibling contract types", () =>
 		Effect.gen(function* () {
 			const fs = yield* FileSystem.FileSystem
-			for (const name of ["Auth", "Transport"]) {
+			for (const name of ["Transport"]) {
 				const source = yield* fs.readFileString(
 					new URL(`${name}.ts`, root).pathname,
 				)
@@ -18,10 +18,7 @@ describe("public contracts", () => {
 				assert.isTrue(
 					Array.every(
 						imports,
-						(match) =>
-							match[1] === "effect" ||
-							match[1] === "./Auth" ||
-							match[1] === "./Errors",
+						(match) => match[1] === "effect" || match[1] === "./Errors",
 					),
 				)
 				assert.isFalse(String.includes("internal/")(source))

@@ -19,9 +19,9 @@ import { parse } from "yaml"
 
 import * as Manage from "../src/Manage"
 
-/** The registry has `@graftland/plugin-remote` and no `graft-plugin-remote`. */
+/** The registry has `@graftland/plugin-example` and no `graft-plugin-example`. */
 const viewed = (args: ReadonlyArray<string>) =>
-	args[0] === "view" && args[1] !== "@graftland/plugin-remote"
+	args[0] === "view" && args[1] !== "@graftland/plugin-example"
 const manager = (code: number, calls: MutableList.MutableList<string>) =>
 	ChildProcessSpawner.make((command) =>
 		Effect.sync(() => {
@@ -69,8 +69,8 @@ for (const global of [false, true]) {
 					)
 				yield* fs.writeFileString(directory + "/graft.yml", text)
 				const calls = MutableList.make<string>()
-				yield* Manage.addPlugin("remote", global).pipe(
-					Effect.andThen(Manage.addPlugin("remote", global)),
+				yield* Manage.addPlugin("example", global).pipe(
+					Effect.andThen(Manage.addPlugin("example", global)),
 					Effect.provideService(
 						ChildProcessSpawner.ChildProcessSpawner,
 						manager(0, calls),
@@ -99,7 +99,7 @@ for (const global of [false, true]) {
 						),
 					)
 				assert.equal(
-					manifest.dependencies["@graftland/plugin-remote"],
+					manifest.dependencies["@graftland/plugin-example"],
 					"latest",
 				)
 				const saved = yield* fs.readFileString(directory + "/graft.yml")
@@ -111,7 +111,7 @@ for (const global of [false, true]) {
 					),
 				)(parse(saved))
 				assert.deepEqual(entries, [
-					{ name: "@graftland/plugin-remote/cli", cli: true },
+					{ name: "@graftland/plugin-example/cli", cli: true },
 				])
 			}).pipe(
 				Effect.scoped,
@@ -128,7 +128,7 @@ it.live("does not enable a command plugin when installation fails", () =>
 		yield* fs.writeFileString(directory + "/package.json", '{"private":true}')
 		yield* fs.writeFileString(directory + "/graft.yml", original)
 		const calls = MutableList.make<string>()
-		const result = yield* Manage.addPlugin("remote", true).pipe(
+		const result = yield* Manage.addPlugin("example", true).pipe(
 			Effect.result,
 			Effect.provideService(
 				ChildProcessSpawner.ChildProcessSpawner,

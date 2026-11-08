@@ -345,14 +345,6 @@ it.effect("loads welcome from an entry", () =>
 | `!env`        | Write `new Entry.Env({ name })` where the file would have `!env`, and supply the variables with `ConfigProvider.fromEnvRecord`.                                                                 |
 | The YAML file | Load `Include.Include` with a `graft.yml` written into `fs.makeTempDirectoryScoped()`, and `NodeServices.layer` in the environment.                                                             |
 
-## Test a remote plugin
-
-The implementation of a [remote plugin](../../remote/overview/) is an ordinary
-plugin: test it in process, as above. The tests of the
-[06 · Remote](https://github.com/graftland/graft/tree/main/samples/06-remote/test)
-sample cross the boundary: a `globalSetup` builds it to JavaScript for Node, and
-an `it.live` test runs it over `local` and `worker`.
-
 ## Test the installed integration
 
 Pack the contract and implementation, install their tarballs into an isolated

@@ -73,12 +73,8 @@ keep it current. Commit it.
 | A plugin module or its local imports              | Hot reload: affected plugins restart on the new code       |
 | Invalid YAML or a module that fails to import     | Logged; the last valid version keeps running               |
 
-Hot reload needs side-effect-free ECMAScript modules; CommonJS, native
-dependencies and `createRequire` make it report `Restart required`. Packages in
-`node_modules` are not reloaded, except the module a plugin is loaded from. A
-[`name: remote`](remote.md) entry is an entry like any other, but its contract
-and implementation are not hot-replaced, and a `config` edit always restarts its
-plugin process.
+Native deployments use fixed data and public Kernel control separately from
+Loader entries. See [native units](remote.md).
 
 ## Edit entries from a plugin
 

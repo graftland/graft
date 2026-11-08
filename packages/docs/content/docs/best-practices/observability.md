@@ -185,14 +185,6 @@ message // => Option.some(["Listening on 8080"])
 `Logger.layer` provided closer to the program, or listed after `Graft.layer` in
 `Layer.mergeAll`, replaces the collector, and `Graft.logs` receives nothing.
 
-A [remote plugin](../../remote/overview/)'s logs reach the host's loggers at
-their own level, with the plugin's annotations in `remote.annotations` and
-`remote.pid` or `remote.threadId`. Entries lost under load show as
-[`Remote logs were dropped`](../../remote/transport-auth/#warnings). Forwarding
-is best effort: a burst can drop almost every entry. Sample or aggregate
-frequent messages in the plugin, and keep records you must not lose in storage,
-not in logs.
-
 ## Collect logs in a plugin
 
 `Graft.logs` streams every entry the environment logs, for alerting, a log view
@@ -347,15 +339,14 @@ collector:
         name: ./src/bot.ts
 ```
 
-| Change                                  | Effect                                                                                                                                                                                                                                                                              |
-| --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| HTTP exporter settings                  | New spans go to a new exporter. Started spans keep the old one, which flushes and closes when they end. Draining waits at most its `shutdownTimeout`; Effect then allows a separate `shutdownTimeout` for flushing (at most twice the timeout in total). The subtree keeps running. |
-| `exporter.config`                       | Forwarded to the exporter’s update function; a compatible update keeps the subtree running.                                                                                                                                                                                         |
-| `plugins`                               | Reconciled like a group: unchanged entries keep running. The exporter is not updated when its config is unchanged.                                                                                                                                                                  |
-| `exporter.name`                         | Restarts the traced subtree with the new provider.                                                                                                                                                                                                                                  |
-| Moving entries into or out of `plugins` | Restarts those entries, because their parent and intercept change.                                                                                                                                                                                                                  |
-| Exporter failure                        | The subtree waits for `Exporter` and resumes when the exporter’s own retry succeeds; no config change is needed.                                                                                                                                                                    |
-| Unloading the entry                     | The subtree stops first, then all remaining exporters flush and close concurrently.                                                                                                                                                                                                 |
+| Change                                  | Effect                                                                                                             |
+| --------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `exporter.config`                       | Forwarded to the exporter’s update function; a compatible update keeps the subtree running.                        |
+| `plugins`                               | Reconciled like a group: unchanged entries keep running. The exporter is not updated when its config is unchanged. |
+| `exporter.name`                         | Restarts the traced subtree with the new provider.                                                                 |
+| Moving entries into or out of `plugins` | Restarts those entries, because their parent and intercept change.                                                 |
+| Exporter failure                        | The subtree waits for `Exporter` and resumes when the exporter’s own retry succeeds; no config change is needed.   |
+| Unloading the entry                     | The subtree stops first, then all remaining exporters flush and close concurrently.                                |
 
 Plugins outside `plugins` are not traced. Graft writes missing ids in `plugins`
 back to the file, just like top-level entries, so reordering them preserves

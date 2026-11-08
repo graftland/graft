@@ -42,5 +42,3 @@ tick
 按 <kbd>Ctrl</kbd>+<kbd>C</kbd> 停止。Graft 会卸载所有插件。
 
 ## 下一步
-
-[06 · 远程插件](../06-remote/README.zh-CN.md)：不改调用方，把插件放到别处运行。

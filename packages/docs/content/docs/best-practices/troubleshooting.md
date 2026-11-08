@@ -99,7 +99,6 @@ Messages about plugins are listed in
 | Entry fails with `ModuleInvalid`                                       | The module did not import, or exports no plugin as its default export or as `plugin`.                                                                                                                                                                                                                         |
 | `graft start` exits at once                                            | The first configuration is invalid without `--watch`, or the `--env-file` file or `--env-dir` directory is missing. See [graft start](../../cli/#graft-start).                                                                                                                                                |
 | A package manager lists two versions of `effect` or `@graftland/graft` | A plugin package depends on them directly. They must be one copy. See [Plugin packages](../packaging/).                                                                                                                                                                                                       |
-| A remote plugin ignores code edits                                     | Without `--watch`, restart the host. With it, rebuild when the entry points at built JavaScript; a network runner's code is not watched. See [Config changes and hot reload](../../remote/hosts/#config-changes-and-hot-reload).                                                                              |
 
 ## A stop that does not finish
 
@@ -123,12 +122,11 @@ see [Limits](../../hot-reload/#limits).
 Find the error tag in the `Cause`, then the section of [Errors](../../errors/)
 that lists it and says what to do.
 
-| Tags                                                                               | Section                                                        |
-| ---------------------------------------------------------------------------------- | -------------------------------------------------------------- |
-| `SchemaError`, `Fork.CleanupError`, a task failure                                 | [Fork failures](../../errors/#fork-failures)                   |
-| `ServiceConflict`                                                                  | [Services](../../errors/#services)                             |
-| `Graft.ReplacementConflict`                                                        | [Replacement](../../errors/#replacement)                       |
-| `UnregisteredReference`, `InvalidIntercept`                                        | [Intercepts](../../errors/#intercepts)                         |
-| `CyclicConfig`, `InvalidOperation`, `StoreError`, `LoaderClosed`                   | [Loader and config file](../../errors/#loader-and-config-file) |
-| `HmrError`, a `Skipped` result                                                     | [Hot reload](../../errors/#hot-reload)                         |
-| `RemoteError`, `Contract.UndeclaredFailure`, `RemoteWithdrawn`, `RemoteEntryError` | [Remote](../../errors/#remote)                                 |
+| Tags                                                             | Section                                                        |
+| ---------------------------------------------------------------- | -------------------------------------------------------------- |
+| `SchemaError`, `Fork.CleanupError`, a task failure               | [Fork failures](../../errors/#fork-failures)                   |
+| `ServiceConflict`                                                | [Services](../../errors/#services)                             |
+| `Graft.ReplacementConflict`                                      | [Replacement](../../errors/#replacement)                       |
+| `UnregisteredReference`, `InvalidIntercept`                      | [Intercepts](../../errors/#intercepts)                         |
+| `CyclicConfig`, `InvalidOperation`, `StoreError`, `LoaderClosed` | [Loader and config file](../../errors/#loader-and-config-file) |
+| `HmrError`, a `Skipped` result                                   | [Hot reload](../../errors/#hot-reload)                         |

@@ -10,15 +10,11 @@ import {
 	Stream,
 	type Scope,
 } from "effect"
-import { SecureRandom } from "effect/crypto"
-import { NodeServices } from "@effect/platform-node"
 import { assert, describe, it } from "@effect/vitest"
 
 import { Graft, type Fork } from "@graftland/graft"
-import * as Remote from "@graftland/plugin-remote"
 
 import { receive } from "../src/Chat.ts"
-import { contract } from "../src/forecastContract"
 import { Forecasts, ForecastUnavailable } from "../src/Forecasts.ts"
 import dice from "../src/plugins/dice.ts"
 import forecasts from "../src/plugins/forecasts.ts"
@@ -76,46 +72,6 @@ const unknownWeather = "Unknown command /weather. Try /help."
 const removed = "A message from alice was removed."
 
 describe("chat-bot", () => {
-	it.live(
-		"serves weather across a process boundary and withdraws only that command",
-		() =>
-			Effect.gen(function* () {
-				const diceFork = yield* Graft.plugin(dice)
-				yield* diceFork.await
-				const weatherFork = yield* Graft.plugin(weather)
-				const provider = yield* Graft.plugin(
-					Remote.plugin(contract, {
-						contractModule: new URL(
-							"../.cache/implementation/forecastContract.js",
-							import.meta.url,
-						).href,
-						implementation: new URL(
-							"../dist/plugins/forecasts.js",
-							import.meta.url,
-						).href,
-						connect: { local: {} },
-					}),
-					{ units: "celsius" },
-				)
-				yield* provider.await
-				yield* reach(weatherFork, "Active")
-				yield* expectReply("/weather Paris", "Paris: light rain, 14 °C")
-				yield* provider.dispose
-				yield* expectState(weatherFork, "Pending")
-				yield* expectReply("/weather Paris", unknownWeather)
-				const roll = yield* reply("/roll 1d4")
-				assert.match(roll, /^alice rolled \d = \d$/)
-			}).pipe(
-				Effect.scoped,
-				Effect.provide(
-					Layer.provideMerge(
-						Graft.layer,
-						Layer.merge(NodeServices.layer, SecureRandom.layerWebCrypto),
-					),
-				),
-			),
-	)
-
 	it.effect("lists and answers only the commands that are loaded", () =>
 		Effect.gen(function* () {
 			const helpFork = yield* Graft.plugin(help)

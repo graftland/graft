@@ -335,12 +335,6 @@ it.effect("loads welcome from an entry", () =>
 | `!env`    | 在文件中会写 `!env` 的位置写 `new Entry.Env({ name })`，并用 `ConfigProvider.fromEnvRecord` 提供变量。                                        |
 | YAML 文件 | 加载 `Include.Include`，指向写入 `fs.makeTempDirectoryScoped()` 的 `graft.yml`，并在环境中加入 `NodeServices.layer`。                         |
 
-## 测试远程插件
-
-[远程插件](../../remote/overview/)的实现就是普通插件：像上文那样在进程内测试即可。[06 · 远程插件](https://github.com/graftland/graft/tree/main/samples/06-remote/test)示例的测试跨越了边界：`globalSetup`
-先把它构建为供 Node 导入的 JavaScript，再由 `it.live` 测试在 `local` 和 `worker`
-上运行它。
-
 ## 测试安装后的集成
 
 分别打包契约和实现，把 tarball 安装到隔离的消费者项目，再针对公开导出编译和运行。不使用工作区源码别名或私有导入。

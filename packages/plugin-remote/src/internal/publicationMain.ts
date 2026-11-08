@@ -22,4 +22,5 @@ const main = Effect.scoped(
 	}),
 )
 
-NodeRuntime.runMain(main.pipe(Effect.provide(NodeServices.layer)))
+if (import.meta.main)
+	NodeRuntime.runMain(main.pipe(Effect.provide(NodeServices.layer)))

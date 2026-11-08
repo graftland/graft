@@ -246,7 +246,7 @@ export const ForecastIssued = Event.make<[city: string, forecast: string]>(
 | 鍵字串以套件名稱為範圍   | 字串就是鍵的身分：字串相同的兩個鍵就是同一個鍵。`graft.yml` 也是用它在 [`inject`、`isolate` 和 `intercept`](../../config-file/#規則) 中指稱這個鍵。 |
 | 實作不放在這個模組裡     | 這樣消費者只相依於契約。發布者可以被[取代](../../replace/)或[移到另一個行程](../../remote/overview/)，而不必改動消費者。                            |
 | 把預期的失敗寫進方法型別 | 呼叫端能看到必須處理哪些錯誤，Remote 契約也能傳遞它們。                                                                                             |
-| 遠端方法要粗粒度         | 每次 Remote 呼叫都要經過連線。一次接受批次的呼叫遠比多次小呼叫便宜，見 [Remote 邊界的開銷](../production/#remote-邊界的開銷)。                      |
+| 遠端方法要粗粒度         | 每次 Remote 呼叫都要經過連線。一次接受批次的呼叫遠比多次小呼叫便宜，見 [Remote 邊界的開銷](../production/)。                                        |
 | 只定義值                 | 與任何[外掛模組](../../plugins/#外掛模組)一樣，匯入此模組不得執行任何 I/O。                                                                         |
 
 要把識別物件和外掛發布為 npm 套件，請參閱[外掛套件](../packaging/)。

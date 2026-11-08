@@ -38,10 +38,6 @@ description: 用 graft.yml 描述应用，并在运行期间修改配置。
 | 保存文件时会发生什么     | [在运行期间修改配置](#在运行期间修改配置) |
 | 从插件或代码中编辑配置项 | [Loader API](../loader-api/)              |
 
-条目也可以让它的插件在子进程、worker 或另一台机器上运行：写上
-`name: remote`，再把插件的配置包一层，见
-[从 YAML 加载](../remote/hosts/#从-yaml-加载)。它仍然是普通条目，同样有 id、`disabled`、`inject`、`isolate`，也能在运行期间编辑。保存的条目 id 同时也是 runner 上的实例名。
-
 从条目加载的插件可从 `@graftland/loader` 导入 `Entry`，读取
 `yield* Entry.CurrentId`。它是
 `Context.Reference<Option<string>>`，值为当前条目的 id，嵌套 group 中也一样；不经过条目加载时默认为
@@ -52,7 +48,7 @@ description: 用 graft.yml 描述应用，并在运行期间修改配置。
 在顶层声明命令插件条目：
 
 ```yaml
-- name: remote/cli
+- name: ./commands.ts
   cli: true
 ```
 
@@ -152,9 +148,6 @@ description: 用 graft.yml 描述应用，并在运行期间修改配置。
 | 以 `/` 开头             | 绝对路径。                                                                                                                                                                                                                                                                             |
 | 以 `@` 开头，或包含 `:` | 直接使用。                                                                                                                                                                                                                                                                             |
 | 其他（例如 `review`）   | 先尝试原名称，再尝试 `@graftland/plugin-<name>` 和 `graft-plugin-<name>`；原名称对应的模块若没有导出插件（例如 Node 的 `http`），会被跳过。两种命名约定地位相同：两者都已安装时，该条目以 `AmbiguousPluginName` 失败。判断时两者都会被导入，因此第二个导入失败时，该条目以该错误失败。 |
-
-包从应用目录解析。例如，`name: remote` 会找到
-`@graftland/plugin-remote`，`name: remote/runner` 会找到它的 `runner` 导出。
 
 ### 模块无法加载时
 

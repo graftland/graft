@@ -37,26 +37,6 @@ no filesystem work. A captured copy is independent of subsequent source edits. A
 detected source change during capture aborts it. Identical captures reuse the
 same directory; a corrupted existing copy is rejected instead of overwritten.
 
-Verification occurs when its Effect runs. A string passed to `Remote.plugin`
-remains an ordinary module location; it does not request capture or future
-verification. Run verification again before a later launch. Passing an
-`artifact` to [a managed Remote plugin](../../transitions/) enables verification
-before every launch, including recovery.
-
-## Declare overlap support
-
-Put the declaration in the captured package's `package.json`:
-
-```json
-{ "graft": { "overlap": true } }
-```
-
-`Artifact.metadata` verifies the captured bytes and reads this declaration
-without importing the implementation. Managed Remote uses it before admitting a
-Change. An absent or false declaration selects Restart; explicit Overlap is
-rejected before candidate execution. The implementation must also declare
-`overlap: true` when its running contract is described.
-
 ## Supported directories
 
 | Requirement  | Rule                                                                                                                                                                                                                   |

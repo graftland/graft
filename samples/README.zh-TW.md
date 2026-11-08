@@ -8,14 +8,13 @@
 
 剛接觸 Graft？請依序閱讀。每個範例都是一個簡短的檔案，只講一個概念，會印出執行過程，並提供可以動手試試的建議。
 
-| 範例                                       | 你將學到                                                               |
-| ------------------------------------------ | ---------------------------------------------------------------------- |
-| [01 · Hello](01-hello)                     | 定義外掛、載入外掛、修改它的設定、卸載它。                             |
-| [02 · Services](02-services)               | 在一個外掛中發布服務，在另一個外掛中使用它，後者會等待服務出現。       |
-| [03 · Events](03-events)                   | 外掛卸載時會自動消失的事件處理器。                                     |
-| [04 · Failures](04-failures)               | 失敗的外掛、重試排程，以及屬於外掛的背景任務。                         |
-| [05 · Config file](05-config-file)         | 用 `graft start --watch` 從 `graft.yml` 執行外掛，並在執行時編輯它們。 |
-| [06 · 遠端外掛](06-remote/README.zh-TW.md) | 不改呼叫端，把服務放到子行程、worker 或 runner。                       |
+| 範例                               | 你將學到                                                               |
+| ---------------------------------- | ---------------------------------------------------------------------- |
+| [01 · Hello](01-hello)             | 定義外掛、載入外掛、修改它的設定、卸載它。                             |
+| [02 · Services](02-services)       | 在一個外掛中發布服務，在另一個外掛中使用它，後者會等待服務出現。       |
+| [03 · Events](03-events)           | 外掛卸載時會自動消失的事件處理器。                                     |
+| [04 · Failures](04-failures)       | 失敗的外掛、重試排程，以及屬於外掛的背景任務。                         |
+| [05 · Config file](05-config-file) | 用 `graft start --watch` 從 `graft.yml` 執行外掛，並在執行時編輯它們。 |
 
 部署與驗證方式見
 [Remote 文件](../packages/docs/content/docs/zh-tw/remote/overview.md)。
@@ -43,7 +42,6 @@ devenv shell -- pnpm build
 devenv shell -- pnpm --filter @graftland/sample-hello start
 ```
 
-每個範例的 README 都給出了它的具體指令。`05-config-file`、`06-remote` 和
 `http-gateway` 會一直執行，直到你按下
 <kbd>Ctrl</kbd>+<kbd>C</kbd>。其他範例印完過程後就會結束。
 

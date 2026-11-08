@@ -15,16 +15,13 @@ description: graft 命令及其子命令。
 | `graft schema`              | 寫入 `graft.yml` 的編輯器 Schema。 | [graft schema](#graft-schema) |
 | `graft check [file]`        | 檢查清單是否符合宿主要求。         | [graft check](#graft-check)   |
 
-`graft start` 同時支援 [remote 宿主](../remote/hosts/)與
-[runner](../remote/runners/)。命令外掛可以加入 `graft remote certificates`
-這樣的子命令，只有明確啟用後才會載入。
+命令插件提供明確啟用的子命令。
 
 ## 命令外掛
 
 ```sh
-graft add --plugin remote
-graft remote certificates --out ./certs --server localhost
-graft add --plugin remote --global
+graft add --plugin example
+graft add --plugin example --global
 ```
 
 `add --plugin` 安裝外掛套件，並啟用它的 `/cli`
@@ -51,10 +48,8 @@ graft start [config] [--watch] [--env-file <path>] [--env-dir <path>] [--stdio]
 
 ### 協定輸出
 
-只有一個 stdio listener 的 runner 使用
-`graft start runner.yml --stdio`，[MCP 伺服器](../mcp-server/overview/)使用
-`graft start --stdio`。載入外掛、處理說明與版本參數之前，stdout 就已保留給協定位元組。日誌、Console 輸出（包括 worker 輸出）、說明、版本與錯誤都寫入 stderr；此模式不提供互動精靈與補全輸出。runner 會拒絕不相符的 listener 設定。stdin
-EOF 後，runner 停止執行單元，確認結束後退出行程；啟動或清理失敗時回傳非零結束碼。
+對 [MCP 伺服器](../mcp-server/overview/)使用
+`graft start --stdio`。標準輸出承載協定位元組；日誌、說明和錯誤寫到標準錯誤。
 
 ### 選項
 

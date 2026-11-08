@@ -19,13 +19,12 @@ devenv shell -- pnpm bench --scenario fanout,events --implementation graft,cordi
 devenv shell -- pnpm bench --scenario memory-cycles --cycles 1000 --output .cache/long-churn
 ```
 
-| 選項               | 行為                                                                                                                                                     |
-| ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--quick`          | 保留原有規模矩陣並減少採樣；Remote 記憶體只測 N=1。僅用於冒煙檢查。                                                                                      |
-| `--scenario`       | 用逗號分隔下表場景名稱的子字串。                                                                                                                         |
-| `--implementation` | 用逗號分隔實作名稱：graft、cordis、avvio、effect、node、emittery；in-process、remote-local、remote-worker、remote-unix、remote-ws、raw-worker、raw-ipc。 |
-| `--cycles`         | 覆寫同一根執行環境內的載入/卸載循環次數。                                                                                                                |
-| `--output`         | 相對於此套件的輸出路徑前綴；預設為 results/latest 或 .cache/quick。                                                                                      |
+| 選項         | 行為                                                                |
+| ------------ | ------------------------------------------------------------------- |
+| `--quick`    | 保留原有規模矩陣並減少採樣；Remote 記憶體只測 N=1。僅用於冒煙檢查。 |
+| `--scenario` | 用逗號分隔下表場景名稱的子字串。                                    |
+| `--cycles`   | 覆寫同一根執行環境內的載入/卸載循環次數。                           |
+| `--output`   | 相對於此套件的輸出路徑前綴；預設為 results/latest 或 .cache/quick。 |
 
 每個案例完成後儲存 JSON 與 Markdown。錯誤保留在兩種輸出中，並使命令失敗。CI 透過根目錄
 `pnpm test`
@@ -47,45 +46,6 @@ devenv shell -- pnpm bench --scenario memory-cycles --cycles 1000 --output .cach
 | memory-cycles                                     | 在同一根執行環境內對 10 個外掛執行 100 次循環，測量堆積成長並記錄檢查點斜率。                     |
 | memory-steady                                     | 1000 個存活外掛相對於空根執行環境的堆積增量，除以外掛數量。                                       |
 | import                                            | 在新行程中匯入各函式庫，分別記錄匯入延遲與子行程總耗時。                                          |
-
-## Remote
-
-`@graftland/plugin-remote` 與同一個行程內服務比較，連線包括直接 `local`、直接
-`worker`、Unix socket runner 和回環 `ws` runner。原生 worker `postMessage`
-與子行程 IPC 提供 echo 基線。runner 服務在計時前就緒。runner 嵌入宿主行程，因此其堆積和 CPU 是宿主與 runner 合計的替代測量。這測量同機 runner 的傳輸成本，不代表跨機器網路、TLS 或驗證的成本。
-
-```sh
-devenv shell -- pnpm bench --scenario remote-
-devenv shell -- pnpm bench --quick --scenario remote-r2,remote-r8
-devenv shell -- pnpm bench --scenario remote-r4 --implementation remote-unix,remote-ws
-```
-
-| 場景                             | 測量內容                                                                                                                           |
-| -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| remote-r1-start / remote-r1-stop | 從載入項目到相依外掛首次呼叫成功；從卸載到子行程或 worker 真正退出且消費者穩定。                                                   |
-| remote-r2-call                   | 微小負載的一次呼叫往返，記錄 mean/p50/p99/p999，並比較原生 Node 基線。                                                             |
-| remote-r3-throughput             | 以 1、16、256 個在途請求完成 256 次呼叫；另比較一次契約批次內完成相同 256 個操作。                                                 |
-| remote-r4-payload                | 請求和回應分別攜帶 100 B、10 KB、1 MB、1 MiB、1 MiB+1 B 的 ASCII 文字；拒絕的框架單獨標記。                                        |
-| remote-r5-stream                 | 完整消費契約支援的串流，值為 0..99。                                                                                               |
-| remote-r6-config                 | 行程內更新函式與 Remote 完整重啟比較；等待舊執行單元退出和新消費者可用。                                                           |
-| remote-r7-footprint              | 1/10/50 個項目的宿主保留堆積、子行程 RSS、worker 隔離堆積與宿主 RSS 總增量；同一次執行也記錄依序啟動 N 個項目的時間。              |
-| remote-r8-loop                   | 相同的五千萬步 CPU 迴圈；宿主事件迴圈延遲直方圖，以及無關行程內服務呼叫的延遲，包含計時器排隊。                                    |
-| remote-r9-logs                   | 無日誌對照、100 筆間隔日誌、10000/100000 筆突發日誌；記錄宿主 CPU、接收/丟棄數量和警告頻率。計時包含排空和停止，明確標為替代測量。 |
-| remote-r10-failure               | 從退出前已確認的通知到 Failed 和消費者停止，也記錄原生退出事件到 Failed；行程內宿主退出另行驗證。                                  |
-
-Remote 使用固定採樣預算：生命週期暖身 3 次後採樣 20 次；單次呼叫暖身 500 次後採樣 5000 次；熱批次暖身 3 次後採樣 30 次；CPU/日誌/崩潰各重複 5 次；記憶體和拒絕邊界各重複 3 次。CPU 另丟棄一次相同迴圈。快速模式降為 2–10 次採樣，記憶體只測 1 個項目，僅用於冒煙檢查；原有函式庫場景仍保留全部規模。Remote 使用原生效能時鐘和匯入/記憶體測量相同的保守 95% 估計器，保留每次呼叫的尾延遲及其他觀測。熱場景重用連線，啟動和卸載不計入呼叫。原生 Node 基線的序列化和排程更簡單，相減不能單獨分離框架協定成本。5000 次採樣的 p999 只有約 5 個最高尾部觀測。
-
-預設資料准入數為 16。runner 協定負載上限是 1
-MiB，業務資料還需要信封空間。直接連線使用其他路徑，分別測試其邊界。Remote 始終透過重啟更新設定。Node 的 RSS 計數屬於整個行程，無法分離單個 worker
-RSS，該項標為 N/A，宿主 RSS 增量是整體估計。日誌使用 process.threadCpuUsage 測量宿主執行緒 CPU，並保留 process.cpuUsage 作為補充。子執行單元保留預設日誌格式化，並明確寫入 stderr。stdout 防護只統計意外輸出，本次 R9 為零位元組。直接 worker 的 stderr 由 runner 擷取，local/runner 使用 ProcessObservation 的有界路徑。宿主結構化接收器在記憶體中計數，不包含正式環境終端或磁碟匯出。結構化計數與完整失敗 cause 均保留。
-
-每個場景擁有 scope、子行程和 worker，核對原生身分與退出事件；runner 最後用唯一的環境標記掃描遺留行程。Linux
-`/proc/self/fd` 縮短 Unix
-socket 位址，實際 socket 和狀態仍在本工作樹內。連線測試把 runner lease 設為 300
-ms，避免等待正式環境預設的續租週期；基準保留全部 Remote 預設值。小規模測試核對呼叫數量和結果、並行負載、串流、設定、日誌、CPU 校驗值、崩潰傳播和實際退出。
-
-[Remote 指南](results/remote-guidance.md)
-區分實測事實、推論及對最佳實務指南的修改建議。
 
 ## 方法
 
@@ -117,7 +77,6 @@ ms，在 cordis 中耗時 2.63 ms：每次處理函式呼叫分別為 5.29 µs �
 包含每種規模、比較比值、N/A 原因與語義解釋。[JSON](results/latest.json)
 記錄環境、精確版本、程式碼雜湊、樣本數、批次歷史與原生結束稽核。無損原始樣本連結至被忽略的
 `.cache/samples/`。快速模式預設輸出
-`.cache/quick.*`，僅供冒煙檢查。results/ 只保留 latest.json、latest.md 與 remote-guidance.md。
 
 從唯一的完整執行結果更新三種語言的表格：
 
@@ -152,21 +111,6 @@ devenv shell -- treefmt
 | memory-cycles      |   10 | B/batch  |  31828* | 23860* |   N/A |   7649* |   N/A |      N/A |
 | memory-steady      | 1000 | B/plugin |   33908 |  10264 |   821 |    2089 |   N/A |      N/A |
 | import             |    1 | ms       | 242.159 |  4.409 | 6.126 | 230.756 | 0.173 |    1.988 |
-
-| Scenario             |    Size | Unit    | in-process | remote-local | remote-worker | remote-unix | remote-ws | raw-worker | raw-ipc |
-| -------------------- | ------: | ------- | ---------: | -----------: | ------------: | ----------: | --------: | ---------: | ------: |
-| remote-r1-start      |       1 | ms      |     2.673* |      866.756 |       698.801 |    1462.665 |  1459.621 |        N/A |     N/A |
-| remote-r1-stop       |       1 | ms      |     1.032* |       43.707 |       21.003* |      75.011 |    76.665 |        N/A |     N/A |
-| remote-r2-call       |       1 | ms      |     0.007* |        0.626 |         0.568 |       1.195 |     1.346 |     0.028* |   0.051 |
-| remote-r5-stream     |     100 | ms      |     0.038* |       3.077* |        3.366* |      6.536* |    5.278* |        N/A |     N/A |
-| remote-r6-config     |       1 | ms      |     1.084* |      886.988 |       705.356 |    1509.301 |  1528.991 |        N/A |     N/A |
-| remote-r8-loop       |       1 | ms      |     55.592 |      65.366* |        63.998 |      66.895 |    64.864 |        N/A |     N/A |
-| remote-r10-failure   |       1 | ms      |        N/A |      33.348* |       14.718* |     65.278* |   58.348* |        N/A |     N/A |
-| remote-r3-throughput |     256 | ms      |     2.000* |       61.159 |        57.755 |     168.286 |   184.851 |     1.405* |  1.698* |
-| remote-r3-batch      |     256 | ms      |     0.430* |       3.408* |        3.271* |      4.953* |    5.230* |     0.240* |  0.336* |
-| remote-r4-payload    | 1048577 | ms      |     0.021* |       9.842* |        8.187* |    rejected |  rejected |     1.306* |  4.960* |
-| remote-r7-footprint  |      50 | B/entry |     89574* |      551195* |       506719* |    1260698* |  1263234* |        N/A |     N/A |
-| remote-r9-logs       |  100000 | ms      |    63.792* |    1045.619* |      676.101* |   1051.592* |   985.239 |        N/A |     N/A |
 
 <!-- results:end -->
 

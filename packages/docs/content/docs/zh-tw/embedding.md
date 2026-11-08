@@ -5,14 +5,13 @@ description: 在自己的 Effect 程式中執行外掛，無需 CLI。
 
 CLI 是建立在這些函式庫之上的一個小程式。你可以用同樣的方式，在自己的 Effect 程式中執行 Graft。
 
-| 你想要…                  | 使用                                | 章節                               |
-| ------------------------ | ----------------------------------- | ---------------------------------- |
-| 從程式碼載入少量外掛     | `Graft.layer` 和 `Graft.plugin`     | [直接執行外掛](#直接執行外掛)      |
-| 從一份項目清單載入外掛   | `Loader.plugin` 和 `ModuleResolver` | [載入設定項目](#載入設定項目)      |
-| 從 YAML 檔案載入外掛     | `Include.Include`                   | [載入設定檔](#載入設定檔)          |
-| 不使用 CLI 而重載程式碼  | `@graftland/hmr`                    | [HMR API](../hmr-api/)             |
-| 讓外掛在另一個行程中執行 | `Remote.plugin`                     | [在別處執行外掛](#在別處執行外掛)  |
-| 測試外掛                 | `@effect/vitest` 和 `Graft.layer`   | [測試](../best-practices/testing/) |
+| 你想要…                 | 使用                                | 章節                               |
+| ----------------------- | ----------------------------------- | ---------------------------------- |
+| 從程式碼載入少量外掛    | `Graft.layer` 和 `Graft.plugin`     | [直接執行外掛](#直接執行外掛)      |
+| 從一份項目清單載入外掛  | `Loader.plugin` 和 `ModuleResolver` | [載入設定項目](#載入設定項目)      |
+| 從 YAML 檔案載入外掛    | `Include.Include`                   | [載入設定檔](#載入設定檔)          |
+| 不使用 CLI 而重載程式碼 | `@graftland/hmr`                    | [HMR API](../hmr-api/)             |
+| 測試外掛                | `@effect/vitest` 和 `Graft.layer`   | [測試](../best-practices/testing/) |
 
 ## 直接執行外掛
 
@@ -187,51 +186,3 @@ const program = Effect.gen(function* () {
 | `watch`    | 接收手動所做的變更。                                         |
 
 從程式碼編輯設定項目，請參閱 [Loader API](../loader-api/)。
-
-## 在別處執行外掛
-
-`@graftland/plugin-remote` 的 `Remote.plugin`
-會建立一個外掛，讓契約的實作在子行程、worker 或 runner 上執行。像其他外掛一樣用
-`Graft.plugin` 載入它：
-
-```ts
-import { Effect, Layer, type Schema } from "effect"
-import { SecureRandom } from "effect/crypto"
-import { NodeRuntime, NodeServices } from "@effect/platform-node"
-
-import { Graft } from "@graftland/graft"
-import * as Remote from "@graftland/plugin-remote"
-
-import { hello } from "./plugins.ts"
-
-declare const contract: Remote.Contract.Contract<
-	Schema.Struct<{ readonly greeting: Schema.String }>
->
-
-const greeter = Remote.plugin(contract, {
-	contractModule: new URL("./contract.js", import.meta.url).href,
-	implementation: new URL("./greeter.js", import.meta.url).href,
-	connect: { local: {} },
-})
-
-const program = Effect.gen(function* () {
-	yield* Graft.plugin(greeter, { greeting: "Hello" })
-	yield* Graft.plugin(hello)
-	return yield* Effect.never
-})
-
-program.pipe(
-	Effect.scoped,
-	Effect.provide(
-		Layer.provideMerge(
-			Graft.layer,
-			Layer.mergeAll(NodeServices.layer, SecureRandom.layerWebCrypto),
-		),
-	),
-	NodeRuntime.runMain,
-)
-```
-
-Remote 需要環境中有 `NodeServices.layer` 和
-`SecureRandom.layerWebCrypto`。`hello` 仍然像以前一樣注入
-`Greeter`。契約和其他選項請見[從 TypeScript 載入](../remote/hosts/#從-typescript-載入)。

@@ -70,16 +70,6 @@ Graft 會保留每個失敗的完整 `Cause`
 
 ## Remote
 
-透過 [Remote](../remote/overview/) 執行的外掛會以下列錯誤失敗，它們來自
-`@graftland/plugin-remote`：
+單元契約透過編碼通道保留已宣告的業務錯誤。在契約的 fromClient 映射中處理 RpcClientError 傳輸失敗。
 
-| 名稱                         | 觸發時機                                                                            |
-| ---------------------------- | ----------------------------------------------------------------------------------- |
-| 已宣告的錯誤                 | 外掛以契約 `error` 中宣告的錯誤失敗。                                               |
-| `Contract.UndeclaredFailure` | 外掛以契約未宣告的錯誤失敗。                                                        |
-| `RemoteError`                | Remote 本身失敗：行程結束、連線中斷或 runner 拒絕。`cause` 說明具體原因。           |
-| `RemoteWithdrawn`            | 呼叫端使用外掛的服務時，這些服務被撤回。                                            |
-| `RemoteEntryError`           | `graft.yml` 中的 `remote` 或 `remote/runner` 設定項目無效。`field` 指出是哪個欄位。 |
-
-defect 仍然是 defect。`RemoteError` 中可能包含哪些錯誤、該如何處理，請見
-[Remote 錯誤](../remote/hosts/#呼叫端看到的錯誤)。
+[呼叫完成](../calls/)和[原生退出證據](../units/)獨立於業務結果。公開 Change 狀態和結果保留 Cause。

@@ -26,6 +26,7 @@ export const install = Effect.gen(function* () {
 
 ## Execution boundaries
 
-Worker placement is a fault boundary. Untrusted code requires a confined child
-process and an operator-provided sandbox launcher. Missing confinement fails
-closed. A native exit establishes ended execution, not successful finalizers.
+Worker and Process placement isolate execution, not permissions. Run the runner
+owner inside an operator-controlled container or VM when a permission boundary
+is needed. Keep control capabilities and artifact storage trusted. Native exit
+establishes ended execution, not successful finalizers.

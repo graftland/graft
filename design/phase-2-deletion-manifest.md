@@ -1,6 +1,6 @@
 # Phase 2 deletion manifest
 
-Status: steps 1–2. This manifest records the disposition at this commit, not the
+Status: steps 1–6. This manifest records the disposition at this commit, not the
 final Phase 2 acceptance. Retained legacy tests remain evidence for the existing
 embedded/Phase 1 implementation only.
 
@@ -397,3 +397,108 @@ native-unit replacements. The old `scripts/packed-gateway.test.mjs` and gateway
 application/release consumers are deleted. The independent ecosystem test keeps
 only a generic installed- package consumer fixture, with no old gateway
 coordinator or release integration.
+
+## Step 6 removed source paths
+
+The fixed native implementation replaces these host paths; no launch adapter or
+executable compatibility stub remains.
+
+| Removed path                                                       | Disposition                       |
+| ------------------------------------------------------------------ | --------------------------------- |
+| `packages/plugin-remote/src/schema.ts`                             | Deleted host/connection mechanism |
+| `packages/plugin-remote/src/cli.ts`                                | Deleted host/connection mechanism |
+| `packages/plugin-remote/src/Sandbox.ts`                            | Deleted host/connection mechanism |
+| `packages/plugin-remote/src/Config.ts`                             | Deleted host/connection mechanism |
+| `packages/plugin-remote/src/Auth.ts`                               | Deleted host/connection mechanism |
+| `packages/plugin-remote/src/Instance.ts`                           | Deleted host/connection mechanism |
+| `packages/plugin-remote/src/host/websocket.ts`                     | Deleted host/connection mechanism |
+| `packages/plugin-remote/src/host/assembly.ts`                      | Deleted host/connection mechanism |
+| `packages/plugin-remote/src/host/local.ts`                         | Deleted host/connection mechanism |
+| `packages/plugin-remote/src/host/credentials.ts`                   | Deleted host/connection mechanism |
+| `packages/plugin-remote/src/host/index.ts`                         | Deleted host/connection mechanism |
+| `packages/plugin-remote/src/host/command.ts`                       | Deleted host/connection mechanism |
+| `packages/plugin-remote/src/host/unix.ts`                          | Deleted host/connection mechanism |
+| `packages/plugin-remote/src/host/worker.ts`                        | Deleted host/connection mechanism |
+| `packages/plugin-remote/src/runner/websocket.ts`                   | Deleted host/connection mechanism |
+| `packages/plugin-remote/src/runner/stdio.ts`                       | Deleted host/connection mechanism |
+| `packages/plugin-remote/src/runner/assembly.ts`                    | Deleted host/connection mechanism |
+| `packages/plugin-remote/src/runner/consumer.ts`                    | Deleted host/connection mechanism |
+| `packages/plugin-remote/src/runner/supervisor.ts`                  | Deleted host/connection mechanism |
+| `packages/plugin-remote/src/runner/index.ts`                       | Deleted host/connection mechanism |
+| `packages/plugin-remote/src/runner/unix.ts`                        | Deleted host/connection mechanism |
+| `packages/plugin-remote/src/internal/websocket.ts`                 | Deleted host/connection mechanism |
+| `packages/plugin-remote/src/internal/websocketServer.ts`           | Deleted host/connection mechanism |
+| `packages/plugin-remote/src/internal/listenerStartup.ts`           | Deleted host/connection mechanism |
+| `packages/plugin-remote/src/internal/sandboxCancellation.ts`       | Deleted host/connection mechanism |
+| `packages/plugin-remote/src/internal/contract.ts`                  | Deleted host/connection mechanism |
+| `packages/plugin-remote/src/internal/socketChannel.ts`             | Deleted host/connection mechanism |
+| `packages/plugin-remote/src/internal/child.ts`                     | Deleted host/connection mechanism |
+| `packages/plugin-remote/src/internal/workerTransport.ts`           | Deleted host/connection mechanism |
+| `packages/plugin-remote/src/internal/entry.ts`                     | Deleted host/connection mechanism |
+| `packages/plugin-remote/src/internal/unit.ts`                      | Deleted host/connection mechanism |
+| `packages/plugin-remote/src/internal/entryConfig.ts`               | Deleted host/connection mechanism |
+| `packages/plugin-remote/src/internal/assembly.ts`                  | Deleted host/connection mechanism |
+| `packages/plugin-remote/src/internal/stdioChannel.ts`              | Deleted host/connection mechanism |
+| `packages/plugin-remote/src/internal/childMain.ts`                 | Deleted host/connection mechanism |
+| `packages/plugin-remote/src/internal/watchdogMain.ts`              | Deleted host/connection mechanism |
+| `packages/plugin-remote/src/internal/platform.ts`                  | Deleted host/connection mechanism |
+| `packages/plugin-remote/src/internal/Peer.ts`                      | Deleted host/connection mechanism |
+| `packages/plugin-remote/src/internal/workerBootstrap.ts`           | Deleted host/connection mechanism |
+| `packages/plugin-remote/src/internal/childErrors.ts`               | Deleted host/connection mechanism |
+| `packages/plugin-remote/src/internal/workerMain.ts`                | Deleted host/connection mechanism |
+| `packages/plugin-remote/src/internal/Certificates.ts`              | Deleted host/connection mechanism |
+| `packages/plugin-remote/src/internal/RunnerLifecycle.ts`           | Deleted host/connection mechanism |
+| `packages/plugin-remote/src/internal/transportOptions.ts`          | Deleted host/connection mechanism |
+| `packages/plugin-remote/src/internal/control.ts`                   | Deleted host/connection mechanism |
+| `packages/plugin-remote/src/internal/Supervisor.ts`                | Deleted host/connection mechanism |
+| `packages/plugin-remote/src/internal/host.ts`                      | Deleted host/connection mechanism |
+| `packages/plugin-remote/src/internal/localTransport.ts`            | Deleted host/connection mechanism |
+| `packages/plugin-remote/src/internal/sandboxChildMain.ts`          | Deleted host/connection mechanism |
+| `packages/plugin-remote/src/internal/follow.ts`                    | Deleted host/connection mechanism |
+| `packages/plugin-remote/src/internal/importer.ts`                  | Deleted host/connection mechanism |
+| `packages/plugin-remote/src/internal/config.ts`                    | Deleted host/connection mechanism |
+| `packages/plugin-remote/src/internal/loadModule.ts`                | Deleted host/connection mechanism |
+| `packages/plugin-remote/src/internal/execution.ts`                 | Deleted host/connection mechanism |
+| `packages/plugin-remote/src/internal/workerChannel.ts`             | Deleted host/connection mechanism |
+| `packages/plugin-remote/src/internal/directTransport.ts`           | Deleted host/connection mechanism |
+| `packages/plugin-remote/src/internal/forkTree.ts`                  | Deleted host/connection mechanism |
+| `packages/plugin-remote/src/internal/childRuntime.ts`              | Deleted host/connection mechanism |
+| `packages/plugin-remote/src/internal/host/local.ts`                | Deleted host/connection mechanism |
+| `packages/plugin-remote/src/internal/host/runner.ts`               | Deleted host/connection mechanism |
+| `packages/plugin-remote/src/internal/auth/mtls.ts`                 | Deleted host/connection mechanism |
+| `packages/plugin-remote/src/internal/auth/tokenCredentials.ts`     | Deleted host/connection mechanism |
+| `packages/plugin-remote/src/internal/auth/config.ts`               | Deleted host/connection mechanism |
+| `packages/plugin-remote/src/internal/auth/token.ts`                | Deleted host/connection mechanism |
+| `packages/plugin-remote/src/internal/runner/WatchdogProtocol.ts`   | Deleted host/connection mechanism |
+| `packages/plugin-remote/src/internal/runner/connectionEnded.ts`    | Deleted host/connection mechanism |
+| `packages/plugin-remote/src/internal/runner/Lock.ts`               | Deleted host/connection mechanism |
+| `packages/plugin-remote/src/internal/runner/Retention.ts`          | Deleted host/connection mechanism |
+| `packages/plugin-remote/src/internal/runner/Multiplex.ts`          | Deleted host/connection mechanism |
+| `packages/plugin-remote/src/internal/runner/Wire.ts`               | Deleted host/connection mechanism |
+| `packages/plugin-remote/src/internal/runner/Processes.ts`          | Deleted host/connection mechanism |
+| `packages/plugin-remote/src/internal/runner/Connection.ts`         | Deleted host/connection mechanism |
+| `packages/plugin-remote/src/internal/runner/model.ts`              | Deleted host/connection mechanism |
+| `packages/plugin-remote/src/internal/runner/accept.ts`             | Deleted host/connection mechanism |
+| `packages/plugin-remote/src/internal/runner/Packages.ts`           | Deleted host/connection mechanism |
+| `packages/plugin-remote/src/internal/runner/Local.ts`              | Deleted host/connection mechanism |
+| `packages/plugin-remote/src/internal/runner/Supervisor.ts`         | Deleted host/connection mechanism |
+| `packages/plugin-remote/src/internal/runner/ProcessObservation.ts` | Deleted host/connection mechanism |
+| `packages/plugin-remote/src/internal/runner/Watchdog.ts`           | Deleted host/connection mechanism |
+| `packages/plugin-remote/src/internal/runner/command.ts`            | Deleted host/connection mechanism |
+| `packages/plugin-remote/src/internal/runner/Execution.ts`          | Deleted host/connection mechanism |
+| `packages/plugin-remote/src/internal/runner/Store.ts`              | Deleted host/connection mechanism |
+| `packages/plugin-remote/src/internal/runner/Bootstrap.ts`          | Deleted host/connection mechanism |
+| `packages/plugin-remote/src/runner/auth/jwt.ts`                    | Deleted host/connection mechanism |
+| `packages/plugin-remote/src/runner/auth/mtls.ts`                   | Deleted host/connection mechanism |
+| `packages/plugin-remote/src/runner/auth/bearer.ts`                 | Deleted host/connection mechanism |
+| `packages/plugin-remote/src/runner/auth/none.ts`                   | Deleted host/connection mechanism |
+| `packages/plugin-remote/src/host/auth/jwt.ts`                      | Deleted host/connection mechanism |
+| `packages/plugin-remote/src/host/auth/mtls.ts`                     | Deleted host/connection mechanism |
+| `packages/plugin-remote/src/host/auth/bearer.ts`                   | Deleted host/connection mechanism |
+| `packages/plugin-remote/src/host/auth/none.ts`                     | Deleted host/connection mechanism |
+
+CLI Remote reload cases, the Remote execution benchmark, obsolete YAML sample
+and direct author host launcher are deleted with their callers. Release storage
+and journal models remain unported; their later execution integration is outside
+this phase. The final per-test and review-regression inventory is recorded with
+step 7.

@@ -14,10 +14,7 @@
 		"cordis": "4.0.0-rc.12",
 		"effect": "4.1.2",
 		"emittery": "2.2.0",
-		"tinybench": "6.2.3",
-		"@graftland/plugin-remote": "workspace:*",
-		"@graftland/loader": "workspace:*",
-		"@effect/platform-node": "4.1.2"
+		"tinybench": "6.2.3"
 	},
 	"devDependencies": {
 		"vitest": "5.1.0"

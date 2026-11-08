@@ -27,7 +27,7 @@ A failed fork tries again when its config or dependencies change, when its
 | Edits to a module have no effect                | The module has import side effects, or it lives in `node_modules`                                 |
 | Shutdown warns about a 10-second drain          | Two plugins wait for each other; look for a cycle through services or events                      |
 | Two copies of Effect or Graft                   | A plugin package lists them as `dependencies` instead of `peerDependencies`                       |
-| Remote plugin ignores code edits                | Contract and implementation modules are not hot-replaced; rebuild, then restart the entry or host |
+| Remote plugin ignores code edits                | Capture the rebuilt bytes and submit a public Change with the new unit target                     |
 
 ## Errors
 

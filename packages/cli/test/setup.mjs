@@ -39,36 +39,6 @@ export default function setup() {
 			}),
 		)
 		.then(() =>
-			build({
-				config: false,
-				entry: [
-					"index",
-					"Contract",
-					"internal/childMain",
-					"internal/workerMain",
-					"host/local",
-					"host/worker",
-				].map(
-					(name) =>
-						new URL(`../../plugin-remote/src/${name}.ts`, import.meta.url)
-							.pathname,
-				),
-				root: new URL("../../plugin-remote/src", import.meta.url).pathname,
-				outDir: new URL("../.cache/remote", import.meta.url).pathname,
-				format: "esm",
-				fixedExtension: false,
-				platform: "node",
-				dts: false,
-				deps: {
-					alwaysBundle: ["@graftland/graft", "@graftland/loader"],
-					neverBundle: [/^effect(?:\/|$)/, /^@effect\//],
-				},
-				inputOptions: {
-					resolve: { conditionNames: ["source", "import", "node"] },
-				},
-			}),
-		)
-		.then(() =>
 			Promise.all(
 				["cli", "create", "package-manager"].map((name) =>
 					build({
@@ -100,16 +70,6 @@ export default function setup() {
 			writeFile(
 				new URL("../.cache/commands/package.json", import.meta.url),
 				'{"version":"0.0.0","type":"module"}',
-			),
-		)
-		.then(() =>
-			writeFile(
-				new URL("../.cache/remote/package.json", import.meta.url),
-				JSON.stringify({
-					name: "@graftland/plugin-remote",
-					type: "module",
-					exports: { "./internal/worker": "./internal/workerMain.js" },
-				}),
 			),
 		)
 		.then(() => undefined)

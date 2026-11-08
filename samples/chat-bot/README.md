@@ -71,19 +71,3 @@ these claims.
 | `src/plugins/moderation.ts` | Middleware that removes messages with banned words.            |
 | `src/main.ts`               | The scripted session.                                          |
 | `test/chat-bot.test.ts`     | Tests for the behavior above.                                  |
-
-## Keep the weather integration in its own process
-
-Step 3 uses
-`Graft.plugin(Remote.plugin(contract, { contractModule, implementation, connect: { local: {} } }), config)`
-to load the ordinary forecasts plugin. A weather SDK that blocks or exits takes
-its own process down, while dice and moderation stay in the host. The weather
-command still injects `Forecasts`; RPC failures become `ForecastUnavailable`,
-which the command answers with a short unavailable message. Withdrawing the
-provider removes only commands that depend on it.
-
-[`src/forecastContract.ts`](src/forecastContract.ts) describes that one service.
-The test calls `/weather` across the process boundary, disposes the provider,
-and checks that `/roll` still works. This is a fault boundary, not a permission
-sandbox. Start with [06 · Remote](../06-remote) to try moving a service
-yourself.

@@ -46,5 +46,3 @@ Leave it running and edit files in this folder:
 Press <kbd>Ctrl</kbd>+<kbd>C</kbd> to stop. Graft unloads every plugin.
 
 ## Next
-
-[06 · Remote](../06-remote) moves a plugin without changing its caller.

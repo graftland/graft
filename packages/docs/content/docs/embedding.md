@@ -6,14 +6,13 @@ description: Run plugins from your own Effect program, without the CLI.
 The CLI is a small program built on top of the libraries. You can run Graft from
 your own Effect program in the same way.
 
-| You want to…                        | Use                                    | Section                                           |
-| ----------------------------------- | -------------------------------------- | ------------------------------------------------- |
-| Load a few plugins from code        | `Graft.layer` and `Graft.plugin`       | [Run plugins directly](#run-plugins-directly)     |
-| Load plugins from a list of entries | `Loader.plugin` and a `ModuleResolver` | [Load entries](#load-entries)                     |
-| Load plugins from a YAML file       | `Include.Include`                      | [Load a config file](#load-a-config-file)         |
-| Reload code without the CLI         | `@graftland/hmr`                       | [HMR API](../hmr-api/)                            |
-| Run a plugin in another process     | `Remote.plugin`                        | [Run a plugin elsewhere](#run-a-plugin-elsewhere) |
-| Test plugins                        | `@effect/vitest` and `Graft.layer`     | [Testing](../best-practices/testing/)             |
+| You want to…                        | Use                                    | Section                                       |
+| ----------------------------------- | -------------------------------------- | --------------------------------------------- |
+| Load a few plugins from code        | `Graft.layer` and `Graft.plugin`       | [Run plugins directly](#run-plugins-directly) |
+| Load plugins from a list of entries | `Loader.plugin` and a `ModuleResolver` | [Load entries](#load-entries)                 |
+| Load plugins from a YAML file       | `Include.Include`                      | [Load a config file](#load-a-config-file)     |
+| Reload code without the CLI         | `@graftland/hmr`                       | [HMR API](../hmr-api/)                        |
+| Test plugins                        | `@effect/vitest` and `Graft.layer`     | [Testing](../best-practices/testing/)         |
 
 ## Run plugins directly
 
@@ -198,52 +197,3 @@ const program = Effect.gen(function* () {
 | `watch`              | Picks up changes made by hand.                                        |
 
 For editing entries from code, see the [Loader API](../loader-api/).
-
-## Run a plugin elsewhere
-
-`Remote.plugin` from `@graftland/plugin-remote` builds a plugin that runs a
-contract's implementation in a child process, a worker or on a runner. Load it
-with `Graft.plugin` like any other plugin:
-
-```ts
-import { Effect, Layer, type Schema } from "effect"
-import { SecureRandom } from "effect/crypto"
-import { NodeRuntime, NodeServices } from "@effect/platform-node"
-
-import { Graft } from "@graftland/graft"
-import * as Remote from "@graftland/plugin-remote"
-
-import { hello } from "./plugins.ts"
-
-declare const contract: Remote.Contract.Contract<
-	Schema.Struct<{ readonly greeting: Schema.String }>
->
-
-const greeter = Remote.plugin(contract, {
-	contractModule: new URL("./contract.js", import.meta.url).href,
-	implementation: new URL("./greeter.js", import.meta.url).href,
-	connect: { local: {} },
-})
-
-const program = Effect.gen(function* () {
-	yield* Graft.plugin(greeter, { greeting: "Hello" })
-	yield* Graft.plugin(hello)
-	return yield* Effect.never
-})
-
-program.pipe(
-	Effect.scoped,
-	Effect.provide(
-		Layer.provideMerge(
-			Graft.layer,
-			Layer.mergeAll(NodeServices.layer, SecureRandom.layerWebCrypto),
-		),
-	),
-	NodeRuntime.runMain,
-)
-```
-
-Remote needs `NodeServices.layer` and `SecureRandom.layerWebCrypto` in the
-environment. `hello` injects `Greeter` exactly as before. See
-[Load from TypeScript](../remote/hosts/#load-from-typescript) for the contract
-and the other options.

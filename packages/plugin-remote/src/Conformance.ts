@@ -6,20 +6,13 @@ import {
 	Effect,
 	Exit,
 	Fiber,
-	Layer,
 	Option,
 	Schema,
 } from "effect"
-import { Rpc, RpcClient, RpcClientError, RpcGroup, RpcSchema } from "effect/rpc"
+import { RpcClientError } from "effect/rpc"
 
 import { Manifest } from "@graftland/graft"
 
-import type * as Artifact from "./Artifact"
-import type * as Contract from "./Contract"
-import { layer as localLayer } from "./internal/localTransport"
-import { identities } from "./internal/operations"
-import * as Unit from "./internal/unit"
-import { layer as workerLayer } from "./internal/workerTransport"
 import * as Publication from "./Publication"
 import { ConformanceError } from "./Testing"
 
@@ -88,11 +81,6 @@ const operations = (
 			operation,
 		})),
 	)
-const sameService = (left: Manifest.Service, right: Manifest.Service) =>
-	left.key === right.key &&
-	Array.every(left.operations, (op) => right.operations.includes(op)) &&
-	Array.every(right.operations, (op) => left.operations.includes(op))
-
 /** Uses Remote's JSON codec, including a real JSON serialization boundary. */
 export const roundTrip = Effect.fn("Conformance.roundTrip")(
 	function* <S extends Schema.Top>(schema: S, value: S["Type"]) {
@@ -111,162 +99,6 @@ export const roundTrip = Effect.fn("Conformance.roundTrip")(
 		)
 	},
 	(effect) => checked(effect, "Portable codec round trip failed"),
-)
-
-export interface DirectOptions {
-	readonly artifact: Artifact.Artifact
-	readonly contractModule: string
-	readonly input: Schema.Json
-	readonly target:
-		| { readonly _tag: "Worker"; readonly execArgv?: ReadonlyArray<string> }
-		| {
-				readonly _tag: "Local"
-				readonly command?: readonly [string, ...Array<string>]
-		  }
-}
-/** Opens an isolated direct unit; no service is published into a host graph. */
-export const direct = Effect.fn("Conformance.direct")(
-	function* (contract: Contract.RunnerContract, options: DirectOptions) {
-		if (contract.inject.length > 0)
-			return yield* error(
-				"Direct conformance requires a self-contained fixture; compose injected providers in the fixture package",
-			)
-		const transports = yield* Layer.build(Layer.merge(localLayer, workerLayer))
-		const unit = yield* Unit.open(contract, options).pipe(
-			Effect.provideContext(transports),
-		)
-		const description = yield* unit.describe
-		const expected = Array.map(contract.provides, (service) => ({
-			key: service.key.key,
-			operations: Array.map(service.operations, Manifest.operationId),
-		}))
-		const actual = Array.map(description.provides, (service) => ({
-			key: service.key,
-			operations: Array.map(service.operations, Manifest.operationId),
-		}))
-		const missing = Array.filter(
-			expected,
-			(service) => !Array.some(actual, (other) => sameService(service, other)),
-		)
-		const unexpected = Array.filter(
-			actual,
-			(service) =>
-				!Array.some(expected, (other) => sameService(service, other)),
-		)
-		const describe = (services: ReadonlyArray<Manifest.Service>) =>
-			Array.join(
-				Array.map(
-					services,
-					(service) =>
-						`${service.key} [${Array.join(service.operations, ", ")}]`,
-				),
-				"; ",
-			)
-		yield* assert(
-			missing.length === 0 && unexpected.length === 0,
-			`The unit declarations disagree with the contract; missing: ${describe(missing)}; unexpected: ${describe(unexpected)}`,
-		)
-
-		yield* unit.serve(options.input)
-		yield* unit.ready
-		const methods = yield* Effect.forEach(contract.provides, (service) =>
-			Effect.gen(function* () {
-				const rpcs = yield* Effect.forEach(
-					Array.fromIterable(service.group.requests.values()),
-					(item) =>
-						Effect.gen(function* () {
-							if (
-								!Rpc.isRpc(item) ||
-								RpcSchema.isStreamSchema(item.successSchema) ||
-								item.middlewares.size > 0
-							)
-								return yield* error(
-									"Only unary operations without middleware are supported by direct conformance",
-								)
-							// Dynamic contract modules erase type parameters. The kit exercises these codecs without
-							// external services; an undeclared decoding dependency fails the conformance run.
-							return item as Rpc.Rpc<
-								string,
-								Schema.Codec<unknown>,
-								Schema.Codec<unknown>,
-								Schema.Codec<unknown>
-							>
-						}),
-				)
-				const client = yield* RpcClient.make(RpcGroup.make(...rpcs), {
-					flatten: true,
-				}).pipe(
-					Effect.provideService(
-						RpcClient.Protocol,
-						unit.clientProtocol(service.key.key),
-					),
-				)
-				return Array.map(rpcs, (rpc) => {
-					const schema = (
-						part: "payload" | "success" | "error",
-					): Schema.Codec<unknown> =>
-						part === "payload"
-							? rpc.payloadSchema
-							: part === "success"
-								? rpc.successSchema
-								: rpc.errorSchema
-					return {
-						service: service.key.key,
-						operation: Manifest.operationId(
-							identities({ requests: new Map([[rpc._tag, rpc]]) })[0]!,
-						),
-						call: (
-							payload: unknown,
-						): Effect.Effect<Exit.Exit<unknown, unknown>, ConformanceError> =>
-							// @effect-diagnostics-next-line anyUnknownInErrorContext:off -- Dynamic business errors are captured as Exit data, never exposed in the effect error channel.
-							Effect.exit(client(rpc._tag, payload)),
-						roundTrip: (
-							value: unknown,
-							part: "payload" | "success" | "error",
-						) => roundTrip(schema(part), value),
-						equal: (
-							actual: unknown,
-							expected: unknown,
-							part: "success" | "error",
-						) => Schema.toEquivalence(schema(part))(actual, expected),
-					}
-				})
-			}),
-		).pipe(Effect.map(Array.flatten))
-		const find = (operation: Operation) =>
-			Effect.fromOption(
-				Array.findFirst(methods, (method) => sameOperation(method, operation)),
-				() => error(`Unknown ${label(operation)}`),
-			)
-		return {
-			operations: Array.map(methods, ({ service, operation }) => ({
-				service,
-				operation,
-			})),
-			terminate: checked(
-				unit.terminate("forced").pipe(Effect.asVoid),
-				"Conformance unit termination failed",
-			),
-			call: (request) =>
-				find(request).pipe(
-					Effect.flatMap((method) => method.call(request.payload)),
-				),
-			roundTrip: (request, value, part) =>
-				find(request).pipe(
-					Effect.flatMap((method) => method.roundTrip(value, part)),
-				),
-			equal: (request, actual, expected, part) =>
-				find(request).pipe(
-					Effect.map((method) => method.equal(actual, expected, part)),
-				),
-			probe: (name) => checked(unit.probe(name), `Probe ${name} failed`),
-		} satisfies Session
-	},
-	(effect) =>
-		checked(
-			Effect.timeout(effect, "5 seconds"),
-			"Direct conformance setup failed",
-		),
 )
 
 export interface Suite {

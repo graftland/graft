@@ -91,7 +91,6 @@ Graft 记录插件的失败时会附上完整的 `Cause`，并带有 `graft.plug
 | 配置项以 `ModuleInvalid` 失败                           | 模块导入失败，或者既没有在默认导出、也没有在 `plugin` 导出中提供插件。                                                                                                                                                           |
 | `graft start` 立即退出                                  | 未使用 `--watch` 时首个配置无效，或者 `--env-file` 指定的文件或 `--env-dir` 指定的目录不存在。见 [graft start](../../cli/#graft-start)。                                                                                         |
 | 包管理器列出了两个版本的 `effect` 或 `@graftland/graft` | 某个插件包直接依赖了它们，而它们必须只有一份。见[插件包](../packaging/)。                                                                                                                                                        |
-| 远程插件忽略代码修改                                    | 未使用 `--watch` 时，重启宿主。使用时，如果配置项指向构建后的 JavaScript，就重新构建；网络 runner 上的代码不受监听。见[配置变更与热重载](../../remote/hosts/#配置变更与热重载)。                                                 |
 
 ## 停止迟迟不结束
 
@@ -112,12 +111,11 @@ Graft 记录插件的失败时会附上完整的 `Cause`，并带有 `graft.plug
 在 `Cause`
 中找到错误标签，再到[错误](../../errors/)页面中列出该标签的小节查看处理方法。
 
-| 标签                                                                               | 小节                                               |
-| ---------------------------------------------------------------------------------- | -------------------------------------------------- |
-| `SchemaError`、`Fork.CleanupError`、任务失败                                       | [Fork 失败](../../errors/#fork-失败)               |
-| `ServiceConflict`                                                                  | [服务](../../errors/#服务)                         |
-| `Graft.ReplacementConflict`                                                        | [替换](../../errors/#替换)                         |
-| `UnregisteredReference`、`InvalidIntercept`                                        | [Intercept](../../errors/#intercept)               |
-| `CyclicConfig`、`InvalidOperation`、`StoreError`、`LoaderClosed`                   | [加载器与配置文件](../../errors/#加载器与配置文件) |
-| `HmrError`、`Skipped` 结果                                                         | [热重载](../../errors/#热重载)                     |
-| `RemoteError`、`Contract.UndeclaredFailure`、`RemoteWithdrawn`、`RemoteEntryError` | [Remote](../../errors/#remote)                     |
+| 标签                                                             | 小节                                               |
+| ---------------------------------------------------------------- | -------------------------------------------------- |
+| `SchemaError`、`Fork.CleanupError`、任务失败                     | [Fork 失败](../../errors/#fork-失败)               |
+| `ServiceConflict`                                                | [服务](../../errors/#服务)                         |
+| `Graft.ReplacementConflict`                                      | [替换](../../errors/#替换)                         |
+| `UnregisteredReference`、`InvalidIntercept`                      | [Intercept](../../errors/#intercept)               |
+| `CyclicConfig`、`InvalidOperation`、`StoreError`、`LoaderClosed` | [加载器与配置文件](../../errors/#加载器与配置文件) |
+| `HmrError`、`Skipped` 结果                                       | [热重载](../../errors/#热重载)                     |

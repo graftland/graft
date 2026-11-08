@@ -93,7 +93,6 @@ Graft 記錄外掛失敗時會附上完整的 `Cause`，並帶有 `graft.plugin`
 | 設定項目以 `ModuleInvalid` 失敗                         | 模組無法匯入，或者既沒有以預設匯出、也沒有以 `plugin` 匯出外掛。                                                                                                                                                                           |
 | `graft start` 立即結束                                  | 沒有 `--watch` 時第一份設定無效，或者找不到 `--env-file` 指定的檔案或 `--env-dir` 指定的目錄。請參閱 [graft start](../../cli/#graft-start)。                                                                                               |
 | 套件管理器列出兩個版本的 `effect` 或 `@graftland/graft` | 某個外掛套件直接相依於它們。它們只能有一份。請參閱[外掛套件](../packaging/)。                                                                                                                                                              |
-| Remote 外掛忽略程式碼編輯                               | 沒有 `--watch` 時，請重新啟動宿主。有 `--watch` 時，如果設定項目指向建置後的 JavaScript，請重新建置；網路 runner 的程式碼不受監看。請參閱[設定變更與熱重載](../../remote/hosts/#設定變更與熱重載)。                                        |
 
 ## 停不下來的停止
 
@@ -114,12 +113,11 @@ Graft 記錄外掛失敗時會附上完整的 `Cause`，並帶有 `graft.plugin`
 在 `Cause`
 中找到錯誤標籤，再到[錯誤](../../errors/)中列出該標籤的章節，查看該怎麼處理。
 
-| 標籤                                                                               | 章節                                             |
-| ---------------------------------------------------------------------------------- | ------------------------------------------------ |
-| `SchemaError`、`Fork.CleanupError`、任務失敗                                       | [fork 失敗](../../errors/#fork-失敗)             |
-| `ServiceConflict`                                                                  | [服務](../../errors/#服務)                       |
-| `Graft.ReplacementConflict`                                                        | [取代](../../errors/#取代)                       |
-| `UnregisteredReference`、`InvalidIntercept`                                        | [Intercept](../../errors/#intercept)             |
-| `CyclicConfig`、`InvalidOperation`、`StoreError`、`LoaderClosed`                   | [Loader 與設定檔](../../errors/#loader-與設定檔) |
-| `HmrError`、`Skipped` 結果                                                         | [熱重載](../../errors/#熱重載)                   |
-| `RemoteError`、`Contract.UndeclaredFailure`、`RemoteWithdrawn`、`RemoteEntryError` | [Remote](../../errors/#remote)                   |
+| 標籤                                                             | 章節                                             |
+| ---------------------------------------------------------------- | ------------------------------------------------ |
+| `SchemaError`、`Fork.CleanupError`、任務失敗                     | [fork 失敗](../../errors/#fork-失敗)             |
+| `ServiceConflict`                                                | [服務](../../errors/#服務)                       |
+| `Graft.ReplacementConflict`                                      | [取代](../../errors/#取代)                       |
+| `UnregisteredReference`、`InvalidIntercept`                      | [Intercept](../../errors/#intercept)             |
+| `CyclicConfig`、`InvalidOperation`、`StoreError`、`LoaderClosed` | [Loader 與設定檔](../../errors/#loader-與設定檔) |
+| `HmrError`、`Skipped` 結果                                       | [熱重載](../../errors/#熱重載)                   |
