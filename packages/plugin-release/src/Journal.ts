@@ -130,8 +130,8 @@ export interface Options {
 	/** How long rendered causes remain available. Default 30 days; must be finite and nonnegative. */
 	readonly diagnosticRetention?: Duration.Input
 }
-/** What the journal shows about one Change. */
-export interface Outcome {
+/** What the journal holds about one Change: stages, members, outcome and member facts. */
+export interface ChangeRecord {
 	readonly run: string
 	readonly change: string
 	readonly stages: ReadonlyArray<Line["stage"]>
@@ -145,7 +145,7 @@ export interface Outcome {
 	readonly diagnosticReference: Option.Option<DiagnosticReference>
 }
 /** A durable outcome with the current availability of its separately retained diagnostic. */
-export interface Summary extends Outcome {
+export interface Summary extends ChangeRecord {
 	readonly diagnostic: string
 	readonly diagnosticStatus: "None" | "Available" | "Expired"
 }
@@ -577,7 +577,7 @@ export const open = Effect.fnUntraced(function* (
 /** Groups journaled lines by kernel run and Change id, in the order each Change first appeared. */
 export const summarize = (
 	lines: ReadonlyArray<Entry>,
-): ReadonlyArray<Outcome> => {
+): ReadonlyArray<ChangeRecord> => {
 	const key = (line: Entry) => `${line.run}/${line.change}`
 	const order = Array.dedupe(Array.map(lines, key))
 	return Array.map(order, (change) => {
