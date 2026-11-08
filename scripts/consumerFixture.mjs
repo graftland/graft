@@ -85,7 +85,8 @@ export function prepare() {
 					release[field] = Object.fromEntries(
 						Object.entries(release[field]).map(([name, version]) => [
 							name,
-							version.startsWith("workspace:") ? "0.0.0" : version,
+							// Public packages share one version, so a workspace dependency is this one's.
+							version.startsWith("workspace:") ? manifest.version : version,
 						]),
 					)
 			}
@@ -93,7 +94,8 @@ export function prepare() {
 			run("pnpm", ["pack", "--pack-destination", tarballs], staged)
 			const tar = join(
 				tarballs,
-				manifest.name.replace("@", "").replace("/", "-") + "-0.0.0.tgz",
+				manifest.name.replace("@", "").replace("/", "-") +
+					`-${manifest.version}.tgz`,
 			)
 			dependencies[manifest.name] = "file:" + tar
 			overrides[manifest.name] = "file:" + tar

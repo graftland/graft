@@ -39,6 +39,14 @@ const readJson = (file: string) =>
 		readText(file),
 		Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown)),
 	)
+/** Generated apps pin Graft packages to this package's own release version. */
+const release = Effect.map(
+	readText(new URL("../package.json", import.meta.url).pathname),
+	(text) =>
+		Schema.decodeUnknownSync(
+			Schema.fromJsonString(Schema.Struct({ version: Schema.String })),
+		)(text).version,
+)
 const readConfig = (file: string) =>
 	Effect.flatMap(readText(file), (yaml) =>
 		Schema.decodeUnknownEffect(Schema.Array(Entry.Entry))(parse(yaml)).pipe(
@@ -108,6 +116,7 @@ describe("create", () => {
 					config: { name: "Graft" },
 				},
 			])
+			const version = yield* release
 			const manifest = yield* readJson(path.join(directory, "package.json"))
 			assert.deepStrictEqual(manifest, {
 				name: "example",
@@ -123,9 +132,9 @@ describe("create", () => {
 					typecheck: "effect-tsgo tsc",
 				},
 				dependencies: {
-					"@graftland/graft": "0.0.0",
-					"@graftland/loader": "0.0.0",
-					"@graftland/cli": "0.0.0",
+					"@graftland/graft": version,
+					"@graftland/loader": version,
+					"@graftland/cli": version,
 					effect: "4.1.2",
 				},
 				devDependencies: {
@@ -164,6 +173,7 @@ describe("create", () => {
 			assert.deepStrictEqual(entries, [
 				{ id: "greeter", name: "./dist/index.js", config: { name: "Graft" } },
 			])
+			const version = yield* release
 			const manifest = yield* readJson(path.join(directory, "package.json"))
 			assert.deepInclude(manifest, {
 				name: "graft-plugin-example",
@@ -173,7 +183,7 @@ describe("create", () => {
 				},
 				files: ["dist"],
 				peerDependencies: {
-					"@graftland/graft": "^0.0.0",
+					"@graftland/graft": `^${version}`,
 					effect: "~4.1.2",
 				},
 			})
@@ -226,6 +236,7 @@ describe("create", () => {
 			)
 			assert.strictEqual(yaml, `${schemaComment}\n[]\n`)
 			assert.deepStrictEqual(entries, [])
+			const version = yield* release
 			const manifest = yield* readJson(path.join(directory, "package.json"))
 			assert.deepInclude(manifest, {
 				scripts: { start: "graft start" },
@@ -252,14 +263,15 @@ describe("create", () => {
 				{ name: "graft-plugin-echo" },
 				{ name: "@acme/audit" },
 			])
+			const version = yield* release
 			const manifest = yield* readJson(path.join(directory, "package.json"))
 			assert.deepInclude(manifest, {
 				dependencies: {
-					"@graftland/graft": "0.0.0",
-					"@graftland/loader": "0.0.0",
-					"@graftland/cli": "0.0.0",
+					"@graftland/graft": version,
+					"@graftland/loader": version,
+					"@graftland/cli": version,
 					effect: "4.1.2",
-					"@graftland/plugin-review": "0.0.0",
+					"@graftland/plugin-review": version,
 					"graft-plugin-echo": "^1.2.0",
 					"@acme/audit": "latest",
 				},
