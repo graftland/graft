@@ -54,7 +54,8 @@ export default defineConfig([
 		clean: false,
 		unbundle: false,
 		deps: { alwaysBundle: [/^(?!node:)/] },
-		dts: false,
+		// The entry exports nothing; its declaration keeps the published export map complete.
+		dts: true,
 		exports: false,
 	},
 ])
