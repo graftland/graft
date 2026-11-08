@@ -49,10 +49,13 @@ Error classes renamed to their tags: `AdmissionRegistrationError`,
 
 ## Linux attack matrix
 
-The Linux confinement suite runs in the CI test job with
-`GRAFT_REQUIRE_SANDBOX=true` (on `main` since the value slices). This branch
-does not change it; the run happens when the branch is pushed, which needs the
-owner's consent.
+Correction after the final review: this section first said the suite was
+unchanged. It was not: Phase 2 deleted the host sandbox and its attack tests, so
+`GRAFT_REQUIRE_SANDBOX` had no consumer. Confinement now belongs to unit targets
+(`confinement: "Sandbox"` on Process units) and
+`packages/plugin-remote/test/sandbox.test.ts` restores the attack test; see
+`review-fixes.md` (H1). It passed on Linux in a local NixOS VM; CI runs it when
+the branch is pushed.
 
 ## Not done
 
