@@ -136,6 +136,21 @@ export const verify = Effect.fnUntraced(function* (store: string, id: string) {
 		return yield* failure("Integrity", "Release directory digest mismatch")
 	const release = yield* read(path.join(directory, "release.json"), Release)
 	for (const entry of release.entries) {
+		if (entry.contractArtifact !== undefined) {
+			if (
+				!/^artifacts\/sha256-v1-[a-f0-9]{64}$/.test(
+					entry.contractArtifact.directory,
+				)
+			)
+				return yield* failure(
+					"Integrity",
+					"Contract artifact path must remain inside the release",
+				)
+			yield* Artifact.verify({
+				...entry.contractArtifact,
+				directory: path.join(directory, entry.contractArtifact.directory),
+			})
+		}
 		if (!/^artifacts\/sha256-v1-[a-f0-9]{64}$/.test(entry.artifact.directory))
 			return yield* failure(
 				"Integrity",
@@ -251,9 +266,32 @@ export const build = Effect.fnUntraced(
 						"Integrity",
 						"Publication changed during capture",
 					)
+				const contract = yield* resolveContract(file, entry.config.contract)
+				const contractFile = yield* path.fromFileUrl(new URL(contract))
+				let contractDirectory = path.dirname(contractFile)
+				while (
+					!(yield* fs.exists(path.join(contractDirectory, "package.json")))
+				) {
+					const parent = path.dirname(contractDirectory)
+					if (parent === contractDirectory)
+						return yield* failure(
+							"Contract",
+							"A contract must belong to a package",
+						)
+					contractDirectory = parent
+				}
+				const contractArtifact = yield* Artifact.capture({
+					directory: contractDirectory,
+					module: path.relative(contractDirectory, contractFile),
+					store: path.join(stage, "artifacts"),
+				})
 				return {
 					id: entry.id,
-					contract: yield* resolveContract(file, entry.config.contract),
+					contract,
+					contractArtifact: {
+						...contractArtifact,
+						directory: path.relative(stage, contractArtifact.directory),
+					},
 					target: entry.config.target,
 					input: entry.config.config,
 					probes: entry.config.probes,
