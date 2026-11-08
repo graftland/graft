@@ -195,7 +195,10 @@ const Conclusion = Schema.Struct({
 	members: Schema.HashMap(Schema.String, Member),
 	units: Strings,
 })
+const Completion = Schema.Literals(["Serving", "Committed"])
 const Status = Schema.Struct({
+	completion: Completion,
+	origin: Schema.Option(Schema.String),
 	plan: Plan,
 	outstandingCalls: Strings,
 	id: Schema.String,
@@ -380,6 +383,7 @@ const Input = Schema.Struct({
 			probes: Schema.optionalKey(Schema.Array(Schema.String)),
 		}),
 	),
+	completion: Schema.optionalKey(Completion),
 })
 const Policy = Schema.Struct({
 	instance: Schema.String,

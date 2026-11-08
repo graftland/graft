@@ -53,6 +53,7 @@ export type {
 	Budget,
 	Requirements,
 	Status,
+	Completion,
 	MemberAttempt,
 	MemberFact,
 	Conclusion,

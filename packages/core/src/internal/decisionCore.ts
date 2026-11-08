@@ -251,6 +251,8 @@ const recordFacts = (
 export const get = (s: State, id: string): Option.Option<Status> =>
 	Option.map(HashMap.get(s.changes, id), (c) => ({
 		id,
+		completion: c.request.completion ?? "Serving",
+		origin: Option.fromUndefinedOr(c.request.origin),
 		plan: c.plan,
 		outstandingCalls: Calls.outstanding(s, c.requiredExits),
 		sequence: c.sequence,
@@ -1414,6 +1416,7 @@ const normalizedIdentity = (
 	budget: { ...defaultBudget, ...input.budget },
 	probes: Arr.copy(input.requirements?.probes ?? []),
 	trial: input.requirements?.trial ?? 0,
+	completion: input.completion ?? "Serving",
 })
 const keyedReply = (
 	s: Working,
@@ -1513,6 +1516,10 @@ const requested = (
 		probes: identity.probes,
 		trial: identity.trial,
 		...(input.key === undefined ? {} : { key: input.key }),
+		...(batch?.completion === undefined
+			? {}
+			: { completion: batch.completion }),
+		...(batch?.origin === undefined ? {} : { origin: batch.origin }),
 	}
 
 	if (input.key !== undefined && HashMap.has(s.keys, input.key))
@@ -1595,6 +1602,12 @@ const requestedBatch = (s: Working, input: Input): Working => {
 				!Preparation.authorized(s, operation.instance, operation.target)),
 	)
 	if (invalid) return reject(s, "Unauthorized")
+	// Reconciling a committed removal needs the removed declaration; not supported yet.
+	if (
+		input.completion === "Committed" &&
+		Arr.some(input.operations, (operation) => operation._tag === "Remove")
+	)
+		return reject(s, "Unsupported")
 	if (
 		Arr.some(
 			input.operations,
@@ -1982,9 +1995,102 @@ const reserve = (
 }
 /** The first lifecycle action of an admitted Change; recorded Changes reach it only after an acknowledged intent. */
 const begin = (s: Working, c: Change): Working =>
-	c.request.strategy === "Restart" && HashSet.size(c.oldUnits) > 0
-		? stopOld(s, c)
-		: resolve(s, c)
+	c.request.completion === "Committed"
+		? commitDesired(s, c)
+		: c.request.strategy === "Restart" && HashSet.size(c.oldUnits) > 0
+			? stopOld(s, c)
+			: resolve(s, c)
+/**
+ * `Committed` completion: the validated desired state is recorded and becomes the
+ * supervisor's; nothing is started here. Reconciliation runs as its own Change.
+ */
+const commitDesired = (s: Working, c: Change): Working => {
+	if (c.recorded && !Recording.acknowledged(s, c.id, "Commit"))
+		return gate(s, c, "Commit", Option.none())
+	if (!owned(s, c))
+		return fail(s, c, Cause.fail("Commit lost a version or reservation"))
+	const applied = HashSet.reduce(c.request.writes, s, (s, key) => {
+		const current = cell(s, key)
+		return {
+			...s,
+			cells: HashMap.set(s.cells, key, {
+				...current,
+				version: current.version + 1,
+			}),
+		}
+	})
+	const next: Change = { ...c, phase: "Settling" }
+	const committed = save(
+		{ ...applied, graph: Graph.commit(applied.graph, c.plan, false) },
+		next,
+	)
+	return reconcile(conclude(committed, next, "Accepted"), c.id, c.plan.members)
+}
+/**
+ * Brings members whose running target differs from the desired one to it, in one
+ * ordinary Change linked to `origin`. Planned work, so it is no restart attempt.
+ */
+const reconcile = (
+	s: Working,
+	origin: string,
+	members: HashSet.HashSet<string>,
+): Working => {
+	const differing = HashSet.filter(members, (id) =>
+		Option.exists(
+			HashMap.get(s.graph.declarations, id),
+			(m) =>
+				Preparation.authorized(s, id, m.target) &&
+				!(
+					Executions.healthy(s, id) &&
+					Option.exists(
+						Executions.current(s, id),
+						({ member }) => member.target.identity === m.target.identity,
+					)
+				),
+		),
+	)
+	if (!s.open || HashSet.size(differing) === 0) return s
+	const restart: PendingRestart = {
+		kind: "Reconcile",
+		unit: origin,
+		members: differing,
+		cause: Cause.empty,
+	}
+	if (HashSet.some(differing, (id) => Option.isSome(cell(s, id).writer)))
+		return defer(s, restart)
+	const submitted = requestedBatch(s, {
+		operations: Arr.flatMap(Arr.fromIterable(differing), (id) =>
+			Option.toArray(
+				Option.map(
+					HashMap.get(s.graph.declarations, id),
+					(m): DeploymentOperation => ({
+						_tag: "Deploy",
+						instance: id,
+						target: m.target,
+					}),
+				),
+			),
+		),
+		strategy: "Restart",
+		origin,
+	})
+	const reply = submitted.reply
+	const next: Working = { ...submitted, reply: s.reply }
+	if (reply._tag === "Rejected")
+		return reply.reason === "Busy" || reply.reason === "Capacity"
+			? defer(next, restart)
+			: next
+	return reply._tag === "Preparing"
+		? {
+				...next,
+				preparations: HashMap.modify(
+					next.preparations,
+					reply.preparation,
+					(p) => ({ ...p, request: { ...p.request, supervised: restart } }),
+				),
+			}
+		: next
+}
 /** Holds the Change at a recording stage until the owner acknowledges the stage's record. */
 const gate = (
 	s: Working,
@@ -2037,7 +2143,9 @@ const resume = (s: Working, c: Change, stage: RecordStage): Working => {
 							released,
 							Cause.fail("Absolute submission deadline exhausted"),
 						)
-					: commit(saved, released)
+					: released.request.completion === "Committed"
+						? commitDesired(saved, released)
+						: commit(saved, released)
 		case "Conclusion":
 			return conclude(saved, released, "Accepted")
 	}
@@ -3219,7 +3327,9 @@ const admittedRestart = (s: Working, request: Request): Working =>
 	s.reply._tag === "Rejected" &&
 	(s.reply.reason === "Busy" || s.reply.reason === "Capacity")
 		? defer(
-				Supervisor.refunded(s, request.supervised.members),
+				request.supervised.kind === "Reconcile"
+					? s
+					: Supervisor.refunded(s, request.supervised.members),
 				request.supervised,
 			)
 		: s
@@ -3230,6 +3340,8 @@ const retryPending = (s: Working): Working =>
 			...next,
 			pendingRestarts: HashMap.remove(next.pendingRestarts, key),
 		}
+		if (restart.kind === "Reconcile")
+			return reconcile(cleared, restart.unit, restart.members)
 		if (restart.kind === "Unit")
 			return superviseUnit(
 				cleared,

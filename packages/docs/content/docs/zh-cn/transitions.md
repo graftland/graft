@@ -31,14 +31,15 @@ export const upgrade = Effect.gen(function* () {
 
 ## 请求字段
 
-| 字段                  | 含义                                                                                         | 默认值                                  |
-| --------------------- | -------------------------------------------------------------------------------------------- | --------------------------------------- |
-| `operations`          | `Deploy`（实例、目标，可选的领域、同驻与放置）和 `Remove`。                                  | 必填                                    |
-| `key`                 | 请求键：相同的键与相同的请求返回同一个 Change。                                              | 无                                      |
-| `strategy`            | `Restart` 先停旧代再启动新代；`Overlap` 在切换期间新旧并行服务。runner 只接受 `Restart`。    | `Restart`                               |
-| `budget`              | `total`、`startup`、`probe`、`drain`、`stop` 与 `terminate` 的毫秒数。                       | 总计 300 000，启动 30 000，其余各 5 000 |
-| `requirements.probes` | 除插件声明的探针外，新代开始服务前还必须通过的[探针](../probes/)。失败时 Change 中止或恢复。 | 无                                      |
-| `requirements.trial`  | 新代在 Change 结束前必须持续服务的毫秒数。                                                   | 0                                       |
+| 字段                  | 含义                                                                                                                                                                              | 默认值                                  |
+| --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------- |
+| `operations`          | `Deploy`（实例、目标，可选的领域、同驻与放置）和 `Remove`。                                                                                                                       | 必填                                    |
+| `key`                 | 请求键：相同的键与相同的请求返回同一个 Change。                                                                                                                                   | 无                                      |
+| `strategy`            | `Restart` 先停旧代再启动新代；`Overlap` 在切换期间新旧并行服务。runner 只接受 `Restart`。                                                                                         | `Restart`                               |
+| `budget`              | `total`、`startup`、`probe`、`drain`、`stop` 与 `terminate` 的毫秒数。                                                                                                            | 总计 300 000，启动 30 000，其余各 5 000 |
+| `requirements.probes` | 除插件声明的探针外，新代开始服务前还必须通过的[探针](../probes/)。失败时 Change 中止或恢复。                                                                                      | 无                                      |
+| `requirements.trial`  | 新代在 Change 结束前必须持续服务的毫秒数。                                                                                                                                        | 0                                       |
+| `completion`          | `Serving`：新状态开始服务后才结束。`Committed`：期望状态通过校验并记录后即结束；之后内核在自己的 Change 中启动成员，该 Change 的 `origin` 指向本次。`Remove` 操作需要 `Serving`。 | `Serving`                               |
 
 ## 观察
 

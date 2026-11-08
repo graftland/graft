@@ -305,7 +305,8 @@ export interface Supervision {
 }
 /** A restart that met a conflicting owner; it is tried again, never dropped. */
 export interface PendingRestart {
-	readonly kind: "Members" | "Unit"
+	/** `Reconcile` brings members to the state a `Committed` Change recorded; `unit` is that Change's id. */
+	readonly kind: "Members" | "Unit" | "Reconcile"
 	readonly unit: string
 	readonly members: HashSet.HashSet<string>
 	readonly cause: Cause.Cause<unknown>
@@ -443,7 +444,15 @@ export interface Input {
 	readonly strategy?: Strategy
 	readonly budget?: Partial<Budget>
 	readonly requirements?: Partial<Requirements>
+	/**
+	 * `Serving` (default): concludes once the new state serves. `Committed`: concludes once the
+	 * desired state is validated and recorded; the kernel then reconciles in its own Change.
+	 */
+	readonly completion?: Completion
+	/** The Change this one reconciles after, set by the kernel. */
+	readonly origin?: string
 }
+export type Completion = "Serving" | "Committed"
 export interface RequestIdentity {
 	readonly mode: "Inspect" | "Deploy"
 	readonly operations: ReadonlyArray<DeploymentOperation>
@@ -452,11 +461,14 @@ export interface RequestIdentity {
 	readonly budget: Budget
 	readonly probes: ReadonlyArray<string>
 	readonly trial: number
+	readonly completion: Completion
 }
 
 export interface Request {
 	/** A supervisor restart: a busy admission defers it instead of dropping it. */
 	readonly supervised?: PendingRestart
+	readonly completion?: Completion
+	readonly origin?: string
 	readonly boundary?: PlacementRequirement
 	readonly member?: MemberDeclaration
 	readonly operations?: ReadonlyArray<DeploymentOperation>
@@ -744,6 +756,9 @@ export interface Timer {
 	readonly command: Option.Option<string>
 }
 export interface Status {
+	readonly completion: Completion
+	/** The Change whose committed state this one reconciles, if any. */
+	readonly origin: Option.Option<string>
 	readonly plan: GroupPlan
 	readonly outstandingCalls: HashSet.HashSet<string>
 	readonly id: string
