@@ -9,9 +9,7 @@ import { reference } from "./reference.mjs"
 // DOCS_URL is the public address of the site. Its path becomes the base of
 // every page. The default is the deployed address, so a local build checks
 // links against the same base as the deployed site.
-const url = new URL(
-	process.env["DOCS_URL"] ?? "https://graftland.github.io/graft/",
-)
+const url = new URL(process.env["DOCS_URL"] ?? "https://docs.graft.land/")
 
 export default defineConfig({
 	site: url.origin,

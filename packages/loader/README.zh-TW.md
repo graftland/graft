@@ -315,8 +315,8 @@ watch 模式同時監聽入口目錄和目前目標目錄。入口連結改變�
 
 ## 文件
 
-- [設定檔](https://graftland.github.io/graft/zh-tw/config-file/)
-- [在你的程式中使用 Graft](https://graftland.github.io/graft/zh-tw/embedding/)
+- [設定檔](https://docs.graft.land/zh-tw/config-file/)
+- [在你的程式中使用 Graft](https://docs.graft.land/zh-tw/embedding/)
 
 屬於 [Graft](https://github.com/graftland/graft)。依
 [Apache 2.0](https://github.com/graftland/graft/blob/main/LICENSE) 授權。

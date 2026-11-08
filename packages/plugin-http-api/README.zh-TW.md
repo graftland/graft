@@ -22,5 +22,5 @@ HttpApi 路由群組作為普通 Graft 外掛提供服務。選用的組合外�
 `HttpApiBuilder.group` 層。Scalar 與 Swagger 是獨立外掛；第三方介面注入
 `HttpApis.Document`。
 
-參閱 [HTTP API 指南](https://graftland.github.io/graft/zh-tw/http-api/)與
+參閱 [HTTP API 指南](https://docs.graft.land/zh-tw/http-api/)與
 [http-gateway 範例](../../samples/http-gateway)。

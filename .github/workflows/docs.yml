@@ -6,11 +6,6 @@ on:
     tags: ["v*"]
   workflow_dispatch:
     inputs:
-      backfill:
-        description:
-          Build every commit on main and every tag that has no docs yet
-        type: boolean
-        default: false
       rebuild:
         description:
           Commits to build again even if they have docs, separated by spaces
@@ -21,16 +16,17 @@ permissions:
   contents: read
 
 env:
-  # The production site, which serves the newest stable release. Every commit
-  # on main and every tag also keeps its own deployment at
-  # https://<first 12 characters of the hash>.<pages host>/, and
-  # https://versions.<pages host>/ serves the commit list and the select.
-  DOCS_URL: https://graft-docs-ekb.pages.dev/
-  DOCS_PROJECT: graft-docs
-  # The project's pages.dev name, which Cloudflare chose when it was created.
-  DOCS_PAGES_HOST: graft-docs-ekb.pages.dev
-  # The old address, which now only redirects to DOCS_URL.
+  # The production site, a Cloudflare Worker that serves the newest stable
+  # release. The newest 15 release tags and the newest 30 commits on main also
+  # keep their own Worker Preview at
+  # https://<first 12 characters of the hash>.<site host>/, and
+  # https://versions.<site host>/ serves the commit list and the select.
+  DOCS_URL: https://docs.graft.land/
+  DOCS_WORKER: graft-docs
+  # Old addresses, which now only redirect to DOCS_URL.
   DOCS_OLD_URL: https://graftland.github.io/graft/
+  DOCS_PAGES_URL: https://graft-docs-ekb.pages.dev/
+  DOCS_PAGES_PROJECT: graft-docs
 
 jobs:
   plan:
@@ -41,6 +37,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       commits: ${{ steps.plan.outputs.commits }}
+      production: ${{ steps.plan.outputs.production }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -50,17 +47,40 @@ jobs:
         run: node packages/docs/publish.mjs plan
         env:
           DOCS_MODE:
-            ${{ inputs.backfill && 'backfill' || startsWith(github.ref,
-            'refs/tags/') && 'tag' || 'main' }}
+            ${{ startsWith(github.ref, 'refs/tags/') && 'tag' || 'main' }}
           DOCS_REBUILD: ${{ inputs.rebuild }}
 
-  build:
-    name: Build ${{ matrix.commit }}
+  production:
+    name: Build ${{ needs.plan.outputs.production }} for production
     needs: plan
-    if: needs.plan.outputs.commits != '[]'
+    if: needs.plan.outputs.production != ''
     runs-on: ubuntu-latest
     # Holds the Cloudflare secrets.
     environment: docs
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      # The publishing tools come from this run's commit.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/docs-commit
+        with:
+          commit: ${{ needs.plan.outputs.production }}
+          production: "true"
+
+  build:
+    name: Build ${{ matrix.commit }}
+    needs: [plan, production]
+    # Production goes first because its deploy creates the Worker and its
+    # domain on the first run; a failed one does not hold back the others.
+    if:
+      always() && needs.plan.result == 'success' && needs.plan.outputs.commits
+      != '[]'
+    runs-on: ubuntu-latest
+    environment: docs
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
     strategy:
       # One commit that no longer builds does not stop the others.
       fail-fast: false
@@ -68,62 +88,15 @@ jobs:
       matrix:
         commit: ${{ fromJSON(needs.plan.outputs.commits) }}
     steps:
-      # The publishing tools come from this run's commit; the site from the
-      # commit being built, with that commit's own toolchain and lockfile.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/docs-commit
         with:
-          ref: ${{ matrix.commit }}
-          path: commit-site
-      - uses: DeterminateSystems/nix-installer-action@3138316df39ed29be04236d7ffc686fa525866aa # v23
-        with:
-          # Download prebuilt devenv packages instead of building them.
-          extra-conf: |
-            extra-substituters = https://devenv.cachix.org
-            extra-trusted-public-keys = devenv.cachix.org-1:w1cLUi8dv3hnoSPGAuibQv+f9TZLr6cv/Hm9XgU50cw=
-      # Keeps Nix build results in the GitHub Actions cache between runs.
-      - uses: DeterminateSystems/magic-nix-cache-action@84c0677f58dcedf3b91f8223ce36a9ea5b3c84b7 # v15
-        with:
-          use-flakehub: false
-          diagnostic-endpoint: ""
-      - name: Install devenv
-        run: nix profile add github:cachix/devenv/v2.4.0
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: commit-site/.cache/pnpm
-          key:
-            pnpm-${{ runner.os }}-${{ hashFiles('commit-site/pnpm-lock.yaml') }}
-          restore-keys: pnpm-${{ runner.os }}-
-      - name: Install dependencies
-        working-directory: commit-site
-        run:
-          devenv shell -- env CI=true pnpm install --frozen-lockfile
-          --config.confirmModulesPurge=false --store-dir .cache/pnpm
-      - name: Test docs tooling
-        if: matrix.commit == github.sha
-        working-directory: commit-site
-        run: devenv shell -- pnpm --filter @graftland/docs test
-      - name: Build
-        working-directory: commit-site
-        run: devenv shell -- pnpm --filter @graftland/docs build
-      - name: Deploy the commit's own docs
-        run:
-          node packages/docs/publish.mjs commit commit-site/packages/docs/dist
-          ${{ matrix.commit }}
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      - name: Record the deployment
-        run: mkdir -p deployed && touch deployed/${{ matrix.commit }}
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: deployed-${{ matrix.commit }}
-          path: deployed
+          commit: ${{ matrix.commit }}
 
   list:
-    name: Update the commit list and the default release
-    needs: [plan, build]
-    # Runs after a partial backfill too, and for a tag that needs no build.
+    name: Update the commit list
+    needs: [plan, production, build]
+    # Runs after failed builds too, and when nothing needed a build.
     if: always() && needs.plan.result == 'success'
     runs-on: ubuntu-latest
     environment:
@@ -145,8 +118,18 @@ jobs:
           pattern: deployed-*
           path: deployed
           merge-multiple: true
-      - name: Publish the list
+      - name: Publish the list and delete the docs no longer kept
         run: node packages/docs/publish.mjs list deployed
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          # Production moves only once its build is deployed.
+          DOCS_PRODUCTION:
+            ${{ needs.production.result == 'success' &&
+            needs.plan.outputs.production || '' }}
+      - name: Redirect the old Cloudflare Pages address
+        if: github.ref == 'refs/heads/main'
+        run: node packages/docs/publish.mjs retire-pages pages-redirect
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

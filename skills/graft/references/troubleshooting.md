@@ -52,5 +52,4 @@ accepted.
 | `DeploymentFailed`                                     | A Change from `graft start` did not conclude Accepted | Read `outcome` and `cause`: `Recovered` brought the old version back |
 | `Contract.UndeclaredFailure`                           | A remote plugin failed with an undeclared error       | Declare it in the contract's `error`, or handle it in the plugin     |
 
-The full list is on the docs errors page:
-`https://graftland.github.io/graft/errors/`.
+The full list is on the docs errors page: `https://docs.graft.land/errors/`.

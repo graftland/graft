@@ -67,13 +67,13 @@ const hello = Plugin.make({
   upgrade ends as `Accepted`, `Aborted`, `Recovered`, `RecoveryFailed` or
   `Stuck`; one that a release recorder must record waits for its acknowledgement
   and shows as recording-blocked until then. See
-  [Changes](https://graftland.github.io/graft/transitions/).
+  [Changes](https://docs.graft.land/transitions/).
 - **Checked dependencies.** Services are Effect `Context` keys, provided by
   `Layer`s or by other plugins. A plugin declares what it needs in `inject`, and
   the compiler checks it.
 
 When one branch needs ground of its own,
-[Remote](https://graftland.github.io/graft/remote/overview/) runs that plugin in
+[Remote](https://docs.graft.land/remote/overview/) runs that plugin in
 a child process, a Node worker or on another machine. The plugins that use its
 services do not change.
 
@@ -89,9 +89,9 @@ cd my-app
 npm run dev
 ```
 
-Read the [documentation](https://graftland.github.io/graft/) (also in
-[简体中文](https://graftland.github.io/graft/zh-cn/) and
-[繁體中文](https://graftland.github.io/graft/zh-tw/)). Working with a coding
+Read the [documentation](https://docs.graft.land/) (also in
+[简体中文](https://docs.graft.land/zh-cn/) and
+[繁體中文](https://docs.graft.land/zh-tw/)). Working with a coding
 agent? The [`graft` skill](skills/graft) teaches it to design an application as
 plugins and Effects, then write, test and run them:
 `npx skills add graftland/graft`.
@@ -99,7 +99,7 @@ plugins and Effects, then write, test and run them:
 Graft draws its plugin model from
 [cordis](https://github.com/cordiverse/cordis). Where cordis composes across
 space and time, Graft keeps to the garden. See
-[how cordis concepts map to Graft](https://graftland.github.io/graft/cordis/).
+[how cordis concepts map to Graft](https://docs.graft.land/cordis/).
 To let a coding agent do the port, install the [migration skills](skills).
 
 ## Samples
@@ -154,7 +154,7 @@ devenv shell -- pnpm typecheck
 devenv shell -- pnpm test
 ```
 
-See [Publishing](https://graftland.github.io/graft/publishing/) for the checks,
+See [Publishing](https://docs.graft.land/publishing/) for the checks,
 the release process and the docs site.
 
 ## License

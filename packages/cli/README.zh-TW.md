@@ -15,8 +15,8 @@ npm install @graftland/cli @graftland/graft @graftland/loader effect
 
 ## 文件
 
-- [快速開始](https://graftland.github.io/graft/zh-tw/quickstart/)
-- [命令列](https://graftland.github.io/graft/zh-tw/cli/)
+- [快速開始](https://docs.graft.land/zh-tw/quickstart/)
+- [命令列](https://docs.graft.land/zh-tw/cli/)
 
 屬於 [Graft](https://github.com/graftland/graft)。採用
 [Apache 2.0](https://github.com/graftland/graft/blob/main/LICENSE) 授權。

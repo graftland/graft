@@ -22,5 +22,5 @@ HttpApi 路由组作为普通 Graft 插件提供服务。可选的组合插件�
 `HttpApiBuilder.group` 层。Scalar 和 Swagger 是独立插件；第三方界面注入
 `HttpApis.Document`。
 
-参见 [HTTP API 指南](https://graftland.github.io/graft/zh-cn/http-api/)和
+参见 [HTTP API 指南](https://docs.graft.land/zh-cn/http-api/)和
 [http-gateway 示例](../../samples/http-gateway)。

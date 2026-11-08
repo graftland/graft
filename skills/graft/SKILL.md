@@ -130,6 +130,6 @@ outside its caller. Contracts and configuration decoding stay inside units; see
 | A plugin in a child process, a worker or a runner      | [remote](references/remote.md)                   |
 | A fork `Pending` or `Failed`, an error name            | [troubleshooting](references/troubleshooting.md) |
 
-`https://graftland.github.io/graft/` is the source of truth for exact behavior.
+`https://docs.graft.land/` is the source of truth for exact behavior.
 The repository's `samples/` folder holds runnable programs with tests, from
 `01-hello` to `05-config-file` and multi-tenant apps.

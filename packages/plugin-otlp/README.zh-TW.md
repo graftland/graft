@@ -70,7 +70,7 @@ exporter。其他傳輸、屬性擴充和廠商整合由第三方實作。本套
 
 ## 文件
 
-- [日誌與追蹤](https://graftland.github.io/graft/zh-tw/best-practices/observability/)
+- [日誌與追蹤](https://docs.graft.land/zh-tw/best-practices/observability/)
 
 Part of [Graft](https://github.com/graftland/graft). Licensed under
 [Apache 2.0](https://github.com/graftland/graft/blob/main/LICENSE).

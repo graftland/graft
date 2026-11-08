@@ -6,9 +6,9 @@ Run captured Graft plugins in Worker, Process or Runner units. The kernel
 coordinates fixed metadata; units import contracts and execute encoded unary
 calls.
 
-- [Units](https://graftland.github.io/graft/units/)
-- [Contracts](https://graftland.github.io/graft/remote/contracts/)
-- [Bindings](https://graftland.github.io/graft/bindings/)
-- [Calls](https://graftland.github.io/graft/calls/)
-- [Public control](https://graftland.github.io/graft/control/)
-- [API reference](https://graftland.github.io/graft/reference/plugin-remote/readme/)
+- [Units](https://docs.graft.land/units/)
+- [Contracts](https://docs.graft.land/remote/contracts/)
+- [Bindings](https://docs.graft.land/bindings/)
+- [Calls](https://docs.graft.land/calls/)
+- [Public control](https://docs.graft.land/control/)
+- [API reference](https://docs.graft.land/reference/plugin-remote/readme/)

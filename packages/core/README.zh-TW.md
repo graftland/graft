@@ -53,7 +53,7 @@ npm install @graftland/graft effect
 - 必選的 `Pending` 相依正在等待啟動，不算作重新啟動的 watcher。
 - 被拒絕的發布者會一直等待，直到它的設定、相依或造成阻塞的相依圖發生變化。
 
-請參閱[服務文件](https://graftland.github.io/graft/zh-tw/services/)。
+請參閱[服務文件](https://docs.graft.land/zh-tw/services/)。
 
 外掛的身分就是物件參考的身分。
 
@@ -71,9 +71,9 @@ defect；預期的外部取消仍是 Interrupt。含有其他失敗的 cause 原
 
 ## 文件
 
-- [外掛](https://graftland.github.io/graft/zh-tw/plugins/)
-- [服務](https://graftland.github.io/graft/zh-tw/services/)
-- [生命週期](https://graftland.github.io/graft/zh-tw/lifecycle/)
+- [外掛](https://docs.graft.land/zh-tw/plugins/)
+- [服務](https://docs.graft.land/zh-tw/services/)
+- [生命週期](https://docs.graft.land/zh-tw/lifecycle/)
 
 屬於 [Graft](https://github.com/graftland/graft)。採用
 [Apache 2.0](https://github.com/graftland/graft/blob/main/LICENSE) 授權。

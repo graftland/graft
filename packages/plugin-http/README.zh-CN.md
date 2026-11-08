@@ -31,7 +31,7 @@ export default Plugin.make({
 `port` 必填；`host` 默认为
 `127.0.0.1`。不提供服务器级身份验证；使用挂载中间件或反向代理。
 
-参见 [HTTP 指南](https://graftland.github.io/graft/zh-cn/http/)和
+参见 [HTTP 指南](https://docs.graft.land/zh-cn/http/)和
 [http-gateway 示例](../../samples/http-gateway)。
 
 `Http.Routing`
