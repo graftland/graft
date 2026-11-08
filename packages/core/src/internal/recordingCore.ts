@@ -42,6 +42,36 @@ export const policy = (options: RecordingDeclaration): RecordingPolicy => ({
 	scope: HashSet.fromIterable(options.scope),
 	maxRecords: Math.max(stages.length, options.maxRecords ?? 64),
 })
+const same = (a: RecordingPolicy, b: RecordingPolicy): boolean =>
+	a.recorder === b.recorder &&
+	a.instance === b.instance &&
+	a.maxRecords === b.maxRecords &&
+	HashSet.size(a.scope) === HashSet.size(b.scope) &&
+	HashSet.isSubset(a.scope, b.scope)
+/**
+ * Sets the recording role when the deployment had none. Declaring the same role again
+ * is accepted; a different one is refused, since records already owed would lose their owner.
+ */
+export const declare = (
+	s: Working,
+	declaration: RecordingDeclaration,
+): Working => {
+	const next = policy(declaration)
+	return Option.match(s.recording, {
+		onNone: () => ({ ...s, recording: Option.some(next) }),
+		onSome: (current) =>
+			same(current, next)
+				? s
+				: {
+						...s,
+						reply: {
+							_tag: "Rejected",
+							reason: "RecordingConflict",
+							conflicts: HashSet.make(current.instance),
+						},
+					},
+	})
+}
 export const dutyId = (change: string, stage: RecordStage): string =>
 	`${change}/${stage}`
 /** A Change needs recording when its full closure contains an instance in the policy scope. */

@@ -71,6 +71,10 @@ export interface Client {
 		ReadonlyArray<Kernel.CallFact>,
 		Wire.ControlError
 	>
+	/** Declares the recording role once; a different role fails with `RecordingConflict`. */
+	readonly declareRecording: (
+		declaration: Kernel.RecordingDeclaration,
+	) => Effect.Effect<void, Wire.ControlError>
 	readonly setPolicy: (
 		policy: Wire.Policy,
 	) => Effect.Effect<void, Wire.ControlError>
@@ -275,6 +279,8 @@ const client = (r: Runtime): Client => ({
 		),
 	),
 	setPolicy: (policy) => action(r, { _tag: "SetPolicy", policy }),
+	declareRecording: (declaration) =>
+		action(r, { _tag: "DeclareRecording", declaration }),
 	shutdown: action(r, { _tag: "Shutdown" }),
 	close: close(r, Cause.fail("The caller closed control")),
 })

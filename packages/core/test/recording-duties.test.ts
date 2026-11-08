@@ -451,3 +451,34 @@ it("records each member's facts with the concluding record and reports its start
 	const intent = duty(gated, "change-1", "Intent")
 	assert.equal(intent.payload.facts[0]?.attempt, "NotStarted")
 })
+
+it("accepts a recording role declared after start once, and refuses a different one (I8)", () => {
+	const unrecorded = Core.make({
+		authority: "declared",
+		maxUnits: 8,
+		declarations: [declaration("release"), declaration("a"), declaration("c")],
+		realms: rootRealms,
+	})
+	const role = { recorder: "release", instance: "release", scope: ["a", "b"] }
+	const declared = Core.reduce(unrecorded, {
+		_tag: "RecordingDeclared",
+		declaration: role,
+		now: unrecorded.now,
+	})
+	assert.notEqual(declared.reply._tag, "Rejected")
+	const again = Core.reduce(declared.state, {
+		_tag: "RecordingDeclared",
+		declaration: role,
+		now: declared.state.now,
+	})
+	assert.notEqual(again.reply._tag, "Rejected")
+	const other = Core.reduce(declared.state, {
+		_tag: "RecordingDeclared",
+		declaration: { ...role, scope: ["c"] },
+		now: declared.state.now,
+	})
+	assert.equal(other.reply._tag, "Rejected")
+	// Work in scope is now recorded: it waits for the intent before acting.
+	const admitted = submit(register(declared.state).state).state
+	assert.isTrue(Option.contains(status(admitted).recording.gate, "Intent"))
+})

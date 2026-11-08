@@ -955,6 +955,12 @@ export type Event =
 			readonly now: number
 	  }
 	| {
+			/** Declares the recording role once, for kernels started without it (such as `graft start`). */
+			readonly _tag: "RecordingDeclared"
+			readonly declaration: RecordingDeclaration
+			readonly now: number
+	  }
+	| {
 			readonly _tag: "PolicyChanged"
 			readonly instance: string
 			/** Omitted: keep the current allowed set; only values change. */
@@ -1036,6 +1042,7 @@ export type Rejection =
 	| "RecordingUnavailable"
 	| "RecordingCapacity"
 	| "SelfReplacement"
+	| "RecordingConflict"
 export type Reply =
 	| { readonly _tag: "None" }
 	| { readonly _tag: "Preparing"; readonly preparation: string }

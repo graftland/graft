@@ -3315,6 +3315,8 @@ const apply = (s: Working, event: Event): Working => {
 			return Preparation.observed(s, event.preparation)
 		case "PolicyChanged":
 			return policyChanged(s, event)
+		case "RecordingDeclared":
+			return Recording.declare(s, event.declaration)
 		case "Observed":
 			return withChange(s, event.change, save)
 		case "Submit":
@@ -3391,6 +3393,7 @@ const eventOwners = (s: State, event: Event): HashSet.HashSet<string> => {
 		case "InspectRequested":
 		case "PreparationObserved":
 		case "PolicyChanged":
+		case "RecordingDeclared":
 		case "Requested":
 		case "Submit":
 			return HashSet.empty()

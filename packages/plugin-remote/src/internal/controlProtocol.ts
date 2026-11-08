@@ -99,6 +99,7 @@ const Rejection = Schema.Literals([
 	"RecordingUnavailable",
 	"RecordingCapacity",
 	"SelfReplacement",
+	"RecordingConflict",
 ])
 const Cleanup = Schema.Union([
 	Schema.TaggedStruct("Unknown", {}),
@@ -409,6 +410,14 @@ export const Request = Schema.Union([
 		]),
 	}),
 	Schema.TaggedStruct("SetPolicy", { policy: Policy }),
+	Schema.TaggedStruct("DeclareRecording", {
+		declaration: Schema.Struct({
+			recorder: Schema.String,
+			instance: Schema.String,
+			scope: Schema.Array(Schema.String),
+			maxRecords: Schema.optionalKey(Schema.Int),
+		}),
+	}),
 ])
 export type Request = typeof Request.Type
 export const Response = Schema.Union([
