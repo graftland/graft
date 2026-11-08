@@ -48,7 +48,7 @@ class UnitFault extends Schema.TaggedError<
 }) {}
 interface Metadata {
 	readonly plugin: Plugin.Plugin
-	readonly contract: Contract.RunnerContract
+	readonly contract: Option.Option<Contract.RunnerContract>
 	readonly description: Kernel.Description
 	readonly input: Schema.Json
 }
@@ -136,6 +136,48 @@ const serviceDescription = (
 			),
 	),
 })
+
+const loadContract = Effect.fnUntraced(function* (
+	runtime: UnitRuntime,
+	deployment: Kernel.DeploymentData,
+) {
+	if (deployment.contract === undefined)
+		return Option.none<Contract.RunnerContract>()
+	const artifact = deployment.contractArtifact ?? deployment.artifact
+	yield* Artifact.verify(artifact)
+	const path = yield* Path.Path
+	const location = path.resolveWithin(artifact.directory, deployment.contract)
+	if (Option.isNone(location))
+		return yield* UnitFault.make({
+			detail: "Contract export escapes its immutable artifact",
+		})
+	yield* runtime.emit({ _tag: "Progress", stage: "DescribeImport" })
+	const module = yield* importModule(pathToFileURL(location.value).href)
+	const contract = yield* Effect.fromOption(Contract.fromModule(module), () =>
+		UnitFault.make({ detail: "Expected a unit contract export" }),
+	)
+	const invalid = Contract.check(contract)
+	if (Option.isSome(invalid))
+		return yield* UnitFault.make({
+			detail: "Unit contract declarations are invalid",
+			cause: Cause.fail(invalid.value),
+		})
+	return Option.some(contract)
+})
+
+const decodeInput = Effect.fnUntraced(function* (
+	plugin: Plugin.Plugin,
+	input: Schema.Json,
+) {
+	if (plugin.config === undefined) return
+	const environment = yield* Effect.context<never>()
+	const context = Context.makeUnsafe<unknown>(environment.mapUnsafe)
+	yield* Effect.updateContext<unknown, Schema.SchemaError, unknown, never>(
+		// @effect-diagnostics-next-line anyUnknownInErrorContext:off -- The inspection unit supplies the dynamic schema environment and reports its complete Exit.
+		Schema.decodeEffect(plugin.config)(input),
+		() => context,
+	)
+})
 const load = Effect.fnUntraced(function* (
 	runtime: UnitRuntime,
 	command: Wire.Command,
@@ -157,50 +199,33 @@ const load = Effect.fnUntraced(function* (
 		})
 	yield* Artifact.verify(deployment.artifact)
 	const contractArtifact = deployment.contractArtifact ?? deployment.artifact
-	yield* Artifact.verify(contractArtifact)
-	const path = yield* Path.Path
-	const contractPath = path.resolveWithin(
-		contractArtifact.directory,
-		deployment.contract,
-	)
-	if (Option.isNone(contractPath))
-		return yield* UnitFault.make({
-			detail: "Contract export escapes its immutable artifact",
-		})
-	yield* runtime.emit({ _tag: "Progress", stage: "DescribeImport" })
-	const contractModule = yield* importModule(
-		pathToFileURL(contractPath.value).href,
-	)
-	const contract = yield* Effect.fromOption(
-		Contract.fromModule(contractModule),
-		() => UnitFault.make({ detail: "Expected a unit contract export" }),
-	)
-	const invalid = Contract.check(contract)
-	if (Option.isSome(invalid))
-		return yield* UnitFault.make({
-			detail: "Unit contract declarations are invalid",
-			cause: Cause.fail(invalid.value),
-		})
+	const contract = yield* loadContract(runtime, deployment)
 
 	yield* runtime.emit({ _tag: "Progress", stage: "DescribeDecode" })
-	yield* Schema.decodeEffect(contract.config)(resolution.input)
+	if (Option.isSome(contract))
+		yield* Schema.decodeEffect(contract.value.config)(resolution.input)
 	const implementation = yield* Artifact.implementation(deployment.artifact)
+	yield* runtime.emit({ _tag: "Progress", stage: "DescribeImport" })
 	const module = yield* importModule(implementation)
 	const plugin = yield* Effect.fromOption(Plugin.fromModule(module), () =>
 		UnitFault.make({ detail: "Expected a plugin export" }),
 	)
+	yield* runtime.emit({ _tag: "Progress", stage: "DescribeDecode" })
+	yield* decodeInput(plugin, resolution.input)
 	const descriptor: Kernel.Description = {
 		artifact: deployment.artifact.identity.digest,
 		configuration: resolution.identity,
 		environment: resolution.environment,
 		protocol: 1,
-		overlap: plugin.overlap,
+		overlap: plugin.overlap && Option.isSome(contract),
 		members: 1,
-		requires: Array.map(contract.inject, (s) =>
-			serviceDescription(s, contractArtifact.identity.digest),
+		requires: Array.map(
+			Option.isSome(contract) ? contract.value.inject : [],
+			(s) => serviceDescription(s, contractArtifact.identity.digest),
 		),
-		provides: Array.map(contract.provides, (s) =>
-			serviceDescription(s, contractArtifact.identity.digest),
+		provides: Array.map(
+			Option.isSome(contract) ? contract.value.provides : [],
+			(s) => serviceDescription(s, contractArtifact.identity.digest),
 		),
 		probes: [],
 	}
@@ -226,41 +251,45 @@ const startNetwork = Effect.fnUntraced(function* (
 	runtime: UnitRuntime,
 	loaded: Metadata,
 ) {
-	const router = yield* Routing.make(loaded.contract.inject, (message) =>
+	if (Option.isNone(loaded.contract)) return Option.none<Wire.Endpoint>()
+	const contract = loaded.contract.value
+	const router = yield* Routing.make(contract.inject, (message) =>
 		runtime.emit({ _tag: "Call", message }),
 	).pipe(Scope.provide(runtime.scope))
 	yield* Ref.set(runtime.router, Option.some(router))
-	if (loaded.contract.provides.length === 0) return Option.none<Wire.Endpoint>()
+	if (contract.provides.length === 0) return Option.none<Wire.Endpoint>()
 	const server = yield* Network.provider(
-		loaded.contract.provides,
+		contract.provides,
 		(cause) => diagnostic(runtime, cause),
 		runtime.calls,
 	).pipe(Scope.provide(runtime.scope))
 	yield* Ref.set(runtime.provider, Option.some(server))
 	return Option.some(server.endpoint)
 })
-const imports = (loaded: Metadata, router: Routing.Router) =>
+const imports = (contract: Contract.RunnerContract, router: Routing.Router) =>
 	Plugin.make({
-		name: loaded.contract.name + "/imports",
+		name: contract.name + "/imports",
 		apply: () =>
-			Effect.forEach(
-				loaded.contract.inject,
-				(service) => service.publish(router),
-				{ discard: true },
-			),
+			Effect.forEach(contract.inject, (service) => service.publish(router), {
+				discard: true,
+			}),
 	})
 const dependencyKey = (value: Plugin.Dependency): string =>
 	value instanceof Plugin.Optional ? value.key.key : value.key
-const exports = (loaded: Metadata, provider: Network.Provider) =>
+const exports = (
+	loaded: Metadata,
+	contract: Contract.RunnerContract,
+	provider: Network.Provider,
+) =>
 	Plugin.make({
-		name: loaded.contract.name + "/exports",
+		name: contract.name + "/exports",
 		inject: Array.dedupeWith<Plugin.Dependency>(
 			[
 				...loaded.plugin.inject,
 				...Array.map(loaded.plugin.provides, (p) =>
 					"operations" in p ? p.key : p,
 				),
-				...Array.map(loaded.contract.provides, (s) => s.key),
+				...Array.map(contract.provides, (s) => s.key),
 			],
 			(a, b) => dependencyKey(a) === dependencyKey(b),
 		),
@@ -298,22 +327,32 @@ const serve = Effect.fnUntraced(function* (
 		),
 	)
 	const services = yield* Layer.buildWithScope(platform, runtime.scope)
-	const router = yield* Ref.get(runtime.router).pipe(
-		Effect.flatMap(Effect.fromOption),
-	)
-	yield* router.install(command.token, command.view ?? { routes: [] })
-	yield* router.activate(command.token)
-	if (loaded.contract.inject.length > 0) {
-		const importer = yield* support(runtime, services, imports(loaded, router))
-		yield* active(importer)
+	if (Option.isSome(loaded.contract)) {
+		const router = yield* Ref.get(runtime.router).pipe(
+			Effect.flatMap(Effect.fromOption),
+		)
+		yield* router.install(command.token, command.view ?? { routes: [] })
+		yield* router.activate(command.token)
+		if (loaded.contract.value.inject.length > 0) {
+			const importer = yield* support(
+				runtime,
+				services,
+				imports(loaded.contract.value, router),
+			)
+			yield* active(importer)
+		}
 	}
 	const member = yield* Graft.plugin(loaded.plugin, loaded.input).pipe(
 		Effect.provideContext(services),
 		Scope.provide(runtime.scope),
 	)
 	const provider = yield* Ref.get(runtime.provider)
-	if (Option.isSome(provider))
-		yield* support(runtime, services, exports(loaded, provider.value))
+	if (Option.isSome(provider) && Option.isSome(loaded.contract))
+		yield* support(
+			runtime,
+			services,
+			exports(loaded, loaded.contract.value, provider.value),
+		)
 
 	yield* Ref.set(runtime.member, Option.some(member))
 	yield* Stream.runForEach(member.state, (state) =>
@@ -440,10 +479,12 @@ const perform = Effect.fnUntraced(function* (
 		}
 		case "Install":
 			yield* ready(runtime)
-			const router = yield* Ref.get(runtime.router).pipe(
-				Effect.flatMap(Effect.fromOption),
-			)
-			yield* router.install(command.token, command.view ?? { routes: [] })
+			const router = yield* Ref.get(runtime.router)
+			if (Option.isSome(router))
+				yield* router.value.install(
+					command.token,
+					command.view ?? { routes: [] },
+				)
 			yield* Ref.update(
 				runtime.views,
 				HashMap.set(
@@ -458,17 +499,13 @@ const perform = Effect.fnUntraced(function* (
 				!HashMap.has(installed, `${command.token.change}/${command.token.view}`)
 			)
 				return yield* UnitFault.make({ detail: "View was not installed" })
-			const router = yield* Ref.get(runtime.router).pipe(
-				Effect.flatMap(Effect.fromOption),
-			)
-			yield* router.activate(command.token)
+			const router = yield* Ref.get(runtime.router)
+			if (Option.isSome(router)) yield* router.value.activate(command.token)
 			return { _tag: "Succeeded" }
 		}
 		case "Discard": {
-			const router = yield* Ref.get(runtime.router).pipe(
-				Effect.flatMap(Effect.fromOption),
-			)
-			yield* router.discard(command.token)
+			const router = yield* Ref.get(runtime.router)
+			if (Option.isSome(router)) yield* router.value.discard(command.token)
 			return { _tag: "Succeeded" }
 		}
 		case "Stop":

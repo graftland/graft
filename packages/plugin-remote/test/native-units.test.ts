@@ -6,6 +6,7 @@ import {
 	HashSet,
 	Layer,
 	Option,
+	Schema,
 	Stream,
 } from "effect"
 import { NodeServices } from "@effect/platform-node"
@@ -13,6 +14,7 @@ import { assert, it } from "@effect/vitest"
 
 import { Change, Kernel, Plugin } from "@graftland/graft"
 
+import * as Wire from "../src/internal/unitProtocol"
 import * as Units from "../src/Units"
 import { budget, stage } from "./native-unit-fixture"
 
@@ -22,8 +24,134 @@ const runtime = (target: Kernel.Target, maxUnits = 3) =>
 		maxUnits,
 		instances: [{ id: "a", target }],
 	}).pipe(Layer.provide(Units.layer), Layer.provideMerge(NodeServices.layer))
+
+it.effect(
+	"serializes a local-only deployment descriptor without importing its module (F2)",
+	() =>
+		Effect.gen(function* () {
+			const target = Units.target({
+				artifact: {
+					directory: "/fixtures/not-imported",
+					identity: {
+						version: 1,
+						algorithm: "sha256",
+						digest:
+							"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+						entry: "plugin.js",
+					},
+				},
+				input: { mode: "test" },
+				placement: "Worker",
+			})
+			const codec = Schema.fromJsonString(Wire.Target)
+			const encoded = yield* Schema.encodeEffect(codec)(target)
+			const decoded = yield* Schema.decodeEffect(codec)(encoded)
+			assert.deepEqual(decoded, target)
+			assert.isUndefined(decoded.deployment?.contract)
+		}),
+)
 for (const placement of ["Worker", "Process"] as const) {
+	it.live(
+		`describes and serves a local-only plugin in a real ${placement} without a contract (F2)`,
+		() =>
+			Effect.gen(function* () {
+				const artifact = yield* stage("none")
+				const target = Units.target({
+					artifact,
+					input: { mode: "test" },
+					placement,
+				})
+				yield* Effect.gen(function* () {
+					const kernel = yield* Kernel.Kernel
+					const inspected = yield* kernel.inspect({
+						instance: "a",
+						target,
+						budget,
+					})
+					assert.equal(inspected.exitEvidence, "Exited")
+					assert.isTrue(Option.isSome(inspected.result))
+					assert.isTrue(
+						Option.isSome(inspected.result) &&
+							inspected.result.value._tag === "Described",
+					)
+					if (
+						Option.isNone(inspected.result) ||
+						inspected.result.value._tag !== "Described"
+					)
+						return
+					assert.deepEqual(inspected.result.value.description.requires, [])
+					assert.deepEqual(inspected.result.value.description.provides, [])
+					const accepted = yield* Change.run({
+						instance: "a",
+						target,
+						strategy: "Restart",
+						budget,
+					})
+					assert.equal(
+						accepted.outcome,
+						"Accepted",
+						Cause.pretty(accepted.cause),
+					)
+					const units = yield* kernel.units
+					assert.equal(
+						Array.filter(
+							units,
+							(u) => u.kind === "Execution" && u.evidence === "Missing",
+						).length,
+						1,
+					)
+				}).pipe(Effect.provide(runtime(target)))
+			}).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+		15000,
+	)
 	for (const fault of ["import", "decode"] as const) {
+		it.live(
+			`terminates a local-only ${placement} blocked in ${fault} and retains preparation evidence (F2)`,
+			() =>
+				Effect.gen(function* () {
+					const artifact = yield* stage(fault)
+					const target = Units.target({
+						artifact,
+						input: { mode: "test" },
+						placement,
+					})
+					yield* Effect.gen(function* () {
+						const kernel = yield* Kernel.Kernel
+						const submission = yield* kernel
+							.inspect({
+								instance: "a",
+								target,
+								budget: { ...budget, startup: 1500 },
+							})
+							.pipe(Effect.exit, Effect.forkScoped)
+						const inspected = yield* Stream.runHead(kernel.preparations)
+						assert.isTrue(Option.isSome(inspected))
+						const unknown = yield* kernel.get("not-a-change")
+						assert.isTrue(Option.isNone(unknown))
+						const result = yield* Fiber.join(submission)
+						assert.equal(result._tag, "Failure")
+						const facts = yield* kernel.inspections
+						assert.isTrue(
+							Array.every(
+								facts,
+								(p) =>
+									p.exitEvidence === "Exited" &&
+									HashSet.size(p.unconfirmedUnits) === 0,
+							),
+						)
+						const units = yield* kernel.units
+						assert.isTrue(
+							Array.some(
+								units,
+								(u) =>
+									u.progress ===
+									(fault === "import" ? "DescribeImport" : "DescribeDecode"),
+							),
+						)
+					}).pipe(Effect.provide(runtime(target)))
+				}).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+			15000,
+		)
 		it.live(
 			`terminates a real ${placement} blocked in ${fault} before admission and keeps the kernel responsive (I2, I4, I5, I11)`,
 			() =>

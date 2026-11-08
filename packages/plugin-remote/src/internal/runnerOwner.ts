@@ -1,6 +1,8 @@
 import { createServer, type Socket } from "node:net"
 
 import {
+	Array,
+	Cause,
 	Context,
 	Effect,
 	FiberSet,
@@ -17,6 +19,18 @@ import { UnitControl } from "@graftland/graft/Kernel"
 import * as Lines from "./jsonLines"
 import * as Native from "./nativeControl"
 import * as Frames from "./runnerFrames"
+
+const reportClientEnd = (cause: Cause.Cause<unknown>) =>
+	cause.reasons.length > 0 &&
+	Array.every(
+		cause.reasons,
+		(reason) =>
+			reason._tag === "Fail" &&
+			Schema.is(Lines.ConnectionEnded)(reason.error) &&
+			reason.error.reason === "Closed",
+	)
+		? Effect.logDebug("Runner control client disconnected", cause)
+		: Effect.logError(cause)
 
 export interface RunnerAddress {
 	readonly socket: string
@@ -60,18 +74,17 @@ export const serveRunner = Effect.fnUntraced(function* (
 							if (request.owner !== address.owner)
 								return yield* Effect.die("Runner owner identity mismatch")
 							const command = Frames.command(request.command)
-							const result = yield* control.send(command)
-							yield* send(socket, {
-								_tag: "Reply",
-								command: command.id,
-								result: yield* Frames.encodeReport(result),
-							})
-						}).pipe(Effect.forkScoped, Effect.asVoid),
+							yield* Effect.gen(function* () {
+								const result = yield* control.send(command)
+								yield* send(socket, {
+									_tag: "Reply",
+									command: command.id,
+									result: yield* Frames.encodeReport(result),
+								})
+							}).pipe(Effect.catchCause(reportClientEnd), Effect.forkScoped)
+						}),
 					).pipe(Effect.ensuring(Ref.update(clients, HashMap.remove(id))))
-				}).pipe(
-					Effect.scoped,
-					Effect.catchCause((cause) => Effect.logError(cause)),
-				),
+				}).pipe(Effect.scoped, Effect.catchCause(reportClientEnd)),
 			),
 		),
 	)

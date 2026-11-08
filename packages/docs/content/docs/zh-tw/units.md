@@ -8,7 +8,7 @@ description: 在原生執行邊界之外執行核心實例。
 ## 選擇擷取的程式碼
 
 用 `Artifact.capture`
-擷取已建置的 JavaScript，再指定契約匯出及編碼設定。契約匯入與設定解碼在執行單元內執行。
+擷取已建置的 JavaScript，再指定選用的契約匯出及編碼設定。外掛與契約匯入、設定解碼都在執行單元內執行。
 
 ```ts
 import { Effect, Layer } from "effect"
@@ -35,6 +35,9 @@ export const inspect = Effect.flatMap(Kernel.Kernel, (kernel) =>
 )
 ```
 
+沒有編碼端點的外掛可以省略
+`contract`。檢查解碼外掛自己的設定 Schema，不啟動外掛，也不建立虛假的契約。這種目標使用 Restart。
+
 ## 准入前檢查
 
 `kernel.inspect`
@@ -57,6 +60,8 @@ export const inspect = Effect.flatMap(Kernel.Kernel, (kernel) =>
 | `Runner`  | `Units.serveRunner` 擁有子行程並回報準確的執行身分；僅支援 Restart。 |
 
 Runner 位址包含本機控制通訊端及擁有者身分。斷線不能證明退出。缺少退出證據時，容量及所有權繼續保留。
+
+控制連線正常關閉是偵錯事件。無效或不完整的訊框仍是錯誤。連線關閉與訊框錯誤都不能證明執行單元已退出。
 
 ## 讀取執行任期
 

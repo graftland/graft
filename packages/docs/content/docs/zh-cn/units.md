@@ -8,7 +8,7 @@ description: 在原生执行边界之外运行内核实例。
 ## 选择捕获的代码
 
 用 `Artifact.capture`
-捕获已构建的 JavaScript，再指定契约导出和编码配置。契约导入与配置解码在执行单元内运行。
+捕获已构建的 JavaScript，再指定可选的契约导出和编码配置。插件与契约导入、配置解码都在执行单元内运行。
 
 ```ts
 import { Effect, Layer } from "effect"
@@ -35,6 +35,9 @@ export const inspect = Effect.flatMap(Kernel.Kernel, (kernel) =>
 )
 ```
 
+没有编码端点的插件可以省略
+`contract`。检查解码插件自己的配置 Schema，不激活插件，也不构造虚假的契约。这种目标使用 Restart。
+
 ## 准入前检查
 
 `kernel.inspect`
@@ -57,6 +60,8 @@ export const inspect = Effect.flatMap(Kernel.Kernel, (kernel) =>
 | `Runner`  | `Units.serveRunner` 拥有子进程并报告准确的执行身份；仅支持 Restart。 |
 
 Runner 地址包含本地控制套接字和所有者身份。断连不能证明退出。缺少退出证据时，容量和所有权继续保留。
+
+控制连接正常关闭是调试事件。无效或不完整的帧仍是错误。连接关闭和帧错误都不能证明执行单元已退出。
 
 ## 读取执行任期
 

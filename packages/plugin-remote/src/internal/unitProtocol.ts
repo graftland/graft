@@ -22,7 +22,7 @@ export const Artifact = Schema.Struct({
 export const Deployment = Schema.Struct({
 	artifact: Artifact,
 	contractArtifact: Schema.optionalKey(Artifact),
-	contract: Schema.String,
+	contract: Schema.optionalKey(Schema.String),
 	input: Schema.Json,
 	runner: Schema.optionalKey(
 		Schema.Struct({ socket: Schema.String, owner: Schema.String }),

@@ -8,9 +8,9 @@ a fault boundary. Use a sandboxed process deployment for untrusted work.
 
 ## Select captured code
 
-Capture built JavaScript with `Artifact.capture`, then select its contract
-export and encoded configuration. Contract imports and configuration decoding
-run inside the unit.
+Capture built JavaScript with `Artifact.capture`, then select its optional
+contract export and encoded configuration. Plugin and contract imports and
+configuration decoding run inside the unit.
 
 ```ts
 import { Effect, Layer } from "effect"
@@ -37,6 +37,10 @@ export const inspect = Effect.flatMap(Kernel.Kernel, (kernel) =>
 )
 ```
 
+Omit `contract` for a plugin without encoded endpoints. Inspection decodes the
+plugin's own configuration schema without activating it or inventing a contract.
+Such a target uses Restart.
+
 ## Inspect before admission
 
 `kernel.inspect` validates a target without activating it. Submission can also
@@ -62,6 +66,9 @@ budget.
 A runner address contains its local control socket and owner identity.
 Disconnect does not establish exit. Missing exit evidence retains capacity and
 ownership.
+
+A clean control connection close is a debug event. Invalid or truncated frames
+remain errors. Neither connection closure nor a frame error proves unit exit.
 
 ## Read the execution term
 

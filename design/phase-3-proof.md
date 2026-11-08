@@ -1,0 +1,89 @@
+# Phase 3 evidence
+
+Status: partial implementation, not Phase 3 acceptance. None of the six
+implementation steps is complete. No architecture contradiction or new Effect
+public-API blocker has been established. In particular, this change does not
+deliver the Loader descriptor migration, deployment groups, recording barriers
+or the fixed CLI bootstrap.
+
+## Evidence inventory
+
+| Specification evidence item | Evidence in this change                                                                                                                                                                                                                                                                                                                                                 | Missing evidence                                                                                                                              |
+| --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1. Core evidence            | No production reducer behavior was changed. Existing production-reducer tests run in the root suite.                                                                                                                                                                                                                                                                    | No new group, member-race, recording or acknowledgement exploration. New exploration bounds, states and transitions: none.                    |
+| 2. Native evidence          | Actual Worker and process tests inspect and serve a plugin without a remote contract. Four blocked-import/decode cases retain preparation evidence until native exit. A real runner test completes two Restart Changes, verifies the first execution's exact native exit, shuts down the second, waits for every native exit and checks clean control closure at Debug. | Multi-member units, co-resident ordinary restart, collateral termination and group settlement are not implemented or proved.                  |
+| 3. CLI boundary             | No new CLI evidence.                                                                                                                                                                                                                                                                                                                                                    | The existing `start` path still imports and activates plugins in the host. No Phase 3 import audit or blocked CLI fixture has been added.     |
+| 4. Gateway value            | Existing gateway tests remain in the root suite. No packed script was invoked directly.                                                                                                                                                                                                                                                                                 | No new CLI/Loader gateway, release-unit, split/merge or group residual proof. Existing gateway tests are not relabeled as Phase 3 acceptance. |
+| 5. Control-plane evidence   | Existing public control tests remain unchanged.                                                                                                                                                                                                                                                                                                                         | No recording grants, obligations, barriers, crash windows, third-party recorder or self-replacement protocol.                                 |
+| 6. Delivery evidence        | The units guide has matching English, Simplified Chinese and Traditional Chinese facts. No test case was deleted. The accompanying deletion manifest records the limited replacements.                                                                                                                                                                                  | The complete I1–I10/F1–F22 inventory, remaining guides and sample migrations are pending.                                                     |
+
+## Named native tests
+
+The tests below import production code. They do not supply privileged protocol
+steps or infer unit exit from a timeout.
+
+| Test                                                                                                    | Cases | Evidence and residual assertions                                                                                                                                                                                   |
+| ------------------------------------------------------------------------------------------------------- | ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `serializes a local-only deployment descriptor without importing its module (F2)`                       | 1     | Fixed target codec round trip preserves the absent contract. Its intentionally nonexistent module is never imported.                                                                                               |
+| `describes and serves a local-only plugin in a real Worker/Process without a contract (F2)`             | 2     | Inspection exits before service starts; encoded requires/provides are empty; Restart is Accepted; exactly one execution remains live. The fixture's apply requires a serving term, so Describe cannot activate it. |
+| `terminates a local-only Worker/Process blocked in import/decode and retains preparation evidence (F2)` | 4     | A concurrent public query responds; inspection fails; native exit evidence is Exited; unconfirmed inspection units are empty; the last progress boundary identifies import or decode.                              |
+| `classifies clean runner client shutdown without an error log`                                          | 1     | A real socket closes cleanly; the owner logs Debug.                                                                                                                                                                |
+| `retains malformed runner control input as an error`                                                    | 1     | Invalid JSON remains Error with its full cause.                                                                                                                                                                    |
+| `retains truncated runner control input as an error`                                                    | 1     | A partial final frame remains Error with its full cause.                                                                                                                                                           |
+| `retires real runner Restart executions and closes control without an error log`                        | 1     | Both Changes are Accepted; term 1 has native exit evidence; shutdown is followed by explicit observation that no unit lacks exit evidence; control closes at Debug and no buffered Error/Fatal entry remains.      |
+
+These are partial F2 and runner-disconnection evidence. They do not cover F2's
+resolver/intercept boundaries or certify any complete Phase 3 invariant or fault
+cell. Existing Phase 2 identifiers in retained test names retain their original
+meaning.
+
+## Interpretations and deviations
+
+| Item                       | Source                                        | Decision or deviation                                                                                                                                                                                                  |
+| -------------------------- | --------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Contract-free targets      | `phase-3.md:83,132`                           | Omit the contract field and transport support. No empty contract object or dummy RPC contract is created.                                                                                                              |
+| Overlap eligibility        | `architecture.md:333`; `phase-3.md:102`       | A contract-free target is Restart-only; a plugin's overlap flag alone does not qualify it.                                                                                                                             |
+| Shutdown connection        | `architecture.md:218–220`; `phase-3.md:299`   | Clean control EOF is a diagnostic fact, not an Error and not native exit evidence. Socket errors, malformed frames and truncated frames keep their failure causes.                                                     |
+| Dynamic schema environment | `architecture.md:87–91`; `phase-3.md:130–132` | The native inspection unit decodes the plugin's schema in its own supplied context. One single-line diagnostic exception identifies this dynamic requirements boundary; no cast or global diagnostic change was added. |
+| Implementation order       | `phase-3.md:323–328`                          | Only native prerequisites and the specifically requested runner correction were implemented. The ordered steps and their required deletions were not completed. This is a deviation, not an approved scope reduction.  |
+| Specification formatting   | `phase-3.md`                                  | The mandatory devenv formatting hook reformatted the specification. A comparison ignoring whitespace and Markdown table separators verified that no specification text changed.                                        |
+
+## Check history
+
+All shell commands ran through `devenv shell --`. Logs use the local prefix
+`/tmp/graft-phase3-`; they are development records, not checked-in artifacts.
+
+| Check or batch                            | Result and correction                                                                                                                                                                                                                                                  |
+| ----------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Initial shell entries before installation | Formatting hook could not find `@ianvs/prettier-plugin-sort-imports`. Requested file reads still ran. Frozen-lockfile installation subsequently succeeded.                                                                                                             |
+| Baseline `pnpm build`                     | Passed, including documentation generation and 2,299 built pages.                                                                                                                                                                                                      |
+| First runner fixture                      | Two failures: the absolute Unix socket pathname produced EACCES. Replaced it with a short worktree-relative socket path and explicitly created its containing directory; no temporary workspace or symlink was created.                                                |
+| Runner red batch                          | One failed, one passed. Clean EOF logged Error rather than Debug.                                                                                                                                                                                                      |
+| First runner classification batch         | One failed, one passed. The malformed-input test exposed that parsing in a fork did not reliably report its failure before clean EOF. Parsing now precedes command dispatch; owned command failures are reported too.                                                  |
+| Contract-free native red batch            | Two failed, eleven passed. The required contract field prevented a contract-free target from being constructed and inspected.                                                                                                                                          |
+| First contract-free typecheck             | Failed on stale built core declarations, dynamic context requirements and an unnecessarily untyped schema decoder. Rebuilt core declarations, supplied the native context explicitly and used `decodeEffect`.                                                          |
+| Initial native green batch                | Fifteen tests passed across the native and runner files.                                                                                                                                                                                                               |
+| First real runner shutdown assertion      | Failed because shutdown admission returned before its asynchronous native exit arrived. The test now waits for actual exit facts rather than asserting synchronous exit.                                                                                               |
+| Three runner diagnostic batches           | Test guard timeouts. A test-only `Queue.takeAll` waited forever on the correctly empty log queue. Replaced it with the public nonblocking `Queue.clear`; temporary file tracing and the diagnostic timeout wrapper were removed. These timeouts are not exit evidence. |
+| Diagnostic-wrapper typecheck              | Failed the timeout/catch diagnostic. Removed the temporary diagnostic wrapper; no rule was disabled.                                                                                                                                                                   |
+| Descriptor assertion typecheck            | Failed the native `Object.hasOwn` diagnostic. Replaced the redundant assertion with an absent-contract assertion; structural round-trip equality already checks the descriptor.                                                                                        |
+| Specification comparison tool             | One heredoc redirection syntax error; the corrected command confirmed formatting-only changes.                                                                                                                                                                         |
+| Later targeted native/runner batch        | Twenty-one tests passed before the serialization case was added.                                                                                                                                                                                                       |
+| Final typecheck                           | Passed.                                                                                                                                                                                                                                                                |
+| Final build                               | Passed, including TypeDoc and the three-language site build.                                                                                                                                                                                                           |
+| Full root test                            | 289 files passed, one failed; 2,129 tests passed, 45 skipped, one failed. The only failure is the explicitly allowed macOS benchmark case `resolves compressed sample files relative to nested result outputs` (`/proc` ENOENT).                                       |
+| Independent docs test                     | Passed: 25 Node/TypeDoc tests and 19 Vitest files with 39 tests.                                                                                                                                                                                                       |
+| Final `treefmt --no-cache` and diff check | Passed: 1,051 files processed, zero changes; `git diff --check` passed.                                                                                                                                                                                                |
+
+No check was manually interrupted. Test-runner guard timeouts are listed above.
+No direct packed script, outward action, push, rebase, stash, reset or `gh`
+command was run. Packed runtime verification remains owner-run work.
+
+## Review priorities
+
+1. The native schema context boundary and the difference between absent
+   transport support and real local service declarations, which remain pending.
+2. Runner EOF/error classification, retention of command-fiber failures and the
+   distinction between connection closure and native exit.
+3. The incomplete acceptance inventory and required deletions: the current
+   changes must not be mistaken for completion of any Phase 3 step.

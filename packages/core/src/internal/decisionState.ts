@@ -14,7 +14,7 @@ export interface ArtifactData {
 export interface DeploymentData {
 	readonly contractArtifact?: ArtifactData
 	readonly artifact: ArtifactData
-	readonly contract: string
+	readonly contract?: string
 	readonly input: Schema.Json
 	readonly runner?: { readonly socket: string; readonly owner: string }
 }

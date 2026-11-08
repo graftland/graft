@@ -36,7 +36,7 @@ export const stage = Effect.fnUntraced(function* (
 	)
 	yield* fs.writeFileString(
 		path.join(source, "plugin.js"),
-		`import { Effect, Schema } from "effect"; import * as Plugin from ${pluginEntry}; export default Plugin.make({ name:"native-unit-fixture",overlap:true,config:Schema.Struct({mode:Schema.String}),apply:() => Effect.gen(function* () { const term = yield* Plugin.term; if (term < 1) return yield* Effect.die("Missing execution term"); ${fault === "finalizer" ? "yield* Effect.addFinalizer(() => Effect.never)" : ""} }) });`,
+		`import { Effect, Schema } from "effect"; import * as Plugin from ${pluginEntry}; ${fault === "import" ? "while (true) {}" : ""} export default Plugin.make({ name:"native-unit-fixture",overlap:true,config:Schema.Struct({mode:Schema.String${fault === "decode" ? ".check(Schema.makeFilter(() => { while (true) {} }))" : ""}}),apply:() => Effect.gen(function* () { const term = yield* Plugin.term; if (term < 1) return yield* Effect.die("Missing execution term"); ${fault === "finalizer" ? "yield* Effect.addFinalizer(() => Effect.never)" : ""} }) });`,
 	)
 	return yield* Artifact.capture({
 		directory: source,
