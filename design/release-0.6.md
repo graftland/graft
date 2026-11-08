@@ -19,6 +19,7 @@ order: `architecture.md` (v1.0), `value.md`, the phase specs, `review-fixes.md`,
 | R2  | Journal: diagnostics store with declared retention, and segment compaction                                                                  | §9.2, §6.3          | Sol    | Tests for retention expiry, compaction preserving history, crash during compaction                                                                               |
 | L1  | Watch mode replans when the conflicting Change ends instead of polling every 250 ms; one integrated CLI + Loader + recorder + gateway test   | §8.2, phase 3 bar   | Sol    | Busy edit applied after the conflict without polling; integrated test drives `graft start` with recorder and gateway                                             |
 | Q1  | Native addon in a Process unit (compiled N-API addon in test setup); benchmark failure on macOS; `group-native` flakiness under load; Linux-only failures from the Docker run | phase 6 | Sol | Support matrix row "native addon" tested; full suite passes on macOS and in Linux Docker with `GRAFT_REQUIRE_SANDBOX=true`                                      |
+| P1  | Changelog and release process modelled on Effect: Changesets (fixed group, `changelog-github`), a Version Packages pull request, per-package `CHANGELOG.md`, a GitHub Release per version from the changelog; the tag-driven npm publishing and its guarantees stay | owner request | Sol | Script tests; `changeset status`; workflows lint; `publishing.md` in three languages |
 | D1  | Notifications: amend `architecture.md` §4 to the pull direction with its reasons                                                            | §4                  | Claude | Architecture and phase-7 agree                                                                                                                                   |
 
 ## Out of scope for 0.6.0
@@ -33,4 +34,6 @@ order: `architecture.md` (v1.0), `value.md`, the phase specs, `review-fixes.md`,
 
 All items merged; full checks on macOS; full suite in Linux Docker; one
 cross-review (Sol reviews Claude's work, Claude reviews Sol's); docs in three
-languages; then merge to `main`, push, wait for CI, tag `v0.6.0`.
+languages; then merge to `main` with the 0.6.0 changeset and push; merge the
+Version Packages pull request that Changesets opens; tag `v0.6.0` once `main`
+passes CI; CI publishes to npm and creates the GitHub Release.
