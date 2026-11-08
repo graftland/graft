@@ -47,7 +47,7 @@ business schemas.
 | `client.units`, `client.preparations` | Expose native exit evidence, cleanup classification, causes and residual reservations, including rejection before admission.             |
 | `client.waiters`                      | Returns bounded queued calls before generation selection; no provider credit is assigned yet.                                            |
 | `client.recording`                    | Returns the recording grant and every unacknowledged [record](../recording/), including those of an exited recorder.                     |
-| `client.supervision`                  | Returns recent supervisor attempts and escalation per instance; see [Supervision](../units/#supervision).                                |
+| `client.supervision`                  | Returns attempts, escalation and an optional down `reason` for every desired instance; see [Supervision](../units/#supervision).         |
 
 ## Read a deployment plan
 

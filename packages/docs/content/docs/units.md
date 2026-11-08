@@ -104,20 +104,44 @@ fresh; nothing from the previous generation stays in memory.
 
 A failure that no Change owns belongs to the **supervisor**. It restarts within
 a bounded **restart intensity**, then stops and keeps the failure observable.
-Set the bound in deployment data: `supervision: { intensity: 3, period: 60000 }`
-(the default) allows three attempts per 60 seconds for each instance.
+Set the policy in deployment data with `supervision`.
 
-| Event                                       | What the supervisor does                                                                                           |
-| ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| A member fails                              | Restarts it and its local consumers in their unit; healthy co-residents keep serving.                              |
-| A unit exits on its own                     | Settles the whole group, then submits one Change that deploys the group's desired targets.                         |
-| The intensity is exhausted                  | Escalates the instance: it stays failed and nothing else restarts. An accepted Change for it lifts the escalation. |
-| A Change owns the member                    | The Change fails or recovers; the supervisor starts no competing attempt.                                          |
-| The restart conflicts with a running Change | It waits and is tried again when that Change releases its objects.                                                 |
+| Field             | Rule                                                                                           |
+| ----------------- | ---------------------------------------------------------------------------------------------- |
+| `intensity`       | At most this many attempts per instance within `period`; default `3`.                          |
+| `period`          | Intensity window in milliseconds; default `60000`.                                             |
+| `backoff`         | Optional `{ initial: 100, factor: 2, max: 5000 }`: wait 100 ms, 200 ms, 400 ms, up to 5000 ms. |
+| Omitted `backoff` | No delay, preserving immediate restarts. `initial: 0` also disables delay.                     |
 
-Attempts are counted per instance and survive new generations; `Busy`, planned
-generations and kernel shutdown do not count. `kernel.supervision` and
-[`client.supervision`](../control/) list recent attempts and escalation.
+| Event                                              | What the supervisor does                                                                                           |
+| -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| A member fails                                     | Restarts it and its local consumers in their unit; healthy co-residents keep serving.                              |
+| A unit exits on its own                            | Settles the whole group, then submits one Change that deploys the group's desired targets.                         |
+| The intensity is exhausted                         | Escalates the instance: it stays failed and nothing else restarts. An accepted Change for it lifts the escalation. |
+| A Change owns the member                           | The Change fails or recovers; the supervisor starts no competing attempt.                                          |
+| Backoff or a conflicting Change delays the restart | Keeps it pending; waiting consumes no attempt.                                                                     |
+| An operator Change is accepted                     | Resets backoff for its instances and discards their stale pending restarts.                                        |
+| The kernel shuts down                              | Cancels waiting restarts.                                                                                          |
+
+Attempts count when a restart starts and survive new generations; `Busy` and
+planned generations do not count. Consecutive failures share backoff progress,
+including successful supervisor restarts. A busy retry reuses its elapsed delay.
+Backoff durations are nonnegative milliseconds; the factor is at least `1`.
+
+`kernel.supervision` and [`client.supervision`](../control/) return attempts,
+escalation and an optional `reason` for every desired instance. Reasons apply
+when no Change owns the instance; a serving instance has none.
+
+| `reason`               | Meaning                                                                                            |
+| ---------------------- | -------------------------------------------------------------------------------------------------- |
+| `Revoked`              | Current policy denies the desired target.                                                          |
+| `Escalated`            | The supervisor has stopped retrying, including when intensity is exhausted.                        |
+| `WaitingForDependency` | A required provider is unavailable.                                                                |
+| `RestartPending`       | A restart waits for backoff, preparation or a conflict.                                            |
+| None                   | No supervisor reason applies, including while a Change owns the instance or the kernel shuts down. |
+
+When several reasons apply, revocation takes precedence, then escalation, then a
+missing dependency, then a pending restart.
 
 ## Read the execution term
 

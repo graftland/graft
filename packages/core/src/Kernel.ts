@@ -95,7 +95,10 @@ export type {
 	RecordDuty,
 	RecordingStatus,
 	RecordingSignal,
+	SupervisionBackoff,
 	SupervisionDeclaration,
+	SupervisionFact,
+	InstanceDownReason,
 	SupervisionPolicy,
 	Supervision,
 	PendingRestart,
@@ -154,10 +157,8 @@ export class Kernel extends Context.Service<
 		readonly preparations: Stream.Stream<Core.PreparationStatus>
 		readonly inspections: Effect.Effect<ReadonlyArray<Core.PreparationStatus>>
 		readonly units: Effect.Effect<ReadonlyArray<Core.Unit>>
-		/** Supervisor facts per instance: recent attempted restarts and whether it was escalated. */
-		readonly supervision: Effect.Effect<
-			ReadonlyArray<{ readonly instance: string } & Core.Supervision>
-		>
+		/** Attempts, escalation and an optional down reason for every desired instance. */
+		readonly supervision: Effect.Effect<ReadonlyArray<Core.SupervisionFact>>
 		/** The current recording grant and every duty not yet acknowledged, including those of ended owners. */
 		readonly recording: Effect.Effect<{
 			readonly grant: Option.Option<Core.RecorderGrant>
@@ -249,12 +250,7 @@ export const layer = (
 				units: Effect.map(controller.snapshot, (s) =>
 					Array.fromIterable(HashMap.values(s.units)),
 				),
-				supervision: Effect.map(controller.snapshot, (s) =>
-					Array.map(Array.fromIterable(s.supervision), ([instance, fact]) => ({
-						instance,
-						...fact,
-					})),
-				),
+				supervision: Effect.map(controller.snapshot, Core.supervision),
 				recording: Effect.map(controller.snapshot, (s) => ({
 					grant: s.recorder,
 					outstanding: Array.filter(
