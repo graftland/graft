@@ -12,9 +12,6 @@ devenv shell -- pnpm build
 devenv shell -- bash -c "cd samples/mcp-tools && pnpm start"
 ```
 
-`graft start --stdio`
-目前会被拒绝：插件运行在单元里，没有插件拥有进程的标准输入输出。下面的客户端配置要等内核提供 stdio 桥接后才适用；在此之前请运行示例的测试，或使用 HTTP 配置。
-
 ```toml
 [mcp_servers.graft-tools]
 command = "sh"

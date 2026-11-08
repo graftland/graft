@@ -34,9 +34,8 @@ export default Tools.plugin({
 - name: ./src/echo.ts
 ```
 
-Run it from a directly embedded application; `graft start --stdio` is rejected
-because plugins run in units and none owns the process stdio. Effect handles MCP
-2026-07-28 and legacy 2025-11-25 clients.
+Run `graft start --stdio`. Effect handles MCP 2026-07-28 and legacy 2025-11-25
+clients.
 
 ## HTTP
 

@@ -8,6 +8,7 @@ import {
 	Fiber,
 	Layer,
 	Logger,
+	Option,
 	Queue,
 	Ref,
 	Schema,
@@ -20,8 +21,11 @@ import {
 import { McpTest, Tool, Toolkit } from "effect/ai"
 import { assert, describe, it } from "@effect/vitest"
 
-import { Application, ProtocolOutput } from "@graftland/cli/Application"
 import { Event, Graft, Plugin } from "@graftland/graft"
+import {
+	ProcessStdio,
+	StdioDenied,
+} from "@graftland/plugin-remote/ProcessStdio"
 
 import { Offered as Tools, Changed as ToolsChanged } from "../src/Catalog.ts"
 import core from "../src/index.ts"
@@ -204,116 +208,91 @@ it.effect(
 		}).pipe(run),
 )
 
-for (const stdio of [false, true]) {
-	it.effect(`observes the CLI Application provision with stdio: ${stdio}`, () =>
-		Effect.gen(function* () {
-			const claims = yield* Ref.make(0)
-			yield* Graft.provide(Application, {
-				claimProtocol: Ref.update(claims, (count) => count + 1),
-				finish: () => Effect.void,
-				onExit: () => Effect.void,
-			})
-			yield* (yield* Graft.plugin(core, {})).await
-			const fork = yield* Graft.plugin(host, {})
-			const activation = yield* Effect.exit(fork.await)
-			if (stdio) {
-				assert.isTrue(Exit.isSuccess(activation))
-				const count = yield* Ref.get(claims)
-				assert.strictEqual(count, 1)
-			} else {
-				assert.isTrue(Exit.isFailure(activation))
-			}
-		}).pipe(
-			Effect.scoped,
-			Effect.provideService(ProtocolOutput, stdio),
-			Effect.provide(
-				Layer.provideMerge(
-					Graft.layer,
-					Stdio.layerTest({ stdin: Stream.never }),
+/** A kernel stand-in that lends `lent` or denies every claim, counting claims and releases. */
+const kernelStdio = (lent: Option.Option<Stdio.Stdio>) =>
+	Effect.gen(function* () {
+		const claims = yield* Ref.make(0)
+		const releases = yield* Ref.make(0)
+		yield* Graft.provide(ProcessStdio, {
+			claim: Effect.gen(function* () {
+				yield* Ref.update(claims, (n) => n + 1)
+				if (Option.isNone(lent)) return yield* StdioDenied.make({})
+				yield* Effect.addFinalizer(() => Ref.update(releases, (n) => n + 1))
+				return lent.value
+			}),
+		})
+		return { claims, releases }
+	})
+const idle = Stdio.make({
+	args: Effect.succeed([]),
+	stdin: Stream.never,
+	stdout: () => Sink.drain,
+	stderr: () => Sink.drain,
+})
+
+for (const granted of [false, true]) {
+	it.effect(
+		`claims the kernel stdio through ProcessStdio when granted: ${granted}`,
+		() =>
+			Effect.gen(function* () {
+				const counts = yield* kernelStdio(
+					granted ? Option.some(idle) : Option.none(),
+				)
+				yield* (yield* Graft.plugin(core, {})).await
+				const fork = yield* Graft.plugin(host, {})
+				const activation = yield* Effect.exit(fork.await)
+				assert.strictEqual(Exit.isSuccess(activation), granted)
+				const observed1 = yield* Ref.get(counts.claims)
+				assert.strictEqual(observed1, 1)
+			}).pipe(
+				Effect.scoped,
+				Effect.provide(
+					Layer.provideMerge(
+						Graft.layer,
+						Stdio.layerTest({ stdin: Stream.never }),
+					),
 				),
 			),
-		),
 	)
 }
 
-it.effect("finishes the application once the client closes stdin", () =>
-	Effect.gen(function* () {
-		const writing = yield* Deferred.make<void>()
-		const release = yield* Deferred.make<void>()
-		const written = yield* Ref.make<ReadonlyArray<string>>([])
-		const finished = yield* Deferred.make<ReadonlyArray<string>>()
-		const stdio = Stdio.layerTest({
-			stdin: Stream.make(
-				new TextEncoder().encode('{"jsonrpc":"2.0","id":1,"method":"ping"}\n'),
-			),
-			stdout: () =>
-				Sink.forEach((chunk: string | Uint8Array) =>
-					Deferred.succeed(writing, undefined).pipe(
-						Effect.andThen(Deferred.await(release)),
-						Effect.andThen(
-							Ref.update(written, (all) => [
-								...all,
-								typeof chunk === "string"
-									? chunk
-									: new TextDecoder().decode(chunk),
-							]),
-						),
+it.effect(
+	"writes the last reply before ending the lent stdout once the client closes stdin",
+	() =>
+		Effect.gen(function* () {
+			const written = yield* Ref.make<ReadonlyArray<string>>([])
+			const ended = yield* Deferred.make<ReadonlyArray<string>>()
+			const lent = Stdio.make({
+				args: Effect.succeed([]),
+				stdin: Stream.make(
+					new TextEncoder().encode(
+						'{"jsonrpc":"2.0","id":1,"method":"ping"}\n',
 					),
 				),
-		})
-		yield* Effect.gen(function* () {
-			yield* Graft.provide(Application, {
-				claimProtocol: Effect.void,
-				finish: (exit) =>
-					Exit.isSuccess(exit)
-						? Effect.andThen(Ref.get(written), (all) =>
-								Deferred.succeed(finished, all),
-							)
-						: Effect.void,
-				onExit: () => Effect.void,
+				stdout: () =>
+					Sink.forEach((chunk: string | Uint8Array) =>
+						Ref.update(written, (all) => [
+							...all,
+							typeof chunk === "string"
+								? chunk
+								: new TextDecoder().decode(chunk),
+						]),
+					).pipe(
+						Sink.onExit(() =>
+							Effect.flatMap(Ref.get(written), (all) =>
+								Deferred.succeed(ended, all),
+							),
+						),
+					),
+				stderr: () => Sink.drain,
 			})
+			yield* kernelStdio(Option.some(lent))
 			yield* (yield* Graft.plugin(core, {})).await
-			const fork = yield* Graft.plugin(host, {})
-			yield* fork.await
-			yield* Deferred.await(writing)
-			const didFinish = yield* Deferred.isDone(finished)
-			assert.isFalse(didFinish)
-			yield* Deferred.succeed(release, undefined)
-			// The reply to the last request is written before the application finishes.
-			const output = yield* Deferred.await(finished)
+			yield* (yield* Graft.plugin(host, {})).await
+			const output = yield* Deferred.await(ended)
 			assert.isTrue(String.includes('"id":1')(Array.join(output, "")))
 		}).pipe(
 			Effect.scoped,
-			Effect.provideService(ProtocolOutput, true),
-			Effect.provide(Layer.provideMerge(Graft.layer, stdio)),
-		)
-	}),
-)
-
-it.effect(
-	"does not finish the application on restart, replacement or unload",
-	() =>
-		Effect.gen(function* () {
-			const finishes = yield* Ref.make(0)
-			yield* Graft.provide(Application, {
-				claimProtocol: Effect.void,
-				finish: () => Ref.update(finishes, (count) => count + 1),
-				onExit: () => Effect.void,
-			})
-			yield* (yield* Graft.plugin(core, {})).await
-			const fork = yield* Graft.plugin(host, {})
-			yield* fork.await
-			yield* fork.restart
-			yield* fork.await
-			const replacement = { ...host, name: "replacement host" }
-			const result = yield* Graft.replace([[host, replacement]])
-			assert.strictEqual(result._tag, "Replaced")
-			yield* fork.dispose
-			const count = yield* Ref.get(finishes)
-			assert.strictEqual(count, 0)
-		}).pipe(
-			Effect.scoped,
-			Effect.provideService(ProtocolOutput, true),
 			Effect.provide(
 				Layer.provideMerge(
 					Graft.layer,
@@ -321,6 +300,29 @@ it.effect(
 				),
 			),
 		),
+)
+
+it.effect("releases the lent stdio when it restarts or unloads", () =>
+	Effect.gen(function* () {
+		const counts = yield* kernelStdio(Option.some(idle))
+		yield* (yield* Graft.plugin(core, {})).await
+		const fork = yield* Graft.plugin(host, {})
+		yield* fork.await
+		yield* fork.restart
+		yield* fork.await
+		const observed2 = yield* Ref.get(counts.claims)
+		assert.strictEqual(observed2, 2)
+		const observed3 = yield* Ref.get(counts.releases)
+		assert.strictEqual(observed3, 1)
+		yield* fork.dispose
+		const observed4 = yield* Ref.get(counts.releases)
+		assert.strictEqual(observed4, 2)
+	}).pipe(
+		Effect.scoped,
+		Effect.provide(
+			Layer.provideMerge(Graft.layer, Stdio.layerTest({ stdin: Stream.never })),
+		),
+	),
 )
 
 it.effect(

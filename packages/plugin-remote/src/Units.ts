@@ -6,6 +6,14 @@ import { Kernel } from "@graftland/graft"
 import type * as Artifact from "./Artifact"
 
 export { layer } from "./internal/nativeControl"
+/** Lends the kernel's stdio to the unit that claims it through `ProcessStdio`. Provide it before `layer`. */
+export {
+	layer as stdio,
+	StdioBridge,
+	type Bridge,
+	type Holder,
+	type Input as StdioInput,
+} from "./internal/stdioBridge"
 export interface TargetOptions {
 	readonly module?: string
 	readonly environment?: ReadonlyArray<Kernel.ConfigurationModule>

@@ -33,8 +33,7 @@ export default Tools.plugin({
 - name: ./src/echo.ts
 ```
 
-請在直接嵌入的應用程式中執行；`graft start --stdio`
-會被拒絕，因為外掛在單元中執行，沒有外掛擁有行程的標準輸入輸出。Effect 處理 MCP
+執行 `graft start --stdio`。Effect 處理 MCP
 2026-07-28 和舊版 2025-11-25 用戶端。
 
 ## HTTP

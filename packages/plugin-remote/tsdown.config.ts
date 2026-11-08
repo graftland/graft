@@ -25,6 +25,7 @@ export default defineConfig({
 		"src/Units.ts",
 		"src/Control.ts",
 		"src/Recording.ts",
+		"src/ProcessStdio.ts",
 		"src/Policy.ts",
 		"src/Publication.ts",
 		"src/Capabilities.ts",

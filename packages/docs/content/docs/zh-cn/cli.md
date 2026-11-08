@@ -36,7 +36,7 @@ graft add --plugin example --global
 ## graft start
 
 ```sh
-graft start [config] [--env-file <path>] [--env-dir <path>]
+graft start [config] [--env-file <path>] [--env-dir <path>] [--stdio]
 ```
 
 运行[配置文件](../config-file/)中描述的应用。`config` 默认为
@@ -48,9 +48,18 @@ graft start [config] [--env-file <path>] [--env-dir <path>]
 
 ### 协议输出
 
-`graft start --stdio`
-会被拒绝：插件运行在单元里，没有插件拥有进程的标准输入输出。要通过 stdio 运行
-[MCP 服务器](../mcp-server/overview/)，请在直接[嵌入](../embedding/)的应用中运行。
+对 [MCP 服务器](../mcp-server/overview/)使用
+`graft start --stdio`。内核拥有进程的标准输入输出，并把它借给一个单元：该单元里通过
+`@graftland/plugin-remote` 的 `ProcessStdio`
+认领它的插件。此时标准输出只承载协议字节；日志、帮助、错误以及单元的控制台输出写到标准错误。
+
+| 规则             | 行为                                                                       |
+| ---------------- | -------------------------------------------------------------------------- |
+| 唯一持有者       | 有存活的化身持有时，第二次认领以 `StdioDenied` 失败。                      |
+| 重启             | 认领随持有者所在的单元结束。没有单元持有期间到达的输入会留给下一个持有者。 |
+| 结束             | 持有者结束其标准输出时，内核的标准输出随之结束，`graft start` 退出。       |
+| 未使用 `--stdio` | 每次认领都以 `StdioDenied` 失败。                                          |
+| 放置             | Worker 和 Process 单元可以持有；runner 单元不能。                          |
 
 ### 选项
 

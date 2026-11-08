@@ -53,6 +53,10 @@
 			"source": "./src/Policy.ts",
 			"default": "./dist/Policy.js"
 		},
+		"./ProcessStdio": {
+			"source": "./src/ProcessStdio.ts",
+			"default": "./dist/ProcessStdio.js"
+		},
 		"./Publication": {
 			"source": "./src/Publication.ts",
 			"default": "./dist/Publication.js"
@@ -106,6 +110,7 @@
 			"./Control": "./dist/Control.js",
 			"./Errors": "./dist/Errors.js",
 			"./Policy": "./dist/Policy.js",
+			"./ProcessStdio": "./dist/ProcessStdio.js",
 			"./Publication": "./dist/Publication.js",
 			"./Recording": "./dist/Recording.js",
 			"./Testing": "./dist/Testing.js",

@@ -37,7 +37,7 @@ repair a broken declaration. Business entries do not run during discovery.
 ## graft start
 
 ```sh
-graft start [config] [--env-file <path>] [--env-dir <path>]
+graft start [config] [--env-file <path>] [--env-dir <path>] [--stdio]
 ```
 
 Runs the application that a [config file](../config-file/) describes. `config`
@@ -52,9 +52,18 @@ inspects each entry in a disposable unit and submits all entries as one
 
 ### Protocol output
 
-`graft start --stdio` is rejected: plugins run in units, so none of them owns
-the process stdio. Run an [MCP server](../mcp-server/overview/) over stdio from
-a directly [embedded](../embedding/) application.
+Use `graft start --stdio` for an [MCP server](../mcp-server/overview/). The
+kernel owns the process stdio and lends it to the one unit whose plugin claims
+it through `ProcessStdio` from `@graftland/plugin-remote`. Stdout then carries
+only protocol bytes; logs, help, errors and unit console output go to stderr.
+
+| Rule              | Behavior                                                                                                           |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------ |
+| One holder        | A second claim fails with `StdioDenied` while a live incarnation holds the stdio.                                  |
+| Restarts          | The claim ends with the holder's unit. Input that arrives while no unit holds the stdio waits for the next holder. |
+| End               | When the holder ends its stdout, the kernel's stdout ends and `graft start` exits.                                 |
+| Without `--stdio` | Every claim fails with `StdioDenied`.                                                                              |
+| Placement         | Worker and Process units can hold the stdio; a runner unit cannot.                                                 |
 
 ### Options
 

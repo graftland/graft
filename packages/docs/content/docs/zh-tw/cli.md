@@ -36,7 +36,7 @@ graft add --plugin example --global
 ## graft start
 
 ```sh
-graft start [config] [--env-file <path>] [--env-dir <path>]
+graft start [config] [--env-file <path>] [--env-dir <path>] [--stdio]
 ```
 
 執行[設定檔](../config-file/)所描述的應用程式。`config` 預設為
@@ -48,9 +48,18 @@ graft start [config] [--env-file <path>] [--env-dir <path>]
 
 ### 協定輸出
 
-`graft start --stdio`
-會被拒絕：外掛在單元中執行，沒有外掛擁有行程的標準輸入輸出。若要透過 stdio 執行
-[MCP 伺服器](../mcp-server/overview/)，請在直接[嵌入](../embedding/)的應用程式中執行。
+對 [MCP 伺服器](../mcp-server/overview/)使用
+`graft start --stdio`。核心擁有行程的標準輸入輸出，並將其借給一個單元：該單元中透過
+`@graftland/plugin-remote` 的 `ProcessStdio`
+認領它的外掛。此時標準輸出只承載協定位元組；日誌、說明、錯誤以及單元的主控台輸出寫到標準錯誤。
+
+| 規則             | 行為                                                                       |
+| ---------------- | -------------------------------------------------------------------------- |
+| 唯一持有者       | 有存活的化身持有時，第二次認領以 `StdioDenied` 失敗。                      |
+| 重新啟動         | 認領隨持有者所在的單元結束。沒有單元持有期間到達的輸入會留給下一個持有者。 |
+| 結束             | 持有者結束其標準輸出時，核心的標準輸出隨之結束，`graft start` 結束。       |
+| 未使用 `--stdio` | 每次認領都以 `StdioDenied` 失敗。                                          |
+| 放置             | Worker 與 Process 單元可以持有；runner 單元不能。                          |
 
 ### 選項
 

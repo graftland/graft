@@ -5,6 +5,6 @@ export class StdioUnavailable extends Schema.TaggedError<
 	{ readonly brand: unique symbol }
 >()("StdioUnavailable", {}) {
 	override get message(): string {
-		return "The MCP stdio transport needs stdout to itself: start it with graft start --stdio"
+		return "The MCP stdio transport needs the process stdio: start the kernel with graft start --stdio, and run only one stdio entry"
 	}
 }

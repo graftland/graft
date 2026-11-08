@@ -16,10 +16,8 @@ consume it. Contributors load and unload without reconnecting clients.
 - name: ./plugins/notes.ts
 ```
 
-Run these entries in a directly [embedded](../../embedding/) application; stdout
-belongs to the protocol, so use `Effect.log*` for logs. `graft start --stdio` is
-rejected because plugins run in units and none owns the process stdio; with
-`graft start`, use the [HTTP transport](#serve-http). The
+Run `graft start --stdio`. Use `Effect.log*` for logs; stdout belongs to the
+protocol, which the kernel [lends to this unit](../../cli/#protocol-output). The
 [sample](https://github.com/graftland/graft/tree/main/samples/mcp-tools)
 includes a runnable client configuration.
 

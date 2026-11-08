@@ -386,6 +386,10 @@ export type Report = typeof Report.Type
 export const Incoming = Schema.Union([
 	Schema.TaggedStruct("Init", { command: Command }),
 	Schema.TaggedStruct("Run", { command: Command }),
+	Schema.TaggedStruct("StdioGranted", {}),
+	Schema.TaggedStruct("StdioDenied", {}),
+	Schema.TaggedStruct("StdioIn", { bytes: Schema.Uint8Array }),
+	Schema.TaggedStruct("StdioEnd", {}),
 ])
 export type Incoming = typeof Incoming.Type
 export const Outgoing = Schema.Union([
@@ -416,6 +420,10 @@ export const Outgoing = Schema.Union([
 	Schema.TaggedStruct("Cleanup", { cause: Schema.optionalKey(Schema.Json) }),
 	Schema.TaggedStruct("Progress", { stage: Schema.String }),
 	Schema.TaggedStruct("RecorderRegister", { recorder: Schema.String }),
+	Schema.TaggedStruct("StdioClaim", {}),
+	Schema.TaggedStruct("StdioOut", { bytes: Schema.Uint8Array }),
+	Schema.TaggedStruct("StdioClose", {}),
+	Schema.TaggedStruct("StdioRelease", {}),
 	Schema.TaggedStruct("RecordAck", {
 		record: Schema.String,
 		content: Schema.String,

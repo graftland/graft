@@ -246,24 +246,64 @@ it.live(
 )
 
 it.live(
-	"rejects protocol stdio because no plugin owns the process stdio (O6)",
+	"lends the kernel's stdio to the one unit that claims it and exits when it ends its output",
 	() =>
 		Effect.gen(function* () {
 			const fs = yield* FileSystem.FileSystem
 			const directory = yield* fs.makeTempDirectoryScoped()
-			yield* fs.writeFileString(`${directory}/graft.yml`, "[]\n")
+			const plugin = yield* quote(
+				new URL("../.cache/integration/plugin.mjs", import.meta.url).href,
+			)
+			const effect = yield* quote(import.meta.resolve("effect"))
+			const lend = yield* quote(
+				new URL("../../plugin-remote/dist/ProcessStdio.js", import.meta.url)
+					.href,
+			)
+			yield* fs.writeFileString(
+				`${directory}/package.json`,
+				'{"name":"start-stdio-fixture","type":"module"}',
+			)
+			yield* fs.writeFileString(
+				`${directory}/echo.mjs`,
+				`import {Plugin} from ${plugin};import {Effect,Stream} from ${effect};import {ProcessStdio} from ${lend};export default Plugin.make({name:"echo",inject:[ProcessStdio],apply:()=>Effect.gen(function*(){const stdio=yield* (yield* ProcessStdio).claim;yield* Effect.logInfo("UNIT LOG");yield* Plugin.fork(stdio.stdin.pipe(Stream.decodeText(),Stream.map((text)=>text.toUpperCase()),Stream.encodeText,Stream.run(stdio.stdout())))})});`,
+			)
+			yield* fs.writeFileString(
+				`${directory}/graft.yml`,
+				"- id: first\n  name: ./echo.mjs\n",
+			)
 			const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
 			const child = yield* spawner.spawn(
 				ChildProcess.make(
 					process.execPath,
-					[executable, "--stdio", "start", `${directory}/graft.yml`],
-					{ cwd: directory, env: { GRAFT_HOME: directory + "/home" } },
+					[
+						executable,
+						"--no-plugins",
+						"--stdio",
+						"start",
+						`${directory}/graft.yml`,
+					],
+					{
+						cwd: directory,
+						env: { GRAFT_HOME: directory + "/home" },
+						extendEnv: true,
+					},
 				),
 			)
-			const output = yield* Stream.mkString(Stream.decodeText(child.all))
+			const stdout = yield* Stream.mkString(
+				Stream.decodeText(child.stdout),
+			).pipe(Effect.forkScoped)
+			const stderr = yield* Stream.mkString(
+				Stream.decodeText(child.stderr),
+			).pipe(Effect.forkScoped)
+			yield* Stream.make(
+				new TextEncoder().encode("hello over the kernel\n"),
+			).pipe(Stream.run(child.stdin))
 			const code = yield* child.exitCode
-			assert.notEqual(code, 0)
-			assert.include(output, "graft start --stdio is unsupported")
+			const out = yield* Fiber.join(stdout)
+			const err = yield* Fiber.join(stderr)
+			assert.strictEqual(out, "HELLO OVER THE KERNEL\n", err)
+			assert.include(err, "UNIT LOG")
+			assert.strictEqual(code, 0, err)
 		}).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
-	15000,
+	30000,
 )

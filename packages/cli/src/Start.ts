@@ -10,7 +10,9 @@ import {
 	FileSystem,
 	Layer,
 	Logger,
+	Option,
 	Path,
+	Stdio,
 	type PlatformError,
 } from "effect"
 import { NodeServices } from "@effect/platform-node"
@@ -20,7 +22,7 @@ import * as Artifact from "@graftland/plugin-remote/Artifact"
 import * as Control from "@graftland/plugin-remote/Control"
 import * as Units from "@graftland/plugin-remote/Units"
 
-import { ApplicationError } from "./Application"
+import { ApplicationError, ProtocolOutput } from "./Application"
 
 export interface Options {
 	/** Path of the config file. */
@@ -122,8 +124,32 @@ const application = Effect.fnUntraced(function* (options: Options) {
 	if (conclusion.outcome !== "Accepted")
 		return yield* ApplicationError.make({ cause: conclusion.cause })
 	yield* Effect.logInfo(`Running ${path.relative(process.cwd(), file) || file}`)
-	return yield* Effect.never
+	/** With protocol stdio, the process ends once the holder ends its output. */
+	const bridge = yield* Units.StdioBridge
+	if (Option.isNone(bridge)) return yield* Effect.never
+	return yield* bridge.value.closed.pipe(
+		Effect.catchCause((cause) => ApplicationError.make({ cause })),
+	)
 })
+
+/** The kernel; with protocol stdio, also the bridge that lends the reserved stdio to a unit. */
+const kernel = (protocol: Option.Option<Stdio.Stdio>) =>
+	Kernel.layer({
+		authority: "graft-start",
+		maxUnits: 64,
+		instances: [],
+	}).pipe(
+		Layer.provide(Units.layer),
+		Layer.provideMerge(
+			Option.match(protocol, {
+				onNone: () => Layer.empty,
+				onSome: (stdio) =>
+					Units.stdio.pipe(Layer.provide(Layer.succeed(Stdio.Stdio, stdio))),
+			}),
+		),
+		Layer.provideMerge(NodeServices.layer),
+		Layer.provideMerge(Logger.layer([Logger.consolePretty()])),
+	)
 
 /**
  * Loads one configuration revision through the Loader unit. Watch and live
@@ -131,33 +157,31 @@ const application = Effect.fnUntraced(function* (options: Options) {
  */
 export const run = (
 	options: Options,
-): Effect.Effect<void, ApplicationError | PlatformError.PlatformError> =>
+): Effect.Effect<
+	void,
+	ApplicationError | PlatformError.PlatformError,
+	Stdio.Stdio
+> =>
 	options.watch
 		? ApplicationError.make({
 				cause: Cause.fail(
 					"Watch and live Loader mutation are unsupported for this deployment",
 				),
 			})
-		: application(options).pipe(
-				Effect.scoped,
-				Effect.catchTags({
-					ArtifactError: (error) =>
-						ApplicationError.make({ cause: Cause.fail(error) }),
-					ChangeRejected: (error) =>
-						ApplicationError.make({ cause: Cause.fail(error) }),
-					ControlError: (error) =>
-						ApplicationError.make({ cause: Cause.fail(error) }),
-				}),
-				// @effect-diagnostics-next-line strictEffectProvide:off -- this runs the whole application, so it is an entry point
-				Effect.provide(
-					Kernel.layer({
-						authority: "graft-start",
-						maxUnits: 64,
-						instances: [],
-					}).pipe(
-						Layer.provide(Units.layer),
-						Layer.provideMerge(NodeServices.layer),
-						Layer.provideMerge(Logger.layer([Logger.consolePretty()])),
-					),
-				),
-			)
+		: Effect.gen(function* () {
+				const protocol = yield* ProtocolOutput
+				const stdio = yield* Stdio.Stdio
+				return yield* application(options).pipe(
+					Effect.scoped,
+					Effect.catchTags({
+						ArtifactError: (error) =>
+							ApplicationError.make({ cause: Cause.fail(error) }),
+						ChangeRejected: (error) =>
+							ApplicationError.make({ cause: Cause.fail(error) }),
+						ControlError: (error) =>
+							ApplicationError.make({ cause: Cause.fail(error) }),
+					}),
+					// @effect-diagnostics-next-line strictEffectProvide:off -- this runs the whole application, so it is an entry point
+					Effect.provide(kernel(protocol ? Option.some(stdio) : Option.none())),
+				)
+			})

@@ -12,9 +12,6 @@ devenv shell -- pnpm build
 devenv shell -- bash -c "cd samples/mcp-tools && pnpm start"
 ```
 
-`graft start --stdio`
-目前會被拒絕：外掛在單元中執行，沒有外掛擁有行程的標準輸入輸出。下列用戶端設定要等核心提供 stdio 橋接後才適用；在此之前請執行範例的測試，或使用 HTTP 設定。
-
 ```toml
 [mcp_servers.graft-tools]
 command = "sh"

@@ -1,8 +1,8 @@
-import { Deferred, Effect, Exit, Layer, Option, Sink, Stdio } from "effect"
+import { Effect, Layer, Option, Stdio } from "effect"
 import { McpServer } from "effect/ai"
 
-import { Application, ProtocolOutput } from "@graftland/cli/Application"
 import { Plugin } from "@graftland/graft"
+import { ProcessStdio } from "@graftland/plugin-remote/ProcessStdio"
 
 import { StdioConfig } from "./Config"
 import { StdioUnavailable } from "./Errors"
@@ -11,41 +11,21 @@ import { Server } from "./Server"
 export default Plugin.make({
 	name: "@graftland/plugin-mcp-server/stdio",
 	config: StdioConfig,
-	// Optional so that the server also runs outside the CLI, under any Stdio.
-	inject: [Server, Stdio.Stdio, Plugin.optional(Application)],
+	// In a unit the kernel lends its process stdio; embedded, any Stdio serves.
+	inject: [Server, Stdio.Stdio, Plugin.optional(ProcessStdio)],
 	apply: Effect.fnUntraced(function* () {
-		// Under graft start, stdout belongs to the protocol only with --stdio.
-		const application = yield* Effect.serviceOption(Application)
-		const stdio = yield* Stdio.Stdio
-		// The server ends stdout once the client has closed stdin and every
-		// reply is written; under graft start that ends the process too.
-		const closed = yield* Deferred.make<void>()
-		if (Option.isSome(application)) {
-			if (!(yield* ProtocolOutput)) return yield* StdioUnavailable.make({})
-			yield* application.value.claimProtocol
-			yield* Plugin.fork(
-				Deferred.await(closed).pipe(
-					Effect.andThen(application.value.finish(Exit.void)),
-				),
-			)
-		}
-		const watched = Stdio.make({
-			...stdio,
-			stdout: (options) =>
-				stdio
-					.stdout(options)
-					.pipe(
-						Sink.onExit((exit) =>
-							Exit.isSuccess(exit)
-								? Deferred.succeed(closed, undefined)
-								: Effect.void,
-						),
-					),
-		})
+		const lent = yield* Effect.serviceOption(ProcessStdio)
+		// The server ends stdout once the client has closed stdin and every reply
+		// is written; under graft start that ends the kernel's stdout and process.
+		const stdio = Option.isSome(lent)
+			? yield* lent.value.claim.pipe(
+					Effect.catchTag("StdioDenied", () => StdioUnavailable.make({})),
+				)
+			: yield* Stdio.Stdio
 		yield* Layer.build(
 			McpServer.layerStdio({
 				...(yield* (yield* Server).options),
-			}).pipe(Layer.provide(Layer.succeed(Stdio.Stdio, watched))),
+			}).pipe(Layer.provide(Layer.succeed(Stdio.Stdio, stdio))),
 		)
 	}),
 })

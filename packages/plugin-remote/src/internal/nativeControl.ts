@@ -33,6 +33,7 @@ import {
 import * as CallFrames from "./callFrames"
 import * as EncodedLimit from "./encodedLimit"
 import * as RunnerClient from "./runnerClient"
+import * as Bridge from "./stdioBridge"
 import * as Wire from "./unitProtocol"
 import * as Resolution from "./unitResolution"
 
@@ -57,6 +58,7 @@ interface Runtime {
 	readonly events: Queue.Queue<UnitEvent>
 	readonly callbacks: FiberSet.FiberSet<void, never>
 	readonly run: (effect: Effect.Effect<void>) => unknown
+	readonly stdio: Option.Option<Bridge.Bridge>
 }
 const failed = (
 	cause: Cause.Cause<unknown>,
@@ -137,6 +139,49 @@ const message = Effect.fnUntraced(
 					_tag: "UnitProgress",
 					...unitEvent(handle.command),
 					stage: frame.stage,
+				})
+				return
+			/** Only the holding incarnation's output reaches the kernel's stdout. */
+			case "StdioClaim": {
+				const granted = yield* Option.match(runtime.stdio, {
+					onNone: () => Effect.succeed(false),
+					onSome: (bridge) =>
+						bridge.claim({
+							unit: handle.command.unit,
+							incarnation: handle.command.token.incarnation,
+							deliver: (input) =>
+								handle.send(
+									input._tag === "Bytes"
+										? { _tag: "StdioIn", bytes: input.bytes }
+										: { _tag: "StdioEnd" },
+								),
+							ended: Deferred.await(handle.ended),
+						}),
+				})
+				yield* handle.send({ _tag: granted ? "StdioGranted" : "StdioDenied" })
+				return
+			}
+			case "StdioOut":
+			case "StdioClose":
+			case "StdioRelease":
+				yield* Option.match(runtime.stdio, {
+					onNone: () => Effect.void,
+					onSome: (bridge) =>
+						frame._tag === "StdioOut"
+							? bridge.write(
+									handle.command.unit,
+									handle.command.token.incarnation,
+									frame.bytes,
+								)
+							: frame._tag === "StdioClose"
+								? bridge.close(
+										handle.command.unit,
+										handle.command.token.incarnation,
+									)
+								: bridge.release(
+										handle.command.unit,
+										handle.command.token.incarnation,
+									),
 				})
 				return
 			/** The channel, not the frame, names the unit incarnation that registers or acknowledges. */
@@ -503,6 +548,7 @@ const placementLayer = (withRunner: boolean) =>
 				events: yield* Queue.bounded<UnitEvent>(256),
 				callbacks,
 				run,
+				stdio: yield* Bridge.StdioBridge,
 			}
 			yield* Effect.addFinalizer(() =>
 				Effect.gen(function* () {

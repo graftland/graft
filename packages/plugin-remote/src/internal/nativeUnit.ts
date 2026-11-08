@@ -24,6 +24,8 @@ import {
 	Ref,
 	Schema,
 	Scope,
+	Sink,
+	Stdio,
 	Stream,
 } from "effect"
 import { Digest, SecureRandom } from "effect/crypto"
@@ -36,6 +38,7 @@ import { Fork, Graft, Kernel, Plugin, Transition } from "@graftland/graft"
 import * as Artifact from "../Artifact"
 import * as Configuration from "../Configuration"
 import * as Contract from "../Contract"
+import { ProcessStdio, StdioDenied } from "../ProcessStdio"
 import { Recorder } from "../Recording"
 import * as EncodedLimit from "./encodedLimit"
 import * as Operations from "./operations"
@@ -92,6 +95,8 @@ interface UnitRuntime {
 	readonly commands: FiberMap.FiberMap<string, void, never>
 	readonly replies: Ref.Ref<HashMap.HashMap<string, Wire.Report>>
 	readonly records: Queue.Queue<Wire.RecordDuty>
+	readonly stdioGrant: Ref.Ref<Option.Option<Deferred.Deferred<boolean>>>
+	readonly stdin: Queue.Queue<Uint8Array, Cause.Done>
 	readonly emit: (frame: Wire.Outgoing) => Effect.Effect<void>
 }
 
@@ -822,7 +827,12 @@ const platform = Effect.fnUntraced(function* (
 			Layer.succeed(Transition.UnitMember, Option.some(command.token.unit)),
 		),
 		/** Unit infrastructure every plugin can inject, first- or third-party alike. */
-		Layer.provideMerge(Layer.succeed(Recorder, recorder(runtime))),
+		Layer.provideMerge(
+			Layer.mergeAll(
+				Layer.succeed(Recorder, recorder(runtime)),
+				Layer.succeed(ProcessStdio, processStdio(runtime)),
+			),
+		),
 	)
 	const built = yield* Layer.buildWithScope(layer, runtime.scope)
 	const services = Context.add(
@@ -834,7 +844,40 @@ const platform = Effect.fnUntraced(function* (
 	return services
 })
 /** Services every execution unit provides itself; they are never deployment dependencies. */
-const unitInfrastructure = HashSet.make(Recorder.key)
+const unitInfrastructure = HashSet.make(Recorder.key, ProcessStdio.key)
+const encoder = new TextEncoder()
+const bytesOf = (chunk: string | Uint8Array) =>
+	typeof chunk === "string" ? encoder.encode(chunk) : chunk
+/** Bytes cross the unit's control channel; the kernel decides whether this incarnation may hold the stdio. */
+const processStdio = (runtime: UnitRuntime): ProcessStdio["Service"] => ({
+	claim: Effect.gen(function* () {
+		const decision = yield* Deferred.make<boolean>()
+		yield* Ref.set(runtime.stdioGrant, Option.some(decision))
+		yield* runtime.emit({ _tag: "StdioClaim" })
+		if (!(yield* Deferred.await(decision))) return yield* StdioDenied.make({})
+		yield* Effect.addFinalizer(() => runtime.emit({ _tag: "StdioRelease" }))
+		return Stdio.make({
+			args: Effect.succeed([]),
+			stdin: Stream.fromQueue(runtime.stdin),
+			stdout: () =>
+				Sink.forEach((chunk: string | Uint8Array) =>
+					runtime.emit({ _tag: "StdioOut", bytes: bytesOf(chunk) }),
+				).pipe(
+					Sink.onExit((exit) =>
+						Exit.isSuccess(exit)
+							? runtime.emit({ _tag: "StdioClose" })
+							: Effect.void,
+					),
+				),
+			stderr: () =>
+				Sink.forEach((chunk: string | Uint8Array) =>
+					Effect.sync(() => {
+						process.stderr.write(bytesOf(chunk))
+					}),
+				),
+		})
+	}),
+})
 /** Deliveries are queued for whichever plugin in this unit holds the role; identity comes from the channel. */
 const recorder = (runtime: UnitRuntime): Recorder["Service"] => ({
 	register: (name) =>
@@ -1411,6 +1454,20 @@ const dispatch = Effect.fnUntraced(function* (
 	runtime: UnitRuntime,
 	message: Wire.Incoming,
 ) {
+	if (message._tag === "StdioGranted" || message._tag === "StdioDenied") {
+		const pending = yield* Ref.getAndSet(runtime.stdioGrant, Option.none())
+		if (Option.isSome(pending))
+			yield* Deferred.succeed(pending.value, message._tag === "StdioGranted")
+		return
+	}
+	if (message._tag === "StdioIn") {
+		yield* Queue.offer(runtime.stdin, message.bytes)
+		return
+	}
+	if (message._tag === "StdioEnd") {
+		yield* Queue.end(runtime.stdin)
+		return
+	}
 	if (message._tag === "Init") {
 		yield* Ref.set(runtime.initial, Option.some(message.command))
 		return yield* runtime.emit({ _tag: "Initialized" })
@@ -1468,6 +1525,8 @@ const main = Effect.gen(function* () {
 		commands: yield* FiberMap.make<string, void, never>(),
 		replies: yield* Ref.make(HashMap.empty<string, Wire.Report>()),
 		records: yield* Queue.unbounded<Wire.RecordDuty>(),
+		stdioGrant: yield* Ref.make(Option.none<Deferred.Deferred<boolean>>()),
+		stdin: yield* Queue.unbounded<Uint8Array, Cause.Done>(),
 		emit: transmit,
 	}
 	yield* runtime.emit({ _tag: "Online" })

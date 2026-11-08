@@ -2,16 +2,7 @@
 /**
  * The `graft` executable. Running this module starts the program.
  */
-import {
-	Array,
-	Console,
-	Effect,
-	Layer,
-	Logger,
-	Option,
-	Stdio,
-	String,
-} from "effect"
+import { Array, Effect, Layer, Logger, Option, Stdio, String } from "effect"
 import { Argument, CliError, Command, Flag } from "effect/cli"
 import { NodeRuntime } from "@effect/platform-node"
 
@@ -161,36 +152,14 @@ const starts = (args: ReadonlyArray<string>) =>
 		),
 		"start",
 	)
-const stdioUnsupported =
-	"graft start --stdio is unsupported: plugins run in units and none owns the process stdio"
-/** Help, version and completions only print; they never start the application. */
-const informational = (args: ReadonlyArray<string>) =>
-	Array.some(
-		args,
-		(arg) =>
-			arg === "--help" ||
-			arg === "-h" ||
-			arg === "--version" ||
-			arg === "--wizard" ||
-			String.startsWith("--completions")(arg),
-	)
 const program = Effect.gen(function* () {
 	const stdio = yield* Stdio.Stdio
 	const args = yield* stdio.args
 	return starts(args)
 		? yield* output(
-				Array.contains(args, "--stdio") && !informational(args)
-					? Console.error(stdioUnsupported).pipe(
-							Effect.andThen(
-								CliError.UserError.make({
-									cause: "Protocol stdio is unsupported for kernel deployments",
-									userMessage: stdioUnsupported,
-								}),
-							),
-						)
-					: Command.runWith(graft.pipe(Command.withSubcommands([start])), {
-							version,
-						})(args),
+				Command.runWith(graft.pipe(Command.withSubcommands([start])), {
+					version,
+				})(args),
 				args,
 			)
 		: yield* output(
