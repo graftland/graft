@@ -47,7 +47,6 @@ or enforce speed thresholds.
 | events-bail / events-serial-bail                  | 100 dispatches; handler H returns 7 after the previous handlers decline.                                               |
 | events-waterfall                                  | 100 middleware dispatches; each wrapper adds one to the terminal result 0.                                             |
 | config-update / config-restart                    | Change value 0 to 1 in place / by teardown and reactivation.                                                           |
-| replace                                           | Replace K distinct definitions in one transaction and await all replacement activations; K = 1, 10, 100.               |
 | memory-cycles                                     | Heap growth after 100 cycles of 10 plugins in one persistent root, with checkpoint slopes.                             |
 | memory-steady                                     | Heap delta for 1000 live plugins relative to an empty root, divided by plugin count.                                   |
 | import                                            | Import each library in a fresh process; record import latency and child-process wall time separately.                  |
@@ -132,7 +131,6 @@ and column labels stay identical across languages.
 | events-waterfall   |  100 | ms       |  95.097 | 11.016 |   N/A |  12.778 |   N/A |      N/A |
 | config-update      |    1 | ms       |   0.120 |  0.040 |   N/A |   0.002 |   N/A |      N/A |
 | config-restart     |    1 | ms       |   0.237 |  0.109 |   N/A |   0.006 |   N/A |      N/A |
-| replace            |  100 | ms       |  34.352 |    N/A |   N/A |     N/A |   N/A |      N/A |
 | memory-cycles      |   10 | B/batch  |  31828* | 23860* |   N/A |   7649* |   N/A |      N/A |
 | memory-steady      | 1000 | B/plugin |   33908 |  10264 |   821 |    2089 |   N/A |      N/A |
 | import             |    1 | ms       | 242.159 |  4.409 | 6.126 | 230.756 | 0.173 |    1.988 |
@@ -141,13 +139,13 @@ and column labels stay identical across languages.
 
 ## Semantic limits
 
-| Library         | Comparison boundary                                                                                                                                                                                 |
-| --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Graft           | Wait for Active, not registration. Config scenarios decode Schema.Int; event invocations restore context and own scopes.                                                                            |
-| cordis          | Pinned 4.0.0-rc.12; await inertia and assert state. Serial can bail; emit/bail are synchronous. This version has no registry.replace.                                                               |
-| avvio           | Ordered boot and close hooks. Runtime unload, restart and replacement are N/A. Whole-loader close and manually wired services are labeled substitutes. events-emit uses its inherited EventEmitter. |
-| Effect          | Explicit Layer/Scope wiring and dependent teardown/rebuild; PubSub for parallel broadcasts, manual loops for other modes. No automatic reactive graph is claimed.                                   |
-| Node / emittery | Dispatch only. Node emit completes synchronous bodies; emittery defers listeners and awaits them. Neither supplies bail or middleware.                                                              |
+| Library         | Comparison boundary                                                                                                                                                                    |
+| --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Graft           | Wait for Active, not registration. Config scenarios decode Schema.Int; event invocations restore context and own scopes.                                                               |
+| cordis          | Pinned 4.0.0-rc.12; await inertia and assert state. Serial can bail; emit/bail are synchronous.                                                                                        |
+| avvio           | Ordered boot and close hooks. Runtime unload and restart are N/A. Whole-loader close and manually wired services are labeled substitutes. events-emit uses its inherited EventEmitter. |
+| Effect          | Explicit Layer/Scope wiring and dependent teardown/rebuild; PubSub for parallel broadcasts, manual loops for other modes. No automatic reactive graph is claimed.                      |
+| Node / emittery | Dispatch only. Node emit completes synchronous bodies; emittery defers listeners and awaits them. Neither supplies bail or middleware.                                                 |
 
 Config comparison uses Graft validation and no optional cordis schema. Waterfall
 compares output wrapping only: the libraries differ in next-input and repeated

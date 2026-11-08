@@ -38,7 +38,7 @@ export const clock = Plugin.make({
 | **Count**      | A fork can publish any number of services.                                                   |
 | **Uniqueness** | Only one fork can publish a key in the same [realm](../isolation/).                          |
 | **Conflict**   | A second `Graft.provide` for the same key fails with `ServiceConflict`.                      |
-| **Swapping**   | Replace the plugin that publishes it, or use [`Graft.replace`](../replace/).                 |
+| **Swapping**   | Replace the plugin that publishes it.                                                        |
 
 ## Use a service
 

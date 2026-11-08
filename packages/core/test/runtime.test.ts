@@ -18,32 +18,6 @@ const Punctuation = Context.Reference<string>(
 
 describe("runtime", () => {
 	it.effect(
-		"replaces running plugins and forwards later loads to the replacement",
-		() =>
-			Effect.gen(function* () {
-				const journal = yield* makeJournal
-				const version = (n: number) =>
-					Plugin.make({
-						name: `v${n}`,
-						apply: () =>
-							Effect.acquireRelease(journal.record(`v${n} up`), () =>
-								journal.record(`v${n} down`),
-							),
-					})
-				const v1 = version(1)
-				const v2 = version(2)
-				const fork = yield* Graft.plugin(v1)
-				yield* fork.await
-				const result = yield* Graft.replace([[v1, v2]])
-				assert.strictEqual(result._tag, "Replaced")
-				yield* reach(fork, "Active")
-				const later = yield* Graft.plugin(v1)
-				yield* later.await
-				yield* journal.expect(["v1 up", "v1 down", "v2 up", "v2 up"])
-			}).pipe(run),
-	)
-
-	it.effect(
 		"lets intercepted references reach services called from below",
 		() =>
 			Effect.gen(function* () {

@@ -5,82 +5,18 @@ import {
 	Effect,
 	Exit,
 	Fiber,
-	HashMap,
 	Option,
 	PubSub,
 	Schema,
 	String,
-	TxRef,
 } from "effect"
 import { assert, describe, it } from "@effect/vitest"
 
 import { Event, Graft, Plugin } from "../src/index.ts"
 import { RuntimeContext } from "../src/internal/runtimeContext"
-import * as Snapshots from "../src/internal/snapshot.ts"
 import { run } from "./utils.ts"
 
 describe("cancellation causes", () => {
-	it.effect(
-		"records an apply failure racing with replacement of that plugin",
-		() =>
-			Effect.gen(function* () {
-				const { runtime } = yield* RuntimeContext
-				const replacementStarted = yield* Deferred.make<void>()
-				const release = yield* Deferred.make<void>()
-				const replacement = Plugin.make({
-					name: "replacement",
-					apply: () =>
-						Effect.asVoid(Deferred.succeed(replacementStarted, undefined)),
-				})
-				// The old activation fails after the swap, before it can be interrupted.
-				const original = Plugin.make({
-					name: "original",
-					apply: () =>
-						Deferred.await(release).pipe(
-							Effect.andThen(Effect.fail("failure during replacement")),
-							Effect.uninterruptible,
-						),
-				})
-				const fork = yield* Graft.plugin(original)
-				const replacing = yield* Effect.forkChild(
-					Graft.replace([[original, replacement]]),
-				)
-				yield* Effect.tx(
-					Effect.gen(function* () {
-						const forks = yield* Snapshots.get(runtime.forks)
-						const entry = Option.getOrThrow(HashMap.get(forks, fork.id))
-						const spec = yield* TxRef.get(entry.spec)
-						if (spec.plugin !== replacement) return yield* Effect.txRetry
-					}),
-				)
-				yield* Deferred.succeed(release, undefined)
-				yield* Deferred.await(replacementStarted)
-				const result = yield* Fiber.join(replacing)
-				assert.strictEqual(result._tag, "Replaced")
-				yield* Effect.log("Review replacement logs")
-				const subscription = yield* PubSub.subscribe(runtime.logs)
-				const entries = yield* PubSub.takeAll(subscription)
-				assert.isTrue(
-					Array.some(
-						entries,
-						({ cause, message }) =>
-							String.includes("failure during replacement")(
-								Cause.pretty(cause),
-							) ||
-							(Array.isArray(message) &&
-								Array.some(
-									message,
-									(item) =>
-										Cause.isCause(item) &&
-										String.includes("failure during replacement")(
-											Cause.pretty(item),
-										),
-								)),
-					),
-				)
-			}).pipe(run),
-	)
-
 	for (const mode of ["emit", "parallel", "bail"] as const)
 		it.effect(
 			`preserves handler cleanup defects when ${mode} is interrupted`,

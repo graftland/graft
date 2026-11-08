@@ -49,10 +49,6 @@ export const expected = (
 		result.finalizers = 1
 		result.value = 1
 	}
-	if (scenario === "replace") {
-		result.activations = size * 2
-		result.finalizers = size
-	}
 	if (
 		scenario === "events-emit" ||
 		scenario === "events-sequential" ||

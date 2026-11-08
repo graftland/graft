@@ -37,7 +37,7 @@ export const clock = Plugin.make({
 | **數量**   | 一個 fork 可以發布任意數量的服務。                                     |
 | **唯一性** | 在同一個[領域（realm）](../isolation/)內，一個鍵只能由一個 fork 發布。 |
 | **衝突**   | 再次對同一個鍵呼叫 `Graft.provide` 會以 `ServiceConflict` 失敗。       |
-| **切換**   | 取代發布它的外掛，或使用 [`Graft.replace`](../replace/)。              |
+| **切換**   | 取代發布它的外掛。                                                     |
 
 ## 使用服務
 

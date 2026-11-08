@@ -1,21 +1,19 @@
 import {
 	Array,
 	Cause,
-	Context,
 	Deferred,
 	Effect,
 	Exit,
 	Option,
 	Queue,
 	Ref,
-	Schema,
 	Stream,
 } from "effect"
 import { assert, it } from "@effect/vitest"
 
 import { Graft, Plugin } from "@graftland/graft"
 
-import { Entry, Intercept, Loader, Tree } from "../src/index.ts"
+import { Entry, Loader, Tree } from "../src/index.ts"
 import { loaderService, run } from "./utils.ts"
 
 const logged = (message: string) =>
@@ -178,61 +176,4 @@ it.effect("logs a throwing external getter without disabling API edits", () =>
 			yield* loader.create({ id: "accepted", name: "unused", disabled: true })
 		}),
 	),
-)
-
-const Settings = Context.Reference(
-	"loader/test/extension-boundaries/Settings",
-	{ defaultValue: () => "default" },
-)
-it.effect.each(["merge", "registration"])(
-	"isolates a synchronous %s callback defect and permits retry",
-	(stage) =>
-		Effect.gen(function* () {
-			const defect = new Error("Extension callback crashed")
-			const broken = yield* Ref.make(true)
-			const registration = Intercept.make(
-				Settings,
-				Schema.String,
-				(_outer, patch) => {
-					if (stage === "merge" && Ref.getUnsafe(broken)) throw defect
-					return patch
-				},
-			)
-			const environment = Intercept.layer([
-				{
-					key: Settings.key,
-					schema: Schema.Unknown,
-					resolve: (input) => {
-						if (stage === "registration" && Ref.getUnsafe(broken)) throw defect
-						return registration.resolve(input)
-					},
-				},
-			])
-			yield* run()((journal) =>
-				Effect.gen(function* () {
-					yield* Graft.plugin(Loader.plugin, [
-						{
-							id: "extension",
-							name: "echo",
-							config: { text: "started" },
-							intercept: { [Settings.key]: "patched" },
-						},
-					])
-					const loader = yield* loaderService
-					yield* loader.ready
-					const record = yield* Graft.logs.pipe(
-						Stream.filter((entry) => Cause.hasDies(entry.cause)),
-						Stream.runHead,
-					)
-					assert.strictEqual(
-						Cause.squash(Option.getOrThrow(record).cause),
-						defect,
-					)
-					yield* Ref.set(broken, false)
-					yield* loader.retry
-					yield* loader.ready
-					yield* journal.expect(["start started"])
-				}),
-			).pipe(Effect.provide(environment))
-		}),
 )

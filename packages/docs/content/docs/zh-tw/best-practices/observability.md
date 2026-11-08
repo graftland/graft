@@ -304,11 +304,11 @@ spans // => ["graft.plugin app/feed", "graft.plugin app/feed > feed.apply", "fee
 每個 `graft.plugin <name>` span 都帶有該外掛日誌的身分 `graft.fork` 和
 `graft.plugin`，另外還有 `graft.revision`：
 
-| 屬性             | 值                                                         |
-| ---------------- | ---------------------------------------------------------- |
-| `graft.fork`     | fork 的 `id`。                                             |
-| `graft.plugin`   | 外掛的 `name`。                                            |
-| `graft.revision` | 從 0 開始，`restart`、取代和回滾時遞增；設定更新不改變它。 |
+| 屬性             | 值                                              |
+| ---------------- | ----------------------------------------------- |
+| `graft.fork`     | fork 的 `id`。                                  |
+| `graft.plugin`   | 外掛的 `name`。                                 |
+| `graft.revision` | 從 0 開始，`restart` 時遞增；設定更新不改變它。 |
 
 ### 匯出 span
 

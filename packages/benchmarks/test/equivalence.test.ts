@@ -39,7 +39,6 @@ const scenarios: ReadonlyArray<Scenario> = [
 	"events-waterfall",
 	"config-update",
 	"config-restart",
-	"replace",
 	"memory-cycles",
 	"memory-steady",
 ]

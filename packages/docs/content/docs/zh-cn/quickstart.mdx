@@ -5,8 +5,7 @@ description: 创建并运行 Graft 项目，在运行期间修改配置和代码
 
 import { Steps } from "@astrojs/starlight/components"
 
-需要 Node.js 22.19 或更高版本，这是 CLI 所用 Effect
-Node 适配器要求的版本。该版本也提供热重载所需的 `module.registerHooks`。
+需要 Node.js 22.19 或更高版本，这是 CLI 所用 Effect Node 适配器要求的版本。
 
 <Steps>
 
@@ -55,12 +54,13 @@ Node 适配器要求的版本。该版本也提供热重载所需的 `module.reg
    `Ticker stopped`、`Greeter stopped`，然后是 `Hi, Graft!`。`hello` 不受影响。
 
 4. 在应用运行期间修改代码。把 `src/ticker.ts` 中的 `"3 seconds"` 改为
-   `"1 second"` 并保存。Graft 导入新模块，只重启
-   `ticker`。如果新代码导入或启动失败，旧版本会继续运行，Graft 会把错误记录到日志中。
+   `"1 second"` 并保存。`tsc` 重新构建
+   `dist`，Graft 把新代码作为一个变更部署。三个示例插件在同一个包里，所以三个都会重启；想让某个插件单独重载，就给它独立的包。如果新代码启动失败，正在运行的配置项保持不变，Graft 会把错误记录到日志中。
 
 5. 拿走一个依赖。给 `greeter` 配置项加上 `disabled: true` 并保存。`ticker`
-   会停止，并以 `Pending` 状态等待，直到 `Greeter`
-   再次出现。删除这一行，它就恢复问候。
+   仍然需要
+   `Greeter`，所以 Graft 拒绝这次编辑，记录原因，所有配置项继续运行。同时禁用
+   `ticker`，或删除这一行，再保存一次。
 
 </Steps>
 

@@ -47,7 +47,7 @@ const hello = Plugin.make({
 ## 為什麼選擇 Graft
 
 - **熱替換。** 不砍樹，只換品種。`graft start --watch`
-  只重新匯入受變更影響的部分，並在一次交易中取代相關外掛。新程式碼匯入或啟動失敗時，Graft 恢復舊外掛，並回報它們是否成功恢復。
+  把每次儲存變成一個變更，只重新部署受影響的項目。變更失敗時，執行中的項目維持不變。
 - **乾淨卸載。** 每個外掛都在自己的 `Scope`
   中執行，它啟動的每個 fiber 都有歸屬。外掛消失時，相依於它的外掛先停止，然後執行它的 finalizer。失敗（包括清理時的失敗）也保留完整的
   `Cause`。
@@ -90,7 +90,6 @@ Graft 的外掛模型借鑑自
 
 - [WebSocket 整合閘道](samples/integration-gateway)，升級外掛時保留工作階段
 - 由外掛組成的聊天機器人，天氣整合在子行程中執行
-- 在負載下替換定價引擎和資料庫的結帳服務
 - 由 `graft.yml` 驅動的 HTTP 閘道
 - 工具即外掛的 MCP 伺服器：用戶端連著時也能重載工具
 - 多租戶服務
@@ -102,7 +101,6 @@ Graft 的外掛模型借鑑自
 | ------------------------------------------------------------ | -------------------------------------------------------------------------- |
 | [`@graftland/graft`](packages/core)                          | 以 Effect 打造的外掛框架：外掛、fork、服務、隔離、事件和日誌。             |
 | [`@graftland/loader`](packages/loader)                       | 從條目清單或 YAML 設定檔載入外掛。                                         |
-| [`@graftland/hmr`](packages/hmr)                             | 在 Node.js 上重載外掛模組，不需重新啟動行程。                              |
 | [`@graftland/cli`](packages/cli)                             | `graft` 命令：`start`、`create`、`add` 和 `remove`。                       |
 | [`@graftland/create`](packages/create)                       | 產生新的 Graft 專案：`npm create @graftland` 與 `graft create`。           |
 | [`@graftland/package-manager`](packages/package-manager)     | 用 npm、pnpm 或 Yarn 安裝相依套件，失敗時還原。                            |

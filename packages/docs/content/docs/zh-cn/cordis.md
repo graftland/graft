@@ -20,7 +20,7 @@ Graft 参考了 [cordis](https://github.com/cordiverse/cordis)
 | `fiber.restart`                        | `fork.restart`。                                                                             |
 | `ctx.isolate`、标签                    | [`isolate`](../isolation/#领域)，对服务和事件都适用。                                        |
 | `ctx.intercept`                        | 配合 `Context.Reference` 使用的 [`intercept`](../intercepts/)。                              |
-| `registry.replace`                     | [`Graft.replace`](../replace/)。                                                             |
+| `registry.replace`                     | [变更](../transitions/)中的 `Deploy` 操作。                                                  |
 | `ctx.on`、`ctx.emit`、`serial`、`bail` | [事件](../events/)：`on`、`emit`、`parallel`、`bail`、`waterfall`。                          |
 | 使用 Standard Schema 的配置            | Effect `Schema`，在插件激活期间解码。                                                        |
 | 日志、定时器和文件系统插件             | Effect 的 `Logger`、`Schedule`、`Clock` 和 `FileSystem`。                                    |
@@ -40,8 +40,8 @@ Graft 参考了 [cordis](https://github.com/cordiverse/cordis)
 - **可使用服务的配置解码。** 解码可以异步执行，也可以使用插件的依赖。
 - **保留上下文的处理函数。**
   事件处理函数使用所属插件自身的服务、领域（realm）和 intercept 运行。
-- **可回滚的原子替换。** `Graft.replace`
-  在一个事务中完成所有插件的替换；新插件启动失败时回到旧插件。
+- **可回滚的变更。**
+  [变更](../transitions/)在内核中部署新版本。目标未通过试运行时，旧代继续运行。
 - **在其他进程中运行插件。** [Remote](../remote/overview/)
   让某个插件在子进程、worker 或另一台机器上运行，使用它服务的插件不必改动。
 

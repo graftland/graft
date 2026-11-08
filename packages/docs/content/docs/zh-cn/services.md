@@ -37,7 +37,7 @@ export const clock = Plugin.make({
 | **数量**     | 一个 fork 可以发布任意数量的服务。                                     |
 | **唯一性**   | 在同一个[领域（realm）](../isolation/)内，一个键只能由一个 fork 发布。 |
 | **冲突**     | 对同一个键再次调用 `Graft.provide` 会以 `ServiceConflict` 失败。       |
-| **切换实现** | 替换发布它的插件，或使用 [`Graft.replace`](../replace/)。              |
+| **切换实现** | 替换发布它的插件。                                                     |
 
 ## 使用服务
 

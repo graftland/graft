@@ -93,24 +93,12 @@ for queued and executing environment refreshes.
 `entries` and `changes` describe saved targets, not finished runtime updates.
 Edits return after saving and publication.
 
-`retry` publishes the current target again, to retry every failed entry. This
-includes module resolution, configuration preparation, and actual plugin
-activation. It also does these things:
-
-- It reads `!env` values again.
-- Active entries get changed config through `update`.
-- A changed intercept loads the entry again.
-- An entry still loading reads them again once it is active, and `ready` waits
-  for that read.
-- Failed plugin forks restart, even under injection or group wrappers.
-- Healthy instances and unfinished resolutions stay as they are.
-
 Ordinary API edits and file changes reconcile only changed entries. Unchanged
 healthy siblings and subtrees retain their current environment; editing one leaf
 no longer implicitly refreshes the whole tree. Failed entries in a reconciled
 group are still retried, and unfinished resolution keeps its activation. Use
-`retry` or `loader.root.update(entries)` to explicitly refresh environment
-values throughout the tree, including nested groups and injection gates.
+`loader.root.update(entries)` to explicitly refresh environment values
+throughout the tree, including nested groups and injection gates.
 
 Independent sibling updates and removals run concurrently. Each entry's work
 remains serialized, and replacement waits for that entry's old cleanup. The
@@ -146,7 +134,7 @@ remains interruption, rather than becoming an entry cleanup error.
 - The removed fork is disposed. It does not stay in the tree as a failed entry.
 - A replacement gets its own lifecycle.
 - If core reports a restart failure on a retained fork, that fork stays visibly
-  failed. `retry` can restart it.
+  failed until its config or dependencies change.
 - `ready` means settled. It does not mean cleanup succeeded.
 
 Once resolution succeeds, the lifecycle owns the actual plugin as a child fork.
@@ -401,9 +389,8 @@ Removal closes that scope and unloads its plugin children.
 `resolve(name, { observationScope })` can supply a separate scope for
 observation leases. The resolver passes it to the importer as the second
 argument. Group owns this scope per configuration entry and uses `ScopedRef` to
-replace it on retry. Failed candidates still release resources immediately,
-while HMR can observe their files until retry, removal or disabling. Without
-this option, the caller's scope owns observations.
+replace it on retry. Failed candidates still release resources immediately.
+Without this option, the caller's scope owns observations.
 
 Each candidate gets a child scope owned by that lifecycle. Failed attempts close
 their scope before fallback is considered. The result retains both the import
@@ -416,8 +403,6 @@ open until the entry lifecycle ends.
 - Restarting a lifecycle releases its old lease before it gets another. This
   includes changing config during resolution and recovering from a preparation
   failure.
-- For HMR, pass `hmr.importerScoped`. Then removed entries stop taking part in
-  reloads.
 
 ## Symbolic links
 

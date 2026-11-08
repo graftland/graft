@@ -37,7 +37,7 @@ tick
 2. 給 `ticker` 項目加上 `disabled: true`
    並儲存。tick 會停止。刪除這一行後，它們會重新開始。
 3. 在 `src/greeter.ts` 中，把 `Hello` 改成 `Hi there`
-   並儲存。Graft 會匯入新程式碼並取代正在執行的外掛：`Reloaded 1 plugin module(s)`、`Goodbye, Bob!`、`Hi there, Bob!`。
+   並儲存。Graft 會匯入新程式碼並取代正在執行的外掛：`Goodbye, Bob!`、`Hi there, Bob!`。
 
 按 <kbd>Ctrl</kbd>+<kbd>C</kbd> 停止。Graft 會卸載所有外掛。
 

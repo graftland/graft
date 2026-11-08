@@ -169,7 +169,7 @@ How `name` is resolved:
 
 If a plugin cannot be found, or its module fails to import, the entry still
 appears in the fork tree as a failed fork with the error. Graft tries again when
-the entry changes, or when [hot reload](../hot-reload/) picks up new code.
+the entry changes.
 
 ### Entry lifecycle
 
@@ -244,8 +244,8 @@ Effect.runSync(readSettings({})) // => { port: 8080 }
 ```
 
 The plugin's schema still describes what the entry accepts. `Config` values that
-a plugin reads from the ambient provider by itself are not `!env` tags, so
-`retry` does not know about them and does not reload them.
+a plugin reads from the ambient provider by itself are not `!env` tags, so a
+refresh does not know about them and does not read them again.
 
 ### Where tags work
 
@@ -262,10 +262,10 @@ a plugin reads from the ambient provider by itself are not `!env` tags, so
 
 ### When values are read again
 
-| Trigger                                         | Which entries read variables again                                               |
-| ----------------------------------------------- | -------------------------------------------------------------------------------- |
-| Ordinary API edit or YAML change                | Only changed entries. Unchanged healthy siblings and subtrees keep their values. |
-| `loader.retry` or `loader.root.update(entries)` | The whole tree, including nested groups and injection gates.                     |
+| Trigger                          | Which entries read variables again                                               |
+| -------------------------------- | -------------------------------------------------------------------------------- |
+| Ordinary API edit or YAML change | Only changed entries. Unchanged healthy siblings and subtrees keep their values. |
+| `loader.root.update(entries)`    | The whole tree, including nested groups and injection gates.                     |
 
 After an explicit refresh:
 
@@ -274,8 +274,8 @@ After an explicit refresh:
 - An entry whose resolved intercept changed is loaded again.
 - Entries whose values did not change keep running.
 - An entry that is still importing reads the environment when the import ends.
-  If a retry reaches an entry that is still loading, it reads them again once it
-  is active.
+  If a refresh reaches an entry that is still loading, it reads them again once
+  it is active.
 - `ready` waits for these queued and executing refreshes too, so after an
   explicit refresh and `ready`, every active entry has the current values.
 

@@ -90,22 +90,8 @@ Plugin identity is object reference identity.
 
 - Reusing a definition refers to the same plugin.
 - `{ ...plugin }` creates a distinct plugin, even with identical fields.
-- Loading, replacement, and conflict checks use this rule. They use it whatever
-  the definition's own `Equal` or `Hash` behavior is.
-
-`Graft.replace` rejects mappings that its global aliases cannot represent. It
-rejects them with a typed `ReplacementConflict`, which contains the conflicting
-pair indices.
-
-- Validation and publication share one transaction. A conflicting batch leaves
-  aliases and forks unchanged.
-- Overlapping replacements such as `P → Q, Q → R` must be split into versions
-  with distinct identities.
-- A single rollback to an older version is still supported.
-
-Typed replacements keep the same input type. They may only narrow the original
-error bound, including decoding errors. Definitions keep that contract across
-aliases. Dynamically loaded `Plugin<any>` values explicitly erase it.
+- Loading and conflict checks use this rule. They use it whatever the
+  definition's own `Equal` or `Hash` behavior is.
 
 ## Resource release
 

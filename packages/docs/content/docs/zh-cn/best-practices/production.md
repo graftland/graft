@@ -47,8 +47,8 @@ Redacted.value(url) // => "postgres://app:secret@db/app"
 
 ## 重试不稳定的资源
 
-没有 `retry` 的插件会一直停在 `Failed`，直到它的配置或依赖发生变化，或者有人运行
-`loader.retry`。依赖网络资源的插件应使用这样的调度：永不放弃、限制最大延迟并加入随机抖动，避免共用同一个数据库的多个 fork 同时重连：
+没有 `retry` 的插件会一直停在
+`Failed`，直到它的配置或依赖发生变化。依赖网络资源的插件应使用这样的调度：永不放弃、限制最大延迟并加入随机抖动，避免共用同一个数据库的多个 fork 同时重连：
 
 ```ts import.meta.vitest name="production: retry flaky resources"
 import { Effect, Ref, Schedule, Schema, Stream } from "effect"
@@ -197,9 +197,8 @@ export default Plugin.make({
 | 把所有 `@graftland/*` 包升级到同一个版本。   | Graft 的所有包[使用同一个版本号](../../releases/#版本)发布。                         |
 | 保持配置变更向后兼容，或者与新版本一起发布。 | 无法再解码的配置会让该配置项以 `SchemaError` 失败。                                  |
 
-要在不重启的情况下替换插件代码，嵌入式宿主可以调用
-[`Graft.replace`](../../replace/)；[checkout-upgrade](https://github.com/graftland/graft/tree/main/samples/checkout-upgrade)
-示例演示了在负载下这样做。
+要在不重启的情况下替换插件代码，请以[监听模式](../../cli/#监听模式)运行
+`graft start`，或者提交一个[变更](../../transitions/)。
 
 ## 嵌入而不使用 CLI
 

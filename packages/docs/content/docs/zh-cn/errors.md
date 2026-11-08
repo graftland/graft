@@ -28,12 +28,6 @@ Graft 会保留每次失败的完整 `Cause`
 错误还携带发布者的 `fork` ID 和服务的
 `realm`。参见[发布导致的依赖环](../services/#发布导致的依赖环)。
 
-## 替换
-
-| 名称                        | 触发时机                    | 应对方法                                                  |
-| --------------------------- | --------------------------- | --------------------------------------------------------- |
-| `Graft.ReplacementConflict` | 一批替换无法用 alias 表达。 | 检查 `indices` 列出的配对。参见[冲突](../replace/#冲突)。 |
-
 ## Intercept
 
 | 名称                    | 触发时机                                          |
@@ -53,20 +47,6 @@ Graft 会保留每次失败的完整 `Cause`
 | `LoaderClosed`     | 加载器关闭之后才提交编辑。                           |
 
 参见 [Loader API](../loader-api/)。
-
-## 热重载
-
-| 名称 / 结果                     | 含义                                                                                        |
-| ------------------------------- | ------------------------------------------------------------------------------------------- |
-| `HmrError`                      | 模块导入失败，或没有导出插件。`cause` 是原始错误。                                          |
-| `Skipped` / `restart-required`  | 原生加载能力或符号链接目标发生变化，需要重启。                                              |
-| `Skipped` / `ambiguous-exports` | 原本共享同一个 Plugin 对象的条目，现在导出了不同的对象。                                    |
-| `Skipped` / `identity-conflict` | 替换身份无法用运行时的 alias 表达。                                                         |
-| `RolledBack`                    | 替换失败或超时；计入的恢复 fork 为活跃或 `Pending`。`failures` 保留替换失败及其完整 cause。 |
-| `RecoveryFailed`                | 旧代码重启失败。`failures` 保留替换失败；`recovery` 列出恢复失败的 fork 及其完整 cause。    |
-| `Failed`                        | 重载失败。值中保存完整的 `Cause`；旧插件继续运行。                                          |
-
-参见[重载未生效的情形](../hot-reload/#重载未生效的情形)。
 
 ## Remote
 

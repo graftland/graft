@@ -54,8 +54,6 @@ Delete, with their tests, docs pages and sample uses, recorded in
 
 - `Graft.replace`, `Graft.resolve`, `internal/replacement.ts`,
   `internal/aliases.ts`;
-- `Plugin.Update` and in-place update handling; `Fork.update` becomes a member
-  restart with the new configuration in the embedded mode;
 - `Transition.ManagedFork`, `withUnmanaged`, `assertUnmanaged` and `unitGuard`
   mutation guards;
 - the HMR package's in-process reload engine, `docs/replace.md`, `hmr-api.md`;
@@ -63,6 +61,13 @@ Delete, with their tests, docs pages and sample uses, recorded in
 
 Embedded `Graft.plugin` composition keeps cooperative member restart; it makes
 no kernel guarantee (A §1.3).
+
+**Decision (2026-11-08, during implementation): `Plugin.Update` is retained for
+the embedded mode.** Deleting it made the embedded Loader restart a whole group
+on every edit and made OTLP restart on an endpoint change — a regression of the
+mode A §1.3 keeps. Kernel deployments never use it: in a unit a configuration
+change is a Change that starts a new generation. So there is still one change
+path for kernel deployments; `Update` is an embedded cooperative mechanism.
 
 ## Evidence and enough bar
 

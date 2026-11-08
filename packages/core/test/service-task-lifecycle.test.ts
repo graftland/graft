@@ -58,49 +58,6 @@ const cleanupPing = Effect.fn("cleanupPing")(function* (rpc: Rpc["Service"]) {
 })
 
 describe("service task leases", () => {
-	it.effect.each(["dispose", "restart", "replace"] as const)(
-		"keeps queue workers serving consumer cleanup during %s",
-		(change) =>
-			Effect.gen(function* () {
-				const cleaned = yield* Deferred.make<boolean>()
-				const definition = Plugin.make({
-					name: "queue provider",
-					apply: () => serve,
-				})
-				const provider = yield* Graft.plugin(definition)
-				yield* provider.await
-				const consumer = yield* Graft.plugin(
-					Plugin.make({
-						name: "queue consumer",
-						inject: [Rpc],
-						apply: () =>
-							Effect.gen(function* () {
-								const rpc = yield* Rpc
-								yield* rpc.ping
-								yield* Effect.addFinalizer(() =>
-									Effect.flatMap(cleanupPing(rpc), (value) =>
-										Deferred.succeed(cleaned, value),
-									),
-								)
-							}),
-					}),
-				)
-				yield* consumer.await
-				if (change === "dispose") yield* provider.dispose
-				else if (change === "restart") yield* provider.restart
-				else
-					yield* Graft.replace([
-						[
-							definition,
-							Plugin.make({ name: "replacement provider", apply: () => serve }),
-						],
-					])
-				const answered = yield* Deferred.await(cleaned)
-				yield* provider.dispose
-				assert.isTrue(answered)
-			}).pipe(run),
-	)
-
 	it.effect(
 		"retains worker-owned resources until the last consumer releases its lease",
 		() =>

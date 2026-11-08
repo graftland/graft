@@ -26,7 +26,6 @@
 		"@effect/vitest": "4.1.2",
 		"@graftland/cli": "workspace:*",
 		"@graftland/graft": "workspace:*",
-		"@graftland/hmr": "workspace:*",
 		"@graftland/loader": "workspace:*",
 		"@graftland/plugin-mcp-server": "workspace:*",
 		"@graftland/plugin-otlp": "workspace:*",

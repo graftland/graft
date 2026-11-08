@@ -119,7 +119,7 @@ describe("create", () => {
 				scripts: {
 					start: "graft start",
 					build: "tsc -p tsconfig.build.json",
-					dev: "tsc -p tsconfig.build.json && graft start",
+					dev: "tsc -p tsconfig.build.json && (tsc -p tsconfig.build.json --watch --preserveWatchOutput & graft start --watch)",
 					typecheck: "effect-tsgo tsc",
 				},
 				dependencies: {

@@ -57,15 +57,15 @@ test("workspace packages use the same exact release", () => {
 		name: "@graftland/loader",
 		version: "0.0.0",
 		dependencies: { "@graftland/graft": "workspace:*", yaml: "2.8.1" },
-		peerDependencies: { "@graftland/hmr": "workspace:^" },
+		peerDependencies: { "@graftland/plugin-http": "workspace:^" },
 	}
 	const result = releaseManifest(
 		manifest,
 		"1.2.3",
-		new Set(["@graftland/graft", "@graftland/hmr"]),
+		new Set(["@graftland/graft", "@graftland/plugin-http"]),
 	)
 	assert.equal(result.dependencies["@graftland/graft"], "1.2.3")
-	assert.equal(result.peerDependencies["@graftland/hmr"], "1.2.3")
+	assert.equal(result.peerDependencies["@graftland/plugin-http"], "1.2.3")
 	assert.equal(result.dependencies.yaml, "2.8.1")
 	assert.equal(manifest.dependencies["@graftland/graft"], "workspace:*")
 	assert.throws(() => releaseManifest(manifest, "1.2.3", new Set()))

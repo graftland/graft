@@ -90,6 +90,7 @@ it("ships a runnable public gateway sample and keeps packed builds inside the wo
 })
 it("maps every original Phase 1 test and review regression to auditable disposition evidence", () => {
 	const inventory = JSON.parse(text("design/phase-2-test-disposition.json"))
+	const laterManifests = text("design/phase-4-deletion-manifest.md")
 	assert.equal(inventory.baseline, "aa36477")
 	assert.isAtLeast(inventory.cases.length, 742)
 	assert.isAtLeast(inventory.reviews.length, 50)
@@ -102,7 +103,12 @@ it("maps every original Phase 1 test and review regression to auditable disposit
 		assert.isNotEmpty(c.reason)
 		assert.isNotEmpty(c.evidence)
 		for (const evidence of c.evidence) {
-			assert.isTrue(existsSync(resolve(root, evidence.file)), evidence.file)
+			// Later phases may delete evidence; each deletion is recorded in a later manifest.
+			assert.isTrue(
+				existsSync(resolve(root, evidence.file)) ||
+					laterManifests.includes("`" + evidence.file + "`"),
+				evidence.file,
+			)
 			assert.isNotEmpty(evidence.test)
 		}
 	}

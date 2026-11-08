@@ -40,8 +40,8 @@ import { Card, CardGrid } from "@astrojs/starlight/components"
 
 <CardGrid>
 	<Card title="熱替換">
-		不砍樹，只換品種。熱重載只取代受變更影響的外掛，在一次交易中完成；新程式碼失敗時保留舊程式碼。見
-		<a href="hot-reload/">熱重載</a>。
+		不砍樹，只換品種。監看模式把每次儲存變成一個變更，只重新部署受影響的外掛；變更失敗時舊外掛繼續執行。見
+		<a href="cli/#監看模式">監看模式</a>。
 	</Card>
 	<Card title="乾淨卸載">
 		每個外掛都在自己的 <code>Scope</code>{" "}
@@ -108,13 +108,13 @@ states // => [Option.some(Fork.ForkState.Pending({ missing: ["app/Greeter"] })),
 
 <CardGrid>
 	<Card title="快速上手" icon="rocket">
-		依照[快速開始](quickstart/)建立專案，並啟用熱重載執行。接著閱讀[核心概念](concepts/)。
+		依照[快速開始](quickstart/)建立專案，並在執行中修改它。接著閱讀[核心概念](concepts/)。
 	</Card>
 	<Card title="撰寫外掛" icon="puzzle">
 		[外掛](plugins/)、[服務](services/)和[事件](events/)：應用程式的基本組成。
 	</Card>
 	<Card title="執行應用程式" icon="setting">
-		用[設定檔](config-file/)描述它，用[命令列](cli/)啟動它，並以[熱重載](hot-reload/)修改它。
+		用[設定檔](config-file/)描述它，用[命令列](cli/)啟動它，並以[監看模式](cli/#監看模式)在執行中修改它。
 	</Card>
 	<Card title="在別處執行外掛" icon="laptop">
 		用 [Remote](remote/overview/) 把某個外掛放到子行程、worker
@@ -127,15 +127,15 @@ states // => [Option.some(Fork.ForkState.Pending({ missing: ["app/Greeter"] })),
 
 ## 文件地圖
 
-| 區段           | 頁面                                                                                                  | 閱讀目的                               |
-| -------------- | ----------------------------------------------------------------------------------------------------- | -------------------------------------- |
-| **從這裡開始** | [快速開始](quickstart/)、[核心概念](concepts/)、[從 cordis 遷移](cordis/)                             | 了解模型並執行點什麼。                 |
-| **建構外掛**   | [外掛](plugins/)、[服務](services/)、[事件](events/)                                                  | 撰寫程式碼。                           |
-| **結構**       | [生命週期](lifecycle/)、[領域](isolation/)、[Intercept](intercepts/)、[取代外掛](replace/)            | 控制外掛之間的關係與變化。             |
-| **應用程式**   | [設定檔](config-file/)、[命令列](cli/)、[熱重載](hot-reload/)、[在自己的程式中使用 Graft](embedding/) | 執行並維運應用程式。                   |
-| **Remote**     | [概覽](remote/overview/)、[單元](units/)、[綁定](bindings/)、[控制](control/)                         | 讓外掛在另一個行程或另一台機器上執行。 |
-| **參考**       | [Fork 控制代碼](fork-handle/)、[Loader API](loader-api/)、[HMR API](hmr-api/)、[錯誤](errors/)        | 查閱確切行為。                         |
-| **專案**       | [發佈](releases/)                                                                                     | 檢查並發佈 Graft。                     |
+| 區段           | 頁面                                                                                       | 閱讀目的                               |
+| -------------- | ------------------------------------------------------------------------------------------ | -------------------------------------- |
+| **從這裡開始** | [快速開始](quickstart/)、[核心概念](concepts/)、[從 cordis 遷移](cordis/)                  | 了解模型並執行點什麼。                 |
+| **建構外掛**   | [外掛](plugins/)、[服務](services/)、[事件](events/)                                       | 撰寫程式碼。                           |
+| **結構**       | [生命週期](lifecycle/)、[領域](isolation/)、[Intercept](intercepts/)、[變更](transitions/) | 控制外掛之間的關係與變化。             |
+| **應用程式**   | [設定檔](config-file/)、[命令列](cli/)、[在自己的程式中使用 Graft](embedding/)             | 執行並維運應用程式。                   |
+| **Remote**     | [概覽](remote/overview/)、[單元](units/)、[綁定](bindings/)、[控制](control/)              | 讓外掛在另一個行程或另一台機器上執行。 |
+| **參考**       | [Fork 控制代碼](fork-handle/)、[Loader API](loader-api/)、[錯誤](errors/)                  | 查閱確切行為。                         |
+| **專案**       | [發佈](releases/)                                                                          | 檢查並發佈 Graft。                     |
 
 ## 套件
 
@@ -143,7 +143,6 @@ states // => [Option.some(Fork.ForkState.Pending({ missing: ["app/Greeter"] })),
 | ------------------------------ | ---------------------------------------------------------------------------------------------------- |
 | `@graftland/graft`             | 基於 Effect 的外掛框架：外掛、fork、服務、隔離、事件和日誌。                                         |
 | `@graftland/loader`            | 從設定項目清單或 YAML 設定檔載入外掛。                                                               |
-| `@graftland/hmr`               | 在 Node.js 中重載外掛模組，無需重新啟動行程。                                                        |
 | `@graftland/cli`               | 提供 `graft` 命令：`start`、`create`、`add` 和 `remove`。                                            |
 | `@graftland/create`            | 建立新的 Graft 專案：`npm create @graftland` 與 `graft create`。                                     |
 | `@graftland/package-manager`   | 使用 npm、pnpm 或 Yarn 安裝相依套件。安裝失敗時，透過[快照還原](cli/#套件管理器)復原。               |

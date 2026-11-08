@@ -27,13 +27,11 @@ import {
 
 import { CleanupError, ForkState, type Fork, type ForkTree } from "./Fork"
 import { setState, supervise, withdraw } from "./internal/activation"
-import * as Aliases from "./internal/aliases"
 import { inheritContext } from "./internal/context"
 import { publicationCycle, resolutionChanged } from "./internal/dependencies"
 import * as ForkStatus from "./internal/forkState"
 import * as Generations from "./internal/generations"
 import * as Probes from "./internal/probes"
-import * as Replacement from "./internal/replacement"
 import {
 	GraftKey,
 	realmKey,
@@ -57,7 +55,6 @@ import { ownedScope } from "./internal/scope"
 import * as Slots from "./internal/slots"
 import * as Snapshots from "./internal/snapshot"
 import * as TrustState from "./internal/trust"
-import * as Coordinator from "./internal/unitGuard"
 import type { ErrorOf, InputOf, Plugin } from "./Plugin"
 import * as Transition from "./Transition"
 
@@ -174,7 +171,6 @@ const runtimeLayer = Layer.effect(
 			ambient,
 			slots: yield* TxRef.make(HashMap.empty<ServiceKey, Slot>()),
 			forks,
-			aliases: Aliases.make(),
 			events: yield* TxRef.make(
 				HashMap.empty<string, ReadonlyArray<Handler>>(),
 			),
@@ -273,23 +269,18 @@ const isolation =
 			: ([entry[0].key, `@${entry[1]}`] as const)
 
 /**
- * Changes a fork's spec and waits until its supervisor has acted on it:
- * updated in place, or begun restarting. A later change also counts.
+ * Changes a fork's spec and waits until its supervisor has begun restarting
+ * with it. A later change also counts.
  */
 const accept = Effect.fnUntraced(function* (
-	runtime: Runtime,
-	id: number,
 	status: ForkStatusHandle,
 	spec: TxRef.TxRef<Spec>,
 	f: (current: Spec) => Spec,
 ) {
 	const next = yield* Effect.tx(
-		Effect.gen(function* () {
-			yield* Coordinator.check(runtime, id)
-			return yield* TxRef.modify(spec, (current) => {
-				const next = f(current)
-				return [next, next]
-			})
+		TxRef.modify(spec, (current) => {
+			const next = f(current)
+			return [next, next]
 		}),
 	)
 	yield* Effect.tx(
@@ -304,7 +295,6 @@ const accept = Effect.fnUntraced(function* (
 })
 
 const makeFork = <I, E>(
-	runtime: Runtime,
 	status: ForkStatusHandle,
 	id: number,
 	spec: TxRef.TxRef<Spec>,
@@ -320,12 +310,7 @@ const makeFork = <I, E>(
 	const state = Snapshots.changesStream(snapshot).pipe(
 		// The definition's error bound is retained under compatible replacements.
 		Stream.map(
-			(snapshot) =>
-				(
-					snapshot as LocalSnapshot<
-						E | Schema.SchemaError | Transition.ManagedFork
-					>
-				).state,
+			(snapshot) => (snapshot as LocalSnapshot<E | Schema.SchemaError>).state,
 		),
 		Stream.changes,
 		Stream.takeUntil(ForkState.$is("Disposed")),
@@ -348,8 +333,8 @@ const makeFork = <I, E>(
 		),
 		stable: ForkStatus.stable(status),
 		update: (input) =>
-			accept(runtime, id, status, spec, (current) => ({ ...current, input })),
-		restart: accept(runtime, id, status, spec, (current) => ({
+			accept(status, spec, (current) => ({ ...current, input })),
+		restart: accept(status, spec, (current) => ({
 			...current,
 			revision: current.revision + 1,
 		})),
@@ -406,9 +391,8 @@ export const plugin: <P extends Plugin>(
 						Effect.gen(function* () {
 							const id = yield* TxRef.get(runtime.ids)
 							yield* TxRef.set(runtime.ids, id + 1)
-							const resolved = yield* Aliases.resolve(runtime.aliases, plugin)
 							const spec = TxRef.makeUnsafe<Spec>({
-								plugin: resolved,
+								plugin,
 								requested: plugin,
 								input,
 								revision: 0,
@@ -436,7 +420,7 @@ export const plugin: <P extends Plugin>(
 								parent: activation.fork === 0 ? undefined : activation.fork,
 								spec,
 								accepted: undefined,
-								name: resolved.name,
+								name: plugin.name,
 								input,
 								state: ForkState.Loading(),
 							}
@@ -579,7 +563,6 @@ export const plugin: <P extends Plugin>(
 						}),
 				).pipe(Scope.provide(forkScope))
 				const fork = makeFork<InputOf<P>, ErrorOf<P>>(
-					runtime,
 					status,
 					id,
 					spec,
@@ -590,86 +573,6 @@ export const plugin: <P extends Plugin>(
 			}),
 		)
 	})
-
-export {
-	ReplacementConflict,
-	ReplacementFailure,
-	ReplaceResult,
-	type ReplaceOptions,
-} from "./internal/replacement"
-
-/** A plugin and the replacement `replace` swaps in for it. */
-export type ReplacementPair = readonly [from: Plugin, to: Plugin]
-
-/** Check every possible definition when either side is a union. */
-export type CanReplace<
-	From extends Plugin,
-	To extends Plugin,
-> = From extends Plugin
-	? To extends Plugin
-		? (<T>() => T extends InputOf<From> ? 1 : 2) extends <
-				T,
-			>() => T extends InputOf<To> ? 1 : 2
-			? [ErrorOf<To>] extends [ErrorOf<From>]
-				? true
-				: false
-			: false
-		: false
-	: false
-
-/** A replacement pair whose input and error contracts are compatible. */
-export type CompatibleReplacement<Pair extends ReplacementPair> =
-	Pair extends readonly [infer From extends Plugin, infer To extends Plugin]
-		? false extends CanReplace<From, To>
-			? never
-			: Pair
-		: never
-
-/** Each pair is checked independently; targets cannot widen the inferred source contract. */
-export type CompatibleReplacements<
-	Pairs extends ReadonlyArray<ReplacementPair>,
-> = {
-	readonly [Index in keyof Pairs]: CompatibleReplacement<Pairs[Index]>
-}
-
-/**
- * Swaps plugins for new versions. Every fork of an old plugin restarts with
- * its replacement, and loading the old plugin later loads the new one.
- * Each pair keeps the same input type and can only narrow the source's error bound.
- *
- * Then it waits for the forks running a replacement. If one fails, or
- * `timeout` passes first, forks still owned by this replacement go back to
- * the old plugins. After recovery settles, the result is `RolledBack` if no
- * counted restored fork failed, or `RecoveryFailed` otherwise. Both carry the
- * replacement `failures`; `RecoveryFailed.recovery` carries one `Failed` per
- * failed restored fork, with its full cause. Disposed forks and forks taken over by a later replacement or
- * restart no longer count. A `Pending` fork waiting for a dependency counts as
- * started or restored. Recovery is not bounded by `timeout`.
- * Interrupting the replacement wait keeps the swap.
- */
-export const replace: <const Pairs extends ReadonlyArray<ReplacementPair>>(
-	pairs: Pairs & CompatibleReplacements<NoInfer<Pairs>>,
-	options?: Replacement.ReplaceOptions,
-) => Effect.Effect<
-	Replacement.ReplaceResult,
-	Replacement.ReplacementConflict,
-	Graft
-> = Effect.fnUntraced(function* (
-	pairs: ReadonlyArray<ReplacementPair>,
-	options?: Replacement.ReplaceOptions,
-) {
-	const { runtime } = yield* RuntimeContext
-	return yield* Replacement.replace(runtime, pairs, options)
-})
-
-/**
- * The plugin that loading `plugin` loads now: the plugin itself, or the one
- * that replacements have put in its place.
- */
-export const resolve = (plugin: Plugin): Effect.Effect<Plugin, never, Graft> =>
-	Effect.flatMap(RuntimeContext, ({ runtime }) =>
-		Effect.tx(Aliases.resolve(runtime.aliases, plugin)),
-	)
 
 const byId = Order.mapInput(Order.Number, (entry: ForkEntry) => entry.id)
 

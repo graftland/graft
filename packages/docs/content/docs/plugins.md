@@ -249,7 +249,9 @@ The update function is a closure, so it can use anything `apply` created, such
 as `banner` here.
 
 A plugin run through [Remote](../remote/overview/) never updates in place: a new
-configuration restarts its plugin process.
+configuration restarts its plugin process. Kernel deployments never update in
+place either: a configuration change is a [Change](../transitions/) that starts
+a new generation.
 
 :::note
 
@@ -407,8 +409,8 @@ The loader and the CLI import plugins from modules.
   named `plugin`. `Plugin.fromModule` reads it the same way.
 - **No side effects.** Importing a plugin module must do nothing except define
   the plugin. Graft can release only what `apply` acquires.
-- **Reloading.** Automatic [hot reload](../hot-reload/) reimports modules
-  affected by a change. Public `hmr.reload` forces a full reload.
+- **Edits.** In [watch mode](../cli/#watch-mode), saving a module redeploys the
+  entries from its package.
 
 ## Publish a plugin
 

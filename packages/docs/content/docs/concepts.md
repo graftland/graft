@@ -33,13 +33,13 @@ Each row links to the page that explains it.
 
 ## Guarantees
 
-| Guarantee                                                   | Where it comes from                                             |
-| ----------------------------------------------------------- | --------------------------------------------------------------- |
-| Dependencies are declared and checked                       | `inject` is checked by the compiler.                            |
-| Consumers stop before providers                             | [How withdrawal works](../services/#how-withdrawal-works).      |
-| Resources are always released                               | Each fork owns a `Scope`; tasks belong to a `FiberSet`.         |
-| Failures keep their full `Cause`                            | [Fork states](../lifecycle/#fork-states), [Errors](../errors/). |
-| Replacement is atomic, and rolls back if a new plugin fails | [Replace plugins](../replace/).                                 |
+| Guarantee                                      | Where it comes from                                             |
+| ---------------------------------------------- | --------------------------------------------------------------- |
+| Dependencies are declared and checked          | `inject` is checked by the compiler.                            |
+| Consumers stop before providers                | [How withdrawal works](../services/#how-withdrawal-works).      |
+| Resources are always released                  | Each fork owns a `Scope`; tasks belong to a `FiberSet`.         |
+| Failures keep their full `Cause`               | [Fork states](../lifecycle/#fork-states), [Errors](../errors/). |
+| A failed Change leaves the old plugins running | [Change outcomes](../transitions/#outcomes).                    |
 
 ## Built on Effect
 
@@ -55,7 +55,7 @@ Graft adds no parallel vocabulary. It maps directly onto Effect:
 | Reference-based settings | `Context.Reference`                |
 
 Graft adds only what Effect does not have: services that come and go at run
-time, the plugin tree, events, config files and hot reload. For habits that keep
+time, the plugin tree, events, config files and Changes. For habits that keep
 plugin code within these mappings, see
 [Effect in plugins](../best-practices/effect/).
 

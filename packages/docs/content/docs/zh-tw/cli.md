@@ -111,8 +111,8 @@ CLI 回報 cause，並以非零狀態碼結束。
 
 ### 需要重新啟動的情況
 
-設定、環境來源或已安裝套件改變後需要重新啟動。直接嵌入的應用程式可使用協作式
-[HMR API](../hmr-api/)，但它不提供核心隔離或依靠終止完成的資源回收。
+環境來源或已安裝套件改變後需要重新啟動。未使用 `--watch`
+時，設定或程式碼改變後也需要重新啟動。
 
 ### 日誌與 intercept
 
@@ -164,13 +164,13 @@ graft create [directory] [options]
 | `plugin`  | 要[發布](../plugins/#發布外掛)的外掛套件。                                        | `src/index.ts`、`test/index.test.ts`、`tsconfig.json`、`tsconfig.build.json`、`README.md`、`.vscode/extensions.json`、`.gitignore`                                                    |
 | `minimal` | 只有設定檔，除了 `--plugin` 加入的項目之外沒有其他項目。                          | `.gitignore`                                                                                                                                                                          |
 
-| Script      | `app`                                       | `plugin`                                    | `minimal`     |
-| ----------- | ------------------------------------------- | ------------------------------------------- | ------------- |
-| `dev`       | `tsc -p tsconfig.build.json && graft start` | `tsc -p tsconfig.build.json && graft start` |               |
-| `start`     | `graft start`                               |                                             | `graft start` |
-| `test`      |                                             | `vitest run`                                |               |
-| `typecheck` | `effect-tsgo tsc`                           | `effect-tsgo tsc`                           |               |
-| `build`     | `tsc -p tsconfig.build.json`                | `tsc -p tsconfig.build.json`                |               |
+| Script      | `app`                                                                                                            | `plugin`                                                                                                         | `minimal`     |
+| ----------- | ---------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- | ------------- |
+| `dev`       | `tsc -p tsconfig.build.json && (tsc -p tsconfig.build.json --watch --preserveWatchOutput & graft start --watch)` | `tsc -p tsconfig.build.json && (tsc -p tsconfig.build.json --watch --preserveWatchOutput & graft start --watch)` |               |
+| `start`     | `graft start`                                                                                                    |                                                                                                                  | `graft start` |
+| `test`      |                                                                                                                  | `vitest run`                                                                                                     |               |
+| `typecheck` | `effect-tsgo tsc`                                                                                                | `effect-tsgo tsc`                                                                                                |               |
+| `build`     | `tsc -p tsconfig.build.json`                                                                                     | `tsc -p tsconfig.build.json`                                                                                     |               |
 
 - 每個專案相依的 Graft 版本都與此命令相同，`graft.yml`
   也指向專案的[編輯器 Schema](../config-file/#編輯器支援)

@@ -78,11 +78,11 @@ A fork moves between states on its own:
 | Building or running an intercept             | `Failed` with the full `Cause`, and `await` finishes. The `retry` schedule does **not** retry it. |
 | A bare `Effect.forkScoped`                   | Not reported to the supervisor.                                                                   |
 
-For an intercept failure, the fork waits for a config update, a replacement, or
-an explicit `restart`. The failure belongs to the spec that the supervisor was
-processing at that time, including an in-place update. An update that was
-already processed does not trigger another try, and new requests that arrive
-during cleanup stay pending.
+For an intercept failure, the fork waits for a config update or an explicit
+`restart`. The failure belongs to the spec that the supervisor was processing at
+that time, including an in-place update. An update that was already processed
+does not trigger another try, and new requests that arrive during cleanup stay
+pending.
 
 How retry interacts with changes:
 
@@ -150,9 +150,9 @@ including logs from the host application.
 
 ## Related
 
-| Page                                                  | Covers                                                |
-| ----------------------------------------------------- | ----------------------------------------------------- |
-| [Fork handle](../fork-handle/)                        | `await`, `stable`, `update`, `restart`, `dispose`.    |
-| [Replace plugins](../replace/)                        | Swapping plugins for new versions in one transaction. |
-| [Errors](../errors/)                                  | Every named error and what to do about it.            |
-| [Troubleshooting](../best-practices/troubleshooting/) | Finding why a fork does not start or does nothing.    |
+| Page                                                  | Covers                                             |
+| ----------------------------------------------------- | -------------------------------------------------- |
+| [Fork handle](../fork-handle/)                        | `await`, `stable`, `update`, `restart`, `dispose`. |
+| [Changes](../transitions/)                            | Deploying new versions of plugins in the kernel.   |
+| [Errors](../errors/)                                  | Every named error and what to do about it.         |
+| [Troubleshooting](../best-practices/troubleshooting/) | Finding why a fork does not start or does nothing. |

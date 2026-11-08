@@ -21,9 +21,6 @@ import { reach, run } from "./utils.ts"
 class Secret extends Context.Service<Secret, string>()("prefix\u0000value") {}
 // @effect-diagnostics-next-line deterministicKeys:off -- Deliberately matches the suffix of Secret's key.
 class Other extends Context.Service<Other, string>()("value") {}
-class Bridge extends Context.Service<Bridge, string>()(
-	"@graftland/graft/test/realm-identity.test/Bridge",
-) {}
 
 const secretProvider = Plugin.service(
 	Secret,
@@ -195,55 +192,6 @@ describe("realm identity", () => {
 					otherRealm,
 				)
 				yield* parent.await
-			}).pipe(run),
-	)
-
-	it.effect(
-		"rechecks a rejected publication with the same structural identity",
-		() =>
-			Effect.gen(function* () {
-				const attempts = yield* Ref.make(0)
-				const watcher = Plugin.make({
-					name: "watcher",
-					inject: [Plugin.optional(Other)],
-					apply: () => Graft.provide(Bridge, "bridge"),
-				})
-				const owner = yield* Graft.plugin(watcher, undefined, otherRealm)
-				yield* owner.await
-				const publisher = yield* Graft.plugin(
-					Plugin.make({
-						name: "cyclic publisher",
-						inject: [Bridge],
-						apply: () =>
-							Ref.update(attempts, (n) => n + 1).pipe(
-								Effect.andThen(Graft.provide(Other, "published")),
-							),
-					}),
-					undefined,
-					otherRealm,
-				)
-				yield* reach(publisher, "Failed")
-				const unrelated = yield* Graft.plugin(
-					secretProvider,
-					undefined,
-					secretRealm,
-				)
-				yield* unrelated.await
-				yield* unrelated.dispose
-				yield* TestClock.adjust("1 millis")
-				const before = yield* Ref.get(attempts)
-				assert.strictEqual(before, 1)
-				yield* Graft.replace([
-					[
-						watcher,
-						Plugin.service(Bridge, Effect.succeed("bridge"), {
-							name: "independent provider",
-						}),
-					],
-				])
-				yield* reach(publisher, "Active")
-				const after = yield* Ref.get(attempts)
-				assert.strictEqual(after, 2)
 			}).pipe(run),
 	)
 

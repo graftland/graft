@@ -7,16 +7,15 @@ import {
 	Option,
 	PlatformError,
 	Ref,
-	Schema,
 	Stream,
 } from "effect"
 import { assert, it } from "@effect/vitest"
 
-import { Graft, Plugin } from "@graftland/graft"
+import { Graft } from "@graftland/graft"
 
 import { parseDocument } from "yaml"
 
-import { Entry, Include, ModuleResolver } from "../src/index"
+import { Include } from "../src/index"
 import { fixture, loaderService, run } from "./utils.ts"
 
 it.effect(
@@ -114,78 +113,6 @@ it.effect(
 		),
 )
 
-it.live(
-	"identifies a hand-added child before its first activation and writes only once",
-	() =>
-		Effect.gen(function* () {
-			const ids = yield* Ref.make<ReadonlyArray<string>>([])
-
-			yield* run({
-				host: fixture("include-entry-lists-host-3751"),
-				child: fixture("include-entry-lists-child-3751"),
-			})(() =>
-				Effect.gen(function* () {
-					const fs = yield* FileSystem.FileSystem
-					const directory = yield* fs.makeTempDirectoryScoped()
-					const file = `${directory}/graft.yml`
-					const writes = yield* Ref.make(0)
-					yield* Graft.provide(FileSystem.FileSystem, {
-						...fs,
-						rename: (source, target) =>
-							fs
-								.rename(source, target)
-								.pipe(Effect.tap(() => Ref.update(writes, (n) => n + 1))),
-					})
-					yield* fs.writeFileString(
-						file,
-						"- id: host\n  name: host\n  config: { plugins: [] }\n",
-					)
-					yield* Graft.plugin(Include.Include, { path: file, watch: true })
-					const loader = yield* loaderService
-					yield* loader.ready
-					yield* fs.writeFileString(
-						file,
-						"- id: host\n  name: host\n  config: { plugins: [{ name: child }] }\n",
-					)
-					yield* loader.changes.pipe(
-						Stream.filter((entries) =>
-							Schema.is(
-								Schema.Struct({ plugins: Schema.NonEmptyArray(Entry.Entry) }),
-							)(entries[0]?.config),
-						),
-						Stream.runHead,
-						Effect.timeout("5 seconds"),
-					)
-					yield* loader.ready
-					const text = yield* fs.readFileString(file)
-					const id = parseDocument(text).getIn([
-						0,
-						"config",
-						"plugins",
-						0,
-						"id",
-					])
-					const started = yield* Ref.get(ids)
-					const count = yield* Ref.get(writes)
-					assert.isString(id)
-					assert.deepEqual(started, [String(id)])
-					assert.equal(count, 1)
-					yield* loader.retry
-					yield* loader.ready
-					const after = yield* Ref.get(writes)
-					assert.equal(after, count)
-				}),
-			).pipe(
-				Effect.provideService(
-					Context.Service<{ readonly ids: typeof ids }>(
-						"loader/fixture/include-entry-lists-child-3751",
-					),
-					{ ids },
-				),
-			)
-		}),
-)
-
 it.effect(
 	"logs a denied hosted-id write with its cause and keeps the child running",
 	() =>
@@ -226,65 +153,4 @@ it.effect(
 				assert.equal(text, original)
 			}),
 		),
-)
-
-it.live("discovers an entry-list field introduced by a replacement", () =>
-	run({
-		host: fixture("include-entry-lists-host-6992"),
-		"replacement-host": fixture("host"),
-		child: fixture("include-entry-lists-child-6992"),
-	})(() =>
-		Effect.gen(function* () {
-			const resolver = yield* ModuleResolver.ModuleResolver
-			const beforeDescriptor = yield* resolver.resolve("host")
-			const hostDescriptor = yield* resolver.resolve("replacement-host")
-			const beforeModule = yield* Effect.tryPromise({
-				try: () => import(beforeDescriptor.location),
-				catch: (cause) =>
-					ModuleResolver.ModuleInvalid.make({
-						specifier: beforeDescriptor.location,
-						cause,
-					}),
-			})
-			const hostModule = yield* Effect.tryPromise({
-				try: () => import(hostDescriptor.location),
-				catch: (cause) =>
-					ModuleResolver.ModuleInvalid.make({
-						specifier: hostDescriptor.location,
-						cause,
-					}),
-			})
-			const before = yield* Effect.fromOption(Plugin.fromModule(beforeModule))
-			const host = yield* Effect.fromOption(Plugin.fromModule(hostModule))
-			const fs = yield* FileSystem.FileSystem
-			const directory = yield* fs.makeTempDirectoryScoped()
-			const file = `${directory}/graft.yml`
-			yield* fs.writeFileString(
-				file,
-				"- id: host\n  name: host\n  config: { plugins: [{ name: child }] }\n",
-			)
-			yield* Graft.plugin(Include.Include, { path: file })
-			const loader = yield* loaderService
-			yield* loader.ready
-			const original = yield* fs.readFileString(file)
-			assert.isUndefined(
-				parseDocument(original).getIn([0, "config", "plugins", 0, "id"]),
-			)
-			yield* Graft.replace([[before, host]])
-			yield* loader.changes.pipe(
-				Stream.filter((entries) =>
-					Schema.is(
-						Schema.Struct({ plugins: Schema.NonEmptyArray(Entry.Entry) }),
-					)(entries[0]?.config),
-				),
-				Stream.runHead,
-				Effect.timeout("2 seconds"),
-			)
-			yield* loader.ready
-			const text = yield* fs.readFileString(file)
-			assert.isString(
-				parseDocument(text).getIn([0, "config", "plugins", 0, "id"]),
-			)
-		}),
-	),
 )

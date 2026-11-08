@@ -1,9 +1,8 @@
 /** Embedded lifecycle guards. Kernel execution uses data-only unit control. */
-import { Context, Effect, Option, Schema, type Cause, type Exit } from "effect"
+import { Context, Option, type Cause, type Effect, type Exit } from "effect"
 
 import type { Fork } from "./Fork"
 import type * as Graft from "./Graft"
-import * as Guard from "./internal/unitGuard"
 import type { Plugin } from "./Plugin"
 
 export const CurrentInstance = Context.Reference<Option.Option<string>>(
@@ -47,16 +46,3 @@ export const Lifecycle = Context.Reference<Option.Option<MemberLifecycle>>(
 	"@graftland/graft/Transition/Lifecycle",
 	{ defaultValue: Option.none },
 )
-export class ManagedFork extends Schema.TaggedError<
-	ManagedFork,
-	{ readonly brand: unique symbol }
->()("ManagedFork", { fork: Schema.Finite }) {}
-export const assertUnmanaged: (
-	fork?: number,
-) => Effect.Effect<void, ManagedFork, Graft.Graft> = (fork) =>
-	Guard.assertUnmanaged(fork)
-export const withUnmanaged = <A, E, R>(
-	effect: Effect.Effect<A, E, R>,
-	fork?: number,
-): Effect.Effect<A, E | ManagedFork, R | Graft.Graft> =>
-	Guard.withUnmanaged(effect, fork)

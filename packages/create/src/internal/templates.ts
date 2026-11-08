@@ -112,7 +112,7 @@ const app: Template = {
 		scripts: {
 			start: "graft start",
 			build: "tsc -p tsconfig.build.json",
-			dev: "tsc -p tsconfig.build.json && graft start",
+			dev: "tsc -p tsconfig.build.json && (tsc -p tsconfig.build.json --watch --preserveWatchOutput & graft start --watch)",
 			typecheck: "effect-tsgo tsc",
 		},
 		dependencies: dependencies(context),
@@ -155,7 +155,7 @@ const plugin: Template = {
 		files: ["dist"],
 		scripts: {
 			build: "tsc -p tsconfig.build.json",
-			dev: "tsc -p tsconfig.build.json && graft start",
+			dev: "tsc -p tsconfig.build.json && (tsc -p tsconfig.build.json --watch --preserveWatchOutput & graft start --watch)",
 			test: "vitest run",
 			typecheck: "effect-tsgo tsc",
 			prepublishOnly: "tsc -p tsconfig.build.json",

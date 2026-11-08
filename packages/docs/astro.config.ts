@@ -89,7 +89,6 @@ export default defineConfig({
 						"lifecycle",
 						"isolation",
 						"intercepts",
-						"replace",
 						"transitions",
 						"units",
 						"bindings",
@@ -106,7 +105,6 @@ export default defineConfig({
 					items: [
 						"config-file",
 						"cli",
-						"hot-reload",
 						"embedding",
 						"http",
 						"http-api",
@@ -147,7 +145,7 @@ export default defineConfig({
 				{
 					label: "API guides",
 					translations: { "zh-CN": "API 使用说明", "zh-TW": "API 使用說明" },
-					items: ["fork-handle", "loader-api", "hmr-api", "errors"],
+					items: ["fork-handle", "loader-api", "errors"],
 				},
 				{
 					label: "Project",

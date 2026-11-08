@@ -1,12 +1,10 @@
 import {
 	Array,
 	Cause,
-	Context,
 	Deferred,
 	Effect,
 	Exit,
 	Fiber,
-	Layer,
 	Option,
 	PubSub,
 	Pull,
@@ -22,100 +20,7 @@ import { Graft, Plugin } from "../src/index.ts"
 import { RuntimeContext } from "../src/internal/runtimeContext"
 import { makeJournal, reach, run } from "./utils.ts"
 
-const task = Plugin.make({
-	name: "typed task",
-	apply: () =>
-		Plugin.fork(Effect.fail("task failed" as const)).pipe(Effect.asVoid),
-})
-
-class Service extends Context.Service<Service, string>()(
-	"@graftland/graft/test/background-tasks.test/Service",
-) {}
-
 describe("supervised background tasks", () => {
-	it("retains asynchronous errors in definitions even when launch errors are handled", () => {
-		const typed: Plugin.Plugin<void, void, "task failed"> = task
-		assert.isTrue(Plugin.isPlugin(typed))
-		// @ts-expect-error A task's error cannot disappear from its plugin contract.
-		const quiet: Plugin.Plugin<void, void, never> = task
-		assert.isTrue(Plugin.isPlugin(quiet))
-		const caught = Plugin.make({
-			name: "caught launch",
-			apply: () =>
-				Plugin.fork(Effect.fail("task failed" as const)).pipe(
-					Effect.catchCause(() => Effect.void),
-					Effect.asVoid,
-				),
-		})
-		const stillTyped: Plugin.Plugin<void, void, "task failed"> = caught
-		assert.isTrue(Plugin.isPlugin(stillTyped))
-		// @ts-expect-error Handling the launch effect does not handle the worker.
-		const stillNotQuiet: Plugin.Plugin<void, void, never> = caught
-		assert.isTrue(Plugin.isPlugin(stillNotQuiet))
-		const updated = Plugin.make({
-			name: "update task",
-			config: Schema.String,
-			apply: () =>
-				Effect.succeed(() =>
-					Plugin.fork(Effect.fail("update failed" as const)).pipe(
-						Effect.as(true),
-					),
-				),
-		})
-		const updateTyped: Plugin.Plugin<string, string, "update failed"> = updated
-		assert.isTrue(Plugin.isPlugin(updateTyped))
-		const service = Plugin.service(
-			Service,
-			Plugin.fork(Effect.fail("service failed" as const)).pipe(
-				Effect.as("ready"),
-			),
-			{ name: "service task" },
-		)
-		const serviceTyped: Plugin.Plugin<
-			void,
-			void,
-			"service failed" | Graft.ServiceConflict
-		> = service
-		assert.isTrue(Plugin.isPlugin(serviceTyped))
-		const layer = Plugin.layer(
-			Layer.effect(
-				Service,
-				Plugin.fork(Effect.fail("layer failed" as const)).pipe(
-					Effect.as("ready"),
-				),
-			),
-			{ name: "layer task", provides: [Service] },
-		)
-		const layerTyped: Plugin.Plugin<
-			void,
-			void,
-			"layer failed" | Graft.ServiceConflict
-		> = layer
-		assert.isTrue(Plugin.isPlugin(layerTyped))
-		const nested = Plugin.make({
-			name: "nested task",
-			apply: () =>
-				Plugin.fork(Plugin.fork(Effect.fail("nested failed" as const))).pipe(
-					Effect.asVoid,
-				),
-		})
-		const nestedTyped: Plugin.Plugin<void, void, "nested failed"> = nested
-		assert.isTrue(Plugin.isPlugin(nestedTyped))
-		const missing = {
-			name: "missing worker service",
-			apply: () => Plugin.fork(Service).pipe(Effect.asVoid),
-		}
-		// @ts-expect-error A background task still requires declared dependencies.
-		assert.isTrue(Plugin.isPlugin(Plugin.make(missing)))
-		const quietDefinition = Plugin.make({
-			name: "quiet",
-			apply: () => Effect.void,
-		})
-		// @ts-expect-error Replacing a quiet plugin cannot introduce asynchronous errors.
-		const incompatible = Graft.replace([[quietDefinition, task]])
-		assert.isTrue(Effect.isEffect(incompatible))
-	})
-
 	it.effect(
 		"fails an active plugin and releases its resources after a worker fails",
 		() =>

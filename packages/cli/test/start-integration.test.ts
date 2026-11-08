@@ -359,3 +359,77 @@ it.live(
 		}).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 	40000,
 )
+
+it.live(
+	"keeps the config file out of artifacts, so editing one entry's config redeploys only that entry (C9)",
+	() =>
+		Effect.gen(function* () {
+			const fs = yield* FileSystem.FileSystem
+			const directory = yield* fs.makeTempDirectoryScoped()
+			const plugin = yield* quote(
+				new URL("../.cache/integration/plugin.mjs", import.meta.url).href,
+			)
+			const effect = yield* quote(import.meta.resolve("effect"))
+			yield* fs.writeFileString(
+				`${directory}/package.json`,
+				'{"name":"start-app-fixture","type":"module"}',
+			)
+			yield* fs.writeFileString(
+				`${directory}/greeter.mjs`,
+				`import {Plugin} from ${plugin};import {Effect,Schema} from ${effect};export default Plugin.make({name:"greeter",config:Schema.Struct({greeting:Schema.String}),apply:(c)=>Effect.logInfo("GREETING "+c.greeting)});`,
+			)
+			yield* fs.writeFileString(
+				`${directory}/other.mjs`,
+				`import {Plugin} from ${plugin};import {Effect} from ${effect};export default Plugin.make({name:"other",apply:()=>Effect.logInfo("OTHER started")});`,
+			)
+			const config = (greeting: string) =>
+				`- id: greeter\n  name: ./greeter.mjs\n  config:\n    greeting: ${greeting}\n- id: other\n  name: ./other.mjs\n`
+			yield* fs.writeFileString(`${directory}/graft.yml`, config("Hello"))
+			const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+			const child = yield* spawner.spawn(
+				ChildProcess.make(
+					process.execPath,
+					[
+						executable,
+						"--no-plugins",
+						"start",
+						`${directory}/graft.yml`,
+						"--watch",
+					],
+					{
+						cwd: directory,
+						env: { GRAFT_HOME: directory + "/home" },
+						extendEnv: true,
+					},
+				),
+			)
+			const lines = yield* Ref.make<ReadonlyArray<string>>([])
+			yield* child.all.pipe(
+				Stream.decodeText(),
+				Stream.splitLines,
+				Stream.runForEach((line) => Ref.update(lines, Array.append(line))),
+				Effect.forkScoped,
+			)
+			const seen = (text: string) =>
+				Ref.get(lines).pipe(
+					Effect.repeat({
+						schedule: Schedule.spaced("50 millis"),
+						until: Array.some(String.includes(text)),
+					}),
+					Effect.timeout("20 seconds"),
+				)
+			yield* seen("GREETING Hello")
+			yield* seen("OTHER started")
+			yield* fs.writeFileString(`${directory}/graft.yml`, config("Hi"))
+			yield* seen("GREETING Hi")
+			yield* Effect.sleep("1 second")
+			const after = yield* Ref.get(lines)
+			assert.lengthOf(
+				Array.filter(after, String.includes("OTHER started")),
+				1,
+				Array.join(after, "\n"),
+			)
+			yield* child.kill()
+		}).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+	40000,
+)

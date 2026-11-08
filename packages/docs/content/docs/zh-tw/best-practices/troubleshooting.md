@@ -61,14 +61,9 @@ Graft 記錄外掛失敗時會附上完整的 `Cause`，並帶有 `graft.plugin`
 [Graft 記錄的內容](../observability/#graft-記錄的內容)中。下列來自 `graft start`
 和 loader 的訊息，指出程式碼或設定有問題：
 
-| 訊息                                                 | 含義                                                                                                             |
-| ---------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| `Restart required…`                                  | 某個模組變更無法熱重載，舊的外掛繼續執行。請參閱[重載不適用的情況](../../hot-reload/#重載不適用的情況)。         |
-| `Reloading plugin modules failed`                    | 新程式碼無法匯入或未通過檢查，舊的外掛繼續執行；修正程式碼後再儲存一次。                                         |
-| `Kept the previous code: plugin "<name>" …`          | 取代失敗或逾時；計入的恢復 fork 為活躍或 `Pending`。失敗帶有完整 cause，逾時沒有 cause。修正程式碼後再儲存一次。 |
-| `Replacement abandoned: plugin "<name>" …`           | `RecoveryFailed`：放棄新程式碼的原因。錯誤帶有完整 cause，逾時會指出外掛。                                       |
-| `Previous code failed to restart: plugin "<name>" …` | `RecoveryFailed`：恢復的舊外掛也失敗了。錯誤帶有完整 cause。修正啟動失敗後再儲存一次。                           |
-| `Dropped an edit to "<id>": the file changed it too` | 一次 API 編輯輸給了檔案中的編輯。請參閱[與外部編輯的衝突](../../loader-api/#與外部編輯的衝突)。                  |
+| 訊息                                                 | 含義                                                                                            |
+| ---------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `Dropped an edit to "<id>": the file changed it too` | 一次 API 編輯輸給了檔案中的編輯。請參閱[與外部編輯的衝突](../../loader-api/#與外部編輯的衝突)。 |
 
 ## 症狀
 
@@ -83,29 +78,27 @@ Graft 記錄外掛失敗時會附上完整的 `Cause`，並帶有 `graft.plugin`
 | 消費者看到的是環境中的值，而不是發布的值                | 提供者在另一個領域中發布。請參閱[環境後備與繼承](../../isolation/#環境後備與繼承)。                                                                                                                       |
 | 處理函式從未被呼叫                                      | 派發在另一個[領域](../../events/#領域與過濾器)中執行、被過濾器排除、鍵字串不同，或它的 scope 已經關閉。此外，`Event.emit` 在第一個失敗處停止，`Event.bail` 則在第一個 `Some` 處停止。                     |
 | 處理函式看到錯誤的服務、設定或日誌註解                  | 處理函式使用自己所屬外掛的 context 執行，而不是派發端的 context。請把它需要的東西作為事件引數傳入。請參閱[處理函式的 context](../../events/#處理函式的-context)。                                         |
-| 編輯 `graft.yml` 沒有效果                               | CLI 啟動時讀取一個版本。修改設定後需要重新啟動。                                                                                                                                                          |
+| 編輯 `graft.yml` 沒有效果                               | 未使用 `--watch` 時，CLI 啟動時只讀取一個版本。請重新啟動，或使用[監看模式](../../cli/#監看模式)。                                                                                                        |
 | 變更環境變數沒有效果                                    | 參照在準備和復原時解析。修改 CLI 的環境來源後需要重新啟動。                                                                                                                                               |
-| 編輯模組沒有效果                                        | 重新建置選中的 JavaScript 模組並重新啟動 CLI。嵌入式 HMR 需要明確註冊和監看器。                                                                                                                           |
-| 重載之後舊行為仍在繼續                                  | 某個模組在匯入時啟動了計時器或連線，Graft 無法停止它。把它移進 `apply`。請參閱[外掛模組的規則](../../hot-reload/#外掛模組的規則)。                                                                        |
+| 編輯模組沒有效果                                        | 重新建置選中的 JavaScript 模組。未使用[監看模式](../../cli/#監看模式)時，還需重新啟動 CLI。                                                                                                               |
+| 重載之後舊行為仍在繼續                                  | 某個模組在匯入時啟動了計時器或連線，Graft 無法停止它。把它移進 `apply`。請參閱[外掛模組](../../plugins/#外掛模組)。                                                                                       |
 | 設定項目以 `ConfigError` 失敗                           | 在行程環境、`--env-file` 或 `--env-dir` 中設定缺少的變數，然後重新啟動。                                                                                                                                  |
 | 設定項目以 `ModuleNotFound` 失敗                        | 它的 `name` 無法解析；訊息會列出嘗試過的名稱。請參閱[外掛名稱](../../config-file/#外掛名稱)。                                                                                                             |
 | 設定項目以 `ModuleInvalid` 失敗                         | 模組無法匯入，或者既沒有以預設匯出、也沒有以 `plugin` 匯出外掛。                                                                                                                                          |
-| `graft start` 立即結束                                  | 檢查初始設定、必要的環境檔案，以及不支援的 `--watch` 選項。                                                                                                                                               |
+| `graft start` 立即結束                                  | 檢查初始設定和必要的環境檔案。                                                                                                                                                                            |
 | 套件管理器列出兩個版本的 `effect` 或 `@graftland/graft` | 某個外掛套件直接相依於它們。它們只能有一份。請參閱[外掛套件](../packaging/)。                                                                                                                             |
 
 ## 停不下來的停止
 
 提供者要等到其服務的消費者都停止之後才會停止，順序見[服務撤回流程](../../services/#服務撤回流程)。這個過程超過 10 秒時，Graft 會記錄
 `Still waiting for consumers of <keys>; a teardown cycle may be holding them`
-並繼續等待；關閉、重新啟動和熱重載時都是如此。
+並繼續等待；關閉和重新啟動時都是如此。
 
 | 要找的情況                                                         | 修正方式                                          |
 | ------------------------------------------------------------------ | ------------------------------------------------- |
 | 消費者的 finalizer 在等待某件提供者停止後才會做的事。              | 不要在 finalizer 中等待提供者；釋放資源後就返回。 |
 | 經由服務或事件形成的環：A 的清理等待 B，而 B 的清理等待 A。        | 用第三個外掛擁有共用的部分，打破這個環。          |
 | 消費者在 `Effect.uninterruptible` 中的任務等待某件永遠不會來的事。 | 讓等待保持可中斷，只把關鍵步驟設為不可中斷。      |
-
-停止卡住卻沒有任何警告時，可能是某個模組匯入一直沒有完成；請參閱[限制](../../hot-reload/#限制)。
 
 ## 錯誤
 
@@ -116,7 +109,5 @@ Graft 記錄外掛失敗時會附上完整的 `Cause`，並帶有 `graft.plugin`
 | ---------------------------------------------------------------- | ------------------------------------------------ |
 | `SchemaError`、`Fork.CleanupError`、任務失敗                     | [fork 失敗](../../errors/#fork-失敗)             |
 | `ServiceConflict`                                                | [服務](../../errors/#服務)                       |
-| `Graft.ReplacementConflict`                                      | [取代](../../errors/#取代)                       |
 | `UnregisteredReference`、`InvalidIntercept`                      | [Intercept](../../errors/#intercept)             |
 | `CyclicConfig`、`InvalidOperation`、`StoreError`、`LoaderClosed` | [Loader 與設定檔](../../errors/#loader-與設定檔) |
-| `HmrError`、`Skipped` 結果                                       | [熱重載](../../errors/#熱重載)                   |

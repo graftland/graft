@@ -131,6 +131,8 @@ export interface Options {
 	readonly store?: string
 	readonly placement?: "Worker" | "Process"
 	readonly budget?: Partial<Kernel.Budget>
+	/** Absolute paths never captured into artifacts, such as the config file that names the entries. */
+	readonly uncaptured?: ReadonlyArray<string>
 }
 const isPath = (name: string) =>
 	String.startsWith(".")(name) || String.startsWith("/")(name)
@@ -343,17 +345,29 @@ const capture = Effect.fnUntraced(function* (
 	const store = path.resolve(
 		options.store ?? path.join(options.base, ".graft/artifacts"),
 	)
-	const relative = path.relative(owner.directory, store)
+	const files = yield* FileSystem.FileSystem
+	/** Compare real paths: the owner directory is resolved, and temporary paths are often symbolic links. */
+	const uncaptured = yield* Effect.forEach(
+		options.uncaptured ?? [],
+		(absolute) =>
+			files.realPath(absolute).pipe(Effect.orElseSucceed(() => absolute)),
+	)
+	const inside = (absolute: string) => {
+		const relative = path.relative(owner.directory, absolute)
+		return !path.isAbsolute(relative) &&
+			!String.startsWith("../")(relative) &&
+			relative !== ""
+			? [relative]
+			: []
+	}
+	/** Editing an uncaptured file, such as graft.yml, must not change every artifact of its package. */
 	const exclude = [
 		"node_modules",
 		".git",
 		".cache",
 		".graft",
-		...(!path.isAbsolute(relative) &&
-		!String.startsWith("../")(relative) &&
-		relative !== ""
-			? [relative]
-			: []),
+		...inside(store),
+		...Array.flatMap(uncaptured, inside),
 	]
 	const artifact = yield* Artifact.capture({
 		directory: owner.directory,

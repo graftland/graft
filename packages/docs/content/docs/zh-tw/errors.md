@@ -28,12 +28,6 @@ Graft 會保留每個失敗的完整 `Cause`
 錯誤還帶有發布者的 `fork` ID 和服務的
 `realm`。請參閱[發布導致的相依環](../services/#發布導致的相依環)。
 
-## 取代
-
-| 名稱                        | 觸發時機                    | 處理方式                                                    |
-| --------------------------- | --------------------------- | ----------------------------------------------------------- |
-| `Graft.ReplacementConflict` | 一批取代無法用 alias 表達。 | 檢查 `indices` 指出的配對。請參閱[衝突](../replace/#衝突)。 |
-
 ## Intercept
 
 | 名稱                    | 觸發時機                                          |
@@ -53,20 +47,6 @@ Graft 會保留每個失敗的完整 `Cause`
 | `LoaderClosed`     | 在 loader 關閉後才提交編輯。                           |
 
 請參閱 [Loader API](../loader-api/)。
-
-## 熱重載
-
-| 名稱／結果                      | 含義                                                                                           |
-| ------------------------------- | ---------------------------------------------------------------------------------------------- |
-| `HmrError`                      | 模組無法匯入，或沒有匯出外掛。`cause` 是原始錯誤。                                             |
-| `Skipped` / `restart-required`  | 原生載入能力或符號連結目標的變更需要重新啟動。                                                 |
-| `Skipped` / `ambiguous-exports` | 原本共用同一個 Plugin 物件的項目，現在匯出了不同的物件。                                       |
-| `Skipped` / `identity-conflict` | 取代的身分與執行階段的 alias 不相容。                                                          |
-| `RolledBack`                    | 取代失敗或逾時；計入的恢復 fork 為活躍或 `Pending`。`failures` 保留取代失敗及其完整 cause。    |
-| `RecoveryFailed`                | 舊程式碼重新啟動失敗。`failures` 保留取代失敗；`recovery` 列出恢復失敗的 fork 及其完整 cause。 |
-| `Failed`                        | 重載失敗。值中包含完整的 `Cause`；舊外掛繼續執行。                                             |
-
-請參閱[重載不適用的情況](../hot-reload/#重載不適用的情況)。
 
 ## Remote
 

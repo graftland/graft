@@ -98,54 +98,6 @@ describe("publication dependency graph", () => {
 	)
 
 	it.effect(
-		"keeps a rejected publisher failed until the other endpoint drops its dependency",
-		() =>
-			Effect.gen(function* () {
-				const journal = yield* makeJournal
-				const attempts = yield* Ref.make(0)
-				const watcher = Plugin.make({
-					name: "watcher",
-					inject: [Target],
-					apply: () =>
-						Effect.gen(function* () {
-							yield* journal.record("watcher started")
-							yield* Graft.provide(First, "first")
-						}),
-				})
-				const changed = Plugin.service(First, Effect.succeed("first"), {
-					name: "independent provider",
-				})
-				const owner = yield* Graft.plugin(watcher)
-				yield* owner.await
-				const publisher = yield* Graft.plugin(
-					Plugin.make({
-						name: "publisher",
-						retry: Schedule.recurs(3),
-						inject: [First],
-						apply: () =>
-							Ref.update(attempts, (n) => n + 1).pipe(
-								Effect.andThen(Graft.provide(Target, "published")),
-							),
-					}),
-				)
-				yield* expectCycle(publisher)
-				// An unrelated graph change must not make the failed fork retry against its cleaned-up graph.
-				const unrelated = yield* Graft.plugin(
-					Plugin.make({ name: "unrelated", apply: () => Effect.void }),
-				)
-				yield* unrelated.await
-				yield* unrelated.dispose
-				const before = yield* Ref.get(attempts)
-				assert.strictEqual(before, 1)
-				yield* journal.expect(["watcher started"])
-				yield* Graft.replace([[watcher, changed]])
-				yield* reach(publisher, "Active")
-				const after = yield* Ref.get(attempts)
-				assert.strictEqual(after, 2)
-			}).pipe(ambient),
-	)
-
-	it.effect(
 		"reaches a fixed point through consumers and their descendants",
 		() =>
 			Effect.gen(function* () {

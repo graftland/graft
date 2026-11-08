@@ -117,8 +117,14 @@ interface Tools {
 	readonly preparation: Effect.Success<ReturnType<typeof Preparation.make>>
 	readonly control: Control.Client
 }
-/** Target identities of the entries the last accepted revision deployed. */
+/** What the last accepted revision deployed per entry: code identity and encoded input. */
 type Applied = HashMap.HashMap<string, string>
+const encodeJson = Schema.encodeEffect(Schema.fromJsonString(Schema.Json))
+/** The code identity does not cover the input, so an edited config alone must still count as a change. */
+const appliedKey = (target: Kernel.Target) =>
+	encodeJson(target.deployment?.input ?? null).pipe(
+		Effect.map((input) => `${target.identity}\u0000${input}`),
+	)
 
 /** Prepares one entry; an entry whose target identity is already applied is left untouched. */
 const operation = Effect.fnUntraced(function* (
@@ -140,10 +146,11 @@ const operation = Effect.fnUntraced(function* (
 	const planned = yield* Preparation.target(input, {
 		control: options.control,
 	})
-	if (Option.contains(HashMap.get(applied, entry.id), planned.identity))
+	const key = yield* appliedKey(planned)
+	if (Option.contains(HashMap.get(applied, entry.id), key))
 		return {
 			instance: entry.id,
-			identity: planned.identity,
+			identity: key,
 			operation: Option.none(),
 		}
 	if (names.length > 0) {
@@ -159,7 +166,7 @@ const operation = Effect.fnUntraced(function* (
 	const prepared = yield* preparation.inspect(input)
 	return {
 		instance: entry.id,
-		identity: prepared.target.identity,
+		identity: yield* appliedKey(prepared.target),
 		operation: Option.some<Kernel.DeploymentOperation>({
 			_tag: "Deploy",
 			instance: entry.id,
@@ -293,6 +300,7 @@ const deploy = Effect.fnUntraced(function* (options: Options) {
 		resolver: yield* ModuleResolver.make({
 			base: path.dirname(options.config),
 			control: options.control,
+			uncaptured: [options.config],
 		}),
 		preparation: yield* Preparation.make({ control: options.control }),
 	}

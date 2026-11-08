@@ -52,10 +52,10 @@ Redacted.value(url) // => "postgres://app:secret@db/app"
 
 ## Retry flaky resources
 
-A plugin without `retry` stays `Failed` until its config or dependencies change
-or `loader.retry` runs. Give plugins that depend on a network resource a
-schedule that never gives up, caps its delay and adds jitter, so forks that
-share a database do not reconnect in lockstep:
+A plugin without `retry` stays `Failed` until its config or dependencies change.
+Give plugins that depend on a network resource a schedule that never gives up,
+caps its delay and adds jitter, so forks that share a database do not reconnect
+in lockstep:
 
 ```ts import.meta.vitest name="production: retry flaky resources"
 import { Effect, Ref, Schedule, Schema, Stream } from "effect"
@@ -218,10 +218,8 @@ After installing packages, rebuild application modules and restart:
 | Upgrade all `@graftland/*` packages to the same version.          | Graft releases every package with [one version](../../releases/#versions).                                            |
 | Keep a config change compatible, or ship it with the new version. | Config that no longer decodes fails that entry with `SchemaError`.                                                    |
 
-To swap plugin code without a restart, an embedding host can call
-[`Graft.replace`](../../replace/); the
-[checkout-upgrade](https://github.com/graftland/graft/tree/main/samples/checkout-upgrade)
-sample does this under load.
+To swap plugin code without a restart, run `graft start` in
+[watch mode](../../cli/#watch-mode), or submit a [Change](../../transitions/).
 
 ## Embed instead of the CLI
 

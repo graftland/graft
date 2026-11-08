@@ -12,7 +12,6 @@ termination-based reclamation.
 | Load a few plugins from code        | `Graft.layer` and `Graft.plugin`       | [Run plugins directly](#run-plugins-directly) |
 | Load plugins from a list of entries | `Loader.plugin` and a `ModuleResolver` | [Load entries](#load-entries)                 |
 | Load plugins from a YAML file       | `Include.Include`                      | [Load a config file](#load-a-config-file)     |
-| Reload code without the CLI         | `@graftland/hmr`                       | [HMR API](../hmr-api/)                        |
 | Test plugins                        | `@effect/vitest` and `Graft.layer`     | [Testing](../best-practices/testing/)         |
 
 ## Run plugins directly

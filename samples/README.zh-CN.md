@@ -27,7 +27,6 @@
 | ------------------------------------------ | ------------------------------------------------- | --------------------------------------------------------------------------------------------- |
 | [integration-gateway](integration-gateway) | 独立打包的集成升级时，保持 WebSocket 机器人会话。 | Worker 和子进程升级；安装后的公开包。                                                         |
 | [chat-bot](chat-bot)                       | 一个聊天机器人，它的命令和过滤器都是插件。        | 由插件拥有的事件处理器、依赖门控、原地更新、子进程中的天气集成。                              |
-| [checkout-upgrade](checkout-upgrade)       | 在定价升级和数据库故障切换期间运行的订单处理器。  | 高负载下的 `Graft.replace` 与重新配置、有序的拆除、排空正在处理的工作。                       |
 | [http-gateway](http-gateway)               | 共享待办存储的 HTTP 网关。                        | HttpApi 契约、类型化客户端、实时 OpenAPI 与 Scalar 界面；监听编辑、Pending 路由与实时插件树。 |
 | [mcp-tools](mcp-tools)                     | 工具都是插件的 MCP 服务器。                       | `plugin-mcp-server`、客户端连接期间重载工具、坏掉的工具会回滚。                               |
 | [saas-tenants](saas-tenants)               | 同一组插件为多个租户提供服务。                    | 每个租户各自的 `isolate` 与 `intercept`、带有租户专属设置的共享服务、租户的接入与退出。       |

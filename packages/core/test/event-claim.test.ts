@@ -17,7 +17,7 @@ import { assert, describe, it } from "@effect/vitest"
 
 import { expectTypeOf } from "vitest"
 
-import { Event, Graft, Plugin } from "../src/index.ts"
+import { Event } from "../src/index.ts"
 import { RuntimeContext } from "../src/internal/runtimeContext"
 import * as Release from "../src/Release.ts"
 import { run } from "./utils.ts"
@@ -176,45 +176,6 @@ describe("fast path lifecycle controls", () => {
 						assert.isFalse(HashMap.has(after, event.key))
 					}
 				}).pipe(run),
-		)
-	}
-
-	for (const change of ["restart", "replace"] as const) {
-		it.effect(`withdraws the old once invocation during plugin ${change}`, () =>
-			Effect.gen(function* () {
-				const event = Event.make<[], string>(`plugin-${change}`)
-				const entered = yield* Deferred.make<void>()
-				const generation = yield* Ref.make(0)
-				const replaced = yield* Deferred.make<void>()
-				const apply = () =>
-					Effect.gen(function* () {
-						const current = yield* Ref.updateAndGet(generation, (n) => n + 1)
-						yield* Event.once(event, () =>
-							current === 1
-								? Deferred.succeed(entered, undefined).pipe(
-										Effect.andThen(Effect.never),
-									)
-								: Effect.succeed("new generation"),
-						)
-						if (current > 1) yield* Deferred.succeed(replaced, undefined)
-					})
-				const plugin = Plugin.make({ name: "original listener", apply })
-				const fork = yield* Graft.plugin(plugin)
-				yield* fork.await
-				const first = yield* Effect.forkScoped(Event.parallel(event))
-				yield* Deferred.await(entered)
-				if (change === "restart") yield* fork.restart
-				else
-					yield* Graft.replace([
-						[plugin, Plugin.make({ name: "replacement listener", apply })],
-					])
-				yield* fork.await
-				yield* Deferred.await(replaced)
-				const previous = yield* Fiber.join(first)
-				const next = yield* Event.parallel(event)
-				assert.deepStrictEqual(previous, [])
-				assert.deepStrictEqual(next, ["new generation"])
-			}).pipe(run),
 		)
 	}
 })

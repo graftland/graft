@@ -49,8 +49,7 @@ export default Plugin.make({
 ```
 
 Keep service keys, event tokens, schemas, error types and the plugin at the top
-level; the
-[rules for plugin modules](../../hot-reload/#rules-for-plugin-modules) cover the
+level; the [rules for plugin modules](../../plugins/#plugin-modules) cover the
 rest. Read settings from config fields, not `process.env`; see
 [Where a setting belongs](../design/#where-a-setting-belongs).
 

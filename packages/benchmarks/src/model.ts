@@ -18,7 +18,6 @@ export type Scenario =
 	| "events-waterfall"
 	| "config-update"
 	| "config-restart"
-	| "replace"
 	| "memory-cycles"
 	| "memory-steady"
 	| "import"
@@ -83,13 +82,8 @@ export const supported = (
 			return "No runtime plugin unload or dependency reactivation API."
 		if (String.startsWith("config-")(scenario))
 			return "No runtime plugin configuration update or restart API."
-		if (scenario === "replace") return "No runtime plugin replacement API."
 		if (String.startsWith("events-")(scenario))
 			return "Only synchronous EventEmitter dispatch is inherited; use events-emit for that overlap."
 	}
-	if (scenario === "replace" && implementation !== "graft")
-		return implementation === "cordis"
-			? "Pinned cordis RegistryService has no replace API; unload/reload does not provide atomic alias replacement."
-			: "Raw Layer/Scope has no plugin identity or atomic alias replacement API."
 	return undefined
 }

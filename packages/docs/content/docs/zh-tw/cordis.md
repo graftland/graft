@@ -20,7 +20,7 @@ Graft 沿用 [cordis](https://github.com/cordiverse/cordis)
 | `fiber.restart`                        | `fork.restart`。                                                                             |
 | `ctx.isolate`、標籤                    | [`isolate`](../isolation/#領域)，對服務和事件都適用。                                        |
 | `ctx.intercept`                        | 搭配 `Context.Reference` 使用的 [`intercept`](../intercepts/)。                              |
-| `registry.replace`                     | [`Graft.replace`](../replace/)。                                                             |
+| `registry.replace`                     | [變更](../transitions/)中的 `Deploy` 操作。                                                  |
 | `ctx.on`、`ctx.emit`、`serial`、`bail` | [事件](../events/)：`on`、`emit`、`parallel`、`bail`、`waterfall`。                          |
 | 使用 Standard Schema 的設定            | Effect `Schema`，在外掛啟用期間解碼。                                                        |
 | 日誌、計時器和檔案系統外掛             | Effect 的 `Logger`、`Schedule`、`Clock` 和 `FileSystem`。                                    |
@@ -40,8 +40,8 @@ Graft 沿用 [cordis](https://github.com/cordiverse/cordis)
 - **可使用服務的設定解碼。** 解碼可以非同步執行，也可以使用外掛的相依服務。
 - **保留情境的處理函式。**
   事件處理函式使用所屬外掛自身的服務、領域（realm）和 intercept 執行。
-- **可回滾的原子性取代。** `Graft.replace`
-  在一筆交易中完成所有外掛的取代；新外掛啟動失敗時回到舊外掛。
+- **可回滾的變更。**
+  [變更](../transitions/)在核心中部署新版本。目標未通過試行時，舊代繼續執行。
 - **在其他行程中執行外掛。** [Remote](../remote/overview/)
   讓某個外掛在子行程、worker 或另一台機器上執行，使用它服務的外掛不必修改。
 

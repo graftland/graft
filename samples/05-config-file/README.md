@@ -40,8 +40,7 @@ Leave it running and edit files in this folder:
 2. Add `disabled: true` to the `ticker` entry and save. The ticks stop. Remove
    the line and they start again.
 3. In `src/greeter.ts`, change `Hello` to `Hi there` and save. Graft imports the
-   new code and replaces the running plugin: `Reloaded 1 plugin module(s)`,
-   `Goodbye, Bob!`, `Hi there, Bob!`.
+   new code and replaces the running plugin: `Goodbye, Bob!`, `Hi there, Bob!`.
 
 Press <kbd>Ctrl</kbd>+<kbd>C</kbd> to stop. Graft unloads every plugin.
 

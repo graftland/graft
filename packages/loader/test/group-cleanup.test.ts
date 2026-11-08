@@ -1,4 +1,4 @@
-import { Array, Cause, Context, Effect, Option, Ref, Stream } from "effect"
+import { Array, Cause, Context, Effect, Option, Stream } from "effect"
 import { assert, it } from "@effect/vitest"
 
 import { Graft, type Fork } from "@graftland/graft"
@@ -97,55 +97,6 @@ it.effect.each(["remove", "disable", "replace"])(
 						readonly second: typeof second
 					}>("loader/fixture/group-cleanup-broken-1435"),
 					{ first, second },
-				),
-			)
-		}),
-)
-
-it.effect(
-	"retains restart cleanup failure on the actual plugin and retries its latest input",
-	() =>
-		Effect.gen(function* () {
-			const broken = yield* Ref.make(true)
-			const cleanup = new Error("Restart cleanup failed")
-
-			yield* run({ changing: fixture("group-cleanup-changing-4156") })(() =>
-				Effect.gen(function* () {
-					yield* Graft.plugin(Loader.plugin, [
-						{ id: "entry", name: "changing", config: "before" },
-					])
-					const loader = yield* loaderService
-					yield* loader.ready
-					yield* loader.update("entry", { config: "after" })
-					yield* loader.ready
-					const trees = yield* Stream.runHead(Graft.forks)
-					const failed = Array.findFirst(
-						flatten(Option.getOrThrow(trees)),
-						(node) => node.state._tag === "Failed",
-					)
-					assert(Option.isSome(failed))
-					assert(failed.value.state._tag === "Failed")
-					assert.include(defects(failed.value.state.cause), cleanup)
-					yield* Ref.set(broken, false)
-					yield* loader.retry
-					yield* loader.ready
-					const recovered = yield* Stream.runHead(Graft.forks)
-					const changing = Array.filter(
-						flatten(Option.getOrThrow(recovered)),
-						(node) => node.name === "changing",
-					)
-					assert.isTrue(
-						Array.every(changing, (node) => node.state._tag === "Active"),
-					)
-					assert.isTrue(Array.some(changing, (node) => node.input === "after"))
-				}),
-			).pipe(
-				Effect.provideService(
-					Context.Service<{
-						readonly broken: typeof broken
-						readonly cleanup: typeof cleanup
-					}>("loader/fixture/group-cleanup-changing-4156"),
-					{ broken, cleanup },
 				),
 			)
 		}),

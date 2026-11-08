@@ -74,7 +74,7 @@ fork 会自动在这些状态之间切换：
 | 构造或运行 intercept             | 以完整的 `Cause` 进入 `Failed`，`await` 结束。`retry` 调度**不会**重试这类失败。 |
 | 裸 `Effect.forkScoped`           | 不会报告给 supervisor。                                                          |
 
-对于 intercept 失败，fork 会等待配置更新、插件替换或显式调用
+对于 intercept 失败，fork 会等待配置更新或显式调用
 `restart`。失败归属于 supervisor 当时正在处理的 spec，包括原地更新。已经处理过的更新不会触发再次尝试，清理期间到达的新请求仍保持待处理。
 
 重试与变更的交互方式：
@@ -138,6 +138,6 @@ trees // => Option.some([{ id: 1, name: "app/app", input: undefined, state: Fork
 | 页面                                           | 内容                                                |
 | ---------------------------------------------- | --------------------------------------------------- |
 | [Fork 句柄](../fork-handle/)                   | `await`、`stable`、`update`、`restart`、`dispose`。 |
-| [替换插件](../replace/)                        | 在一个事务中把插件替换为新版本。                    |
+| [变更](../transitions/)                        | 在内核中部署插件的新版本。                          |
 | [错误](../errors/)                             | 所有具名的错误以及应对方法。                        |
 | [故障排查](../best-practices/troubleshooting/) | 找出 fork 为何没有启动或什么也不做。                |

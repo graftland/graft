@@ -303,11 +303,11 @@ spans // => ["graft.plugin app/feed", "graft.plugin app/feed > feed.apply", "fee
 每个 `graft.plugin <name>` span 都带有该插件日志的身份 `graft.fork` 和
 `graft.plugin`，另外还有 `graft.revision`：
 
-| 属性             | 值                                                         |
-| ---------------- | ---------------------------------------------------------- |
-| `graft.fork`     | fork 的 `id`。                                             |
-| `graft.plugin`   | 插件的 `name`。                                            |
-| `graft.revision` | 从 0 开始，`restart`、替换和回滚时递增；配置更新不改变它。 |
+| 属性             | 值                                              |
+| ---------------- | ----------------------------------------------- |
+| `graft.fork`     | fork 的 `id`。                                  |
+| `graft.plugin`   | 插件的 `name`。                                 |
+| `graft.revision` | 从 0 开始，`restart` 时递增；配置更新不改变它。 |
 
 ### 导出 span
 

@@ -39,7 +39,6 @@ export const cases = (quick = false) => {
 	])
 		add(`events-${mode}`, [1, 10, 100], quick ? 2 : 100)
 	for (const scenario of ["config-update", "config-restart"]) add(scenario, [1])
-	add("replace", [1, 10, 100])
 	add("memory-cycles", [10])
 	add("memory-steady", [1000])
 	add("import", [1])
@@ -105,8 +104,6 @@ export const interpretation = {
 		"One sequential config update after startup, preserving activation. Graft Schema.Struct decodes Schema.Int; cordis uses an internal/update hook and no optional Config schema; raw Effect assigns a value manually. This is a default-validation comparison. Equal schema validation could change the gap.",
 	"config-restart":
 		"Change config and await teardown and a second activation. Graft decodes the same integer schema; cordis uses update without an update hook; raw Effect closes/rebuilds a scope manually. Schema, queueing and restart profiles could change attribution.",
-	replace:
-		"One Graft.replace transaction for K distinct definitions, then wait for all replacement definitions to be Active. Atomicity concerns the spec/alias transaction, not simultaneous activation. Pinned cordis has no replacement API. There is no competitor speed ratio; a compatible atomic API would permit a comparison.",
 	"memory-cycles":
 		"Retained heap growth after M cycles of 10 plugins inside one persistent root, after warmup and forced GC. Report bytes per batch and slope across checkpoints, including negative noise. Avvio has no runtime unload. A repeatable positive slope over larger M and heap snapshots would support a leak claim; one positive delta does not.",
 	"memory-steady":

@@ -209,55 +209,6 @@ describe("regressions", () => {
 			}).pipe(run),
 	)
 
-	it.effect("retries a failed consumer when its dependency is replaced", () =>
-		Effect.gen(function* () {
-			const oldProvider = Plugin.service(Service, Effect.succeed("broken"), {
-				name: "old provider",
-			})
-			const newProvider = Plugin.service(Service, Effect.succeed("fixed"), {
-				name: "new provider",
-			})
-			const provider = yield* Graft.plugin(oldProvider)
-			yield* provider.await
-			const fork = yield* Graft.plugin(
-				Plugin.make({
-					name: "consumer",
-					inject: [Service],
-					apply: () =>
-						Effect.flatMap(Service, (value) =>
-							value === "fixed" ? Effect.void : Effect.fail("bad dependency"),
-						),
-				}),
-			)
-			yield* Effect.exit(fork.await)
-			const result = yield* Graft.replace([[oldProvider, newProvider]])
-			assert.strictEqual(result._tag, "Replaced")
-			yield* reach(provider, "Active")
-			yield* reach(fork, "Active")
-		}).pipe(run),
-	)
-
-	it.effect(
-		"can load the original plugin after replacing a version back to it",
-		() =>
-			Effect.gen(function* () {
-				const first = Plugin.make({ name: "first", apply: () => Effect.void })
-				const second = Plugin.make({ name: "second", apply: () => Effect.void })
-				yield* Graft.replace([[first, second]])
-				yield* Graft.replace([[second, first]])
-				const fork = yield* Graft.plugin(first)
-				yield* fork.await
-				const tree = yield* Stream.runHead(Graft.forks)
-				assert.deepStrictEqual(
-					Option.map(
-						tree,
-						Array.map((node) => node.name),
-					),
-					Option.some(["first"]),
-				)
-			}).pipe(run),
-	)
-
 	it.effect("records defects from interrupted apply cleanup", () =>
 		Effect.gen(function* () {
 			const started = yield* Deferred.make<void>()

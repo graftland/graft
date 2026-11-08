@@ -314,11 +314,11 @@ spans // => ["graft.plugin app/feed", "graft.plugin app/feed > feed.apply", "fee
 Each `graft.plugin <name>` span carries the plugin's log identity, `graft.fork`
 and `graft.plugin`, and also `graft.revision`:
 
-| Attribute        | Value                                                                                   |
-| ---------------- | --------------------------------------------------------------------------------------- |
-| `graft.fork`     | The fork's `id`.                                                                        |
-| `graft.plugin`   | The plugin's `name`.                                                                    |
-| `graft.revision` | Starts at 0 and grows on `restart`, replacement and rollback; a config update keeps it. |
+| Attribute        | Value                                                         |
+| ---------------- | ------------------------------------------------------------- |
+| `graft.fork`     | The fork's `id`.                                              |
+| `graft.plugin`   | The plugin's `name`.                                          |
+| `graft.revision` | Starts at 0 and grows on `restart`; a config update keeps it. |
 
 ### Export spans
 

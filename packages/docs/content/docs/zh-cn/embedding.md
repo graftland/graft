@@ -6,13 +6,12 @@ description: 从自己的 Effect 程序运行插件，无需 CLI。
 **嵌入式 Graft**
 在你的 Effect 程序内组合插件。生命周期是协作式的，不提供内核 Change 结果、隔离或依靠终止完成的资源回收。
 
-| 你想要……                | 使用                                | 章节                               |
-| ----------------------- | ----------------------------------- | ---------------------------------- |
-| 从代码中加载少量插件    | `Graft.layer` 和 `Graft.plugin`     | [直接运行插件](#直接运行插件)      |
-| 从配置项列表加载插件    | `Loader.plugin` 和 `ModuleResolver` | [加载配置项](#加载配置项)          |
-| 从 YAML 文件加载插件    | `Include.Include`                   | [加载配置文件](#加载配置文件)      |
-| 不使用 CLI 也能重载代码 | `@graftland/hmr`                    | [HMR API](../hmr-api/)             |
-| 测试插件                | `@effect/vitest` 和 `Graft.layer`   | [测试](../best-practices/testing/) |
+| 你想要……             | 使用                                | 章节                               |
+| -------------------- | ----------------------------------- | ---------------------------------- |
+| 从代码中加载少量插件 | `Graft.layer` 和 `Graft.plugin`     | [直接运行插件](#直接运行插件)      |
+| 从配置项列表加载插件 | `Loader.plugin` 和 `ModuleResolver` | [加载配置项](#加载配置项)          |
+| 从 YAML 文件加载插件 | `Include.Include`                   | [加载配置文件](#加载配置文件)      |
+| 测试插件             | `@effect/vitest` 和 `Graft.layer`   | [测试](../best-practices/testing/) |
 
 ## 直接运行插件
 

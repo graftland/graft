@@ -42,7 +42,6 @@ devenv shell -- pnpm bench --scenario memory-cycles --cycles 1000 --output .cach
 | events-bail / events-serial-bail                  | 执行 100 次分发；前面的处理器不返回结果，第 H 个返回 7。                                          |
 | events-waterfall                                  | 执行 100 次中间件分发；每层将终端结果 0 加一。                                                    |
 | config-update / config-restart                    | 将值从 0 改为 1，分别原地更新或卸载后重新激活。                                                   |
-| replace                                           | 在一个事务中替换 K 个不同定义，等待全部新定义激活；K = 1、10、100。                               |
 | memory-cycles                                     | 在同一根运行时内对 10 个插件执行 100 次循环，测量堆增长并记录检查点斜率。                         |
 | memory-steady                                     | 1000 个存活插件相对空根运行时的堆增量，除以插件数量。                                             |
 | import                                            | 在新进程中导入各库，分别记录导入延迟和子进程总耗时。                                              |
@@ -107,7 +106,6 @@ devenv shell -- treefmt
 | events-waterfall   |  100 | ms       |  95.097 | 11.016 |   N/A |  12.778 |   N/A |      N/A |
 | config-update      |    1 | ms       |   0.120 |  0.040 |   N/A |   0.002 |   N/A |      N/A |
 | config-restart     |    1 | ms       |   0.237 |  0.109 |   N/A |   0.006 |   N/A |      N/A |
-| replace            |  100 | ms       |  34.352 |    N/A |   N/A |     N/A |   N/A |      N/A |
 | memory-cycles      |   10 | B/batch  |  31828* | 23860* |   N/A |   7649* |   N/A |      N/A |
 | memory-steady      | 1000 | B/plugin |   33908 |  10264 |   821 |    2089 |   N/A |      N/A |
 | import             |    1 | ms       | 242.159 |  4.409 | 6.126 | 230.756 | 0.173 |    1.988 |
@@ -116,13 +114,13 @@ devenv shell -- treefmt
 
 ## 语义边界
 
-| 库              | 比较边界                                                                                                                                      |
-| --------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| Graft           | 等待 Active，而非仅完成注册。配置场景解码 Schema.Int；事件调用恢复上下文，并拥有各自的作用域。                                                |
-| cordis          | 固定为 4.0.0-rc.12；等待 inertia 并检查状态。serial 可以提前返回；emit/bail 同步执行。此版本没有 registry.replace。                           |
-| avvio           | 按顺序启动并执行关闭钩子。运行时卸载、重启和替换为 N/A。整个加载器关闭和手动服务连接明确标为替代测量。events-emit 使用其继承的 EventEmitter。 |
-| Effect          | 显式连接 Layer/Scope，手动停止和重建消费者；并行广播使用 PubSub，其他模式使用手写循环。不声称具有自动响应依赖变化的图。                       |
-| Node / emittery | 仅比较分发。Node emit 执行完同步主体后返回；emittery 延后并等待监听器。两者都不提供 bail 或中间件。                                           |
+| 库              | 比较边界                                                                                                                                |
+| --------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| Graft           | 等待 Active，而非仅完成注册。配置场景解码 Schema.Int；事件调用恢复上下文，并拥有各自的作用域。                                          |
+| cordis          | 固定为 4.0.0-rc.12；等待 inertia 并检查状态。serial 可以提前返回；emit/bail 同步执行。                                                  |
+| avvio           | 按顺序启动并执行关闭钩子。运行时卸载和重启为 N/A。整个加载器关闭和手动服务连接明确标为替代测量。events-emit 使用其继承的 EventEmitter。 |
+| Effect          | 显式连接 Layer/Scope，手动停止和重建消费者；并行广播使用 PubSub，其他模式使用手写循环。不声称具有自动响应依赖变化的图。                 |
+| Node / emittery | 仅比较分发。Node emit 执行完同步主体后返回；emittery 延后并等待监听器。两者都不提供 bail 或中间件。                                     |
 
 配置比较启用 Graft 验证，不为 cordis 安装可选 schema。waterfall 仅比较输出包装：两者传递 next 输入和重复调用 next 的行为不同。所有处理器主体同步执行，因此事件表不衡量异步 I/O 吞吐量。各场景报告标明替代测量，并给出可验证的其他解释。
 

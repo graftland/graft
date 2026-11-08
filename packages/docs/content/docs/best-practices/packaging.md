@@ -105,23 +105,20 @@ Expose each part as its own entry point:
 }
 ```
 
-| Package                                                           | List under                                 | Why                                                                                                                                                                                     |
-| ----------------------------------------------------------------- | ------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `effect`, `@graftland/graft`                                      | `peerDependencies` and `devDependencies`   | The application must have [one copy of each](../../hot-reload/#rules-for-plugin-modules). Under `dependencies`, a range that the application's copy does not satisfy installs a second. |
-| `@graftland/loader`, `@graftland/cli`, `@graftland/plugin-remote` | The same, only if your modules import them | They are released together with `@graftland/graft` and pin it, so give them the same range.                                                                                             |
-| Everything else, such as drivers and clients                      | `dependencies`                             | They are private to your package.                                                                                                                                                       |
+| Package                                                           | List under                                 | Why                                                                                                                                                                          |
+| ----------------------------------------------------------------- | ------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `effect`, `@graftland/graft`                                      | `peerDependencies` and `devDependencies`   | The application must have [one copy of each](../../plugins/#publish-a-plugin). Under `dependencies`, a range that the application's copy does not satisfy installs a second. |
+| `@graftland/loader`, `@graftland/cli`, `@graftland/plugin-remote` | The same, only if your modules import them | They are released together with `@graftland/graft` and pin it, so give them the same range.                                                                                  |
+| Everything else, such as drivers and clients                      | `dependencies`                             | They are private to your package.                                                                                                                                            |
 
 ## Write modules that load and reload
 
-Native units import captured, built plugin modules. Directly embedded
-development tools can reimport modules through the [HMR API](../../hmr-api/).
-Keep imports free of I/O; acquire resources in plugin effects.
+Native units import captured, built plugin modules. Keep imports free of I/O;
+acquire resources in plugin effects.
 
-| Rule                                                                                             | Pitfall it avoids                                                                                                                                                                                                                                                                                       |
-| ------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Ship ESM, and keep CommonJS and native-addon dependencies out of what the plugin module imports. | A CommonJS or native dependency reachable from the entry makes hot reload report `Skipped` / `restart-required` (see [When a reload does not apply](../../hot-reload/#when-a-reload-does-not-apply)). Accept a restart for such a dependency, or run the plugin under [Remote](../../remote/overview/). |
-| Keep `node:module` and `module`, even `createRequire`, out of the plugin module.                 | Such an import puts the whole graph [out of hot reload](../../hot-reload/#when-a-reload-does-not-apply) until the process restarts.                                                                                                                                                                     |
-| Read settings from `config`, not from `process.env`.                                             | Users cannot see or set them in `graft.yml`. [`--env-file` values](../../cli/#env-files) never reach `process.env`, and `loader.retry` does not read yours again.                                                                                                                                       |
+| Rule                                                 | Pitfall it avoids                                                                                                                                            |
+| ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Read settings from `config`, not from `process.env`. | Users cannot see or set them in `graft.yml`. [`--env-file` values](../../cli/#env-files) never reach `process.env`, and a refresh does not read yours again. |
 
 ## Treat config and keys as public API
 

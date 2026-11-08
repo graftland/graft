@@ -61,7 +61,6 @@ export function prepare() {
 					"@graftland/plugin-remote",
 					"@graftland/plugin-mcp-server",
 					"@graftland/plugin-http",
-					"@graftland/hmr",
 					"@graftland/create",
 					"@graftland/package-manager",
 				].includes(manifest.name),

@@ -12,17 +12,12 @@ import {
 	Record,
 	Ref,
 	Schema,
-	Stream,
-	String,
-	SubscriptionRef,
 } from "effect"
 import {
 	HttpClient,
 	HttpClientError,
 	HttpClientRequest,
-	HttpRouter,
 	HttpServer,
-	HttpServerResponse,
 } from "effect/http"
 import {
 	HttpApi,
@@ -35,12 +30,10 @@ import {
 import { assert, it } from "@effect/vitest"
 
 import { Graft, Plugin } from "@graftland/graft"
-import server from "@graftland/plugin-http"
 import * as Http from "@graftland/plugin-http/Http"
 
 import * as HttpApis from "../src/HttpApis.ts"
 import composer from "../src/index.ts"
-import scalar from "../src/scalar.ts"
 import {
 	capture,
 	logs,
@@ -217,40 +210,6 @@ const simple = HttpApi.make("simple").add(
 		HttpApiEndpoint.get("get", "/one", { success: Schema.String }),
 	),
 )
-const simplePlugin = (text: string) =>
-	Plugin.make({
-		name: "simple",
-		apply: () =>
-			HttpApis.serve(
-				simple,
-				["one"],
-				HttpApiBuilder.group(simple, "one", (h) =>
-					h.handle("get", () => Effect.succeed(text)),
-				),
-			),
-	})
-it.live("replaces and rolls back handlers", () =>
-	Effect.gen(function* () {
-		const { url } = yield* start
-		const a = simplePlugin("first"),
-			b = simplePlugin("second")
-		const f = yield* Graft.plugin(a)
-		yield* f.await
-		const client = yield* HttpApiClient.make(simple, { baseUrl: url })
-		const first = yield* client.one.get()
-		assert.strictEqual(first, "first")
-		assert.strictEqual((yield* Graft.replace([[a, b]]))._tag, "Replaced")
-		const second = yield* client.one.get()
-		assert.strictEqual(second, "second")
-		const bad = Plugin.make({
-			name: "bad",
-			apply: () => Effect.die("replacement failed"),
-		})
-		assert.strictEqual((yield* Graft.replace([[b, bad]]))._tag, "RolledBack")
-		const restored = yield* client.one.get()
-		assert.strictEqual(restored, "second")
-	}).pipe(run),
-)
 
 it.live("fails apply for duplicate method and path inside one serve", () =>
 	Effect.gen(function* () {
@@ -398,132 +357,6 @@ for (const uninterruptible of [false, true])
 				assert.isTrue(closed)
 			}).pipe(run),
 	)
-
-it.live(
-	"keeps mounts, composer and UI activations across listener port changes and replacement",
-	() =>
-		Effect.gen(function* () {
-			const { fork: listener } = yield* start
-			const activations = yield* Ref.make({ mount: 0, composer: 0, ui: 0 })
-			const count = (key: "mount" | "composer" | "ui") =>
-				Ref.update(activations, (counts) => ({
-					...counts,
-					[key]: counts[key] + 1,
-				}))
-			const originalMount = simplePlugin("ok")
-			const countedMount: typeof originalMount = {
-				...originalMount,
-				apply: (input) =>
-					// @effect-diagnostics-next-line anyUnknownInErrorContext:off -- Plugin.apply erases requirements at its public activation boundary.
-					count("mount").pipe(Effect.andThen(originalMount.apply(input))),
-			}
-			const countedComposer: typeof composer = {
-				...composer,
-				apply: (input) =>
-					// @effect-diagnostics-next-line anyUnknownInErrorContext:off -- Plugin.apply erases requirements at its public activation boundary.
-					count("composer").pipe(Effect.andThen(composer.apply(input))),
-			}
-			const countedUi: typeof scalar = {
-				...scalar,
-				// @effect-diagnostics-next-line anyUnknownInErrorContext:off -- Plugin.apply erases requirements at its public activation boundary.
-				apply: (input) => count("ui").pipe(Effect.andThen(scalar.apply(input))),
-			}
-			const feature = yield* Graft.plugin(countedMount)
-			yield* feature.await
-			const doc = yield* Graft.plugin(countedComposer, {})
-			yield* doc.await
-			const view = yield* Graft.plugin(countedUi, {})
-			yield* view.await
-			const document = yield* capture(HttpApis.Document)
-			const routes = yield* capture(Http.Routes)
-			yield* waitFor(document, ({ spec }) => Record.has(spec.paths, "/one"))
-			const beforeOption = yield* Stream.runHead(Graft.forks)
-			const before = Option.getOrThrow(beforeOption)
-			for (const change of [
-				listener.update({ port: "0" }),
-				Graft.replace([[server, { ...server, name: "third-party-listener" }]]),
-			]) {
-				yield* change
-				yield* listener.await
-				const { url } = yield* capture(Http.Server)
-				const currentDocument = yield* capture(HttpApis.Document)
-				const currentRoutes = yield* capture(Http.Routes)
-				assert.strictEqual(currentDocument, document)
-				assert.strictEqual(currentRoutes, routes)
-				const currentActivations = yield* Ref.get(activations)
-				assert.deepStrictEqual(currentActivations, {
-					mount: 1,
-					composer: 1,
-					ui: 1,
-				})
-				const client = yield* HttpApiClient.make(simple, { baseUrl: url })
-				const value = yield* client.one.get()
-				assert.strictEqual(value, "ok")
-				assert.strictEqual((yield* request(url + "/docs")).status, 200)
-				const afterOption = yield* Stream.runHead(Graft.forks)
-				const after = Option.getOrThrow(afterOption)
-				for (const old of Array.filter(
-					before,
-					(node) =>
-						node.id === feature.id ||
-						node.id === doc.id ||
-						node.id === view.id ||
-						node.name === "@graftland/plugin-http/router",
-				))
-					assert.deepStrictEqual(
-						Array.findFirst(after, (node) => node.id === old.id),
-						Option.some(old),
-					)
-			}
-			const { url } = yield* capture(Http.Server)
-			const addedApi = HttpApi.make("new").add(
-				HttpApiGroup.make("new").add(
-					HttpApiEndpoint.get("get", "/new", { success: Schema.String }),
-				),
-			)
-			const added = yield* Graft.plugin(
-				Plugin.make({
-					name: "new-group",
-					apply: () =>
-						HttpApis.serve(
-							addedApi,
-							["new"],
-							HttpApiBuilder.group(addedApi, "new", (h) =>
-								h.handle("get", () => Effect.succeed("new")),
-							),
-						),
-				}),
-			)
-			yield* added.await
-			yield* waitFor(document, ({ spec }) => Record.has(spec.paths, "/new"))
-			const client = yield* HttpApiClient.make(addedApi, { baseUrl: url })
-			const value = yield* client.new.get()
-			assert.strictEqual(value, "new")
-			const raw = yield* Graft.plugin(
-				Plugin.make({
-					name: "raw-conflict-after-restart",
-					apply: () =>
-						Http.mount(
-							HttpRouter.add("GET", "/new", HttpServerResponse.empty()),
-						).pipe(Effect.asVoid),
-				}),
-			)
-			yield* raw.await
-			yield* waitFor(document, ({ spec }) => !Record.has(spec.paths, "/new"))
-			assert.strictEqual((yield* request(url + "/new")).status, 404)
-			yield* raw.dispose
-			yield* waitFor(document, ({ spec }) => Record.has(spec.paths, "/new"))
-			const state = yield* SubscriptionRef.get(routes)
-			assert.isEmpty(state.conflicts)
-			const entries = yield* logs
-			assert.lengthOf(
-				Array.filter(entries, (entry) =>
-					String.startsWith("Listening on")(logText(entry)),
-				),
-				3,
-			)
-		}).pipe(run),
-)
 
 it.effect("uses unchanged handler layers with HttpApiTest", () =>
 	Effect.gen(function* () {

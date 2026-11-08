@@ -42,7 +42,6 @@ devenv shell -- pnpm bench --scenario memory-cycles --cycles 1000 --output .cach
 | events-bail / events-serial-bail                  | 執行 100 次分發；前面的處理器不傳回結果，第 H 個傳回 7。                                          |
 | events-waterfall                                  | 執行 100 次中介軟體分發；每層將終端結果 0 加一。                                                  |
 | config-update / config-restart                    | 將值從 0 改為 1，分別原地更新或卸載後重新啟用。                                                   |
-| replace                                           | 在一個交易中替換 K 個不同定義，等待全部新定義啟用；K = 1、10、100。                               |
 | memory-cycles                                     | 在同一根執行環境內對 10 個外掛執行 100 次循環，測量堆積成長並記錄檢查點斜率。                     |
 | memory-steady                                     | 1000 個存活外掛相對於空根執行環境的堆積增量，除以外掛數量。                                       |
 | import                                            | 在新行程中匯入各函式庫，分別記錄匯入延遲與子行程總耗時。                                          |
@@ -107,7 +106,6 @@ devenv shell -- treefmt
 | events-waterfall   |  100 | ms       |  95.097 | 11.016 |   N/A |  12.778 |   N/A |      N/A |
 | config-update      |    1 | ms       |   0.120 |  0.040 |   N/A |   0.002 |   N/A |      N/A |
 | config-restart     |    1 | ms       |   0.237 |  0.109 |   N/A |   0.006 |   N/A |      N/A |
-| replace            |  100 | ms       |  34.352 |    N/A |   N/A |     N/A |   N/A |      N/A |
 | memory-cycles      |   10 | B/batch  |  31828* | 23860* |   N/A |   7649* |   N/A |      N/A |
 | memory-steady      | 1000 | B/plugin |   33908 |  10264 |   821 |    2089 |   N/A |      N/A |
 | import             |    1 | ms       | 242.159 |  4.409 | 6.126 | 230.756 | 0.173 |    1.988 |
@@ -116,13 +114,13 @@ devenv shell -- treefmt
 
 ## 語義邊界
 
-| 函式庫          | 比較邊界                                                                                                                                            |
-| --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Graft           | 等待 Active，而非僅完成註冊。設定場景解碼 Schema.Int；事件呼叫恢復上下文，並擁有各自的作用域。                                                      |
-| cordis          | 固定為 4.0.0-rc.12；等待 inertia 並檢查狀態。serial 可以提早傳回；emit/bail 同步執行。此版本沒有 registry.replace。                                 |
-| avvio           | 依序啟動並執行關閉掛鉤。執行期間卸載、重新啟動與替換為 N/A。整個載入器關閉與手動服務連接明確標示為替代測量。events-emit 使用其繼承的 EventEmitter。 |
-| Effect          | 明確連接 Layer/Scope，手動停止及重建消費者；平行廣播使用 PubSub，其他模式使用手寫迴圈。不聲稱具有自動回應依賴變化的圖。                             |
-| Node / emittery | 僅比較分發。Node emit 執行完同步主體後傳回；emittery 延後並等待監聽器。兩者都不提供 bail 或中介軟體。                                               |
+| 函式庫          | 比較邊界                                                                                                                                      |
+| --------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| Graft           | 等待 Active，而非僅完成註冊。設定場景解碼 Schema.Int；事件呼叫恢復上下文，並擁有各自的作用域。                                                |
+| cordis          | 固定為 4.0.0-rc.12；等待 inertia 並檢查狀態。serial 可以提早傳回；emit/bail 同步執行。                                                        |
+| avvio           | 依序啟動並執行關閉掛鉤。執行期間卸載與重新啟動為 N/A。整個載入器關閉與手動服務連接明確標示為替代測量。events-emit 使用其繼承的 EventEmitter。 |
+| Effect          | 明確連接 Layer/Scope，手動停止及重建消費者；平行廣播使用 PubSub，其他模式使用手寫迴圈。不聲稱具有自動回應依賴變化的圖。                       |
+| Node / emittery | 僅比較分發。Node emit 執行完同步主體後傳回；emittery 延後並等待監聽器。兩者都不提供 bail 或中介軟體。                                         |
 
 設定比較啟用 Graft 驗證，不為 cordis 安裝選用 schema。waterfall 僅比較輸出包裝：兩者傳遞 next 輸入與重複呼叫 next 的行為不同。所有處理器主體同步執行，因此事件表不衡量非同步 I/O 吞吐量。各場景報告標示替代測量，並提供可驗證的其他解釋。
 

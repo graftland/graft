@@ -6,13 +6,12 @@ description: 在自己的 Effect 程式中執行外掛，無需 CLI。
 **嵌入式 Graft**
 在你的 Effect 程式內組合外掛。生命週期是協作式的，不提供核心 Change 結果、隔離或依靠終止完成的資源回收。
 
-| 你想要…                 | 使用                                | 章節                               |
-| ----------------------- | ----------------------------------- | ---------------------------------- |
-| 從程式碼載入少量外掛    | `Graft.layer` 和 `Graft.plugin`     | [直接執行外掛](#直接執行外掛)      |
-| 從一份項目清單載入外掛  | `Loader.plugin` 和 `ModuleResolver` | [載入設定項目](#載入設定項目)      |
-| 從 YAML 檔案載入外掛    | `Include.Include`                   | [載入設定檔](#載入設定檔)          |
-| 不使用 CLI 而重載程式碼 | `@graftland/hmr`                    | [HMR API](../hmr-api/)             |
-| 測試外掛                | `@effect/vitest` 和 `Graft.layer`   | [測試](../best-practices/testing/) |
+| 你想要…                | 使用                                | 章節                               |
+| ---------------------- | ----------------------------------- | ---------------------------------- |
+| 從程式碼載入少量外掛   | `Graft.layer` 和 `Graft.plugin`     | [直接執行外掛](#直接執行外掛)      |
+| 從一份項目清單載入外掛 | `Loader.plugin` 和 `ModuleResolver` | [載入設定項目](#載入設定項目)      |
+| 從 YAML 檔案載入外掛   | `Include.Include`                   | [載入設定檔](#載入設定檔)          |
+| 測試外掛               | `@effect/vitest` 和 `Graft.layer`   | [測試](../best-practices/testing/) |
 
 ## 直接執行外掛
 

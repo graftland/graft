@@ -48,8 +48,8 @@ Redacted.value(url) // => "postgres://app:secret@db/app"
 
 ## 重試不穩定的資源
 
-沒有 `retry` 的外掛會一直停在 `Failed`，直到它的設定或相依項目變更，或執行
-`loader.retry`。依賴網路資源的外掛應該使用一個永不放棄、限制最大延遲並加入隨機抖動的排程，這樣共用同一個資料庫的 fork 就不會同時重新連線：
+沒有 `retry` 的外掛會一直停在
+`Failed`，直到它的設定或相依項目變更。依賴網路資源的外掛應該使用一個永不放棄、限制最大延遲並加入隨機抖動的排程，這樣共用同一個資料庫的 fork 就不會同時重新連線：
 
 ```ts import.meta.vitest name="production: retry flaky resources"
 import { Effect, Ref, Schedule, Schema, Stream } from "effect"
@@ -198,10 +198,8 @@ export default Plugin.make({
 | 把所有 `@graftland/*` 套件升級到同一個版本。 | Graft 以[同一個版本](../../releases/#版本)發佈所有套件。                                     |
 | 讓設定變更保持相容，否則就與新版本一起發布。 | 無法再解碼的設定會讓該設定項目以 `SchemaError` 失敗。                                        |
 
-要在不重新啟動的情況下替換外掛程式碼，嵌入 Graft 的宿主應用程式可以呼叫
-[`Graft.replace`](../../replace/)；
-[checkout-upgrade](https://github.com/graftland/graft/tree/main/samples/checkout-upgrade)
-範例示範了如何在負載下這麼做。
+要在不重新啟動的情況下替換外掛程式碼，請以[監看模式](../../cli/#監看模式)執行
+`graft start`，或提交一個[變更](../../transitions/)。
 
 ## 以嵌入取代 CLI
 

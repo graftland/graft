@@ -14,12 +14,6 @@
 			"path": "./packages/loader/tsconfig.test.json"
 		},
 		{
-			"path": "./packages/hmr"
-		},
-		{
-			"path": "./packages/hmr/tsconfig.test.json"
-		},
-		{
 			"path": "./packages/package-manager"
 		},
 		{
@@ -57,9 +51,6 @@
 		},
 		{
 			"path": "./samples/chat-bot"
-		},
-		{
-			"path": "./samples/checkout-upgrade"
 		},
 		{
 			"path": "./samples/http-gateway"

@@ -43,9 +43,9 @@ import { Card, CardGrid } from "@astrojs/starlight/components"
 
 <CardGrid>
 	<Card title="Hot swap">
-		Change the variety without felling the tree. Hot reload swaps only the
-		plugins your change affects, in one transaction, and keeps the old code if
-		the new code fails. See <a href="hot-reload/">hot reload</a>.
+		Change the variety without felling the tree. In watch mode each save becomes
+		one Change that redeploys only the plugins it affects, and a failed Change
+		keeps the old ones running. See <a href="cli/#watch-mode">watch mode</a>.
 	</Card>
 	<Card title="Clean teardown">
 		Each plugin runs in its own <code>Scope</code>. When it goes away, its
@@ -111,7 +111,7 @@ states // => [Option.some(Fork.ForkState.Pending({ missing: ["app/Greeter"] })),
 
 <CardGrid>
 	<Card title="Get started" icon="rocket">
-		Create a project and run it with hot reload in the
+		Create a project and change it while it runs in the
 		[quickstart](quickstart/). Then read the [core concepts](concepts/).
 	</Card>
 	<Card title="Write plugins" icon="puzzle">
@@ -120,7 +120,7 @@ states // => [Option.some(Fork.ForkState.Pending({ missing: ["app/Greeter"] })),
 	</Card>
 	<Card title="Run an application" icon="setting">
 		Describe it in a [config file](config-file/), start it with the [command
-		line](cli/), and edit it with [hot reload](hot-reload/).
+		line](cli/), and edit it live in [watch mode](cli/#watch-mode).
 	</Card>
 	<Card title="Run plugins elsewhere" icon="laptop">
 		Move one plugin into a child process, a worker or another machine with
@@ -133,15 +133,15 @@ states // => [Option.some(Fork.ForkState.Pending({ missing: ["app/Greeter"] })),
 
 ## Documentation map
 
-| Section           | Pages                                                                                                                 | Read it to…                                            |
-| ----------------- | --------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
-| **Start here**    | [Quickstart](quickstart/), [Core concepts](concepts/), [Coming from cordis](cordis/)                                  | Learn the model and run something.                     |
-| **Build plugins** | [Plugins](plugins/), [Services](services/), [Events](events/)                                                         | Write the code.                                        |
-| **Structure**     | [Lifecycle](lifecycle/), [Realms](isolation/), [Intercepts](intercepts/), [Replace plugins](replace/)                 | Control how plugins relate and change.                 |
-| **Applications**  | [Config file](config-file/), [Command line](cli/), [Hot reload](hot-reload/), [Use Graft in your program](embedding/) | Run and operate an app.                                |
-| **Remote**        | [Overview](remote/overview/), [Units](units/), [Bindings](bindings/), [Control](control/)                             | Run a plugin in another process or on another machine. |
-| **Reference**     | [Fork handle](fork-handle/), [Loader API](loader-api/), [HMR API](hmr-api/), [Errors](errors/)                        | Look up exact behavior.                                |
-| **Project**       | [Releases](releases/)                                                                                                 | Check and publish Graft.                               |
+| Section           | Pages                                                                                             | Read it to…                                            |
+| ----------------- | ------------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
+| **Start here**    | [Quickstart](quickstart/), [Core concepts](concepts/), [Coming from cordis](cordis/)              | Learn the model and run something.                     |
+| **Build plugins** | [Plugins](plugins/), [Services](services/), [Events](events/)                                     | Write the code.                                        |
+| **Structure**     | [Lifecycle](lifecycle/), [Realms](isolation/), [Intercepts](intercepts/), [Changes](transitions/) | Control how plugins relate and change.                 |
+| **Applications**  | [Config file](config-file/), [Command line](cli/), [Use Graft in your program](embedding/)        | Run and operate an app.                                |
+| **Remote**        | [Overview](remote/overview/), [Units](units/), [Bindings](bindings/), [Control](control/)         | Run a plugin in another process or on another machine. |
+| **Reference**     | [Fork handle](fork-handle/), [Loader API](loader-api/), [Errors](errors/)                         | Look up exact behavior.                                |
+| **Project**       | [Releases](releases/)                                                                             | Check and publish Graft.                               |
 
 ## Packages
 
@@ -149,7 +149,6 @@ states // => [Option.some(Fork.ForkState.Pending({ missing: ["app/Greeter"] })),
 | ------------------------------ | --------------------------------------------------------------------------------------------------------------------------- |
 | `@graftland/graft`             | A plugin framework built on Effect: plugins, forks, services, isolation, events and logs.                                   |
 | `@graftland/loader`            | Loads plugins from a list of entries or a YAML config file.                                                                 |
-| `@graftland/hmr`               | Reloads plugin modules on Node.js without restarting the process.                                                           |
 | `@graftland/cli`               | The `graft` command: `start`, `create`, `add` and `remove`.                                                                 |
 | `@graftland/create`            | Makes a new Graft project: `npm create @graftland` and `graft create`.                                                      |
 | `@graftland/package-manager`   | Installs dependencies with npm, pnpm or Yarn. A failed install is undone by [snapshot rollback](cli/#package-managers).     |

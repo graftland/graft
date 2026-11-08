@@ -60,6 +60,6 @@ reservations. Unrelated instances may progress within capacity.
 
 ## Embedded lifecycle
 
-Code changes in embedded mode require process restart. Embedded restart,
-replacement and HMR do not provide kernel Change outcomes or native termination
+Code changes in embedded mode require a process restart. Embedded restarts and
+in-place updates do not provide kernel Change outcomes or native termination
 guarantees.

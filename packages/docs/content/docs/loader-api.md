@@ -62,10 +62,6 @@ The embedded `Loader` service reads and edits a cooperative application’s
 entries. It provides no kernel Change outcomes or termination-based reclamation.
 The rules below apply to this embedded service.
 
-For a tree containing a managed fork, Loader rejects edits, refreshes and retry
-before invoking store mutations. See [Execution transitions](../transitions/)
-for bypass protection.
-
 ## Edit entries from code
 
 | Member                    | What it does                                                                                   |
@@ -76,7 +72,6 @@ for bypass protection.
 | `update(id, patch)`       | Changes some fields of an entry.                                                               |
 | `remove(id)`              | Removes an entry.                                                                              |
 | `ready`                   | Waits until the current target is reconciled and no fork is Loading.                           |
-| `retry`                   | Retries all failed entries and refreshes `!env` values throughout the tree.                    |
 
 Edits are written to the file. Graft keeps the file's comments, formatting and
 `!env` tags.
@@ -102,13 +97,12 @@ scoped worker continues to save the file and publish the target.
 Runtime reconciliation runs in a separate scoped fiber and may skip intermediate
 targets.
 
-| You want to…                                  | Do                                                                                            |
-| --------------------------------------------- | --------------------------------------------------------------------------------------------- |
-| Wait for the current target and loading forks | `ready`, outside lifecycle callbacks.                                                         |
-| Submit an edit from a lifecycle callback      | Do so, but never wait for `ready` there: it would wait for the callback itself.               |
-| Refresh the current saved target              | `retry`, then `ready`. `retry` returns after it publishes its request.                        |
-| Refresh `!env` across the whole tree          | `loader.retry`, or `loader.root.update(entries)` (also refreshes when entries are unchanged). |
-| Persist configuration changes                 | The ordinary edit methods.                                                                    |
+| You want to…                                  | Do                                                                                         |
+| --------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| Wait for the current target and loading forks | `ready`, outside lifecycle callbacks.                                                      |
+| Submit an edit from a lifecycle callback      | Do so, but never wait for `ready` there: it would wait for the callback itself.            |
+| Refresh `!env` across the whole tree          | `loader.root.update(entries)`, then `ready`. It refreshes even when entries are unchanged. |
+| Persist configuration changes                 | The ordinary edit methods.                                                                 |
 
 `ready` waits for the current target version, queued and executing environment
 refreshes, and all loading descendants. It treats `Pending` and `Failed` forks
@@ -117,15 +111,8 @@ started. So `ready` does not promise that every plugin is active. The core
 [`fork.stable`](../fork-handle/) barrier only describes current fork states; it
 does not replace these loader checks.
 
-About `retry`:
-
-- `changes` also emits when `retry` publishes an unchanged target again.
-- It reaches failed plugins below lifecycle, injection and group wrappers, and
-  restarts the failed plugin forks.
-- It keeps healthy instances and unfinished resolutions unless refreshed values
-  require an update or reload.
-- Ordinary edits retry failed entries in reconciled groups without refreshing
-  unchanged healthy subtrees.
+Ordinary edits retry failed entries in reconciled groups without refreshing
+unchanged healthy subtrees.
 
 ## Snapshots
 

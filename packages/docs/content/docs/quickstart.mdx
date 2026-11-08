@@ -6,7 +6,7 @@ description: Create a Graft project, run it, and change it while it runs.
 import { Steps } from "@astrojs/starlight/components"
 
 You need Node.js 22.19 or later. This is the version that the CLI's Effect Node
-adapter needs. It also has `module.registerHooks`, which hot reload uses.
+adapter needs.
 
 <Steps>
 
@@ -58,13 +58,16 @@ adapter needs. It also has `module.registerHooks`, which hot reload uses.
    touched.
 
 4. Change the code while the app runs. In `src/ticker.ts`, change `"3 seconds"`
-   to `"1 second"` and save. Graft imports the new module and restarts only
-   `ticker`. If the new code fails to import or to start, the old version keeps
-   running, and Graft logs the error.
+   to `"1 second"` and save. `tsc` rebuilds `dist`, and Graft deploys the new
+   code as one Change. The three example plugins share one package, so all three
+   restart; give a plugin its own package to reload it alone. If the new code
+   fails to start, the running entries stay as they are and Graft logs the
+   error.
 
 5. Take a dependency away. Add `disabled: true` to the `greeter` entry and save.
-   `ticker` stops and waits as `Pending` until a `Greeter` exists again. Remove
-   the line, and it greets again.
+   `ticker` still needs the `Greeter`, so Graft rejects the edit, logs why, and
+   keeps everything running. Disable `ticker` too, or remove the line, and save
+   again.
 
 </Steps>
 

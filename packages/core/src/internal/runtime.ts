@@ -15,7 +15,6 @@ import {
 
 import type { ForkState } from "../Fork"
 import type { Plugin } from "../Plugin"
-import type { Aliases } from "./aliases"
 import type { Token } from "./generations"
 import type * as Probes from "./probes"
 import type { Snapshot } from "./snapshot"
@@ -156,7 +155,6 @@ export interface Runtime {
 	readonly ambient: Context.Context<never>
 	readonly slots: TxRef.TxRef<HashMap.HashMap<ServiceKey, Slot>>
 	readonly forks: Snapshot<HashMap.HashMap<number, ForkEntry>>
-	readonly aliases: Aliases
 	readonly events: TxRef.TxRef<HashMap.HashMap<string, ReadonlyArray<Handler>>>
 	readonly ids: TxRef.TxRef<number>
 	readonly generationIds: TxRef.TxRef<number>

@@ -132,21 +132,6 @@ describe("mcp-server", () => {
 		}).pipe(run),
 	)
 
-	it.effect("serves the new handler after a replacement", () =>
-		Effect.gen(function* () {
-			const v1 = clock("12:00")
-			const v2 = clock("13:00")
-			const fork = yield* Graft.plugin(v1)
-			yield* fork.await
-			const client = yield* connect
-			yield* expectTime(client, "12:00")
-			const result = yield* Graft.replace([[v1, v2]])
-			assert.strictEqual(result._tag, "Replaced")
-			yield* expectTime(client, "13:00")
-			yield* expectListed(client, ["now"])
-		}).pipe(run),
-	)
-
 	it.effect("serves neither tool when two plugins offer the same name", () =>
 		Effect.gen(function* () {
 			const first = yield* Graft.plugin(clock("12:00"))

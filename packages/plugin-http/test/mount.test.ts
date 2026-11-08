@@ -93,32 +93,6 @@ it.live("restarts only the server on a port change", () =>
 	}).pipe(run),
 )
 
-it.live("replaces routes and restores them after rollback", () =>
-	Effect.gen(function* () {
-		const { url } = yield* start
-		const first = route("/old"),
-			next = route("/new")
-		const fork = yield* Graft.plugin(first)
-		yield* fork.await
-		assert.strictEqual((yield* Graft.replace([[first, next]]))._tag, "Replaced")
-		assert.strictEqual((yield* request(`${url}/old`)).status, 404)
-		assert.strictEqual((yield* request(`${url}/new`)).status, 200)
-		const broken = Plugin.make({
-			name: "broken",
-			apply: () =>
-				Http.mount(
-					HttpRouter.add("GET", "/broken", HttpServerResponse.empty()),
-				).pipe(Effect.asVoid, Effect.andThen(Effect.die("replacement failed"))),
-		})
-		assert.strictEqual(
-			(yield* Graft.replace([[next, broken]]))._tag,
-			"RolledBack",
-		)
-		assert.strictEqual((yield* request(`${url}/new`)).status, 200)
-		assert.strictEqual((yield* request(`${url}/broken`)).status, 404)
-	}).pipe(run),
-)
-
 it.live("indexes root, parameters, nested prefixes, and HEAD fallback", () =>
 	Effect.gen(function* () {
 		const { url } = yield* start

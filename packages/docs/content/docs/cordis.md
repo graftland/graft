@@ -23,7 +23,7 @@ only what Effect does not have.
 | `fiber.restart`                        | `fork.restart`.                                                                                 |
 | `ctx.isolate`, labels                  | [`isolate`](../isolation/#realms), for services and events alike.                               |
 | `ctx.intercept`                        | [`intercept`](../intercepts/) with `Context.Reference`.                                         |
-| `registry.replace`                     | [`Graft.replace`](../replace/).                                                                 |
+| `registry.replace`                     | A `Deploy` operation in a [Change](../transitions/).                                            |
 | `ctx.on`, `ctx.emit`, `serial`, `bail` | [Events](../events/): `on`, `emit`, `parallel`, `bail`, `waterfall`.                            |
 | Config with Standard Schema            | Effect `Schema`, decoded inside the plugin's activation.                                        |
 | Logger, timer and fs plugins           | Effect's `Logger`, `Schedule`, `Clock` and `FileSystem`.                                        |
@@ -47,8 +47,8 @@ only what Effect does not have.
   use the plugin's dependencies.
 - **Handlers that keep their context.** An event handler runs with the services,
   realm and intercepts of its own plugin.
-- **Atomic replacement with rollback.** `Graft.replace` changes every plugin in
-  one transaction, and goes back to the old plugins if a new one fails to start.
+- **Changes with rollback.** A [Change](../transitions/) deploys new versions in
+  the kernel. If the target fails its trial, the old generation keeps running.
 - **Plugins in other processes.** [Remote](../remote/overview/) runs one plugin
   in a child process, a worker or on another machine. The plugins that use its
   services do not change.

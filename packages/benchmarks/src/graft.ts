@@ -11,13 +11,7 @@ import {
 	String,
 } from "effect"
 
-import {
-	Event,
-	Graft,
-	Plugin,
-	type Fork,
-	type Transition,
-} from "@graftland/graft"
+import { Event, Graft, Plugin, type Fork } from "@graftland/graft"
 
 import {
 	audit,
@@ -116,19 +110,12 @@ export const make = Effect.fnUntraced(function* (
 	})
 	let run: Effect.Effect<
 		number,
-		| Schema.SchemaError
-		| Graft.ServiceConflict
-		| Fork.CleanupError
-		| Graft.ReplacementConflict
-		| Transition.ManagedFork,
+		Schema.SchemaError | Graft.ServiceConflict | Fork.CleanupError,
 		Graft.Graft | Scope.Scope
 	> = Effect.succeed(0)
 	let prepare: Effect.Effect<
 		unknown,
-		| Schema.SchemaError
-		| Graft.ServiceConflict
-		| Fork.CleanupError
-		| Transition.ManagedFork,
+		Schema.SchemaError | Graft.ServiceConflict | Fork.CleanupError,
 		Graft.Graft | Scope.Scope
 	> = Effect.void
 	if (
@@ -262,34 +249,6 @@ export const make = Effect.fnUntraced(function* (
 			yield* configFork.update({ value: 1 })
 			yield* active(configFork)
 			return state.value
-		})
-	}
-	if (spec.scenario === "replace") {
-		const pairs = Array.makeBy(
-			spec.size,
-			() => [independent("original"), independent("replacement")] as const,
-		)
-		prepare = Effect.gen(function* () {
-			forks = yield* Effect.forEach(pairs, ([from]) => Graft.plugin(from))
-			yield* Effect.forEach(forks, active)
-		})
-		run = Effect.gen(function* () {
-			const result = yield* Graft.replace(pairs)
-			if (result._tag !== "Replaced") return yield* Effect.die(result)
-			yield* Graft.forks.pipe(
-				Stream.filter(
-					(tree) =>
-						tree.length === spec.size &&
-						Array.every(
-							tree,
-							(fork) =>
-								fork.name === "replacement" && fork.state._tag === "Active",
-						),
-				),
-				Stream.runHead,
-			)
-			yield* Effect.forEach(forks, active)
-			return 0
 		})
 	}
 	if (eventScenario(spec)) {

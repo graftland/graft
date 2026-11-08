@@ -67,14 +67,9 @@ Messages about plugins are listed in
 [What Graft logs](../observability/#what-graft-logs). These messages from
 `graft start` and the loader point at a problem with code or configuration:
 
-| Message                                              | Meaning                                                                                                                                                                     |
-| ---------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `Restart required…`                                  | A module change cannot be hot reloaded. The old plugins keep running. See [When a reload does not apply](../../hot-reload/#when-a-reload-does-not-apply).                   |
-| `Reloading plugin modules failed`                    | The new code did not import or pass its checks. The old plugins keep running; fix the code and save again.                                                                  |
-| `Kept the previous code: plugin "<name>" …`          | The replacement failed or timed out; counted restored forks are active or `Pending`. A failure carries its full cause; a timeout has no cause. Fix the code and save again. |
-| `Replacement abandoned: plugin "<name>" …`           | `RecoveryFailed`: why the new code was abandoned. Errors carry full causes; timeouts name the plugin.                                                                       |
-| `Previous code failed to restart: plugin "<name>" …` | `RecoveryFailed`: the restored plugin also failed. The error carries its full cause. Fix the startup failure and save again.                                                |
-| `Dropped an edit to "<id>": the file changed it too` | An API edit lost to an edit in the file. See [Conflicts with external edits](../../loader-api/#conflicts-with-external-edits).                                              |
+| Message                                              | Meaning                                                                                                                        |
+| ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `Dropped an edit to "<id>": the file changed it too` | An API edit lost to an edit in the file. See [Conflicts with external edits](../../loader-api/#conflicts-with-external-edits). |
 
 ## Symptoms
 
@@ -89,14 +84,14 @@ Messages about plugins are listed in
 | A consumer sees the environment value, not the published one           | The provider publishes in another realm. See [Environment fallback and inheritance](../../isolation/#environment-fallback-and-inheritance).                                                                                                                                                       |
 | A handler is never called                                              | The dispatch runs in another [realm](../../events/#realms-and-filters), a filter excludes it, its key string differs, or its scope has closed. `Event.emit` also stops at the first failure and `Event.bail` at the first `Some`.                                                                 |
 | A handler sees the wrong service, setting or log annotations           | Handlers run with their own plugin's context, not the dispatcher's. Pass what they need as event arguments. See [Handler context](../../events/#handler-context).                                                                                                                                 |
-| `graft.yml` edit has no effect                                         | CLI start reads one revision. Restart after editing configuration.                                                                                                                                                                                                                                |
+| `graft.yml` edit has no effect                                         | Without `--watch`, CLI start reads one revision. Restart, or use [watch mode](../../cli/#watch-mode).                                                                                                                                                                                             |
 | Changed environment variable has no effect                             | References are resolved during preparation and recovery. Restart the CLI after changing its environment sources.                                                                                                                                                                                  |
-| Module edit has no effect                                              | Rebuild the selected JavaScript modules and restart the CLI. Embedded HMR requires explicit registration and a watcher.                                                                                                                                                                           |
-| Old behavior continues after a reload                                  | A module started a timer or connection on import. Graft cannot stop it. Move it into `apply`. See [Rules for plugin modules](../../hot-reload/#rules-for-plugin-modules).                                                                                                                         |
+| Module edit has no effect                                              | Rebuild the selected JavaScript modules. Without [watch mode](../../cli/#watch-mode), also restart the CLI.                                                                                                                                                                                       |
+| Old behavior continues after a reload                                  | A module started a timer or connection on import. Graft cannot stop it. Move it into `apply`. See [Plugin modules](../../plugins/#plugin-modules).                                                                                                                                                |
 | Entry fails with `ConfigError`                                         | Set the missing variable in the process environment, `--env-file` or `--env-dir`, then restart.                                                                                                                                                                                                   |
 | Entry fails with `ModuleNotFound`                                      | Its `name` did not resolve; the message lists the names tried. See [Plugin names](../../config-file/#plugin-names).                                                                                                                                                                               |
 | Entry fails with `ModuleInvalid`                                       | The module did not import, or exports no plugin as its default export or as `plugin`.                                                                                                                                                                                                             |
-| `graft start` exits at once                                            | Check the initial configuration, required environment files and unsupported `--watch` flag.                                                                                                                                                                                                       |
+| `graft start` exits at once                                            | Check the initial configuration and required environment files.                                                                                                                                                                                                                                   |
 | A package manager lists two versions of `effect` or `@graftland/graft` | A plugin package depends on them directly. They must be one copy. See [Plugin packages](../packaging/).                                                                                                                                                                                           |
 
 ## A stop that does not finish
@@ -105,16 +100,13 @@ A provider stops only after the consumers of its services have stopped, in the
 order of [How withdrawal works](../../services/#how-withdrawal-works). When that
 takes more than 10 seconds, Graft logs
 `Still waiting for consumers of <keys>; a teardown cycle may be holding them`
-and keeps waiting, on shutdown, on a restart and on a hot reload alike.
+and keeps waiting, on shutdown and on a restart alike.
 
 | Look for                                                                                   | Fix                                                                    |
 | ------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------- |
 | A consumer's finalizer that waits for something the provider does only after it stops.     | Do not wait for the provider in a finalizer; release and return.       |
 | A cycle through services or events: A's teardown waits for B, and B's waits for A.         | Break the cycle with a third plugin that owns the shared part.         |
 | A consumer task inside `Effect.uninterruptible` that waits for something that never comes. | Keep waits interruptible; make only the critical step uninterruptible. |
-
-A stop that hangs with no warning can be a module import that never finishes;
-see [Limits](../../hot-reload/#limits).
 
 ## Errors
 
@@ -125,7 +117,5 @@ that lists it and says what to do.
 | ---------------------------------------------------------------- | -------------------------------------------------------------- |
 | `SchemaError`, `Fork.CleanupError`, a task failure               | [Fork failures](../../errors/#fork-failures)                   |
 | `ServiceConflict`                                                | [Services](../../errors/#services)                             |
-| `Graft.ReplacementConflict`                                      | [Replacement](../../errors/#replacement)                       |
 | `UnregisteredReference`, `InvalidIntercept`                      | [Intercepts](../../errors/#intercepts)                         |
 | `CyclicConfig`, `InvalidOperation`, `StoreError`, `LoaderClosed` | [Loader and config file](../../errors/#loader-and-config-file) |
-| `HmrError`, a `Skipped` result                                   | [Hot reload](../../errors/#hot-reload)                         |

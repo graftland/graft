@@ -59,7 +59,7 @@ function fixture(files, run) {
 }
 
 it("keeps every published entry's signature publicly nameable", () => {
-	assert.lengthOf(publicPackages(root), 12)
+	assert.lengthOf(publicPackages(root), 11)
 	assert.deepEqual(checkWorkspace(root), [])
 })
 

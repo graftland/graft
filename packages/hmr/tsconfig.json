@@ -1,9 +1,0 @@
-{
-	"extends": "../../tsconfig.base.json",
-	"compilerOptions": {
-		"rootDir": "src",
-		"outDir": ".cache/types",
-		"tsBuildInfoFile": ".cache/src.tsbuildinfo"
-	},
-	"include": ["src"]
-}

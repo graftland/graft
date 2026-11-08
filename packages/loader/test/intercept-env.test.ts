@@ -1,7 +1,6 @@
 import {
 	Array,
 	Cause,
-	ConfigProvider,
 	Context,
 	Effect,
 	FileSystem,
@@ -184,59 +183,6 @@ it.effect.each([true, false])(
 				Effect.provideService(
 					Context.Service<{ readonly observed: typeof observed }>(
 						"loader/fixture/intercept-env-leaf-4082",
-					),
-					{ observed },
-				),
-				Effect.provide(registry),
-			)
-		}),
-)
-
-it.effect(
-	"retries a failed intercept after its environment value becomes available",
-	() =>
-		Effect.gen(function* () {
-			const available = yield* Ref.make(false)
-			const observed = yield* Ref.make<ReadonlyArray<string>>([])
-
-			const provider = ConfigProvider.make(() =>
-				Effect.map(Ref.get(available), (available) =>
-					available ? ConfigProvider.makeValue("recovered") : undefined,
-				),
-			)
-			const environment = ConfigProvider.layer(provider)
-			yield* run(
-				{ leaf: fixture("intercept-env-leaf-6493") },
-				environment,
-			)(() =>
-				Effect.gen(function* () {
-					yield* Graft.plugin(Loader.plugin, [
-						{
-							id: "leaf",
-							name: "leaf",
-							intercept: { [Setting.key]: new Entry.Env({ name: "SETTING" }) },
-						},
-					])
-					const loader = yield* loaderService
-					yield* loader.ready
-					const initial = yield* Ref.get(observed)
-					assert.deepStrictEqual(initial, [])
-					yield* Ref.set(available, true)
-					yield* loader.retry
-					yield* loader.ready
-					const recovered = yield* Ref.get(observed)
-					assert.deepStrictEqual(recovered, ["recovered"])
-					yield* loader.update("leaf", {
-						intercept: { [Setting.key]: "replacement" },
-					})
-					yield* loader.ready
-					const replaced = yield* Ref.get(observed)
-					assert.deepStrictEqual(replaced, ["recovered", "replacement"])
-				}),
-			).pipe(
-				Effect.provideService(
-					Context.Service<{ readonly observed: typeof observed }>(
-						"loader/fixture/intercept-env-leaf-6493",
 					),
 					{ observed },
 				),

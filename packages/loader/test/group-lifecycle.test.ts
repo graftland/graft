@@ -12,42 +12,6 @@ class Dependency extends Context.Service<Dependency, string>()(
 
 describe("group lifecycle", () => {
 	it.effect(
-		"settles pending injections and applies their latest config when the service arrives",
-		() =>
-			run()((journal) =>
-				Effect.gen(function* () {
-					yield* Graft.plugin(Loader.plugin, [
-						{
-							id: "echo",
-							name: "echo",
-							inject: [Dependency.key],
-							config: { text: "old" },
-						},
-					])
-					const loader = yield* loaderService
-					yield* loader.ready
-					yield* journal.expect([])
-					yield* loader.update("echo", { config: { text: "latest" } })
-					yield* loader.ready
-					yield* Graft.provide(Dependency, "available")
-					yield* loader.ready
-					// A service publication can precede the supervisor observing it.
-					// A retry waits for reconciliation to accept the current tree.
-					yield* loader.retry
-					yield* loader.ready
-					yield* journal.expect(["start latest"])
-					yield* loader.update("echo", { config: { text: "updated" } })
-					yield* loader.ready
-					yield* journal.expect([
-						"start latest",
-						"stop latest",
-						"start updated",
-					])
-				}),
-			),
-	)
-
-	it.effect(
 		"removes a provider and its consumer without retaining a lease",
 		() =>
 			run({

@@ -115,9 +115,8 @@ except `node_modules`, `.graft`, `.cache` and `.git`.
 
 ### Restart requirements
 
-Restart after changing configuration, environment sources or installed packages.
-Directly embedded applications can use the cooperative [HMR API](../hmr-api/);
-it does not provide kernel isolation or termination-based cleanup.
+Restart after changing environment sources or installed packages. Without
+`--watch`, also restart after changing configuration or code.
 
 ### Logs and intercepts
 
@@ -173,13 +172,13 @@ With `--yes`, or when stdin or stdout is not a terminal, it asks nothing and
 | `plugin`  | A plugin package to [publish](../plugins/#publish-a-plugin).                                                 | `src/index.ts`, `test/index.test.ts`, `tsconfig.json`, `tsconfig.build.json`, `README.md`, `.vscode/extensions.json`, `.gitignore`                                                    |
 | `minimal` | Only the config file, with no entries besides those from `--plugin`.                                         | `.gitignore`                                                                                                                                                                          |
 
-| Script      | `app`                                       | `plugin`                                    | `minimal`     |
-| ----------- | ------------------------------------------- | ------------------------------------------- | ------------- |
-| `dev`       | `tsc -p tsconfig.build.json && graft start` | `tsc -p tsconfig.build.json && graft start` |               |
-| `start`     | `graft start`                               |                                             | `graft start` |
-| `test`      |                                             | `vitest run`                                |               |
-| `typecheck` | `effect-tsgo tsc`                           | `effect-tsgo tsc`                           |               |
-| `build`     | `tsc -p tsconfig.build.json`                | `tsc -p tsconfig.build.json`                |               |
+| Script      | `app`                                                                                                            | `plugin`                                                                                                         | `minimal`     |
+| ----------- | ---------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- | ------------- |
+| `dev`       | `tsc -p tsconfig.build.json && (tsc -p tsconfig.build.json --watch --preserveWatchOutput & graft start --watch)` | `tsc -p tsconfig.build.json && (tsc -p tsconfig.build.json --watch --preserveWatchOutput & graft start --watch)` |               |
+| `start`     | `graft start`                                                                                                    |                                                                                                                  | `graft start` |
+| `test`      |                                                                                                                  | `vitest run`                                                                                                     |               |
+| `typecheck` | `effect-tsgo tsc`                                                                                                | `effect-tsgo tsc`                                                                                                |               |
+| `build`     | `tsc -p tsconfig.build.json`                                                                                     | `tsc -p tsconfig.build.json`                                                                                     |               |
 
 - Every project depends on the same Graft version as the command, and
   `graft.yml` points to its [editor schema](../config-file/#editor-support),

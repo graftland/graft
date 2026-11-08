@@ -64,7 +64,6 @@
 		"@graftland/loader": "workspace:*"
 	},
 	"dependencies": {
-		"@graftland/hmr": "workspace:*",
 		"@graftland/create": "workspace:*",
 		"@graftland/package-manager": "workspace:*",
 		"@effect/platform-node": "4.1.2",

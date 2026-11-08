@@ -53,9 +53,8 @@ const hello = Plugin.make({
 ## Why Graft
 
 - **Hot swap.** Change the variety without felling the tree.
-  `graft start --watch` reimports only what your change affects and swaps the
-  affected plugins in one transaction. If the new code fails to import or to
-  start, Graft restores the old plugins and reports whether they came back.
+  `graft start --watch` turns each save into one Change that redeploys only the
+  entries it affects. If the Change fails, the running entries stay as they are.
 - **Clean teardown.** Every plugin runs in its own `Scope`, and every fiber it
   starts has an owner. When a plugin goes away, the plugins that depend on it
   stop first. Then its finalizers run. A failure, including one during cleanup,
@@ -111,7 +110,6 @@ After those, larger applications show what Graft is for:
 - a [WebSocket integration gateway](samples/integration-gateway) that upgrades a
   plugin while keeping its session
 - a chat bot built from plugins, with its weather integration in a child process
-- a checkout that swaps its pricing engine and database under load
 - an HTTP gateway driven by `graft.yml`
 - an MCP server whose tools are plugins that reload while a client is connected
 - a multi-tenant service
@@ -123,7 +121,6 @@ After those, larger applications show what Graft is for:
 | ------------------------------------------------------------ | ------------------------------------------------------------------------------------------- |
 | [`@graftland/graft`](packages/core)                          | A plugin framework built on Effect: plugins, forks, services, isolation, events and logs.   |
 | [`@graftland/loader`](packages/loader)                       | Loads plugins from a list of entries or a YAML config file.                                 |
-| [`@graftland/hmr`](packages/hmr)                             | Reloads plugin modules on Node.js without restarting the process.                           |
 | [`@graftland/cli`](packages/cli)                             | The `graft` command: `start`, `create`, `add` and `remove`.                                 |
 | [`@graftland/create`](packages/create)                       | Generates a new Graft project: `npm create @graftland` and `graft create`.                  |
 | [`@graftland/package-manager`](packages/package-manager)     | Installs dependencies with npm, pnpm or Yarn, and rolls back on failure.                    |

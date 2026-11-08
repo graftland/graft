@@ -27,7 +27,6 @@ import { RuntimeContext } from "./internal/runtimeContext"
 import * as TaskGroup from "./internal/tasks"
 import type { Tasks } from "./internal/tasks"
 import type { PlacementRequirement, ResourceDeclaration } from "./Kernel"
-import type { ManagedFork } from "./Transition"
 
 export type { Tasks } from "./internal/tasks"
 
@@ -102,12 +101,14 @@ export type Requirements<Inject extends ReadonlyArray<Dependency>> =
 	Scope.Scope | Graft | Required<Inject>
 
 /**
- * Returned from `apply` to accept configuration changes in place. Resolving
- * to `false` restarts the plugin with the new configuration instead.
+ * Returned from `apply` to accept configuration changes in place in the
+ * embedded mode. Resolving to `false` restarts the plugin with the new
+ * configuration instead. Kernel deployments never update in place: a
+ * configuration change is a Change that starts a new generation.
  */
 export type Update<Config, E = never, R = never> = (
 	next: Config,
-) => Effect.Effect<boolean, ManagedFork, Graft | Scope.Scope | R | Tasks<E>>
+) => Effect.Effect<boolean, never, Graft | Scope.Scope | R | Tasks<E>>
 
 /** Starts an activation-owned worker. Its unhandled errors belong to the plugin, not the launch operation. */
 export const fork: <A, E, R>(

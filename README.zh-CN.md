@@ -47,7 +47,7 @@ const hello = Plugin.make({
 ## 为什么选择 Graft
 
 - **热替换。** 不砍树，只换品种。`graft start --watch`
-  只重新导入受改动影响的部分，并在一次事务中替换相关插件。新代码导入或启动失败时，Graft 恢复旧插件，并报告它们是否成功恢复。
+  把每次保存变成一个变更，只重新部署受影响的配置项。变更失败时，正在运行的配置项保持不变。
 - **干净卸载。** 每个插件都在自己的 `Scope`
   中运行，它启动的每个 fiber 都有归属。插件消失时，依赖它的插件先停止，然后执行它的 finalizer。失败（包括清理时的失败）也保留完整的
   `Cause`。
@@ -90,7 +90,6 @@ Graft 的插件模型借鉴自
 
 - [WebSocket 集成网关](samples/integration-gateway)，升级插件时保留会话
 - 由插件构成的聊天机器人，天气集成在子进程中运行
-- 在负载下替换定价引擎和数据库的结账服务
 - 由 `graft.yml` 驱动的 HTTP 网关
 - 工具即插件的 MCP 服务器：客户端连着时也能重载工具
 - 多租户服务
@@ -102,7 +101,6 @@ Graft 的插件模型借鉴自
 | ------------------------------------------------------------ | -------------------------------------------------------------------------- |
 | [`@graftland/graft`](packages/core)                          | 基于 Effect 的插件框架：插件、fork、服务、隔离、事件和日志。               |
 | [`@graftland/loader`](packages/loader)                       | 从条目列表或 YAML 配置文件加载插件。                                       |
-| [`@graftland/hmr`](packages/hmr)                             | 在 Node.js 上重载插件模块，无需重启进程。                                  |
 | [`@graftland/cli`](packages/cli)                             | `graft` 命令：`start`、`create`、`add` 和 `remove`。                       |
 | [`@graftland/create`](packages/create)                       | 生成新的 Graft 项目：`npm create @graftland` 和 `graft create`。           |
 | [`@graftland/package-manager`](packages/package-manager)     | 用 npm、pnpm 或 Yarn 安装依赖，失败时回滚。                                |
