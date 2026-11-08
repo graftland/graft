@@ -88,6 +88,25 @@ ownership.
 A clean control connection close is a debug event. Invalid or truncated frames
 remain errors. Neither connection closure nor a frame error proves unit exit.
 
+## Supervision
+
+A failure that no Change owns belongs to the **supervisor**. It restarts within
+a bounded **restart intensity**, then stops and keeps the failure observable.
+Set the bound in deployment data: `supervision: { intensity: 3, period: 60000 }`
+(the default) allows three attempts per 60 seconds for each instance.
+
+| Event                                       | What the supervisor does                                                                                           |
+| ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| A member fails                              | Restarts it and its local consumers in their unit; healthy co-residents keep serving.                              |
+| A unit exits on its own                     | Settles the whole group, then submits one Change that deploys the group's desired targets.                         |
+| The intensity is exhausted                  | Escalates the instance: it stays failed and nothing else restarts. An accepted Change for it lifts the escalation. |
+| A Change owns the member                    | The Change fails or recovers; the supervisor starts no competing attempt.                                          |
+| The restart conflicts with a running Change | It waits and is tried again when that Change releases its objects.                                                 |
+
+Attempts are counted per instance and survive new generations; `Busy`, planned
+generations and kernel shutdown do not count. `kernel.supervision` and
+[`client.supervision`](../control/) list recent attempts and escalation.
+
 ## Read the execution term
 
 `Plugin.term` exposes the kernel's execution grant inside a serving unit. Each

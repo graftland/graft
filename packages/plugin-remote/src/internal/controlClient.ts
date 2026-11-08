@@ -52,6 +52,10 @@ export interface Client {
 		ReadonlyArray<Kernel.PreparationStatus>,
 		Wire.ControlError
 	>
+	readonly supervision: Effect.Effect<
+		ReadonlyArray<{ readonly instance: string } & Kernel.Supervision>,
+		Wire.ControlError
+	>
 	readonly recording: Effect.Effect<
 		{
 			readonly grant: Option.Option<Kernel.RecorderGrant>
@@ -246,6 +250,11 @@ const client = (r: Runtime): Client => ({
 	preparations: request(r, { _tag: "Preparations" }).pipe(
 		Effect.flatMap((v) =>
 			v._tag === "Preparations" ? Effect.succeed(v.value) : unexpected(v),
+		),
+	),
+	supervision: request(r, { _tag: "Supervision" }).pipe(
+		Effect.flatMap((v) =>
+			v._tag === "Supervision" ? Effect.succeed(v.value) : unexpected(v),
 		),
 	),
 	recording: request(r, { _tag: "Recording" }).pipe(

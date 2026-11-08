@@ -357,6 +357,8 @@ it("uses the reserved recovery claim for a fresh Describe of a previously servin
 			(member) => ({ ...member, overlap: true }),
 		),
 		realms: rootRealms,
+		// The premise is an unavailable instance that no supervisor restarts.
+		supervision: { intensity: 0 },
 	})
 	const old = HashMap.get(known.units, "a@0").pipe(Option.getOrThrow)
 	const unavailable = Core.reduce(known, {

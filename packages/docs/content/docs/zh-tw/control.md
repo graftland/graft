@@ -44,6 +44,7 @@ export const replace = Effect.scoped(
 | `client.units`、`client.preparations` | 提供原生退出證據、清理分類、Cause 和剩餘預留，包括准入前拒絕留下的事實。         |
 | `client.waiters`                      | 傳回選擇代之前有數量上限的排隊呼叫；此時尚未分配提供方執行額度。                 |
 | `client.recording`                    | 傳回記錄授權，以及所有未確認的[記錄](../recording/)，包括已結束記錄者的記錄。    |
+| `client.supervision`                  | 傳回每個實例最近的監督嘗試與升級狀態，見[監督](../units/#監督)。                 |
 
 ## 讀取部署計畫
 

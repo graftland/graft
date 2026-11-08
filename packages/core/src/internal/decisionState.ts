@@ -285,6 +285,27 @@ export interface VerifiedDescription {
 	readonly resolution: ResolvedInput
 	readonly description: Description
 }
+/** Deployment data bounding supervisor restarts, as in OTP: at most `intensity` attempts per `period` milliseconds. */
+export interface SupervisionDeclaration {
+	readonly intensity?: number
+	readonly period?: number
+}
+export interface SupervisionPolicy {
+	readonly intensity: number
+	readonly period: number
+}
+/** Supervisor facts for one instance: recent attempted restarts and whether it was escalated. */
+export interface Supervision {
+	readonly attempts: ReadonlyArray<number>
+	readonly escalated: boolean
+}
+/** A restart that met a conflicting owner; it is tried again, never dropped. */
+export interface PendingRestart {
+	readonly kind: "Members" | "Unit"
+	readonly unit: string
+	readonly members: HashSet.HashSet<string>
+	readonly cause: Cause.Cause<unknown>
+}
 /** Each recorded Change has at most one duty per stage, acknowledged in this order. */
 export type RecordStage = "Intent" | "Commit" | "Conclusion"
 /** Deployment data that names the recording role, the instance allowed to hold it and the instances whose Changes it records. */
@@ -714,6 +735,9 @@ export interface GraphIssue {
 	readonly cause: Cause.Cause<unknown>
 }
 export interface State {
+	readonly supervisionPolicy: SupervisionPolicy
+	readonly supervision: HashMap.HashMap<string, Supervision>
+	readonly pendingRestarts: HashMap.HashMap<string, PendingRestart>
 	readonly recording: Option.Option<RecordingPolicy>
 	readonly recorder: Option.Option<RecorderGrant>
 	readonly records: HashMap.HashMap<string, RecordDuty>

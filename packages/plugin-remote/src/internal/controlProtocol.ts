@@ -32,6 +32,14 @@ export const Deployment = Schema.Struct({
 			wait: Schema.optionalKey(Schema.Finite),
 		}),
 	),
+	supervision: Schema.optionalKey(
+		Schema.Struct({
+			intensity: Schema.optionalKey(
+				Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+			),
+			period: Schema.optionalKey(Schema.Finite.check(Schema.isGreaterThan(0))),
+		}),
+	),
 	recording: Schema.optionalKey(
 		Schema.Struct({
 			recorder: Schema.String,
@@ -385,6 +393,7 @@ export const Request = Schema.Union([
 			"Calls",
 			"Waiters",
 			"Recording",
+			"Supervision",
 			"Shutdown",
 		]),
 	}),
@@ -400,6 +409,15 @@ export const Response = Schema.Union([
 	Schema.TaggedStruct("Preparation", { value: Schema.Option(Preparation) }),
 	Schema.TaggedStruct("Calls", { value: Schema.Array(Call) }),
 	Schema.TaggedStruct("Waiters", { value: Schema.Array(Waiter) }),
+	Schema.TaggedStruct("Supervision", {
+		value: Schema.Array(
+			Schema.Struct({
+				instance: Schema.String,
+				attempts: Schema.Array(Schema.Finite),
+				escalated: Schema.Boolean,
+			}),
+		),
+	}),
 	Schema.TaggedStruct("Recording", {
 		grant: Schema.Option(Grant),
 		outstanding: Schema.Array(Unit.RecordDuty),

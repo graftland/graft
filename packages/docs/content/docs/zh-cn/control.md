@@ -45,6 +45,7 @@ export const replace = Effect.scoped(
 | `client.units`、`client.preparations` | 提供原生退出证据、清理分类、Cause 和剩余预留，包括准入前拒绝留下的事实。         |
 | `client.waiters`                      | 返回选择代之前有数量上限的排队调用；此时尚未分配提供方执行额度。                 |
 | `client.recording`                    | 返回记录授权，以及所有未确认的[记录](../recording/)，包括已退出记录者的记录。    |
+| `client.supervision`                  | 返回每个实例最近的监督尝试和升级状态，见[监督](../units/#监督)。                 |
 
 ## 读取部署计划
 

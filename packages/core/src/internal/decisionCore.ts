@@ -21,6 +21,7 @@ import type {
 	Command,
 	CommandKind,
 	Conclusion,
+	DeploymentOperation,
 	Description,
 	Event,
 	FixedBinding,
@@ -32,6 +33,7 @@ import type {
 	MemberExecution,
 	MemberFact,
 	Outcome,
+	PendingRestart,
 	Phase,
 	RealmDeclaration,
 	RecordingDeclaration,
@@ -44,6 +46,7 @@ import type {
 	Settlement,
 	State,
 	Status,
+	SupervisionDeclaration,
 	Target,
 	Timer,
 	TimerPurpose,
@@ -60,6 +63,7 @@ import * as Members from "./memberCore"
 import * as Grants from "./memberGrant"
 import * as Preparation from "./preparationCore"
 import * as Recording from "./recordingCore"
+import * as Supervisor from "./supervisorCore"
 
 export const getPreparation = Preparation.get
 export type * from "./decisionState.ts"
@@ -219,6 +223,7 @@ export const make = (options: {
 	readonly callLimits?: Partial<CallLimits>
 	readonly bindings?: ReadonlyArray<FixedBinding>
 	readonly recording?: RecordingDeclaration
+	readonly supervision?: SupervisionDeclaration
 }): State => {
 	const graph = Graph.initialize(options.declarations, options.realms)
 	return Arr.reduce(
@@ -237,6 +242,9 @@ export const make = (options: {
 			),
 			recorder: Option.none(),
 			records: HashMap.empty(),
+			supervisionPolicy: Supervisor.policy(options.supervision),
+			supervision: HashMap.empty(),
+			pendingRestarts: HashMap.empty(),
 			nextMemberOperation: 1,
 			memberOperations: HashMap.empty(),
 			memberOperationsByUnit: HashMap.empty(),
@@ -818,7 +826,11 @@ const conclude = (s: Working, c: Change, outcome: Outcome): Working => {
 		c.recorded && outcome !== "Accepted"
 			? Recording.request(saved, next, "Conclusion", Option.some(outcome))
 			: saved
-	return release(transferServing(recorded, next), next)
+	const supervised =
+		outcome === "Accepted"
+			? Supervisor.cleared(recorded, c.plan.members)
+			: recorded
+	return release(transferServing(supervised, next), next)
 }
 const terminate = (
 	s: Working,
@@ -1561,6 +1573,7 @@ export const empty = (options: {
 	readonly callLimits?: Partial<CallLimits>
 	readonly bindings?: ReadonlyArray<FixedBinding>
 	readonly recording?: RecordingDeclaration
+	readonly supervision?: SupervisionDeclaration
 	readonly instances: ReadonlyArray<{
 		readonly id: string
 		readonly target: Target
@@ -2325,7 +2338,7 @@ const endUnit = (
 					: HashMap.set(s.claims, u.claim, { ...claim, unit: Option.none() }),
 		}),
 	}
-	return HashSet.reduce(
+	const settled = HashSet.reduce(
 		HashSet.add(
 			HashMap.reduce(u.members, HashSet.empty<string>(), (ids, member) =>
 				HashSet.union(
@@ -2369,6 +2382,17 @@ const endUnit = (
 				return progressSettlement(saved, observed)
 			}),
 	)
+	/** Nothing owned this exit: the supervisor redeploys the group once it has settled. */
+	return u.kind === "Execution" &&
+		evidence === "Exited" &&
+		u.owner === `group:${u.group}`
+		? superviseUnit(
+				settled,
+				u.id,
+				HashSet.fromIterable(HashMap.keys(u.members)),
+				cause,
+			)
+		: settled
 }
 const currentReport = (c: Change, command: Command): boolean =>
 	command.token.view === c.view &&
@@ -2978,7 +3002,86 @@ const memberSignal = (
 										),
 						),
 			)
-		return Members.start(observed, updated, affected, event.cause)
+		return superviseMembers(observed, updated, affected, event.cause)
+	})
+/** A failure no Change owns: restart within the intensity, wait while busy, otherwise escalate and only stop. */
+const superviseMembers = (
+	s: Working,
+	unit: Unit,
+	affected: HashSet.HashSet<string>,
+	cause: Cause.Cause<unknown>,
+): Working => {
+	if (!Supervisor.allows(s, affected))
+		return Members.start(
+			Supervisor.escalate(s, affected),
+			unit,
+			affected,
+			cause,
+			false,
+		)
+	const started = Members.start(s, unit, affected, cause, true)
+	return started.nextMemberOperation === s.nextMemberOperation
+		? defer(s, { kind: "Members", unit: unit.id, members: affected, cause })
+		: Supervisor.attempted(started, affected)
+}
+const defer = (s: Working, restart: PendingRestart): Working => ({
+	...s,
+	pendingRestarts: HashMap.set(
+		s.pendingRestarts,
+		`${restart.kind}:${restart.unit}`,
+		restart,
+	),
+})
+/** A crashed unit no Change owns: after the group settles, one supervisor Change redeploys its desired targets. */
+const superviseUnit = (
+	s: Working,
+	unit: string,
+	members: HashSet.HashSet<string>,
+	cause: Cause.Cause<unknown>,
+): Working => {
+	const declared = HashSet.filter(members, (id) =>
+		HashMap.has(s.graph.declarations, id),
+	)
+	if (!s.open || HashSet.size(declared) === 0) return s
+	if (!Supervisor.allows(s, declared)) return Supervisor.escalate(s, declared)
+	if (HashSet.some(declared, (id) => Option.isSome(cell(s, id).writer)))
+		return defer(s, { kind: "Unit", unit, members: declared, cause })
+	const operations = Arr.flatMap(Arr.fromIterable(declared), (id) =>
+		Option.toArray(
+			Option.map(
+				HashMap.get(s.graph.declarations, id),
+				(m): DeploymentOperation => ({
+					_tag: "Deploy",
+					instance: id,
+					target: m.target,
+				}),
+			),
+		),
+	)
+	const submitted = requestedBatch(s, { operations, strategy: "Restart" })
+	return Supervisor.attempted({ ...submitted, reply: s.reply }, declared)
+}
+/** Deferred restarts are tried again after every event; one that still conflicts stays deferred. */
+const retryPending = (s: Working): Working =>
+	HashMap.reduce(s.pendingRestarts, s, (next, restart, key) => {
+		const cleared = {
+			...next,
+			pendingRestarts: HashMap.remove(next.pendingRestarts, key),
+		}
+		if (restart.kind === "Unit")
+			return superviseUnit(
+				cleared,
+				restart.unit,
+				restart.members,
+				restart.cause,
+			)
+		return Option.match(HashMap.get(cleared.units, restart.unit), {
+			onNone: () => cleared,
+			onSome: (u) =>
+				u.evidence === "Missing"
+					? superviseMembers(cleared, u, restart.members, restart.cause)
+					: cleared,
+		})
 	})
 const apply = (s: Working, event: Event): Working => {
 	switch (event._tag) {
@@ -3233,7 +3336,7 @@ export const reduce = (state: State, incoming: Event): Transition => {
 		timed,
 		Preparation.expire,
 	)
-	const appliedEvent = apply(prepTimed, event)
+	const appliedEvent = retryPending(apply(prepTimed, event))
 	const applied = Arr.reduce(
 		appliedEvent.admissions,
 		appliedEvent,
