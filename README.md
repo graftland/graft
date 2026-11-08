@@ -73,9 +73,9 @@ const hello = Plugin.make({
   the compiler checks it.
 
 When one branch needs ground of its own,
-[Remote](https://docs.graft.land/remote/overview/) runs that plugin in
-a child process, a Node worker or on another machine. The plugins that use its
-services do not change.
+[Remote](https://docs.graft.land/remote/overview/) runs that plugin in a child
+process, a Node worker or on another machine. The plugins that use its services
+do not change.
 
 To run Graft on Node.js, you need version 22.19 or later. To develop this
 workspace, you need Node.js 22.22 or later. This includes building the
@@ -91,16 +91,15 @@ npm run dev
 
 Read the [documentation](https://docs.graft.land/) (also in
 [简体中文](https://docs.graft.land/zh-cn/) and
-[繁體中文](https://docs.graft.land/zh-tw/)). Working with a coding
-agent? The [`graft` skill](skills/graft) teaches it to design an application as
-plugins and Effects, then write, test and run them:
-`npx skills add graftland/graft`.
+[繁體中文](https://docs.graft.land/zh-tw/)). Working with a coding agent? The
+[`graft` skill](skills/graft) teaches it to design an application as plugins and
+Effects, then write, test and run them: `npx skills add graftland/graft`.
 
 Graft draws its plugin model from
 [cordis](https://github.com/cordiverse/cordis). Where cordis composes across
 space and time, Graft keeps to the garden. See
-[how cordis concepts map to Graft](https://docs.graft.land/cordis/).
-To let a coding agent do the port, install the [migration skills](skills).
+[how cordis concepts map to Graft](https://docs.graft.land/cordis/). To let a
+coding agent do the port, install the [migration skills](skills).
 
 ## Samples
 
@@ -154,8 +153,8 @@ devenv shell -- pnpm typecheck
 devenv shell -- pnpm test
 ```
 
-See [Publishing](https://docs.graft.land/publishing/) for the checks,
-the release process and the docs site.
+See [Publishing](https://docs.graft.land/publishing/) for the checks, the
+release process and the docs site.
 
 ## License
 

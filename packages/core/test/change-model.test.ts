@@ -40,6 +40,7 @@ const forward = (id: string, instance: string): ReadonlyArray<Stimulus> => [
 	{ name: `${id}:OldExit`, event: (s) => exitEvent(s, `${instance}@0`) },
 ]
 
+// Exhaustive: about 20 s alone, several times that on a busy CI runner.
 it("explores every causal shuffle of independent Changes using production commands (I1, I2, I3, I6)", () => {
 	const base = initial()
 	const s = submit(submit(base), request(base, "instance-1"))
@@ -57,7 +58,7 @@ it("explores every causal shuffle of independent Changes using production comman
 	assert.strictEqual(stats.states, stats.transitions + 1)
 	assert.strictEqual(stats.states, 184755)
 	assert.strictEqual(stats.transitions, 184754)
-}, 60000)
+}, 180000)
 
 it("explores conflicting admission and shutdown in every causal order (I2, I3, I7)", () => {
 	const base = initial()
