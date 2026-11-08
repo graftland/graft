@@ -44,10 +44,12 @@ export const kernel = Kernel.layer({
 
 ## Run a recorder
 
-`@graftland/plugin-release/Recorder` is an ordinary recorder: it stores each
-record in its unit's memory, then acknowledges it. Deploy it as `instance` with
-`{ recorder: "release" }`. A third-party plugin can hold the role through the
-same `Recording.Recorder` service; there is no first-party path.
+`@graftland/plugin-release/Recorder` is an ordinary recorder. Deploy it as
+`instance` with `{ recorder: "release", directory: "./journal" }`: it appends
+each record to the journal there and syncs it to disk before acknowledging.
+Without `directory`, records stay in its unit's memory. A third-party plugin can
+hold the role through the same `Recording.Recorder` service; there is no
+first-party path.
 
 ```ts
 import { Effect, Stream } from "effect"
@@ -69,13 +71,27 @@ export default Plugin.make({
 })
 ```
 
-| Rule            | Behavior                                                                                               |
-| --------------- | ------------------------------------------------------------------------------------------------------ |
-| Identity        | The unit's control channel names the incarnation. A plugin cannot register or acknowledge for another. |
-| Registration    | Accepted from a unit that hosts `instance`; the grant counts once that unit is current.                |
-| Acknowledgement | Send it after storing. A repeat is ignored; other content, owner or incarnation is rejected.           |
-| Reconnect       | Registering again from the same incarnation replays its outstanding records.                           |
-| Durability      | None. Records live in the recorder's memory and in the kernel until acknowledged.                      |
+| Rule            | Behavior                                                                                                   |
+| --------------- | ---------------------------------------------------------------------------------------------------------- |
+| Identity        | The unit's control channel names the incarnation. A plugin cannot register or acknowledge for another.     |
+| Registration    | Accepted from a unit that hosts `instance`; the grant counts once that unit is current.                    |
+| Acknowledgement | Send it after storing. A repeat is ignored; other content, owner or incarnation is rejected.               |
+| Reconnect       | Registering again from the same incarnation replays its outstanding records.                               |
+| Durability      | With `directory`, the journal on disk; otherwise none. The kernel keeps a record until it is acknowledged. |
+
+## Read the journal
+
+The journal is append-only segments, one line per record; concurrent Changes
+interleave and nothing is rewritten. `Journal.history(directory)` from
+`@graftland/plugin-release` reads it without a running kernel and returns one
+summary per Change id: stages, members, targets, outcome and `concluded`.
+
+| Situation                      | Result                                                                                                 |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------ |
+| A record is delivered again    | Acknowledged without a second line. The same id with other content is refused.                         |
+| Writing or syncing fails       | Not acknowledged; the append is retried every second while the unit runs, so the Change stays blocked. |
+| The process stopped mid-write  | A torn final line is removed when the recorder opens the journal; an earlier bad line refuses to open. |
+| The process stopped mid-Change | The Change shows an intent without a conclusion: `concluded` is `false`.                               |
 
 ## When recording is missing
 

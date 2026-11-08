@@ -43,6 +43,10 @@
 			"source": "./src/index.ts",
 			"default": "./dist/index.js"
 		},
+		"./Journal": {
+			"source": "./src/Journal.ts",
+			"default": "./dist/Journal.js"
+		},
 		"./Recorder": {
 			"source": "./src/Recorder.ts",
 			"default": "./dist/Recorder.js"
@@ -52,6 +56,7 @@
 	"publishConfig": {
 		"exports": {
 			".": "./dist/index.js",
+			"./Journal": "./dist/Journal.js",
 			"./Recorder": "./dist/Recorder.js",
 			"./package.json": "./package.json"
 		}

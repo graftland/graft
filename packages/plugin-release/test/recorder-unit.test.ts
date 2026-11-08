@@ -15,6 +15,8 @@ import { Change, Kernel } from "@graftland/graft"
 import * as Artifact from "@graftland/plugin-remote/Artifact"
 import * as Units from "@graftland/plugin-remote/Units"
 
+import * as Journal from "../src/Journal"
+
 const budget = {
 	total: 10000,
 	startup: 2000,
@@ -25,7 +27,10 @@ const budget = {
 }
 const recording = { recorder: "release", instance: "release", scope: ["a"] }
 /** Captures the built release recorder and the business fixture into this package's cache. */
-const fixture = Effect.fn(function* (recorderEntry: "release" | "withholding") {
+const fixture = Effect.fn(function* (
+	recorderEntry: "release" | "withholding",
+	durable: boolean = false,
+) {
 	const fs = yield* FileSystem.FileSystem
 	const path = yield* Path.Path
 	const cache = new URL("../.cache/recorder-tests/", import.meta.url).pathname
@@ -52,7 +57,9 @@ const fixture = Effect.fn(function* (recorderEntry: "release" | "withholding") {
 	})
 	const recorder = Units.target({
 		artifact: recorderArtifact,
-		input: { recorder: "release" },
+		input: durable
+			? { recorder: "release", directory: path.join(directory, "journal") }
+			: { recorder: "release" },
 		placement: "Worker",
 	})
 	const version = (n: number) =>
@@ -70,7 +77,7 @@ const fixture = Effect.fn(function* (recorderEntry: "release" | "withholding") {
 			{ id: "a", target: version(1) },
 		],
 	}).pipe(Layer.provide(Units.layer), Layer.provide(NodeServices.layer))
-	return { recorder, version, layer }
+	return { recorder, version, layer, journal: path.join(directory, "journal") }
 })
 const granted = Effect.gen(function* () {
 	const kernel = yield* Kernel.Kernel
@@ -178,6 +185,42 @@ it.live(
 					),
 				)
 			}).pipe(Effect.provide(f.layer))
+		}).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+	30000,
+)
+
+it.live(
+	"journals every stage of a recorded Change on disk before acknowledging it, readable by Change id (C4)",
+	() =>
+		Effect.gen(function* () {
+			const f = yield* fixture("release", true)
+			const id = yield* Effect.gen(function* () {
+				yield* Change.run({
+					operations: [
+						{ _tag: "Deploy", instance: "release", target: f.recorder },
+					],
+					budget,
+				})
+				yield* granted
+				const handle = yield* Change.submit({
+					operations: [{ _tag: "Deploy", instance: "a", target: f.version(1) }],
+					budget,
+				})
+				const result = yield* handle.await
+				assert.equal(result.outcome, "Accepted", Cause.pretty(result.cause))
+				return handle.id
+			}).pipe(Effect.provide(f.layer))
+			const history = yield* Journal.history(f.journal)
+			const recorded = Option.getOrThrow(
+				Array.findFirst(history, (s) => s.change === id),
+			)
+			assert.deepStrictEqual(recorded.stages, [
+				"Intent",
+				"Commit",
+				"Conclusion",
+			])
+			assert.isTrue(Option.contains(recorded.outcome, "Accepted"))
+			assert.isTrue(recorded.concluded)
 		}).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 	30000,
 )

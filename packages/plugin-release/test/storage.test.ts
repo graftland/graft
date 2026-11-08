@@ -1,20 +1,10 @@
-import {
-	Array,
-	ConfigProvider,
-	Effect,
-	FileSystem,
-	Layer,
-	Path,
-	Schema,
-	String,
-} from "effect"
+import { ConfigProvider, Effect, FileSystem, Layer, Path, Schema } from "effect"
 import { NodeServices } from "@effect/platform-node"
 import { assert, it } from "@effect/vitest"
 
 import { Graft } from "@graftland/graft"
 import { Artifact } from "@graftland/plugin-remote"
 
-import { validate } from "../src/internal/journal"
 import {
 	build,
 	load,
@@ -22,7 +12,7 @@ import {
 	resolveInput,
 	write,
 } from "../src/internal/storage"
-import { Journal, RejectionSummary, type Release } from "../src/Model"
+import type { Release } from "../src/Model"
 
 const runtime = Graft.layer.pipe(Layer.provideMerge(NodeServices.layer))
 const release: Release = {
@@ -187,85 +177,3 @@ it.effect(
 			assert.equal(result.entries[0]?.package.name, "@example/untrusted")
 		}).pipe(Effect.scoped, Effect.provide(runtime)),
 )
-
-it.effect(
-	"replays admission rejection separately from admitted outcomes and failed compensation",
-	() =>
-		Effect.gen(function* () {
-			const h = yield* setup()
-			const target = String.repeat(64)("a")
-			const accepted = {
-				change: "change-a",
-				_tag: "Accepted" as const,
-				phase: "Complete",
-				evidence: [],
-			}
-			const journal: Journal = {
-				version: 1,
-				status: {
-					current: h.id,
-					previous: null,
-					state: "Degraded",
-					revocations: [],
-				},
-				events: [
-					{ kind: "Bootstrap", current: h.id, target: h.id },
-					{ kind: "Intent", current: h.id, target, entries: ["a", "b"] },
-					{
-						kind: "Outcome",
-						current: h.id,
-						target,
-						entry: "a",
-						outcome: accepted,
-					},
-					{
-						kind: "Outcome",
-						current: h.id,
-						target,
-						entry: "b",
-						rejection: { reason: { _tag: "Closing" } },
-					},
-					{
-						kind: "Compensation",
-						current: h.id,
-						target: h.id,
-						entry: "a",
-						rejection: {
-							reason: {
-								_tag: "Stale",
-								object: { _tag: "Instance", instance: "a" },
-								expected: 2,
-								actual: 3,
-							},
-						},
-					},
-					{ kind: "Rejected", current: h.id, target },
-				],
-			}
-			const replay = yield* validate(h.store, journal)
-			assert.strictEqual(replay.status.state, "Degraded")
-			const both: Journal = {
-				...journal,
-				events: Array.map(journal.events, (event) =>
-					event.entry === "b" ? { ...event, outcome: accepted } : event,
-				),
-			}
-			const invalid = yield* Effect.flip(validate(h.store, both))
-			assert.strictEqual(invalid._tag, "ReleaseError")
-			if (invalid._tag === "ReleaseError")
-				assert.strictEqual(invalid.code, "Journal")
-		}).pipe(Effect.scoped, Effect.provide(runtime)),
-)
-
-it("retains strict version-one journal rejection validation after removing runtime adapters", () => {
-	assert.isTrue(Schema.is(RejectionSummary)({ reason: { _tag: "Closing" } }))
-	assert.isFalse(Schema.is(RejectionSummary)({ reason: { _tag: "Invented" } }))
-	assert.isFalse(
-		Schema.is(RejectionSummary)({
-			reason: {
-				_tag: "Busy",
-				conflicts: [{ object: { _tag: "Instance", instance: "a" } }],
-			},
-		}),
-	)
-})

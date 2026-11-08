@@ -10,6 +10,5 @@ package metadata. It exports storage data and validation; deployment uses the
 ## Build
 
 Use `build` with a store directory and a source file. The result identifies the
-immutable directory. `metadataOnly` avoids importing package code. Application
-batches, compensation and persistent Change recovery belong to a later release
-phase.
+immutable directory. `metadataOnly` avoids importing package code. The
+[release recorder](../recording/#read-the-journal) journals recorded Changes.

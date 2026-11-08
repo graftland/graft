@@ -100,31 +100,6 @@ export const read = <
 				),
 			),
 	)
-/** Atomic replacement plus file and parent-directory sync; one writer owns a store. */
-export const durable = Effect.fnUntraced(function* (
-	file: string,
-	value: Schema.Json,
-) {
-	const fs = yield* FileSystem.FileSystem
-	const path = yield* Path.Path
-	const text = yield* json(value)
-	const temporary = file + ".next"
-	yield* Effect.scoped(
-		Effect.gen(function* () {
-			const handle = yield* fs.open(temporary, { flag: "w", mode: 0o600 })
-			yield* handle.writeAll(new TextEncoder().encode(text))
-			yield* handle.sync
-		}),
-	)
-	yield* fs.rename(temporary, file)
-	yield* Effect.scoped(
-		Effect.gen(function* () {
-			const directory = yield* fs.open(path.dirname(file))
-			yield* directory.sync
-		}),
-	)
-}, Effect.uninterruptible)
-
 const syncDirectory = Effect.fnUntraced(function* (
 	directory: string,
 ): Effect.fn.Return<
