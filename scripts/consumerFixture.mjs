@@ -104,8 +104,9 @@ export function prepare() {
 			private: true,
 			type: "module",
 			dependencies,
+			pnpm: { overrides },
 		})
-		json(join(directory, "pnpm-workspace.yaml"), { packages: [], overrides })
+		json(join(directory, "pnpm-workspace.yaml"), { packages: [] })
 		run("pnpm", ["install", "--ignore-scripts"], directory)
 		run(
 			"pnpm",
