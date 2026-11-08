@@ -1,0 +1,6 @@
+{
+	"name": "group-cleanup-replacement-1435",
+	"version": "1.0.0",
+	"type": "module",
+	"exports": "./index.mjs"
+}

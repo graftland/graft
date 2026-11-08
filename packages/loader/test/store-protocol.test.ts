@@ -20,7 +20,7 @@ describe("store notification protocol", () => {
 	it.effect(
 		"reads a notification only after an in-progress API edit has committed",
 		() =>
-			run(() => ({}))(() =>
+			run()(() =>
 				Effect.gen(function* () {
 					const current = yield* Ref.make<ReadonlyArray<Entry.Entry>>([])
 					const notifications = yield* Queue.unbounded<void>()
@@ -83,7 +83,7 @@ describe("store notification protocol", () => {
 	it.effect(
 		"records the complete cause if the notification stream terminates unexpectedly",
 		() =>
-			run(() => ({}))(() =>
+			run()(() =>
 				Effect.gen(function* () {
 					const defect = new Error("Notification backend failed")
 					yield* Graft.plugin(

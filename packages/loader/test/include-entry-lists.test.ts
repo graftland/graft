@@ -1,6 +1,7 @@
 import {
 	Array,
 	Cause,
+	Context,
 	Effect,
 	FileSystem,
 	Option,
@@ -15,31 +16,19 @@ import { Graft, Plugin } from "@graftland/graft"
 
 import { parseDocument } from "yaml"
 
-import { Entry, Group, Include } from "../src/index"
-import { loaderService, run } from "./utils"
-
-const host = Plugin.make({
-	name: "host",
-	config: Schema.Struct({ plugins: Entry.Entries }),
-	apply: Effect.fnUntraced(function* ({ plugins }) {
-		const subtree = yield* Graft.plugin(Group.Group, plugins)
-		return (next) => subtree.update(next.plugins).pipe(Effect.as(true))
-	}),
-})
+import { Entry, Include, ModuleResolver } from "../src/index"
+import { fixture, loaderService, run } from "./utils.ts"
 
 it.effect(
 	"writes hosted ids without restarting children and preserves YAML comments and formatting",
 	() =>
 		Effect.gen(function* () {
 			const ids = yield* Ref.make<ReadonlyArray<string>>([])
-			const child = Plugin.make({
-				name: "child",
-				apply: () =>
-					Effect.flatMap(Entry.CurrentId, (id) =>
-						Ref.update(ids, (values) => [...values, Option.getOrThrow(id)]),
-					),
-			})
-			yield* run(() => ({ host, child }))(() =>
+
+			yield* run({
+				host: fixture("include-entry-lists-host-1055"),
+				child: fixture("include-entry-lists-child-1055"),
+			})(() =>
 				Effect.gen(function* () {
 					const fs = yield* FileSystem.FileSystem
 					const directory = yield* fs.makeTempDirectoryScoped()
@@ -72,6 +61,13 @@ it.effect(
       - id:`,
 					)
 				}),
+			).pipe(
+				Effect.provideService(
+					Context.Service<{ readonly ids: typeof ids }>(
+						"loader/fixture/include-entry-lists-child-1055",
+					),
+					{ ids },
+				),
 			)
 		}),
 )
@@ -79,10 +75,10 @@ it.effect(
 it.effect(
 	"writes lists inside hosts and groups without leaking ids through anchors",
 	() =>
-		run(() => ({
-			host,
-			child: Plugin.make({ name: "child", apply: () => Effect.void }),
-		}))(() =>
+		run({
+			host: fixture("include-entry-lists-host-2221"),
+			child: fixture("include-entry-lists-child-2221"),
+		})(() =>
 			Effect.gen(function* () {
 				const fs = yield* FileSystem.FileSystem
 				const directory = yield* fs.makeTempDirectoryScoped()
@@ -123,14 +119,11 @@ it.live(
 	() =>
 		Effect.gen(function* () {
 			const ids = yield* Ref.make<ReadonlyArray<string>>([])
-			const child = Plugin.make({
-				name: "child",
-				apply: () =>
-					Effect.flatMap(Entry.CurrentId, (id) =>
-						Ref.update(ids, Array.append(Option.getOrThrow(id))),
-					),
-			})
-			yield* run(() => ({ host, child }))(() =>
+
+			yield* run({
+				host: fixture("include-entry-lists-host-3751"),
+				child: fixture("include-entry-lists-child-3751"),
+			})(() =>
 				Effect.gen(function* () {
 					const fs = yield* FileSystem.FileSystem
 					const directory = yield* fs.makeTempDirectoryScoped()
@@ -182,6 +175,13 @@ it.live(
 					const after = yield* Ref.get(writes)
 					assert.equal(after, count)
 				}),
+			).pipe(
+				Effect.provideService(
+					Context.Service<{ readonly ids: typeof ids }>(
+						"loader/fixture/include-entry-lists-child-3751",
+					),
+					{ ids },
+				),
 			)
 		}),
 )
@@ -189,13 +189,10 @@ it.live(
 it.effect(
 	"logs a denied hosted-id write with its cause and keeps the child running",
 	() =>
-		run((journal) => ({
-			host,
-			child: Plugin.make({
-				name: "child",
-				apply: () => journal.record("started"),
-			}),
-		}))((journal) =>
+		run({
+			host: fixture("include-entry-lists-host-5468"),
+			child: fixture("include-entry-lists-child-5468"),
+		})((journal) =>
 			Effect.gen(function* () {
 				const fs = yield* FileSystem.FileSystem
 				const directory = yield* fs.makeTempDirectoryScoped()
@@ -231,18 +228,34 @@ it.effect(
 		),
 )
 
-it.live("discovers an entry-list field introduced by a replacement", () => {
-	const before = Plugin.make({
-		name: "host",
-		config: Schema.Struct({ plugins: Schema.Array(Entry.NewEntry) }),
-		apply: ({ plugins }) =>
-			Graft.plugin(Group.Group, plugins).pipe(Effect.asVoid),
-	})
-	return run(() => ({
-		host: before,
-		child: Plugin.make({ name: "child", apply: () => Effect.void }),
-	}))(() =>
+it.live("discovers an entry-list field introduced by a replacement", () =>
+	run({
+		host: fixture("include-entry-lists-host-6992"),
+		"replacement-host": fixture("host"),
+		child: fixture("include-entry-lists-child-6992"),
+	})(() =>
 		Effect.gen(function* () {
+			const resolver = yield* ModuleResolver.ModuleResolver
+			const beforeDescriptor = yield* resolver.resolve("host")
+			const hostDescriptor = yield* resolver.resolve("replacement-host")
+			const beforeModule = yield* Effect.tryPromise({
+				try: () => import(beforeDescriptor.location),
+				catch: (cause) =>
+					ModuleResolver.ModuleInvalid.make({
+						specifier: beforeDescriptor.location,
+						cause,
+					}),
+			})
+			const hostModule = yield* Effect.tryPromise({
+				try: () => import(hostDescriptor.location),
+				catch: (cause) =>
+					ModuleResolver.ModuleInvalid.make({
+						specifier: hostDescriptor.location,
+						cause,
+					}),
+			})
+			const before = yield* Effect.fromOption(Plugin.fromModule(beforeModule))
+			const host = yield* Effect.fromOption(Plugin.fromModule(hostModule))
 			const fs = yield* FileSystem.FileSystem
 			const directory = yield* fs.makeTempDirectoryScoped()
 			const file = `${directory}/graft.yml`
@@ -273,5 +286,5 @@ it.live("discovers an entry-list field introduced by a replacement", () => {
 				parseDocument(text).getIn([0, "config", "plugins", 0, "id"]),
 			)
 		}),
-	)
-})
+	),
+)

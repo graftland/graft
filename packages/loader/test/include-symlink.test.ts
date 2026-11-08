@@ -21,7 +21,7 @@ import { loaderService, run } from "./utils.ts"
 
 for (const stage of ["api edit", "initial ID assignment"]) {
 	it.effect(`preserves config symlink during ${stage}`, () =>
-		run(() => ({}))(() =>
+		run()(() =>
 			Effect.gen(function* () {
 				const fs = yield* FileSystem.FileSystem
 				const dir = yield* fs.makeTempDirectoryScoped()
@@ -79,7 +79,7 @@ const fixture = Effect.gen(function* () {
 it.effect(
 	"uses the real target directory and permissions through a relative link chain",
 	() =>
-		run(() => ({}))(() =>
+		run()(() =>
 			Effect.gen(function* () {
 				const { fs, path, entrance, first, link, a } = yield* fixture
 				const alias = path.join(entrance, "alias.yml")
@@ -113,7 +113,7 @@ it.effect(
 it.effect(
 	"follows a new referent even when it has exactly the previous contents",
 	() =>
-		run(() => ({}))(() =>
+		run()(() =>
 			Effect.gen(function* () {
 				const { fs, link, a, b, retarget } = yield* fixture
 				const owner = yield* Graft.plugin(Include.Include, { path: link })
@@ -134,7 +134,7 @@ it.effect(
 it.effect.each([false, true])(
 	"rebases a retarget during write preparation (conflicting field: %s)",
 	(conflicting) =>
-		run(() => ({}))(() =>
+		run()(() =>
 			Effect.gen(function* () {
 				const { fs, first, second, link, a, b, retarget } = yield* fixture
 				if (conflicting) yield* fs.writeFileString(b, contents("external"))
@@ -201,7 +201,7 @@ it.effect.each([false, true])(
 it.effect(
 	"does not replace a dangling symlink with initial configuration",
 	() =>
-		run(() => ({}))(() =>
+		run()(() =>
 			Effect.gen(function* () {
 				const { fs, entrance, first, link, a } = yield* fixture
 				yield* fs.remove(a)
@@ -225,7 +225,7 @@ it.effect(
 it.live(
 	"watches the referent, switches directories after retargeting, and releases old watchers",
 	() =>
-		run(() => ({}))(() =>
+		run()(() =>
 			Effect.gen(function* () {
 				const { fs, entrance, first, second, link, a, b, retarget } =
 					yield* fixture

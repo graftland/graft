@@ -1,28 +1,14 @@
-import { Array, Deferred, Effect, Fiber, Ref, Schema, Stream } from "effect"
+import { Array, Context, Deferred, Effect, Fiber, Ref, Stream } from "effect"
 import { assert, describe, it } from "@effect/vitest"
 
-import { Graft, Plugin } from "@graftland/graft"
+import { Graft } from "@graftland/graft"
 
 import { Loader } from "../src/index.ts"
-import { loaderService, run } from "./utils.ts"
+import { fixture, loaderService, run } from "./utils.ts"
 
 describe("target reconciliation", () => {
 	it.effect("allows a finalizer to submit another edit", () =>
-		run(() => ({
-			removable: Plugin.make({
-				name: "removable",
-				inject: [Loader.Loader],
-				apply: () =>
-					Effect.gen(function* () {
-						const loader = yield* Loader.Loader
-						yield* Effect.addFinalizer(() =>
-							loader
-								.create({ id: "created", name: "unused", disabled: true })
-								.pipe(Effect.orDie),
-						)
-					}),
-			}),
-		}))(() =>
+		run({ removable: fixture("removable") })(() =>
 			Effect.gen(function* () {
 				yield* Graft.plugin(Loader.plugin, [
 					{ id: "removable", name: "removable" },
@@ -40,21 +26,7 @@ describe("target reconciliation", () => {
 		),
 	)
 	it.effect("allows an update handler to submit another edit", () =>
-		run(() => ({
-			admin: Plugin.make({
-				name: "admin",
-				config: Schema.Finite,
-				inject: [Loader.Loader],
-				apply: () =>
-					Effect.gen(function* () {
-						const loader = yield* Loader.Loader
-						return (_next: number) =>
-							loader
-								.create({ id: "created", name: "unused", disabled: true })
-								.pipe(Effect.orDie, Effect.as(true))
-					}),
-			}),
-		}))(() =>
+		run({ admin: fixture("admin") })(() =>
 			Effect.gen(function* () {
 				yield* Graft.plugin(Loader.plugin, [
 					{ id: "admin", name: "admin", config: 1 },
@@ -80,23 +52,15 @@ describe("target reconciliation", () => {
 				const release = yield* Deferred.make<void>()
 				const observed = yield* Ref.make<ReadonlyArray<number>>([])
 				const completed = yield* Deferred.make<void>()
-				yield* run(() => ({
-					updatable: Plugin.make({
-						name: "updatable",
-						config: Schema.Finite,
-						apply: () =>
-							Effect.succeed((value: number) =>
-								Effect.gen(function* () {
-									if (value === 1) {
-										yield* Deferred.succeed(entered, undefined)
-										yield* Deferred.await(release)
-									}
-									yield* Ref.update(observed, (values) => [...values, value])
-									return true
-								}),
-							),
-					}),
-				}))(() =>
+				class State extends Context.Service<
+					State,
+					{
+						readonly entered: typeof entered
+						readonly release: typeof release
+						readonly observed: typeof observed
+					}
+				>()("@graftland/loader/test/reconciliation.test/State") {}
+				yield* run({ updatable: fixture("reconciliation-updatable") })(() =>
 					Effect.gen(function* () {
 						yield* Graft.plugin(Loader.plugin, [
 							{ id: "entry", name: "updatable", config: 0 },
@@ -128,7 +92,7 @@ describe("target reconciliation", () => {
 						const values = yield* Ref.get(observed)
 						assert.deepStrictEqual(values, [1, 3])
 					}),
-				)
+				).pipe(Effect.provideService(State, { entered, release, observed }))
 			}),
 	)
 })

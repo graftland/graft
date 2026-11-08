@@ -9,22 +9,12 @@ see [Hot reload](../hot-reload/).
 ```ts
 import { Effect } from "effect"
 
-import { Graft } from "@graftland/graft"
 import * as Hmr from "@graftland/hmr"
-import { ModuleResolver } from "@graftland/loader"
 
-declare const directory: string
-
-const program = Effect.gen(function* () {
+export const program = Effect.gen(function* () {
 	const hmr = yield* Hmr.make({ base: import.meta.url })
-	const resolver = yield* ModuleResolver.make({
-		base: directory,
-		importer: hmr.importerScoped,
-	})
-	yield* Graft.provide(ModuleResolver.ModuleResolver, resolver)
-	// ...load plugins through the resolver, then, after files changed:
-	const result = yield* hmr.reload
-	yield* Effect.log(result)
+	yield* hmr.importerScoped("./dist/plugin.js")
+	return yield* hmr.reload
 })
 ```
 
@@ -49,22 +39,12 @@ nothing.
 | `importer(specifier)`       | The whole HMR session closes. | Promise importers.                      |
 | `importerScoped(specifier)` | The caller's scope closes.    | Effect importers and Promise importers. |
 
-Pass `importerScoped` to `ModuleResolver.make`.
+Use scoped importers directly in explicit development tooling. They are not
+transferable Loader resolvers. `graft start` rejects watch mode; HMR results are
+embedded cooperative results, without kernel isolation or forced reclamation.
 
-`importerScoped(specifier, { observationScope })` separates the observation
-lease from temporary importer resources.
-
-- `ModuleResolver` passes this scope as the importer's second argument.
-- Keep it alive while failed entries await retry, and close it when replacing
-  the observation attempt or removing the entry.
-- Candidate resources can close immediately on failure without deleting that
-  observation.
-- Omitting the option uses the caller's scope.
-
-Reacquiring an entry in the same import view preserves its cached identity. The
-current view retains facts needed for cache hits without watching unleased
-entries. A committed reload retires that cache; observations survive only where
-active, pending or reused graphs still need them.
+`importerScoped(specifier, { observationScope })` keeps its observation lease
+until that scope closes. Omitting it uses the caller's scope.
 
 ## Watching
 

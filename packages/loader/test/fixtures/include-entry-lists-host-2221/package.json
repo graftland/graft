@@ -1,0 +1,6 @@
+{
+	"name": "include-entry-lists-host-2221",
+	"version": "1.0.0",
+	"type": "module",
+	"exports": "./index.mjs"
+}

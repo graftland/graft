@@ -1,336 +1,97 @@
 import {
 	Deferred,
 	Effect,
-	Exit,
 	Fiber,
 	FileSystem,
-	Queue,
-	Ref,
 	Schema,
 	Stream,
 	String,
 } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import { NodeServices } from "@effect/platform-node"
-import { assert, describe, it } from "@effect/vitest"
+import { assert, it } from "@effect/vitest"
 
-const pluginUrl = new URL("../.cache/integration/plugin.mjs", import.meta.url)
-const runtimeUrl = new URL("../.cache/integration/runtime.mjs", import.meta.url)
 const quote = Schema.encodeEffect(Schema.fromJsonString(Schema.String))
-
-// A fresh Node process exercises Start's real layers and native module hooks.
-describe("CLI configuration startup", () => {
-	it.live.each([false, true])(
-		"handles invalid initial YAML (watch: %s)",
-		(watch) =>
-			Effect.gen(function* () {
-				const fs = yield* FileSystem.FileSystem
-				const directory = yield* fs.makeTempDirectoryScoped()
-				const file = `${directory}/graft.yml`
-				const plugin = yield* quote(pluginUrl.href)
-				const effect = yield* quote(import.meta.resolve("effect"))
-				yield* fs.writeFileString(file, "plugins: [\n")
-				yield* fs.writeFileString(
-					`${directory}/plugin.mjs`,
-					`
-import { Plugin } from ${plugin};
-import { Effect } from ${effect};
-export default Plugin.make({ name: 'recovered', apply: () => Effect.logInfo('RECOVERED_MARKER') });
-`,
-				)
-				const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
-				const child = yield* spawner.spawn(
-					ChildProcess.make(
-						process.execPath,
-						[
-							new URL("../.cache/commands/cli/bin.js", import.meta.url)
-								.pathname,
-							"start",
-							file,
-							...(watch ? ["--watch"] : []),
-						],
-						{ cwd: directory, env: { GRAFT_HOME: directory + "/home" } },
-					),
-				)
-				const invalid = yield* Deferred.make<void>()
-				const recovered = yield* Deferred.make<void>()
-				const lines = yield* Ref.make("")
-				const output = yield* child.all.pipe(
-					Stream.decodeText(),
-					Stream.splitLines,
-					Stream.runForEach((line) =>
-						Effect.gen(function* () {
-							yield* Ref.update(lines, (text) => `${text}${line}\n`)
-							if (String.includes("YAMLParseError")(line))
-								yield* Deferred.succeed(invalid, undefined)
-							if (String.includes("RECOVERED_MARKER")(line))
-								yield* Deferred.succeed(recovered, undefined)
-						}),
-					),
-					Effect.forkChild,
-				)
-				if (watch) {
-					const ended = Fiber.join(output).pipe(
-						Effect.andThen(Effect.die("CLI exited before recovery")),
-					)
-					yield* Deferred.await(invalid).pipe(Effect.raceFirst(ended))
-					yield* fs.writeFileString(
-						file,
-						"- id: recovered\n  name: ./plugin.mjs\n",
-					)
-					yield* Deferred.await(recovered).pipe(Effect.raceFirst(ended))
-					yield* child.kill()
-				}
-				const code = yield* child.exitCode
-				yield* Fiber.join(output)
-				const text = yield* Ref.get(lines)
-				assert.include(text, "YAMLParseError")
-				if (watch) assert.include(text, "RECOVERED_MARKER")
-				else {
-					assert.notStrictEqual(code, 0)
-					assert.notInclude(text, "Running ")
-				}
-			}).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
-	)
-})
+const executable = new URL("../.cache/commands/cli/bin.js", import.meta.url)
+	.pathname
 
 it.live(
-	"unloads a module lease before reloading the remaining configured plugin",
+	"rejects watch before loading an invalid application revision (O6)",
 	() =>
 		Effect.gen(function* () {
 			const fs = yield* FileSystem.FileSystem
 			const directory = yield* fs.makeTempDirectoryScoped()
-			const file = `${directory}/graft.yml`
-			const runtime = yield* quote(runtimeUrl.href)
-			const plugin = yield* quote(pluginUrl.href)
-			const effect = yield* quote(import.meta.resolve("effect"))
-			const node = yield* quote(import.meta.resolve("@effect/platform-node"))
-			const config = yield* quote(file)
-			const source = (
-				name: string,
-			) => `import { Plugin } from ${plugin}; import { Effect } from ${effect};
-export default Plugin.make({ name: '${name}', apply: () => Effect.acquireRelease(
-Effect.logInfo('START ${name}'), () => Effect.logInfo('STOP ${name}')) });`
-			yield* fs.writeFileString(`${directory}/a.mjs`, source("a1"))
-			yield* fs.writeFileString(`${directory}/b.mjs`, source("b1"))
-			yield* fs.writeFileString(
-				file,
-				"- id: a\n  name: ./a.mjs\n- id: b\n  name: ./b.mjs\n",
-			)
-			const startedA = yield* Deferred.make<void>()
-			const startedB = yield* Deferred.make<void>()
-			const stoppedA = yield* Deferred.make<void>()
-			const updatedB = yield* Deferred.make<void>()
+			yield* fs.writeFileString(`${directory}/graft.yml`, "plugins: [\n")
 			const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
 			const child = yield* spawner.spawn(
-				ChildProcess.make(process.execPath, [
-					"--input-type=module",
-					"-e",
-					`
-import { Start } from ${runtime}; import { NodeRuntime } from ${node};
-Start.run({ config: ${config}, watch: true }).pipe(NodeRuntime.runMain);`,
-				]),
-			)
-			const output = yield* child.all.pipe(
-				Stream.decodeText(),
-				Stream.splitLines,
-				Stream.runForEach((line) =>
-					Effect.gen(function* () {
-						if (String.includes("START a1")(line))
-							yield* Deferred.succeed(startedA, undefined)
-						if (String.includes("START b1")(line))
-							yield* Deferred.succeed(startedB, undefined)
-						if (String.includes("STOP a1")(line))
-							yield* Deferred.succeed(stoppedA, undefined)
-						if (String.includes("START b2")(line))
-							yield* Deferred.succeed(updatedB, undefined)
-					}),
+				ChildProcess.make(
+					process.execPath,
+					[
+						executable,
+						"--no-plugins",
+						"start",
+						`${directory}/graft.yml`,
+						"--watch",
+					],
+					{ cwd: directory, env: { GRAFT_HOME: directory + "/home" } },
 				),
-				Effect.forkChild,
 			)
-			const ended = Fiber.join(output).pipe(
-				Effect.andThen(Effect.die("CLI exited before reloading")),
-			)
-			yield* Effect.gen(function* () {
-				yield* Deferred.await(startedA)
-				yield* Deferred.await(startedB)
-				yield* fs.writeFileString(file, "- id: b\n  name: ./b.mjs\n")
-				yield* Deferred.await(stoppedA)
-				yield* fs.writeFileString(`${directory}/a.mjs`, "export default ???")
-				yield* fs.writeFileString(`${directory}/b.mjs`, source("b2"))
-				yield* Deferred.await(updatedB)
-			}).pipe(Effect.raceFirst(ended))
-			yield* child.kill()
-			yield* Fiber.join(output)
+			const output = yield* Stream.mkString(Stream.decodeText(child.all))
+			const code = yield* child.exitCode
+			assert.notEqual(code, 0)
+			assert.include(output, "Watch and live Loader mutation are unsupported")
+			assert.notInclude(output, "YAMLParseError")
 		}).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+	15000,
 )
 
-it.live.each(["require-esm", "cached-commonjs", "symlink", "helper-symlink"])(
-	"reports a restart instead of stale success for %s",
-	(scenario) =>
+it.live(
+	"fails CLI startup on invalid initial YAML without waiting for edits (O6)",
+	() =>
 		Effect.gen(function* () {
-			const fs = yield* FileSystem.FileSystem
-			const temporary = yield* fs.makeTempDirectoryScoped()
-			const directory = yield* fs.realPath(temporary)
-			const file = `${directory}/graft.yml`
-			const runtime = yield* quote(runtimeUrl.href)
-			const plugin = yield* quote(pluginUrl.href)
-			const effect = yield* quote(import.meta.resolve("effect"))
-			const node = yield* quote(import.meta.resolve("@effect/platform-node"))
-			const config = yield* quote(file)
-			const header = `import { Plugin } from ${plugin}; import { Effect } from ${effect};`
-			const extension = scenario === "require-esm" ? "mjs" : "cjs"
-			const required = (name: string) => `${header}
-import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);
-export default Plugin.make({ name: '${name}', apply: () => Effect.logInfo('START ${name}=' + require('./dep.${extension}').value) });`
-			const plain = (name: string) =>
-				`${header} export default Plugin.make({ name: '${name}', apply: () => Effect.logInfo('START ${name}') });`
-			const write = (name: string, text: string) =>
-				fs.writeFileString(`${directory}/${name}`, text)
-			if (scenario === "symlink" || scenario === "helper-symlink") {
-				yield* write("one.mjs", plain("one"))
-				yield* write("two.mjs", plain("two"))
-				const link = scenario === "symlink" ? "a.mjs" : "helper.mjs"
-				yield* fs.symlink("one.mjs", `${directory}/${link}`)
-				if (scenario === "helper-symlink")
-					yield* write("a.mjs", "export { default } from './helper.mjs'")
-			} else {
-				yield* write(
-					`dep.${extension}`,
-					extension === "mjs"
-						? "export const value = 1"
-						: "module.exports = { value: 1 }",
-				)
-				yield* write("a.mjs", required("a"))
-				yield* write("b.mjs", required("b"))
-			}
-			yield* write("graft.yml", "- id: a\n  name: ./a.mjs\n")
-			const started = yield* Deferred.make<void>()
-			const switched = yield* Deferred.make<void>()
-			const restart = yield* Deferred.make<void>()
-			const edited = yield* Deferred.make<void>()
-			const output = yield* Ref.make("")
-			const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
-			const child = yield* spawner.spawn(
-				ChildProcess.make(process.execPath, [
-					"--input-type=module",
-					"-e",
-					`import { Start } from ${runtime}; import { NodeRuntime } from ${node}; Start.run({ config: ${config}, watch: true }).pipe(NodeRuntime.runMain);`,
-				]),
-			)
-			const reading = yield* child.all.pipe(
-				Stream.decodeText(),
-				Stream.splitLines,
-				Stream.runForEach((line) =>
-					Effect.gen(function* () {
-						yield* Ref.update(output, (text) => `${text}${line}\n`)
-						if (
-							String.includes(
-								scenario === "symlink" || scenario === "helper-symlink"
-									? "START one"
-									: "START a=1",
-							)(line)
-						)
-							yield* Deferred.succeed(started, undefined)
-						if (String.includes("START b=1")(line))
-							yield* Deferred.succeed(switched, undefined)
-						if (
-							String.includes("Restart required")(line) &&
-							(scenario === "require-esm" ||
-								scenario === "cached-commonjs" ||
-								(yield* Deferred.isDone(edited)))
-						)
-							yield* Deferred.succeed(restart, undefined)
-					}),
-				),
-				Effect.forkChild,
-			)
-			const ended = Fiber.join(reading).pipe(
-				Effect.andThen(
-					Effect.die("CLI exited before reporting the restart requirement"),
-				),
-			)
-			yield* Effect.gen(function* () {
-				yield* Deferred.await(started)
-				if (scenario === "cached-commonjs") {
-					yield* write("graft.yml", "- id: b\n  name: ./b.mjs\n")
-					yield* Deferred.await(switched)
-				}
-				yield* Deferred.succeed(edited, undefined)
-				if (scenario === "symlink" || scenario === "helper-symlink") {
-					const link = scenario === "symlink" ? "a.mjs" : "helper.mjs"
-					yield* fs.remove(`${directory}/${link}`)
-					yield* fs.symlink("two.mjs", `${directory}/${link}`)
-				} else
-					yield* write(
-						`dep.${extension}`,
-						extension === "mjs"
-							? "export const value = 2"
-							: "module.exports = { value: 2 }",
-					)
-				yield* Deferred.await(restart)
-			}).pipe(
-				Effect.raceFirst(ended),
-				Effect.onExit((exit) =>
-					Exit.isFailure(exit)
-						? Ref.get(output).pipe(
-								Effect.flatMap((text) =>
-									Effect.logError(
-										"CLI output before failure",
-										text,
-										exit.cause,
-									),
-								),
-							)
-						: Effect.void,
-				),
-			)
-			yield* child.kill()
-			yield* Fiber.join(reading)
-			const text = yield* Ref.get(output)
-			assert.include(text, "Restart required")
-			if (scenario !== "symlink" && scenario !== "helper-symlink")
-				assert.notInclude(text, "Reloaded 1 plugin module(s)")
-		}).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
-)
-
-it.live.each(["once", "watch", "symlink"])(
-	"reads !env from an env file after the process environment (%s)",
-	(mode) =>
-		Effect.gen(function* () {
-			const watch = mode !== "once"
 			const fs = yield* FileSystem.FileSystem
 			const directory = yield* fs.makeTempDirectoryScoped()
-			const file = `${directory}/graft.yml`
-			const runtime = yield* quote(runtimeUrl.href)
-			const plugin = yield* quote(pluginUrl.href)
+			yield* fs.writeFileString(`${directory}/graft.yml`, "plugins: [\n")
+			const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+			const child = yield* spawner.spawn(
+				ChildProcess.make(
+					process.execPath,
+					[executable, "--no-plugins", "start", `${directory}/graft.yml`],
+					{ cwd: directory, env: { GRAFT_HOME: directory + "/home" } },
+				),
+			)
+			const output = yield* Stream.mkString(Stream.decodeText(child.all))
+			const code = yield* child.exitCode
+			assert.notEqual(code, 0)
+			assert.include(output, "YAMLParseError")
+		}).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+	15000,
+)
+
+it.live(
+	"reads !env once from an env file after process environment values (F2, O6)",
+	() =>
+		Effect.gen(function* () {
+			const fs = yield* FileSystem.FileSystem
+			const directory = yield* fs.makeTempDirectoryScoped()
+			const plugin = yield* quote(
+				new URL("../.cache/integration/plugin.mjs", import.meta.url).href,
+			)
 			const effect = yield* quote(import.meta.resolve("effect"))
-			const node = yield* quote(import.meta.resolve("@effect/platform-node"))
-			const config = yield* quote(file)
-			const envFile = yield* quote(`${directory}/.env`)
+			yield* fs.writeFileString(
+				`${directory}/package.json`,
+				'{"name":"start-env-fixture","type":"module"}',
+			)
 			yield* fs.writeFileString(
 				`${directory}/plugin.mjs`,
-				`
-import { Plugin } from ${plugin};
-import { Effect, Redacted, Schema } from ${effect};
-export default Plugin.make({
-	name: 'env',
-	config: Schema.Struct({ file: Schema.String, shared: Schema.RedactedFromValue(Schema.String), empty: Schema.String }),
-	apply: (config) => Effect.logInfo('VALUES file=' + config.file + ' shared=' + Redacted.value(config.shared) + ' empty=[' + config.empty + ']'),
-});
-`,
+				`import {Plugin} from ${plugin};import {Effect,Schema} from ${effect};export default Plugin.make({name:"env",config:Schema.Struct({file:Schema.String,shared:Schema.String,empty:Schema.String}),apply:config=>Effect.logInfo("VALUES file="+config.file+" shared="+config.shared+" empty=["+config.empty+"]")});`,
 			)
-			const targetDirectory = yield* fs.makeTempDirectoryScoped()
-			if (mode === "symlink") {
-				yield* fs.writeFileString(`${targetDirectory}/values.env`, "")
-				yield* fs.symlink(`${targetDirectory}/values.env`, `${directory}/.env`)
-			}
 			yield* fs.writeFileString(
 				`${directory}/.env`,
 				"GRAFT_TEST_FILE=file\nGRAFT_TEST_SHARED=file\nGRAFT_TEST_EMPTY=file\n",
 			)
 			yield* fs.writeFileString(
-				file,
+				`${directory}/graft.yml`,
 				"- id: env\n  name: ./plugin.mjs\n  config:\n    file: !env GRAFT_TEST_FILE\n    shared: !env GRAFT_TEST_SHARED\n    empty: !env GRAFT_TEST_EMPTY\n",
 			)
 			const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
@@ -338,129 +99,46 @@ export default Plugin.make({
 				ChildProcess.make(
 					process.execPath,
 					[
-						"--input-type=module",
-						"-e",
-						`
-import { Start } from ${runtime}; import { NodeRuntime } from ${node};
-Start.run({ config: ${config}, watch: ${watch}, envFile: ${envFile} }).pipe(NodeRuntime.runMain);`,
+						executable,
+						"--no-plugins",
+						"start",
+						`${directory}/graft.yml`,
+						"--env-file",
+						`${directory}/.env`,
 					],
 					{
-						env: { GRAFT_TEST_SHARED: "process", GRAFT_TEST_EMPTY: "" },
+						cwd: directory,
+						env: {
+							GRAFT_HOME: directory + "/home",
+							GRAFT_TEST_SHARED: "process",
+							GRAFT_TEST_EMPTY: "",
+						},
 						extendEnv: true,
 					},
 				),
 			)
-			const values = yield* Queue.unbounded<string>()
+			const ready = yield* Deferred.make<void>()
 			const output = yield* child.all.pipe(
 				Stream.decodeText(),
 				Stream.splitLines,
 				Stream.runForEach((line) =>
-					String.includes("VALUES")(line)
-						? Queue.offer(values, line)
-						: Effect.void,
+					String.includes("VALUES file=file shared=process empty=[]")(line)
+						? Deferred.succeed(ready, undefined)
+						: Effect.logDebug(line),
 				),
-				Effect.forkChild,
+				Effect.forkScoped,
 			)
-			const ended = Fiber.join(output).pipe(
-				Effect.andThen(Effect.die("CLI exited before loading the plugin")),
+			yield* Deferred.await(ready).pipe(
+				Effect.raceFirst(
+					Fiber.join(output).pipe(
+						Effect.andThen(
+							Effect.die("CLI exited before applying the environment fixture"),
+						),
+					),
+				),
 			)
-			const first = yield* Queue.take(values).pipe(Effect.raceFirst(ended))
-			assert.include(first, "file=file shared=process empty=[]")
-			if (watch) {
-				if (mode === "symlink") yield* Effect.sleep("1500 millis")
-				yield* fs.writeFileString(
-					`${directory}/.env`,
-					"GRAFT_TEST_FILE=edited\nGRAFT_TEST_SHARED=file\nGRAFT_TEST_EMPTY=file\n",
-				)
-				const second = yield* Queue.take(values).pipe(Effect.raceFirst(ended))
-				assert.include(second, "file=edited shared=process empty=[]")
-			}
 			yield* child.kill()
 			yield* Fiber.join(output)
 		}).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
-)
-
-it.live("recovers an initially invalid module through polling alone", () =>
-	Effect.gen(function* () {
-		const fs = yield* FileSystem.FileSystem
-		const temporary = yield* fs.makeTempDirectoryScoped()
-		const directory = yield* fs.realPath(temporary)
-		const runtime = yield* quote(runtimeUrl.href)
-		const plugin = yield* quote(pluginUrl.href)
-		const effect = yield* quote(import.meta.resolve("effect"))
-		const node = yield* quote(import.meta.resolve("@effect/platform-node"))
-		const config = yield* quote(`${directory}/graft.yml`)
-		yield* fs.writeFileString(
-			`${directory}/graft.yml`,
-			"- id: broken\n  name: ./plugin.mjs\n",
-		)
-		yield* fs.writeFileString(`${directory}/plugin.mjs`, "export default ???")
-		yield* fs.writeFileString(
-			`${directory}/preload.mjs`,
-			`
-import fs from 'node:fs';
-import { syncBuiltinESMExports } from 'node:module';
-const watch = fs.watch;
-fs.watch = (path, options, callback) => watch(path, options, (event, file) => {
-	if (String(file) !== 'plugin.mjs') callback(event, file);
-});
-syncBuiltinESMExports();
-`,
-		)
-		const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
-		const child = yield* spawner.spawn(
-			ChildProcess.make(process.execPath, [
-				"--import",
-				`${directory}/preload.mjs`,
-				"--input-type=module",
-				"-e",
-				`import { Start } from ${runtime}; import { NodeRuntime } from ${node}; Start.run({ config: ${config}, watch: true }).pipe(NodeRuntime.runMain);`,
-			]),
-		)
-		const failed = yield* Deferred.make<void>()
-		const recovered = yield* Deferred.make<void>()
-		const lines = yield* Ref.make("")
-		const output = yield* child.all.pipe(
-			Stream.decodeText(),
-			Stream.splitLines,
-			Stream.runForEach((line) =>
-				Effect.gen(function* () {
-					yield* Ref.update(lines, (text) => `${text}${line}\n`)
-					if (String.includes("SyntaxError")(line))
-						yield* Deferred.succeed(failed, undefined)
-					if (String.includes("RECOVERED_BY_POLLING")(line))
-						yield* Deferred.succeed(recovered, undefined)
-				}),
-			),
-			Effect.forkChild,
-		)
-		const ended = Fiber.join(output).pipe(
-			Effect.andThen(Effect.die("CLI exited before polling recovery")),
-		)
-		yield* Effect.gen(function* () {
-			yield* Deferred.await(failed)
-			yield* fs.writeFileString(
-				`${directory}/plugin.mjs`,
-				`import { Plugin } from ${plugin}; import { Effect } from ${effect}; export default Plugin.make({ name: 'recovered', apply: () => Effect.logInfo('RECOVERED_BY_POLLING') });`,
-			)
-			yield* Deferred.await(recovered)
-		}).pipe(
-			Effect.raceFirst(ended),
-			Effect.onExit((exit) =>
-				Exit.isFailure(exit)
-					? Ref.get(lines).pipe(
-							Effect.flatMap((text) =>
-								Effect.logError(
-									"CLI output before polling recovery failed",
-									text,
-									exit.cause,
-								),
-							),
-						)
-					: Effect.void,
-			),
-		)
-		yield* child.kill()
-		yield* Fiber.join(output)
-	}).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+	15000,
 )

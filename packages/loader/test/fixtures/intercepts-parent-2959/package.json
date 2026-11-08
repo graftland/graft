@@ -1,0 +1,6 @@
+{
+	"name": "intercepts-parent-2959",
+	"version": "1.0.0",
+	"type": "module",
+	"exports": "./index.mjs"
+}

@@ -3,11 +3,10 @@ import { NodeServices } from "@effect/platform-node"
 import { assert, it } from "@effect/vitest"
 
 import { Graft, Plugin, type Fork } from "@graftland/graft"
-import { Loader, ModuleResolver } from "@graftland/loader"
+import { Loader } from "@graftland/loader"
 
-import core from "../src/index.ts"
 import * as Testing from "../src/Testing.ts"
-import unix from "./fixtures/unix.ts"
+import { fixture, moduleLayer } from "./module-fixtures"
 import { unixConnection } from "./wire.ts"
 
 it.effect(
@@ -17,10 +16,14 @@ it.effect(
 			const fs = yield* FileSystem.FileSystem
 			const directory = yield* fs.makeTempDirectoryScoped({ prefix: "mcp-" })
 			const path = directory + "/server.sock"
-			const resolver = ModuleResolver.fromRecord({
-				"@graftland/plugin-mcp-server": core,
-				"mcp-server": core,
-				"@acme/graft-plugin-mcp-unix": unix,
+			const resolver = moduleLayer({
+				"@graftland/plugin-mcp-server": fixture(
+					"plugin-mcp-server-unix-graftland-plugin-mcp-server-0",
+				),
+				"mcp-server": fixture("plugin-mcp-server-unix-mcp-server-1"),
+				"@acme/graft-plugin-mcp-unix": fixture(
+					"plugin-mcp-server-unix-acme-graft-plugin-mcp-unix-2",
+				),
 			})
 			yield* Effect.gen(function* () {
 				const loader = yield* Graft.plugin(Loader.plugin, [

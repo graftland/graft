@@ -1,0 +1,6 @@
+{
+	"name": "include-entry-lists-child-1055",
+	"version": "1.0.0",
+	"type": "module",
+	"exports": "./index.mjs"
+}

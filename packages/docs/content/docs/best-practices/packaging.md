@@ -113,11 +113,9 @@ Expose each part as its own entry point:
 
 ## Write modules that load and reload
 
-Applications import your plugin module when an entry loads it, and again on hot
-reload under `graft start --watch`. Every file of the package follows the
-[rules for plugin modules](../../hot-reload/#rules-for-plugin-modules) and
-[acquires in `apply`, not on import](../effect/#describe-on-import-acquire-in-apply).
-A package breaks these most often:
+Native units import captured, built plugin modules. Directly embedded
+development tools can reimport modules through the [HMR API](../../hmr-api/).
+Keep imports free of I/O; acquire resources in plugin effects.
 
 | Rule                                                                                             | Pitfall it avoids                                                                                                                                                                                                                                                                                       |
 | ------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

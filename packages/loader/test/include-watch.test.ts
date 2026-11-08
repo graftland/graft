@@ -23,7 +23,7 @@ import { Graft } from "@graftland/graft"
 import { parse } from "yaml"
 
 import { Include, Loader } from "../src/index.ts"
-import { echo, loaderService, run } from "./utils.ts"
+import { loaderService, run } from "./utils.ts"
 
 const setupNotifications = Effect.gen(function* () {
 	const fs = yield* FileSystem.FileSystem
@@ -75,7 +75,7 @@ describe("include watcher serialization", () => {
 	])(
 		"recovers from an invalid initial document without replacing it: %s",
 		(invalid) =>
-			run((journal) => ({ echo: echo(journal) }))((journal) =>
+			run()((journal) =>
 				Effect.gen(function* () {
 					const fs = yield* FileSystem.FileSystem
 					const path = yield* Path.Path
@@ -140,7 +140,7 @@ describe("include watcher serialization", () => {
 	it.effect(
 		"fails initial parsing without watch and preserves the original error",
 		() =>
-			run(() => ({}))(() =>
+			run()(() =>
 				Effect.gen(function* () {
 					const fs = yield* FileSystem.FileSystem
 					const directory = yield* fs.makeTempDirectoryScoped()
@@ -159,7 +159,7 @@ describe("include watcher serialization", () => {
 	it.effect(
 		"serializes a watcher refresh with an API edit waiting to run",
 		() =>
-			run((journal) => ({ echo: echo(journal) }))(() =>
+			run()(() =>
 				Effect.gen(function* () {
 					const fs = yield* FileSystem.FileSystem
 					const path = yield* Path.Path
@@ -232,7 +232,7 @@ describe("include watcher serialization", () => {
 	it.effect(
 		"refreshes an external edit after an API operation fails validation",
 		() =>
-			run((journal) => ({ echo: echo(journal) }))((journal) =>
+			run()((journal) =>
 				Effect.gen(function* () {
 					const { fs, file, loader } = yield* setupNotifications
 					yield* fs.writeFileString(
@@ -264,7 +264,7 @@ describe("include watcher serialization", () => {
 	it.effect(
 		"retains the last valid tree after a failed refresh and accepts the next notification",
 		() =>
-			run((journal) => ({ echo: echo(journal) }))((journal) =>
+			run()((journal) =>
 				Effect.gen(function* () {
 					const { fs, file, loader, notify } = yield* setupNotifications
 					const before = yield* loader.entries
@@ -319,7 +319,7 @@ describe("include watcher serialization", () => {
 it.effect(
 	"coalesces a notification burst into one read after the quiet period",
 	() =>
-		run((journal) => ({ echo: echo(journal) }))(() =>
+		run()(() =>
 			Effect.gen(function* () {
 				const { notify, reads, readEvents } = yield* setupNotifications
 				yield* TestClock.adjust("100 millis")
@@ -356,7 +356,7 @@ it.effect(
 it.effect(
 	"logs the complete native watcher cleanup cause before merge discards it",
 	() =>
-		run(() => ({}))(() =>
+		run()(() =>
 			Effect.gen(function* () {
 				const fs = yield* FileSystem.FileSystem
 				const directory = yield* fs.makeTempDirectoryScoped()
@@ -407,7 +407,7 @@ it.effect(
 )
 
 it.effect("logs pure interruption from a native watcher finalizer", () =>
-	run(() => ({}))(() =>
+	run()(() =>
 		Effect.gen(function* () {
 			const fs = yield* FileSystem.FileSystem
 			const directory = yield* fs.makeTempDirectoryScoped()

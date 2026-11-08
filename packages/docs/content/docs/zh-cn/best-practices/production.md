@@ -8,20 +8,8 @@ description: 启动、保护、监控、重新配置、停止和升级长期运�
 
 ## 不使用 `--watch` 启动
 
-生产环境运行 `graft start graft.yml`，`--watch`
-留给开发环境。所有选项见[命令行](../../cli/#graft-start)页面。
-
-| 关注点                  | 不使用 `--watch`                                                | 使用 `--watch`                                                              |
-| ----------------------- | --------------------------------------------------------------- | --------------------------------------------------------------------------- |
-| 插件代码变化            | 需要重启。                                                      | [热重载](../../hot-reload/)，它[不适用于生产环境](../../hot-reload/#限制)。 |
-| 手动编辑 `graft.yml`    | 在下次重启或下次 Loader 编辑时生效。                            | 保存即生效。                                                                |
-| `--env-file` 的内容     | 只在启动时读取一次。                                            | [保存时重新读取](../../cli/#环境变量文件)。                                 |
-| 启动时 `graft.yml` 无效 | 进程[以非零状态退出](../../cli/#初始配置无效)，部署会明确失败。 | 进程继续等待，不运行任何配置项。                                            |
-| 失败的配置项            | 在发生变化时、按其 `retry` 调度，或由 `loader.retry` 重试。     | 每次模块重载后也会重试。                                                    |
-
-给每个配置项写上 `id`，或者在 Graft
-[写回缺失的 ID](../../config-file/#配置项字段)之后提交
-`graft.yml`，这样只读文件或刚部署的文件就不会在启动时被改写。
+构建模块后运行 `graft start graft.yml`。不支持
+`--watch`。配置、环境文件和已安装包在此次启动时读取；修改后重新构建并重启。
 
 ## 传递密钥
 
@@ -191,17 +179,11 @@ export default Plugin.make({
 
 ## 无需重启即可重新配置
 
-- 编辑会写入
-  `graft.yml`。部署时替换该文件会丢弃这些编辑，因此要么把部署后的文件当作状态来管理，要么把修改写回你的代码仓库。
-- 运行中进程的环境无法从外部修改。轮换设置在进程环境中的密钥需要重启。`loader.retry`
-  会[重新读取 `!env` 的值](../../config-file/#何时重新读取)，但只有在值的来源确实变化时才有用，例如使用
-  `--watch` 时的 `--env-file` 或 `--env-dir`。
-- 持有连接或缓存的插件应支持[原地更新](../../plugins/#原地更新)，这样修改配置时不会丢掉它们。
+直接嵌入的应用可编辑 Loader，并显式刷新引用。CLI 进程需要在修改后重启。公开部署可在准备和恢复时重新解析原始引用，参见[单元](../../units/)。
 
 ## 升级插件
 
-`node_modules` 中的变化永远不会触发重新加载，无论是否使用
-`--watch`。升级时先安装，再重启：
+安装包后，重新构建应用模块并重启：
 
 1. **安装**：运行
    `graft add <package>@<version>`。安装失败时，包文件会被恢复；见[回滚](../../cli/#回滚)。
@@ -230,12 +212,15 @@ import { Layer, Logger, LogLevel, References, Schema } from "effect"
 import { NodeServices } from "@effect/platform-node"
 
 import { Intercept, ModuleResolver } from "@graftland/loader"
+import type * as Control from "@graftland/plugin-remote/Control"
+
+declare const control: Control.Address
 
 const environment = Layer.mergeAll(
 	NodeServices.layer,
 	ModuleResolver.layer({
-		base: process.cwd(),
-		importer: (specifier) => import(specifier),
+		base: "/app",
+		control,
 	}).pipe(Layer.provide(NodeServices.layer)),
 	Intercept.layer([
 		Intercept.make(

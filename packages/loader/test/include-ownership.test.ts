@@ -4,7 +4,7 @@ import { assert, it } from "@effect/vitest"
 import { Graft } from "@graftland/graft"
 
 import { Include } from "../src/index.ts"
-import { echo, loaderService, run } from "./utils.ts"
+import { loaderService, run } from "./utils.ts"
 
 const setup = Effect.gen(function* () {
 	const fs = yield* FileSystem.FileSystem
@@ -21,7 +21,7 @@ const setup = Effect.gen(function* () {
 it.effect(
 	"keeps the persisted target consistent with the file after caller mutation",
 	() =>
-		run((journal) => ({ echo: echo(journal) }))(() =>
+		run()(() =>
 			Effect.gen(function* () {
 				const { fs, file, loader, config } = yield* setup
 				config.text = "after"
@@ -33,7 +33,7 @@ it.effect(
 		),
 )
 it.effect("applies an explicitly submitted update after caller mutation", () =>
-	run((journal) => ({ echo: echo(journal) }))((journal) =>
+	run()((journal) =>
 		Effect.gen(function* () {
 			const { fs, file, loader, config } = yield* setup
 			config.text = "after"

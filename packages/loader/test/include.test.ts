@@ -4,7 +4,7 @@ import { assert, describe, it } from "@effect/vitest"
 import { Graft } from "@graftland/graft"
 
 import { Include } from "../src/index.ts"
-import { echo, loaderService, run } from "./utils.ts"
+import { loaderService, run } from "./utils.ts"
 
 const original = `# Plugins for the test
 - name: echo # greets
@@ -25,7 +25,7 @@ describe("include", () => {
 	it.effect(
 		"persists ids for anonymous entries and keeps the file's formatting",
 		() =>
-			run((journal) => ({ echo: echo(journal) }))((journal) =>
+			run()((journal) =>
 				Effect.gen(function* () {
 					const { fs, file } = yield* setup
 					yield* Graft.plugin(Include.Include, { path: file })
@@ -50,7 +50,7 @@ describe("include", () => {
 	)
 
 	it.effect("lets the file win when it changed the same field first", () =>
-		run((journal) => ({ echo: echo(journal) }))(() =>
+		run()(() =>
 			Effect.gen(function* () {
 				const { fs, file } = yield* setup
 				yield* Graft.plugin(Include.Include, { path: file })
@@ -72,7 +72,7 @@ describe("include", () => {
 	)
 
 	it.live("picks up edits made to the file while running", () =>
-		run((journal) => ({ echo: echo(journal) }))((journal) =>
+		run()((journal) =>
 			Effect.gen(function* () {
 				const { fs, file } = yield* setup
 				yield* Graft.plugin(Include.Include, { path: file, watch: true })

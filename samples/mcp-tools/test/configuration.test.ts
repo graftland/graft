@@ -17,22 +17,14 @@ import { FetchHttpClient } from "effect/http"
 import { NodeServices } from "@effect/platform-node"
 import { assert, it } from "@effect/vitest"
 
-import { Graft, Plugin } from "@graftland/graft"
+import { Graft, Kernel, Plugin } from "@graftland/graft"
 import { Entry, Loader, ModuleResolver } from "@graftland/loader"
-import listener from "@graftland/plugin-http"
 import * as Http from "@graftland/plugin-http/Http"
-import router from "@graftland/plugin-http/router"
-import core from "@graftland/plugin-mcp-server"
-import http from "@graftland/plugin-mcp-server/http"
-import stdio from "@graftland/plugin-mcp-server/stdio"
 import * as Testing from "@graftland/plugin-mcp-server/Testing"
+import * as Control from "@graftland/plugin-remote/Control"
+import * as Units from "@graftland/plugin-remote/Units"
 
 import { parse } from "yaml"
-
-import clock from "../src/plugins/clock.ts"
-import content from "../src/plugins/content.ts"
-import store from "../src/plugins/todo-store.ts"
-import todo from "../src/plugins/todo.ts"
 
 const capture = Effect.fnUntraced(function* <I, S>(key: Context.Key<I, S>) {
 	const ready = yield* Deferred.make<S>()
@@ -48,17 +40,24 @@ const capture = Effect.fnUntraced(function* <I, S>(key: Context.Key<I, S>) {
 	)).await
 	return yield* Deferred.await(ready)
 })
-const resolver = ModuleResolver.fromRecord({
-	"@graftland/plugin-mcp-server": core,
-	"@graftland/plugin-mcp-server/stdio": stdio,
-	"@graftland/plugin-mcp-server/http": http,
-	"@graftland/plugin-http": listener,
-	"@graftland/plugin-http/router": router,
-	"./src/plugins/clock.ts": clock,
-	"./src/plugins/content.ts": content,
-	"./src/plugins/todo-store.ts": store,
-	"./src/plugins/todo.ts": todo,
-})
+const resolver = Layer.effect(
+	ModuleResolver.ModuleResolver,
+	Effect.gen(function* () {
+		const control = yield* Control.serve()
+		return yield* ModuleResolver.make({
+			base: new URL("..", import.meta.url).pathname,
+			control,
+		})
+	}),
+).pipe(
+	Layer.provide(
+		Kernel.layer({
+			authority: "sample-preparation",
+			maxUnits: 16,
+			instances: [],
+		}).pipe(Layer.provide(Units.layer), Layer.provideMerge(NodeServices.layer)),
+	),
+)
 
 for (const mode of ["stdio", "http"] as const) {
 	it.live(

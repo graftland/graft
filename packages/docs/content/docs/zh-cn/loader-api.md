@@ -3,60 +3,56 @@ title: Loader API
 description: 从插件和代码中读取、编辑配置项，以及每种编辑提供的保证。
 ---
 
-加载器发布了 `Loader`
-服务，插件可以注入它来读取和编辑[配置文件](../config-file/)中的配置项：
+通过公开控制协议准备不可变的插件描述符。模块导入和配置检查在可丢弃单元中运行；准备过程等待这些单元退出后才返回。
 
-```ts import.meta.vitest name="loader-api: edit entries from a plugin"
-import { Deferred, Effect, Layer } from "effect"
+## 准备部署
 
-import { Graft, Plugin } from "@graftland/graft"
-import { Entry, Loader, ModuleResolver } from "@graftland/loader"
+`ModuleResolver`
+返回捕获的位置、导出、解析基准、来源和已声明外部依赖的观察结果，不返回 Plugin、Schema、Context 或 Layer。完整包名优先，短名歧义会失败；相对名称以声明它的 include 目录为基准。
 
-const admin = Plugin.make({
-	name: "app/admin",
-	inject: [Loader.Loader],
-	apply: () =>
-		Effect.gen(function* () {
-			const loader = yield* Loader.Loader
-			const id = yield* loader.create({ name: "./plugins/cron.mjs" })
-			yield* loader.update(id, { config: { every: "5 minutes" } })
-			yield* loader.update("api", { disabled: true })
-		}),
+```ts
+import { Effect, HashMap } from "effect"
+
+import { ModuleResolver, Preparation } from "@graftland/loader"
+import type * as Control from "@graftland/plugin-remote/Control"
+
+declare const control: Control.Address
+
+export const prepared = Effect.gen(function* () {
+	const resolver = yield* ModuleResolver.make({ base: "/app", control })
+	const module = yield* resolver.resolve("@acme/graft-plugin-api")
+	const settings = yield* resolver.resolve("./dist/settings.js", {
+		kind: "Environment",
+	})
+	const prepare = yield* Preparation.make({
+		control,
+		intercepts: HashMap.make(["app/Settings", settings]),
+	})
+	return yield* prepare.inspect({
+		instance: "api",
+		module,
+		input: { port: 8080 },
+		intercept: [{ key: "app/Settings", patch: { color: "red" } }],
+	})
 })
-
-const cron = Plugin.make({ name: "app/cron", apply: () => Effect.void })
-const api = Plugin.make({ name: "app/api", apply: () => Effect.void })
-const resolver = ModuleResolver.fromRecord({ "./plugins/cron.mjs": cron, api })
-
-const entries = await Effect.runPromise(
-	Effect.gen(function* () {
-		const loaderFork = yield* Graft.plugin(Loader.plugin, [
-			{ id: "api", name: "api" },
-		])
-		yield* loaderFork.await
-		const fork = yield* Graft.plugin(admin)
-		yield* fork.await
-		const read = yield* Deferred.make<ReadonlyArray<Entry.Entry>>()
-		const probe = Plugin.make({
-			name: "app/probe",
-			inject: [Loader.Loader],
-			apply: () =>
-				Loader.Loader.pipe(
-					Effect.flatMap((loader) => Deferred.into(loader.entries, read)),
-					Effect.asVoid,
-				),
-		})
-		yield* Graft.plugin(probe)
-		return yield* Deferred.await(read)
-	}).pipe(
-		Effect.scoped,
-		Effect.provide(Layer.provideMerge(Graft.layer, resolver)),
-	),
-)
-
-entries[0]?.disabled // => true
-entries[1]?.config // => { every: "5 minutes" }
 ```
+
+通过 `ModuleResolver.make` 的 `resolver: { artifact, options }`
+使用自定义解析。模块默认导出的 Effect 从 `Configuration.Options` 读取
+`name`、`base` 和
+`options`，返回描述数据。它在一次性单元中运行，结果经过独立检查后才使用。本地模块须属于包含
+`package.json` 的包；先将 TypeScript 构建成 JavaScript。
+
+| 标识     | 规则                                                                               |
+| -------- | ---------------------------------------------------------------------------------- |
+| 代码授权 | 包含插件、契约和有序配置模块的标识。调用者提供的标识不匹配时，内核拒绝请求。       |
+| 验证环境 | 包含解析后的配置选项及模块顺序。恢复时重新解析原始引用。                           |
+| 外部依赖 | 已声明依赖的位置和版本只是观察结果，不是捕获的字节。未声明的动态导入不在此清单内。 |
+
+## 嵌入式编辑
+
+嵌入式 `Loader`
+服务读写协作式应用的配置项，不提供内核 Change 结局或基于终止的回收。下面的规则适用于这个嵌入式服务。
 
 树中存在受管理 fork 时，Loader 在调用存储修改之前拒绝编辑、刷新和重试。绕过保护见[执行转换](../transitions/)。
 

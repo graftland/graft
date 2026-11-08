@@ -4,7 +4,7 @@ import { assert, it } from "@effect/vitest"
 import { Graft, type Fork } from "@graftland/graft"
 
 import { Group } from "../src/index.ts"
-import { echo, run } from "./utils.ts"
+import { run } from "./utils.ts"
 
 const flatten = (
 	trees: ReadonlyArray<Fork.ForkTree>,
@@ -26,7 +26,7 @@ const settled = (id: number) =>
 	)
 
 it.effect("rejects duplicate sibling IDs at the public Group boundary", () =>
-	run((journal) => ({ echo: echo(journal) }))(() =>
+	run()(() =>
 		Effect.gen(function* () {
 			const group = yield* Graft.plugin(Group.Group, [
 				{ id: "duplicate", name: "echo", config: { text: "first" } },
@@ -44,7 +44,7 @@ it.effect("rejects duplicate sibling IDs at the public Group boundary", () =>
 it.effect(
 	"rejects duplicate IDs on update before starting conflicting children and recovers",
 	() =>
-		run((journal) => ({ echo: echo(journal) }))((journal) =>
+		run()((journal) =>
 			Effect.gen(function* () {
 				const group = yield* Graft.plugin(Group.Group, [])
 				yield* group.await
@@ -71,7 +71,7 @@ it.effect(
 it.effect(
 	"checks disabled IDs too without rejecting healthy siblings of an invalid nested group",
 	() =>
-		run((journal) => ({ echo: echo(journal) }))((journal) =>
+		run()((journal) =>
 			Effect.gen(function* () {
 				const group = yield* Graft.plugin(Group.Group, [
 					{
@@ -106,7 +106,7 @@ it.effect(
 it.effect(
 	"captures direct Group inputs before retaining them for reconciliation",
 	() =>
-		run((journal) => ({ echo: echo(journal) }))((journal) =>
+		run()((journal) =>
 			Effect.gen(function* () {
 				const config = { text: "before" }
 				const entries = [{ id: "entry", name: "echo", config }]

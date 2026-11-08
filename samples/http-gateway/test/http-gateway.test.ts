@@ -12,22 +12,41 @@ import {
 } from "effect"
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/http"
 import { HttpApiClient } from "effect/http-api"
+import { NodeServices } from "@effect/platform-node"
 import { assert, describe, it } from "@effect/vitest"
 
-import { Graft, Plugin } from "@graftland/graft"
+import { Graft, Kernel, Plugin } from "@graftland/graft"
 import { Loader, ModuleResolver } from "@graftland/loader"
 import server from "@graftland/plugin-http"
-import composer from "@graftland/plugin-http-api"
 import { Document } from "@graftland/plugin-http-api/HttpApis"
-import scalar from "@graftland/plugin-http-api/scalar"
 import * as Http from "@graftland/plugin-http/Http"
 import router from "@graftland/plugin-http/router"
+import * as Control from "@graftland/plugin-remote/Control"
+import * as Units from "@graftland/plugin-remote/Units"
 
 import { Api } from "../src/api/Todos.ts"
 import health from "../src/plugins/health.ts"
-import inspector from "../src/plugins/inspector.ts"
 import todoStore from "../src/plugins/todo-store.ts"
 import todos from "../src/plugins/todos.ts"
+
+const resolver = Layer.effect(
+	ModuleResolver.ModuleResolver,
+	Effect.gen(function* () {
+		const control = yield* Control.serve()
+		return yield* ModuleResolver.make({
+			base: new URL("..", import.meta.url).pathname,
+			control,
+		})
+	}),
+).pipe(
+	Layer.provide(
+		Kernel.layer({
+			authority: "sample-preparation",
+			maxUnits: 16,
+			instances: [],
+		}).pipe(Layer.provide(Units.layer), Layer.provideMerge(NodeServices.layer)),
+	),
+)
 
 // These tests open a real server on a free port and talk to it over HTTP.
 const run = <A, E>(
@@ -45,19 +64,7 @@ const run = <A, E>(
 		Effect.provide(
 			Layer.provideMerge(
 				Layer.fresh(Graft.layer),
-				Layer.mergeAll(
-					FetchHttpClient.layer,
-					ModuleResolver.fromRecord({
-						"@graftland/plugin-http": server,
-						"@graftland/plugin-http/router": router,
-						"@graftland/plugin-http-api": composer,
-						"@graftland/plugin-http-api/scalar": scalar,
-						"./src/plugins/health.ts": health,
-						"./src/plugins/inspector.ts": inspector,
-						"./src/plugins/todo-store.ts": todoStore,
-						"./src/plugins/todos.ts": todos,
-					}),
-				),
+				Layer.mergeAll(FetchHttpClient.layer, resolver),
 			),
 		),
 	)
@@ -202,13 +209,13 @@ describe("http-gateway", () => {
 				{ id: "api", name: "@graftland/plugin-http-api" },
 				{ id: "ui", name: "@graftland/plugin-http-api/scalar" },
 				{ id: "server", name: "@graftland/plugin-http", config: { port: 0 } },
-				{ id: "inspector", name: "./src/plugins/inspector.ts" },
+				{ id: "inspector", name: "./dist/plugins/inspector.js" },
 				{
 					id: "todo-store",
-					name: "./src/plugins/todo-store.ts",
+					name: "./dist/plugins/todo-store.js",
 					config: { seed: ["Try the gateway"] },
 				},
-				{ id: "todos", name: "./src/plugins/todos.ts" },
+				{ id: "todos", name: "./dist/plugins/todos.js" },
 			])
 			const loader = yield* capture(Loader.Loader)
 			yield* loader.ready

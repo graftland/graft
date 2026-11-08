@@ -1,0 +1,6 @@
+{
+	"name": "intercepts-probe-5031",
+	"version": "1.0.0",
+	"type": "module",
+	"exports": "./index.mjs"
+}

@@ -15,7 +15,7 @@ import { Graft } from "@graftland/graft"
 import { parse } from "yaml"
 
 import { Include } from "../src/index.ts"
-import { echo, loaderService, run } from "./utils.ts"
+import { loaderService, run } from "./utils.ts"
 
 const setup = Effect.gen(function* () {
 	const fs = yield* FileSystem.FileSystem
@@ -34,7 +34,7 @@ const setup = Effect.gen(function* () {
 
 describe("include consistency", () => {
 	it.effect("rejects deleting a required field before writing the file", () =>
-		run((journal) => ({ echo: echo(journal) }))(() =>
+		run()(() =>
 			Effect.gen(function* () {
 				const { fs, file, loader } = yield* setup
 				const before = yield* fs.readFileString(file)
@@ -59,7 +59,7 @@ describe("include consistency", () => {
 	it.effect(
 		"rejects negative positions before changing either the file or the tree",
 		() =>
-			run((journal) => ({ echo: echo(journal) }))(() =>
+			run()(() =>
 				Effect.gen(function* () {
 					const { fs, file, loader } = yield* setup
 					const before = yield* fs.readFileString(file)
@@ -80,7 +80,7 @@ describe("include consistency", () => {
 	)
 
 	it.effect("preserves distinct ids for two identical anonymous entries", () =>
-		run((journal) => ({ echo: echo(journal) }))(() =>
+		run()(() =>
 			Effect.gen(function* () {
 				const { fs, file, loader } = yield* setup
 				const anonymous =
@@ -100,7 +100,7 @@ describe("include consistency", () => {
 	it.effect(
 		"preserves an anonymous entry's id when moving into and out of a group",
 		() =>
-			run((journal) => ({ echo: echo(journal) }))(() =>
+			run()(() =>
 				Effect.gen(function* () {
 					const { fs, file, loader } = yield* setup
 					yield* fs.writeFileString(
@@ -125,7 +125,7 @@ describe("include consistency", () => {
 	it.effect(
 		"does not persist a failed edit during the next successful edit",
 		() =>
-			run((journal) => ({ echo: echo(journal) }))(() =>
+			run()(() =>
 				Effect.gen(function* () {
 					const fs = yield* FileSystem.FileSystem
 					const fail = yield* Ref.make(false)
@@ -153,7 +153,7 @@ describe("include consistency", () => {
 	it.effect(
 		"returns a typed error for malformed edits on disk and recovers",
 		() =>
-			run((journal) => ({ echo: echo(journal) }))(() =>
+			run()(() =>
 				Effect.gen(function* () {
 					const { fs, file, loader } = yield* setup
 					const original = yield* fs.readFileString(file)
@@ -175,7 +175,7 @@ describe("include consistency", () => {
 	)
 
 	it.effect("does not reuse an id that is still explicitly present", () =>
-		run((journal) => ({ echo: echo(journal) }))(() =>
+		run()(() =>
 			Effect.gen(function* () {
 				const { fs, file, loader } = yield* setup
 				yield* fs.writeFileString(
@@ -193,7 +193,7 @@ describe("include consistency", () => {
 	)
 
 	it.effect("does not rewrite invalid entries just to assign ids", () =>
-		run((journal) => ({ echo: echo(journal) }))(() =>
+		run()(() =>
 			Effect.gen(function* () {
 				const { fs, file, loader } = yield* setup
 				const invalid = "- name: 42\n"

@@ -1,7 +1,15 @@
 // @effect-diagnostics-next-line nodeBuiltinImport:off -- NodeHttpServer requires a Node server factory.
 import { createServer } from "node:http"
 
-import { Deferred, Effect, Layer, Predicate, Queue, String } from "effect"
+import {
+	Context,
+	Deferred,
+	Effect,
+	Layer,
+	Predicate,
+	Queue,
+	String,
+} from "effect"
 import {
 	FetchHttpClient,
 	HttpServer,
@@ -11,10 +19,10 @@ import {
 import { NodeHttpServer } from "@effect/platform-node"
 import { assert, it } from "@effect/vitest"
 
-import { Graft, Plugin } from "@graftland/graft"
-import { ModuleResolver } from "@graftland/loader"
+import { Graft } from "@graftland/graft"
 import otlp from "@graftland/plugin-otlp"
-import http from "@graftland/plugin-otlp/http"
+
+import { fixture, moduleLayer } from "./module-fixtures"
 
 for (const serialization of ["json", "protobuf"] as const) {
 	for (const compression of ["none", "gzip"] as const) {
@@ -82,18 +90,20 @@ for (const serialization of ["json", "protobuf"] as const) {
 							Layer.provideMerge(
 								Layer.mergeAll(
 									FetchHttpClient.layer,
-									ModuleResolver.fromRecord({
-										"@graftland/plugin-otlp/http": http,
-										worker: Plugin.make({
-											name: "test/worker",
-											apply: () =>
-												Effect.void.pipe(
-													Effect.withSpan("serialization-fixture"),
-													Effect.andThen(Deferred.succeed(traced, undefined)),
-													Effect.asVoid,
-												),
+									Layer.mergeAll(
+										moduleLayer({
+											"@graftland/plugin-otlp/http": fixture(
+												"plugin-otlp-serialization-graftland-plugin-otlp-http-0",
+											),
+											worker: fixture("serialization-worker-2874"),
 										}),
-									}),
+										Layer.succeed(
+											Context.Service<{ readonly traced: typeof traced }>(
+												"loader/fixture/serialization-worker-2874",
+											),
+											{ traced },
+										),
+									),
 								),
 							),
 						),

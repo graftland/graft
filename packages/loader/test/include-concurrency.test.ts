@@ -32,7 +32,7 @@ const setup = Effect.gen(function* () {
 it.effect.each([false, true])(
 	"rebases an overlapping save (same field: %s)",
 	(sameField) =>
-		run(() => ({}))(() =>
+		run()(() =>
 			Effect.gen(function* () {
 				const { fs, directory, file } = yield* setup
 				yield* fs.writeFileString(file, original)
@@ -98,7 +98,7 @@ it.effect.each([false, true])(
 it.effect(
 	"bounds rebase attempts and remains editable after contention stops",
 	() =>
-		run(() => ({}))(() =>
+		run()(() =>
 			Effect.gen(function* () {
 				const { fs, directory, file } = yield* setup
 				yield* fs.writeFileString(file, original)
@@ -156,7 +156,7 @@ it.effect(
 it.effect.each(["creation", "anonymous IDs"])(
 	"rebases an overlapping save during %s",
 	(stage) =>
-		run(() => ({}))(() =>
+		run()(() =>
 			Effect.gen(function* () {
 				const { fs, directory, file } = yield* setup
 				const anonymous = pipe(
@@ -209,7 +209,7 @@ it.effect.each(["creation", "anonymous IDs"])(
 it.effect(
 	"does not retry away a cleanup failure accompanying a version conflict",
 	() =>
-		run(() => ({}))(() =>
+		run()(() =>
 			Effect.gen(function* () {
 				const { fs, file } = yield* setup
 				yield* fs.writeFileString(file, original)

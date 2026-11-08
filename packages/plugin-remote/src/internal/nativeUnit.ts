@@ -17,6 +17,7 @@ import {
 	Layer,
 	Option,
 	Path,
+	Predicate,
 	Queue,
 	Ref,
 	Schema,
@@ -24,12 +25,14 @@ import {
 	Stream,
 } from "effect"
 import { Digest, SecureRandom } from "effect/crypto"
+import { FetchHttpClient } from "effect/http"
 import type { Socket } from "effect/socket"
 import { NodeRuntime, NodeServices } from "@effect/platform-node"
 
 import { Fork, Graft, Plugin, Transition, type Kernel } from "@graftland/graft"
 
 import * as Artifact from "../Artifact"
+import * as Configuration from "../Configuration"
 import * as Contract from "../Contract"
 import * as EncodedLimit from "./encodedLimit"
 import * as Operations from "./operations"
@@ -43,10 +46,12 @@ class UnitFault extends Schema.TaggedError<
 	UnitFault,
 	{ readonly brand: unique symbol }
 >()("UnitFault", {
+	reason: Schema.optionalKey(Schema.Literal("PluginExportMissing")),
 	detail: Schema.String,
 	cause: Schema.optionalKey(Schema.Cause(Schema.Unknown, Schema.Unknown)),
 }) {}
 interface Metadata {
+	readonly environment: Context.Context<never>
 	readonly plugin: Plugin.Plugin
 	readonly contract: Option.Option<Contract.RunnerContract>
 	readonly description: Kernel.Description
@@ -165,23 +170,85 @@ const loadContract = Effect.fnUntraced(function* (
 	return Option.some(contract)
 })
 
+interface ConfigurationContext {
+	readonly input: Context.Context<never>
+	readonly output: Context.Context<never>
+}
+const constructConfiguration = Effect.fnUntraced(function* (
+	runtime: UnitRuntime,
+	context: ConfigurationContext,
+	descriptor: Kernel.ConfigurationModule,
+) {
+	yield* Artifact.verify(descriptor.artifact)
+	yield* runtime.emit({ _tag: "Progress", stage: "DescribeEnvironment" })
+	const location = yield* Artifact.implementation(descriptor.artifact)
+	const module = yield* importModule(location)
+	const layer = Predicate.hasProperty(module, descriptor.export)
+		? module[descriptor.export]
+		: undefined
+	if (!Layer.isLayer(layer))
+		return yield* UnitFault.make({
+			detail: "Expected an environment Layer export",
+		})
+	const supplied = Context.add(
+		context.input,
+		Configuration.Options,
+		descriptor.options,
+	)
+	const dynamic = Context.makeUnsafe<unknown>(supplied.mapUnsafe)
+	const built = yield* Effect.updateContext<
+		Context.Context<unknown>,
+		UnitFault,
+		unknown,
+		never
+	>(
+		// @effect-diagnostics-next-line anyUnknownInErrorContext:off -- A unit-loaded Layer has a dynamic environment; its complete Cause is reported by the unit protocol.
+		Layer.buildWithScope(Layer.fresh(layer), runtime.scope).pipe(
+			Effect.catchCause((cause) =>
+				UnitFault.make({ detail: "Unit configuration failed", cause }),
+			),
+		),
+		() => dynamic,
+	)
+	return {
+		input: Context.makeUnsafe<never>(
+			Context.merge(context.input, built).mapUnsafe,
+		),
+		output: Context.makeUnsafe<never>(
+			Context.merge(context.output, built).mapUnsafe,
+		),
+	}
+})
+const configurationEnvironment = Effect.fnUntraced(function* (
+	runtime: UnitRuntime,
+	modules: ReadonlyArray<Kernel.ConfigurationModule>,
+) {
+	const input = yield* Effect.context<never>()
+	const constructed = yield* Effect.reduce(
+		modules,
+		(): ConfigurationContext => ({ input, output: Context.empty() }),
+		(context, descriptor) =>
+			constructConfiguration(runtime, context, descriptor),
+	)
+	return constructed.output
+})
 const decodeInput = Effect.fnUntraced(function* (
 	plugin: Plugin.Plugin,
 	input: Schema.Json,
+	environment: Context.Context<never>,
 ) {
 	if (plugin.config === undefined) return
-	const environment = yield* Effect.context<never>()
-	const context = Context.makeUnsafe<unknown>(environment.mapUnsafe)
+	const infrastructure = yield* Effect.context<never>()
+	const context = Context.makeUnsafe<unknown>(
+		Context.merge(infrastructure, environment).mapUnsafe,
+	)
 	yield* Effect.updateContext<unknown, Schema.SchemaError, unknown, never>(
 		// @effect-diagnostics-next-line anyUnknownInErrorContext:off -- The inspection unit supplies the dynamic schema environment and reports its complete Exit.
 		Schema.decodeEffect(plugin.config)(input),
 		() => context,
 	)
 })
-const load = Effect.fnUntraced(function* (
-	runtime: UnitRuntime,
-	command: Wire.Command,
-) {
+const grantedDeployment = Effect.fnUntraced(function* (command: Wire.Command) {
 	const deployment = command.target.deployment
 	const resolution = command.resolution
 	if (deployment === undefined || resolution === undefined)
@@ -191,28 +258,53 @@ const load = Effect.fnUntraced(function* (
 	const fingerprint = yield* Resolution.fingerprint(resolution.input)
 	if (
 		fingerprint !== resolution.identity ||
-		Resolution.environment(command.target.placement) !== resolution.environment
+		(yield* Resolution.validationEnvironment(
+			command.target.placement,
+			resolution.environmentModules,
+		)) !== resolution.environment
 	)
 		return yield* UnitFault.make({
 			detail:
 				"Unit resolution or validation environment differs from its grant",
 		})
 	yield* Artifact.verify(deployment.artifact)
+	return { deployment, resolution }
+})
+const load = Effect.fnUntraced(function* (
+	runtime: UnitRuntime,
+	command: Wire.Command,
+) {
+	const { deployment, resolution } = yield* grantedDeployment(command)
+	const environment = yield* configurationEnvironment(
+		runtime,
+		resolution.environmentModules ?? [],
+	)
 	const contractArtifact = deployment.contractArtifact ?? deployment.artifact
 	const contract = yield* loadContract(runtime, deployment)
 
 	yield* runtime.emit({ _tag: "Progress", stage: "DescribeDecode" })
-	if (Option.isSome(contract))
+	if (Option.isSome(contract) && deployment.inspection !== "Module")
 		yield* Schema.decodeEffect(contract.value.config)(resolution.input)
 	const implementation = yield* Artifact.implementation(deployment.artifact)
 	yield* runtime.emit({ _tag: "Progress", stage: "DescribeImport" })
-	const module = yield* importModule(implementation)
+	const module = yield* importModule(
+		implementation + (deployment.moduleSuffix ?? ""),
+	)
 	const plugin = yield* Effect.fromOption(Plugin.fromModule(module), () =>
-		UnitFault.make({ detail: "Expected a plugin export" }),
+		UnitFault.make({
+			detail: "Expected a plugin export",
+			reason: "PluginExportMissing",
+		}),
 	)
 	yield* runtime.emit({ _tag: "Progress", stage: "DescribeDecode" })
-	yield* decodeInput(plugin, resolution.input)
+	if (deployment.inspection !== "Module")
+		yield* decodeInput(plugin, resolution.input, environment)
 	const descriptor: Kernel.Description = {
+		moduleExport:
+			Predicate.hasProperty(module, "default") &&
+			Plugin.isPlugin(module.default)
+				? "default"
+				: "plugin",
 		artifact: deployment.artifact.identity.digest,
 		configuration: resolution.identity,
 		environment: resolution.environment,
@@ -230,8 +322,79 @@ const load = Effect.fnUntraced(function* (
 		probes: [],
 	}
 	yield* Schema.decodeEffect(Wire.Description)(descriptor)
-	return { plugin, contract, description: descriptor, input: resolution.input }
-}, Effect.scoped)
+	return {
+		plugin,
+		contract,
+		description: descriptor,
+		input: resolution.input,
+		environment,
+	}
+})
+const resolverResult = Effect.fnUntraced(function* (
+	runtime: UnitRuntime,
+	exported: unknown,
+	input: Schema.Json,
+) {
+	if (!Effect.isEffect(exported))
+		return yield* UnitFault.make({
+			detail: "Expected a default resolver Effect export",
+		})
+	const services = yield* Effect.context<never>().pipe(
+		Scope.provide(runtime.scope),
+	)
+	const dynamic = Context.makeUnsafe<unknown>(
+		Context.add(services, Configuration.Options, input).mapUnsafe,
+	)
+	const value = yield* Effect.updateContext<unknown, UnitFault, unknown, never>(
+		// @effect-diagnostics-next-line anyUnknownInErrorContext:off -- The disposable resolver supplies a dynamic Effect; its entire Cause is reported before its owning scope settles.
+		exported.pipe(
+			Effect.catchCause((cause) =>
+				UnitFault.make({ detail: "Custom resolution failed", cause }),
+			),
+		),
+		() => dynamic,
+	)
+	return yield* Schema.decodeUnknownEffect(Schema.Json)(value)
+})
+const describeModule = Effect.fnUntraced(function* (
+	runtime: UnitRuntime,
+	command: Wire.Command,
+) {
+	const { deployment, resolution } = yield* grantedDeployment(command)
+	if (deployment.inspection !== "Module")
+		return yield* UnitFault.make({
+			detail: "Metadata inspection requires a module-only grant",
+		})
+	yield* runtime.emit({ _tag: "Progress", stage: "DescribeImport" })
+	const location = yield* Artifact.implementation(deployment.artifact)
+	const module = yield* importModule(location + (deployment.moduleSuffix ?? ""))
+	if (!Predicate.hasProperty(module, "default"))
+		return yield* UnitFault.make({
+			detail: "Expected a default inspection export",
+		})
+	if (deployment.moduleKind === "Environment" && !Layer.isLayer(module.default))
+		return yield* UnitFault.make({
+			detail: "Expected a default environment Layer export",
+		})
+	const inspectionData =
+		deployment.moduleKind === "Resolver"
+			? yield* resolverResult(runtime, module.default, resolution.input)
+			: undefined
+	const description: Kernel.Description = {
+		...(inspectionData === undefined ? {} : { inspectionData }),
+		moduleExport: "default",
+		artifact: deployment.artifact.identity.digest,
+		configuration: resolution.identity,
+		environment: resolution.environment,
+		protocol: 1,
+		overlap: false,
+		members: 0,
+		requires: [],
+		provides: [],
+		probes: [],
+	}
+	return description
+})
 const metadata = Effect.fnUntraced(function* (
 	runtime: UnitRuntime,
 	command: Wire.Command,
@@ -318,7 +481,9 @@ const serve = Effect.fnUntraced(function* (
 		Effect.flatMap(Effect.fromOption),
 	)
 	const platform = Graft.layer.pipe(
-		Layer.provideMerge(NodeServices.layer),
+		Layer.provideMerge(
+			Layer.mergeAll(NodeServices.layer, FetchHttpClient.layer),
+		),
 		Layer.provideMerge(
 			Layer.succeed(Transition.UnitMember, Option.some(command.token.unit)),
 		),
@@ -326,7 +491,8 @@ const serve = Effect.fnUntraced(function* (
 			Layer.succeed(Plugin.UnitTerm, Option.some(command.token.term)),
 		),
 	)
-	const services = yield* Layer.buildWithScope(platform, runtime.scope)
+	const built = yield* Layer.buildWithScope(platform, runtime.scope)
+	const services = Context.merge(built, loaded.environment)
 	if (Option.isSome(loaded.contract)) {
 		const router = yield* Ref.get(runtime.router).pipe(
 			Effect.flatMap(Effect.fromOption),
@@ -413,7 +579,8 @@ const perform = Effect.fnUntraced(function* (
 	FileSystem.FileSystem | Path.Path | Digest.Digest | SecureRandom.SecureRandom
 > {
 	if (
-		command.token.term === 0 &&
+		(command.token.term === 0 ||
+			command.target.deployment?.inspection === "Module") &&
 		["Start", "Serve", "Install", "Activate"].includes(command.kind)
 	)
 		return yield* UnitFault.make({
@@ -449,7 +616,10 @@ const perform = Effect.fnUntraced(function* (
 		case "Describe":
 			return {
 				_tag: "Described",
-				value: (yield* metadata(runtime, command)).description,
+				value:
+					command.target.deployment?.moduleKind !== undefined
+						? yield* describeModule(runtime, command)
+						: (yield* metadata(runtime, command)).description,
 			}
 		case "Start": {
 			const loaded = yield* metadata(runtime, command)
@@ -533,6 +703,15 @@ const execute = Effect.fnUntraced(
 			? exit.value
 			: {
 					_tag: "Failed",
+					...(Array.some(
+						exit.cause.reasons,
+						(reason) =>
+							reason._tag === "Fail" &&
+							Schema.is(UnitFault)(reason.error) &&
+							reason.error.reason === "PluginExportMissing",
+					)
+						? { reason: "PluginExportMissing" }
+						: {}),
 					cause: yield* Schema.encodeEffect(Wire.Cause)(exit.cause),
 					creation: "Unknown",
 				}
@@ -630,6 +809,7 @@ export const run = () =>
 		main.pipe(
 			Effect.provide([
 				NodeServices.layer,
+				FetchHttpClient.layer,
 				Digest.layerWebCrypto,
 				SecureRandom.layerWebCrypto,
 			]),

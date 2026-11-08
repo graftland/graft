@@ -1,6 +1,7 @@
 import {
 	Array,
 	Cause,
+	Context,
 	Deferred,
 	Effect,
 	FileSystem,
@@ -19,27 +20,28 @@ import { NodeServices } from "@effect/platform-node"
 import { assert, describe, it } from "@effect/vitest"
 
 import { Graft, Plugin, type Fork } from "@graftland/graft"
-import { Include, Intercept, Loader, ModuleResolver } from "@graftland/loader"
+import { Include, Intercept, Loader } from "@graftland/loader"
 
 import { layer as intercepts } from "../src/internal/intercepts"
+import { fixture, FixtureDirectory, moduleLayer } from "./module-fixtures"
 
 const run = <A, E>(
-	plugins: Readonly<Record<string, Plugin.Plugin>>,
+	plugins: Readonly<Record<string, string>>,
 	program: Effect.Effect<
 		A,
 		E,
-		Graft.Graft | FileSystem.FileSystem | Path.Path | Scope.Scope
+		| Graft.Graft
+		| FileSystem.FileSystem
+		| Path.Path
+		| Scope.Scope
+		| FixtureDirectory
 	>,
 ) =>
 	program.pipe(
 		Effect.provide(
 			Layer.provideMerge(
 				Graft.layer,
-				Layer.mergeAll(
-					NodeServices.layer,
-					ModuleResolver.fromRecord(plugins),
-					intercepts,
-				),
+				Layer.mergeAll(NodeServices.layer, moduleLayer(plugins), intercepts),
 			),
 		),
 		Effect.scoped,
@@ -48,7 +50,8 @@ const run = <A, E>(
 const loadConfig = (text: string) =>
 	Effect.gen(function* () {
 		const fs = yield* FileSystem.FileSystem
-		const directory = yield* fs.makeTempDirectoryScoped()
+		const base = yield* FixtureDirectory
+		const directory = yield* fs.makeTempDirectoryScoped({ directory: base })
 		const file = `${directory}/graft.yml`
 		yield* fs.writeFileString(file, text)
 		const found = yield* Deferred.make<typeof Loader.Loader.Service>()
@@ -104,18 +107,9 @@ describe("CLI intercept registrations", () => {
 					config: Schema.String,
 					apply: emit,
 				})
-				const parent = Plugin.make({
-					name: "parent",
-					config: Schema.String,
-					apply: (name) =>
-						Effect.gen(function* () {
-							yield* emit(name)
-							const fork = yield* Graft.plugin(child, `${name}-child`)
-							yield* fork.await
-						}),
-				})
+
 				yield* run(
-					{ parent },
+					{ parent: fixture("intercepts-parent-2959") },
 					Effect.gen(function* () {
 						yield* loadConfig(`
 - id: restricted
@@ -168,6 +162,12 @@ describe("CLI intercept registrations", () => {
 						}
 					}),
 				).pipe(
+					Effect.provideService(
+						Context.Service<{ readonly child: typeof child }>(
+							"loader/fixture/intercepts-parent-2959",
+						),
+						{ child },
+					),
 					Effect.provide(logger),
 					Effect.provideService(References.CurrentLogAnnotations, {
 						host: "cli",
@@ -187,12 +187,9 @@ describe("CLI intercept registrations", () => {
 	])("rejects %s = %s as InvalidIntercept before apply", ([reference, input]) =>
 		Effect.gen(function* () {
 			const started = yield* Ref.make(false)
-			const probe = Plugin.make({
-				name: "probe",
-				apply: () => Ref.set(started, true),
-			})
+
 			yield* run(
-				{ probe },
+				{ probe: fixture("intercepts-probe-5031") },
 				Effect.gen(function* () {
 					const key = `effect/References/${reference}`
 					yield* loadConfig(`- id: invalid
@@ -217,6 +214,13 @@ describe("CLI intercept registrations", () => {
 					const applied = yield* Ref.get(started)
 					assert.isFalse(applied)
 				}),
+			).pipe(
+				Effect.provideService(
+					Context.Service<{ readonly started: typeof started }>(
+						"loader/fixture/intercepts-probe-5031",
+					),
+					{ started },
+				),
 			)
 		}),
 	)

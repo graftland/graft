@@ -1,0 +1,6 @@
+{
+	"name": "regressions-other-6106",
+	"version": "1.0.0",
+	"type": "module",
+	"exports": "./index.mjs"
+}

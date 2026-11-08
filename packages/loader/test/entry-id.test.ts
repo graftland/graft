@@ -1,23 +1,13 @@
 import { Effect, Option } from "effect"
 import { assert, it } from "@effect/vitest"
 
-import { Graft, Plugin } from "@graftland/graft"
+import { Graft } from "@graftland/graft"
 
 import { Entry, Loader } from "../src/index.ts"
-import { loaderService, run, type Journal } from "./utils.ts"
-
-const reporter = (journal: Journal) =>
-	Plugin.make({
-		name: "reporter",
-		apply: () =>
-			Effect.gen(function* () {
-				const id = yield* Entry.CurrentId
-				yield* journal.record(Option.getOrElse(id, () => "none"))
-			}),
-	})
+import { fixture, loaderService, run } from "./utils.ts"
 
 it.effect("tells each plugin the id of the entry it was loaded from", () =>
-	run((journal) => ({ reporter: reporter(journal) }))((journal) =>
+	run({ reporter: fixture("reporter") })((journal) =>
 		Effect.gen(function* () {
 			yield* Graft.plugin(Loader.plugin, [
 				{ id: "top", name: "reporter" },
@@ -30,7 +20,7 @@ it.effect("tells each plugin the id of the entry it was loaded from", () =>
 			])
 			const loader = yield* loaderService
 			yield* loader.ready
-			yield* journal.expect(["top", "nested"])
+			yield* journal.expect([["top", "nested"]])
 		}),
 	),
 )

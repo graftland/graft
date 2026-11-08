@@ -6,13 +6,13 @@ import { Graft } from "@graftland/graft"
 import { parse } from "yaml"
 
 import { Include } from "../src/index.ts"
-import { echo, loaderService, run } from "./utils.ts"
+import { loaderService, run } from "./utils.ts"
 
 describe("include edit lifetime", () => {
 	it.effect(
 		"keeps a committed file aligned with the runtime when the caller is interrupted",
 		() =>
-			run((journal) => ({ echo: echo(journal) }))(() =>
+			run()(() =>
 				Effect.gen(function* () {
 					const fs = yield* FileSystem.FileSystem
 					const path = yield* Path.Path

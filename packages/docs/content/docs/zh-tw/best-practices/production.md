@@ -9,20 +9,8 @@ description: 啟動、保護、監督、重新設定、停止並升級長時間�
 
 ## 不帶 `--watch` 啟動
 
-正式環境請執行 `graft start graft.yml`，`--watch`
-留給開發使用。所有選項都列在[命令列](../../cli/#graft-start)頁面。
-
-| 項目                    | 不帶 `--watch`                                                        | 帶 `--watch`                                                                  |
-| ----------------------- | --------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
-| 外掛程式碼變更          | 需要重新啟動。                                                        | [熱重載](../../hot-reload/)，但它[不適用於正式環境](../../hot-reload/#限制)。 |
-| 手動編輯 `graft.yml`    | 在下次重新啟動或下次透過 Loader 編輯時套用。                          | 儲存時套用。                                                                  |
-| `--env-file` 的內容     | 只在啟動時讀取一次。                                                  | [儲存時重新讀取](../../cli/#env-檔案)。                                       |
-| 啟動時 `graft.yml` 無效 | 行程[以非零狀態碼結束](../../cli/#第一份設定無效)，部署會明確地失敗。 | 行程持續等待，不執行任何設定項目。                                            |
-| 失敗的設定項目          | 在變更時、依其 `retry` 排程，或由 `loader.retry` 重試。               | 每次模組重載後也會重試。                                                      |
-
-為每個設定項目指定 `id`，或在 Graft
-[補上缺少的 id](../../config-file/#設定項目欄位) 後提交
-`graft.yml`，這樣唯讀或剛部署的檔案就不會在啟動時被改寫。
+建置模組後執行 `graft start graft.yml`。不支援
+`--watch`。設定、環境檔案和已安裝套件在此次啟動時讀取；修改後重新建置並重新啟動。
 
 ## 傳遞機密
 
@@ -192,17 +180,11 @@ export default Plugin.make({
 
 ## 不重新啟動就變更設定
 
-- 編輯會寫入
-  `graft.yml`。替換該檔案的部署會丟棄這些編輯，因此請把已部署的檔案當成狀態看待，或把變更寫回你的儲存庫。
-- 執行中行程的環境無法從外部變更，因此輪替設定在那裡的機密需要重新啟動。`loader.retry`
-  會[重新讀取 `!env` 的值](../../config-file/#何時重新讀取值)，但只有在值的來源有變更時才有幫助，例如
-  `--watch` 下的 `--env-file` 或 `--env-dir`。
-- 持有連線或快取的外掛應支援[原地更新](../../plugins/#原地更新)，這樣編輯設定時就不會中斷它們。
+直接嵌入的應用程式可編輯 Loader，並明確更新參照。CLI 行程需要在修改後重新啟動。公開部署可在準備和復原時重新解析原始參照，請參閱[單元](../../units/)。
 
 ## 升級外掛
 
-`node_modules` 中的變更永遠不會觸發重載，無論是否使用
-`--watch`。升級的方式是安裝後重新啟動：
+安裝套件後，重新建置應用程式模組並重新啟動：
 
 1. **安裝**：執行
    `graft add <package>@<version>`。安裝失敗時，套件檔案會被還原；請參閱[還原](../../cli/#還原)。
@@ -232,12 +214,15 @@ import { Layer, Logger, LogLevel, References, Schema } from "effect"
 import { NodeServices } from "@effect/platform-node"
 
 import { Intercept, ModuleResolver } from "@graftland/loader"
+import type * as Control from "@graftland/plugin-remote/Control"
+
+declare const control: Control.Address
 
 const environment = Layer.mergeAll(
 	NodeServices.layer,
 	ModuleResolver.layer({
-		base: process.cwd(),
-		importer: (specifier) => import(specifier),
+		base: "/app",
+		control,
 	}).pipe(Layer.provide(NodeServices.layer)),
 	Intercept.layer([
 		Intercept.make(

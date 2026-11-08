@@ -14,7 +14,7 @@ import { assert, describe, it } from "@effect/vitest"
 import { Graft, Plugin } from "@graftland/graft"
 
 import { Entry, Loader, Tree } from "../src/index.ts"
-import { loaderService, run } from "./utils.ts"
+import { fixture, loaderService, run } from "./utils.ts"
 
 const setup = Effect.gen(function* () {
 	const entered = yield* Deferred.make<void>()
@@ -57,14 +57,7 @@ describe("loader edit admission", () => {
 	it.effect(
 		"finishes removing an entry whose apply is waiting for that edit",
 		() =>
-			run(() => ({
-				self: Plugin.make({
-					name: "self",
-					inject: [Loader.Loader],
-					apply: () =>
-						Effect.flatMap(Loader.Loader, (loader) => loader.remove("self")),
-				}),
-			}))(() =>
+			run({ self: fixture("self-removing") })(() =>
 				Effect.gen(function* () {
 					yield* Graft.plugin(Loader.plugin, [{ id: "self", name: "self" }])
 					const loader = yield* loaderService
@@ -80,7 +73,7 @@ describe("loader edit admission", () => {
 	it.effect(
 		"cancels a blocked offer without cancelling an already queued edit",
 		() =>
-			run(() => ({}))(() =>
+			run()(() =>
 				Effect.gen(function* () {
 					const { loader, create, first, release, current } = yield* setup
 					// The worker holds the first edit; the single queue slot accepts the second.
@@ -110,7 +103,7 @@ describe("loader edit admission", () => {
 	it.effect(
 		"settles active and queued callers when the owning scope closes",
 		() =>
-			run(() => ({}))(() =>
+			run()(() =>
 				Effect.gen(function* () {
 					const { fork, create, first, current } = yield* setup
 					const queued = yield* create("queued").pipe(
@@ -143,7 +136,7 @@ describe("loader edit admission", () => {
 	)
 
 	it.effect("logs an abandoned edit's cause and keeps the worker usable", () =>
-		run(() => ({}))(() =>
+		run()(() =>
 			Effect.gen(function* () {
 				const entered = yield* Deferred.make<void>()
 				const release = yield* Deferred.make<void>()

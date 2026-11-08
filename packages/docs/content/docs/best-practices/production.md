@@ -11,20 +11,9 @@ and stops it with `SIGTERM`.
 
 ## Start without `--watch`
 
-Run `graft start graft.yml` in production and keep `--watch` for development.
-Every option is on the [command line](../../cli/#graft-start) page.
-
-| Concern                        | Without `--watch`                                                                                 | With `--watch`                                                                            |
-| ------------------------------ | ------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
-| Plugin code changes            | Need a restart.                                                                                   | [Hot reload](../../hot-reload/), which is [not for production](../../hot-reload/#limits). |
-| Hand edits to `graft.yml`      | Applied at the next restart or the next Loader edit.                                              | Applied on save.                                                                          |
-| `--env-file` contents          | Read once at startup.                                                                             | [Read again on save](../../cli/#env-files).                                               |
-| Invalid `graft.yml` at startup | The process [exits nonzero](../../cli/#invalid-first-configuration), so the deploy fails visibly. | The process waits, running no entries.                                                    |
-| Failed entries                 | Retried on change, on their `retry` schedule, or by `loader.retry`.                               | Also retried after each module reload.                                                    |
-
-Give every entry an `id`, or commit `graft.yml` after Graft
-[writes the missing ones](../../config-file/#entry-fields), so a read-only or
-freshly deployed file is not rewritten at startup.
+Run `graft start graft.yml` after building your modules. `--watch` is rejected.
+Configuration, environment files and installed packages are read for this start;
+rebuild and restart to apply edits.
 
 ## Pass secrets
 
@@ -207,21 +196,14 @@ For a stop that hangs, see
 
 ## Reconfigure without a restart
 
-- Edits are written to `graft.yml`. A deployment that replaces the file discards
-  them, so treat the deployed file as state or write the change back to your
-  repository.
-- A running process's environment cannot change from outside. Rotating a secret
-  set there needs a restart. `loader.retry`
-  [rereads `!env` values](../../config-file/#when-values-are-read-again), which
-  helps only when their source changed, such as `--env-file` or `--env-dir`
-  under `--watch`.
-- Support [Update in place](../../plugins/#update-in-place) in plugins that hold
-  connections or caches, so a config edit does not drop them.
+Directly embedded applications can edit their Loader and explicitly refresh
+references. A CLI process requires restart after edits. A public deployment can
+re-resolve raw references during preparation and recovery; see
+[Units](../../units/).
 
 ## Upgrade plugins
 
-Changes in `node_modules` never trigger a reload, with or without `--watch`.
-Upgrade by installing and restarting:
+After installing packages, rebuild application modules and restart:
 
 1. **Install** with `graft add <package>@<version>`. If the install fails, the
    package files are restored; see [Rollback](../../cli/#rollback).
@@ -253,12 +235,15 @@ import { Layer, Logger, LogLevel, References, Schema } from "effect"
 import { NodeServices } from "@effect/platform-node"
 
 import { Intercept, ModuleResolver } from "@graftland/loader"
+import type * as Control from "@graftland/plugin-remote/Control"
+
+declare const control: Control.Address
 
 const environment = Layer.mergeAll(
 	NodeServices.layer,
 	ModuleResolver.layer({
-		base: process.cwd(),
-		importer: (specifier) => import(specifier),
+		base: "/app",
+		control,
 	}).pipe(Layer.provide(NodeServices.layer)),
 	Intercept.layer([
 		Intercept.make(

@@ -74,6 +74,9 @@ importers:
       "@graftland/package-manager":
         specifier: workspace:*
         version: link:../package-manager
+      "@graftland/plugin-remote":
+        specifier: workspace:*
+        version: link:../plugin-remote
       yaml:
         specifier: 2.9.1
         version: 2.9.1
@@ -246,6 +249,9 @@ importers:
       "@graftland/graft":
         specifier: workspace:*
         version: link:../core
+      "@graftland/plugin-remote":
+        specifier: workspace:*
+        version: link:../plugin-remote
       effect:
         specifier: 4.1.2
         version: 4.1.2
@@ -283,6 +289,9 @@ importers:
       "@graftland/loader":
         specifier: workspace:*
         version: link:../loader
+      "@graftland/plugin-remote":
+        specifier: workspace:*
+        version: link:../plugin-remote
       effect:
         specifier: 4.1.2
         version: 4.1.2
@@ -307,6 +316,9 @@ importers:
       "@graftland/plugin-http":
         specifier: workspace:*
         version: link:../plugin-http
+      "@graftland/plugin-remote":
+        specifier: workspace:*
+        version: link:../plugin-remote
       effect:
         specifier: 4.1.2
         version: 4.1.2
@@ -361,6 +373,9 @@ importers:
       "@graftland/loader":
         specifier: workspace:*
         version: link:../loader
+      "@graftland/plugin-remote":
+        specifier: workspace:*
+        version: link:../plugin-remote
       effect:
         specifier: 4.1.2
         version: 4.1.2
@@ -587,6 +602,9 @@ importers:
       "@effect/vitest":
         specifier: 4.1.2
         version: 4.1.2(effect@4.1.2)(vitest@5.1.0(@types/node@26.6.6)(vite@8.3.5(@types/node@26.6.6)(yaml@2.9.1)))
+      "@graftland/plugin-remote":
+        specifier: workspace:*
+        version: link:../../packages/plugin-remote
       vitest:
         specifier: 5.1.0
         version: 5.1.0(@types/node@26.6.6)(vite@8.3.5(@types/node@26.6.6)(yaml@2.9.1))
@@ -652,6 +670,9 @@ importers:
       "@graftland/loader":
         specifier: workspace:*
         version: link:../../packages/loader
+      "@graftland/plugin-remote":
+        specifier: workspace:*
+        version: link:../../packages/plugin-remote
       vitest:
         specifier: 5.1.0
         version: 5.1.0(@types/node@26.6.6)(vite@8.3.5(@types/node@26.6.6)(yaml@2.9.1))
@@ -1481,13 +1502,6 @@ packages:
       "@emnapi/core": ^1.7.1 || 2.0.0-beta.2 || 2.0.0-beta.3
       "@emnapi/runtime": ^1.7.1 || 2.0.0-beta.2 || 2.0.0-beta.3
 
-  "@noble/hashes@2.4.0":
-    resolution:
-      {
-        integrity: sha512-X5XaVWZIBCT7HHZGm5I7ZQXDwLG+bGXuSrMQAW+7Zvl87h1kmc1ZB1VSRJcpUfoUrGQp4Fkoxm5kZ+Ms+aW+eA==,
-      }
-    engines: { node: ">= 20.19.0" }
-
   "@oslojs/encoding@1.1.0":
     resolution:
       {
@@ -1561,13 +1575,6 @@ packages:
       }
     cpu: [x64]
     os: [win32]
-
-  "@peculiar/utils@4.1.0":
-    resolution:
-      {
-        integrity: sha512-y2oDqAwp+VPZMUYFGFFMYlXM8xinwb7ehb69+2EhbEL+n7KsykCQX5F0u3/B+BFHxCkwTyft3T1id0ugyzNHVQ==,
-      }
-    engines: { node: ^20.19.0 || >=22.12.0 }
 
   "@quansync/fs@1.1.0":
     resolution:
@@ -2307,13 +2314,6 @@ packages:
       }
     engines: { node: ">= 0.4" }
 
-  asn1js@4.0.0:
-    resolution:
-      {
-        integrity: sha512-81NlooYbXCbBWL2+p1/ivGyT4AR2+bnfKYlPq/3rCoIPJSuLbdS8G70XYt561wOJnbaYfBS2HQDMENaX5hM2vA==,
-      }
-    engines: { node: ^20.19.0 || >=22.12.0 }
-
   assertion-error@2.0.1:
     resolution:
       {
@@ -2399,13 +2399,6 @@ packages:
         integrity: sha512-yQbXgO/OSZVD2IsiLlro+7Hf6Q18EJrKSEsdoMzKePKXct3gvD8oLcOQdIzGupr5Fj+EDe8gO/lxc1BzfMpxvA==,
       }
     engines: { node: ">=8" }
-
-  bytestreamjs@3.0.0:
-    resolution:
-      {
-        integrity: sha512-QJYdJHpGNj4dAfRrgQAu8V5OEFVgiALJ8YFR4c1BuNYzvoDU86yEg+9SXu/AbGyMaLAn17qdMmwsCc2Ry2nHPg==,
-      }
-    engines: { node: ^20.19.0 || >=22.12.0 }
 
   cac@7.1.0:
     resolution:
@@ -3712,15 +3705,6 @@ packages:
         integrity: sha512-qcJu88Q2IWqJsDD529JKMdwGm/dvInW4HvQnRwiH9JtihJvzGOscDtHE3x1pBKeUOTysQ8kVmLnJ2kJu7yhcGA==,
       }
     engines: { node: ">=12" }
-
-  pkijs@4.0.1:
-    resolution:
-      {
-        integrity: sha512-hs6jHBg+Y9ZZ9r5w2CHnKXkGPOr3qWfkLfnZGlbNkP2hceGZ6EgjnTS7tqwbugHXx5mCqoSf4TUH2nu1diirnA==,
-      }
-    engines: { node: ^20.19.0 || >=22.12.0 }
-    peerDependencies:
-      asn1js: ^4.0.0
 
   postcss-nested@7.0.2:
     resolution:
@@ -5096,8 +5080,6 @@ snapshots:
       "@tybys/wasm-util": 0.10.4
     optional: true
 
-  "@noble/hashes@2.4.0": {}
-
   "@oslojs/encoding@1.1.0": {}
 
   "@oxc-project/types@0.156.0": {}
@@ -5124,8 +5106,6 @@ snapshots:
 
   "@pagefind/windows-x64@1.6.0":
     optional: true
-
-  "@peculiar/utils@4.1.0": {}
 
   "@quansync/fs@1.1.0":
     dependencies:
@@ -5446,10 +5426,6 @@ snapshots:
 
   aria-query@5.3.2: {}
 
-  asn1js@4.0.0:
-    dependencies:
-      "@peculiar/utils": 4.1.0
-
   assertion-error@2.0.1: {}
 
   astro-expressive-code@0.44.3(astro@7.4.1(@types/node@26.6.6)(yaml@2.9.1)):
@@ -5575,8 +5551,6 @@ snapshots:
   braces@3.0.3:
     dependencies:
       fill-range: 7.1.1
-
-  bytestreamjs@3.0.0: {}
 
   cac@7.1.0: {}
 
@@ -6482,13 +6456,6 @@ snapshots:
   picomatch@2.3.2: {}
 
   picomatch@4.0.7: {}
-
-  pkijs@4.0.1(asn1js@4.0.0):
-    dependencies:
-      "@noble/hashes": 2.4.0
-      "@peculiar/utils": 4.1.0
-      asn1js: 4.0.0
-      bytestreamjs: 3.0.0
 
   postcss-nested@7.0.2(postcss@8.5.32):
     dependencies:

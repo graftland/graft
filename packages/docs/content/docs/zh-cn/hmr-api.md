@@ -9,22 +9,12 @@ description: 在自己的程序中使用 @graftland/hmr，无需 CLI。
 ```ts
 import { Effect } from "effect"
 
-import { Graft } from "@graftland/graft"
 import * as Hmr from "@graftland/hmr"
-import { ModuleResolver } from "@graftland/loader"
 
-declare const directory: string
-
-const program = Effect.gen(function* () {
+export const program = Effect.gen(function* () {
 	const hmr = yield* Hmr.make({ base: import.meta.url })
-	const resolver = yield* ModuleResolver.make({
-		base: directory,
-		importer: hmr.importerScoped,
-	})
-	yield* Graft.provide(ModuleResolver.ModuleResolver, resolver)
-	// ...load plugins through the resolver, then, after files changed:
-	const result = yield* hmr.reload
-	yield* Effect.log(result)
+	yield* hmr.importerScoped("./dist/plugin.js")
+	return yield* hmr.reload
 })
 ```
 
@@ -48,17 +38,11 @@ const program = Effect.gen(function* () {
 | `importer(specifier)`       | 整个 HMR 会话关闭。   | Promise importer。                    |
 | `importerScoped(specifier)` | 调用方的 scope 关闭。 | Effect importer 和 Promise importer。 |
 
-将 `importerScoped` 传给 `ModuleResolver.make`。
+在显式开发工具中直接使用带 scope 的 importer。它不是可传递的 Loader 解析器。`graft start`
+拒绝监听模式；HMR 的结果属于嵌入式协作，不提供内核隔离或强制回收。
 
 `importerScoped(specifier, { observationScope })`
-将观察租约与 importer 的临时资源分开。
-
-- `ModuleResolver` 通过 importer 的第二个参数传递这个 scope。
-- 失败条目等待重试时应保持它存活，替换观察尝试或移除条目时关闭它。
-- 候选资源可以在失败时立即关闭，而不会删除该观察。
-- 省略该选项时使用调用方的 scope。
-
-在同一导入视图中重新取得入口租约，会保留其缓存身份。当前视图保存缓存命中所需的信息，但不监听没有租约的入口。成功提交重载后，这份缓存会被回收；只有活跃、待重试或复用的依赖图仍需要的观察信息会继续保留。
+将观察租约保留到该 scope 关闭；省略此项时使用调用方的 scope。
 
 ## 监听
 

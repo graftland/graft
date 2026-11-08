@@ -33,7 +33,7 @@ describe("scoped atomic writes", () => {
 	it.effect(
 		"does not commit if the original ownership cannot be preserved",
 		() =>
-			run(() => ({}))(() =>
+			run()(() =>
 				Effect.gen(function* () {
 					const { fs, directory, file } = yield* setup
 					yield* fs.writeFileString(file, "original")
@@ -66,7 +66,7 @@ describe("scoped atomic writes", () => {
 			),
 	)
 	it.effect("retains interruption and cleanup failure together", () =>
-		run(() => ({}))(() =>
+		run()(() =>
 			Effect.gen(function* () {
 				const { fs, file } = yield* setup
 				const entered = yield* Deferred.make<void>()
@@ -99,7 +99,7 @@ describe("scoped atomic writes", () => {
 	)
 	for (const mode of [0o600, 0o640, 0o644]) {
 		it.effect(`preserves existing permission bits ${mode.toString(8)}`, () =>
-			run(() => ({}))(() =>
+			run()(() =>
 				Effect.gen(function* () {
 					const { fs, directory, file } = yield* setup
 					yield* fs.writeFileString(
@@ -122,7 +122,7 @@ describe("scoped atomic writes", () => {
 	it.effect(
 		"creates initial files privately and syncs data before rename",
 		() =>
-			run(() => ({}))(() =>
+			run()(() =>
 				Effect.gen(function* () {
 					const { fs, file } = yield* setup
 					const synced = yield* Ref.make(false)
@@ -158,7 +158,7 @@ describe("scoped atomic writes", () => {
 
 	for (const stage of ["partial write", "sync", "rename"] as const) {
 		it.effect(`removes its temporary file after a ${stage} failure`, () =>
-			run(() => ({}))(() =>
+			run()(() =>
 				Effect.gen(function* () {
 					const { fs, directory, file } = yield* setup
 					yield* fs.writeFileString(file, "original")
@@ -196,7 +196,7 @@ describe("scoped atomic writes", () => {
 	it.effect(
 		"removes its temporary file when Include closes during an edit",
 		() =>
-			run(() => ({}))(() =>
+			run()(() =>
 				Effect.gen(function* () {
 					const { fs, directory, file } = yield* setup
 					yield* fs.writeFileString(
@@ -240,7 +240,7 @@ describe("scoped atomic writes", () => {
 	)
 
 	it.effect("retains both operation and cleanup failures in the cause", () =>
-		run(() => ({}))(() =>
+		run()(() =>
 			Effect.gen(function* () {
 				const { fs, file } = yield* setup
 				const rename = failure("rename")
@@ -265,7 +265,7 @@ describe("scoped atomic writes", () => {
 	it.effect(
 		"rejects a pre-existing temporary symlink without following or deleting it",
 		() =>
-			run(() => ({}))(() =>
+			run()(() =>
 				Effect.gen(function* () {
 					const { fs, directory, file } = yield* setup
 					const victim = `${directory}/victim`
@@ -294,7 +294,7 @@ for (const stage of ["write", "rename"]) {
 	it.live(
 		`waits for accepted native ${stage} completion before cancellation cleanup`,
 		() =>
-			run(() => ({}))(() =>
+			run()(() =>
 				Effect.gen(function* () {
 					const { fs, file } = yield* setup
 					const started = Promise.withResolvers<void>()

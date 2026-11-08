@@ -3,7 +3,8 @@ title: 在程序中使用 Graft
 description: 从自己的 Effect 程序运行插件，无需 CLI。
 ---
 
-CLI 是建立在这些库之上的一个小程序。你也可以用同样的方式，在自己的 Effect 程序中运行 Graft。
+**嵌入式 Graft**
+在你的 Effect 程序内组合插件。生命周期是协作式的，不提供内核 Change 结果、隔离或依靠终止完成的资源回收。
 
 | 你想要……                | 使用                                | 章节                               |
 | ----------------------- | ----------------------------------- | ---------------------------------- |
@@ -31,11 +32,12 @@ const program = Effect.gen(function* () {
 	return yield* Effect.never
 })
 
-program.pipe(
-	Effect.scoped,
-	Effect.provide(Layer.provideMerge(Graft.layer, NodeServices.layer)),
-	NodeRuntime.runMain,
-)
+export const run = () =>
+	program.pipe(
+		Effect.scoped,
+		Effect.provide(Layer.provideMerge(Graft.layer, NodeServices.layer)),
+		NodeRuntime.runMain,
+	)
 ```
 
 Layer 环境中的服务对所有插件可用，这里就是 Node.js 服务。参见[来自环境的服务](../services/#来自环境的服务)。
@@ -71,103 +73,53 @@ export const hello = Plugin.make({
 
 ## 加载配置项
 
-`Loader.plugin` 运行保存在内存中的[配置项](../config-file/#配置项字段)列表。通过
-`Loader` 服务所做的编辑只修改这份列表。配置项需要 `ModuleResolver`
-将名称解析为插件：
-
-```ts import.meta.vitest name="embedding: load entries"
-import { Effect, Layer, Option, Stream } from "effect"
-
-import { Graft } from "@graftland/graft"
-import { Loader, ModuleResolver } from "@graftland/loader"
-
-import { greeter, hello } from "./plugins.ts"
-
-const program = Effect.gen(function* () {
-	yield* Graft.plugin(Loader.plugin, [
-		{ id: "greeter", name: "greeter", config: { greeting: "Hello" } },
-		{ id: "hello", name: "hello" },
-	])
-	return yield* Graft.logs.pipe(
-		Stream.map((log) => log.message),
-		Stream.runHead,
-	)
-})
-
-const resolver = ModuleResolver.fromRecord({ greeter, hello })
-
-await Effect.runPromise(
-	program.pipe(
-		Effect.scoped,
-		Effect.provide(Layer.provideMerge(Graft.layer, resolver)),
-	),
-) // => Option.some(["Hello, world!"])
-```
-
-`Group.Group`
-也接受没有 id 的条目。插入不同名称的条目不会改变已有条目的派生 id；插入或移动同名条目时，请显式指定 id。见[托管条目](../plugins/#托管条目)。
-
-### 选择解析器
-
-| 解析器                                     | 如何找到插件                                                 | 适用于             |
-| ------------------------------------------ | ------------------------------------------------------------ | ------------------ |
-| `ModuleResolver.fromRecord(table)`         | 从固定的映射表解析。                                         | 打包后的应用、测试 |
-| `ModuleResolver.layer({ base, importer })` | 导入模块。相对名称从 `base` 解析，包名通过 `importer` 解析。 | 带有插件文件的应用 |
-
-`importer` 通常是在应用中编写的
-`(specifier) => import(specifier)`，以便找到应用的依赖。
-
-在应用中，将解析器和 Node.js 服务一起提供到环境中：
+嵌入式 `Loader.plugin`
+按配置项列表加载构建后的模块。解析需要有效的公开控制端点来执行可丢弃检查；相对 include 保留声明它的目录。
 
 ```ts
-import { Effect, Layer, type Scope } from "effect"
+import { Effect, Layer } from "effect"
 import { NodeRuntime, NodeServices } from "@effect/platform-node"
 
 import { Graft } from "@graftland/graft"
-import type { ModuleResolver } from "@graftland/loader"
+import { Loader, ModuleResolver } from "@graftland/loader"
+import type * as Control from "@graftland/plugin-remote/Control"
 
-declare const program: Effect.Effect<never, never, Graft.Graft | Scope.Scope>
-declare const resolver: Layer.Layer<ModuleResolver.ModuleResolver>
-
-program.pipe(
-	Effect.scoped,
-	Effect.provide(
-		Layer.provideMerge(
-			Graft.layer,
-			Layer.mergeAll(NodeServices.layer, resolver),
-		),
-	),
-	NodeRuntime.runMain,
+declare const control: Control.Address
+const resolver = ModuleResolver.layer({ base: "/app", control }).pipe(
+	Layer.provide(NodeServices.layer),
 )
+export const run = () =>
+	Effect.gen(function* () {
+		const fork = yield* Graft.plugin(Loader.plugin, [
+			{ id: "hello", name: "./dist/hello.js" },
+		])
+		yield* fork.stable
+	}).pipe(
+		Effect.scoped,
+		Effect.provide(
+			Layer.provideMerge(
+				Graft.layer,
+				Layer.mergeAll(NodeServices.layer, resolver),
+			),
+		),
+		NodeRuntime.runMain,
+	)
 ```
 
-### 解析计划
+| 边界       | 规则                                                     |
+| ---------- | -------------------------------------------------------- |
+| 解析       | 返回可序列化描述符，在可丢弃单元中检查可执行代码。       |
+| 嵌入式激活 | 在嵌入它的进程中运行，以协作方式管理 scope。             |
+| 配置       | 原生准备只传递 JSON 和不可变模块身份。                   |
+| 保证       | 嵌入式 fork 不提供 Change 结局、强制回收或代码卸载保证。 |
 
-`ModuleResolver.make` 缓存规范化的候选计划，不缓存 importer 的结果。
-
-- 不提供可选的 `resolution` 环境时，每次调用仍先尝试原始名称，再按命名约定尝试。
-- 成功的 importer 每次都会执行，因此自定义 importer 的逐次调用行为和资源 scope 保持不变。
-
-`resolution` 环境可以跳过已知不存在的候选：
-
-| 成员                                        | 作用                                                                                                           |
-| ------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
-| `revision`                                  | 返回解析环境版本的 Effect。安装、移除依赖或其他解析变化后应推进版本，使旧计划失效，包括“不存在”的判断。        |
-| `exists(specifier)`                         | 检查规范化候选是否存在，不导入模块，也不获取资源；候选优先级保持不变。                                         |
-| `observe(specifiers, { observationScope })` | 在每次解析时执行，包括缓存命中和计划失败，用于保留缺失名称或路径的观察。资源仍归候选 scope 和观察 scope 所有。 |
-
-:::caution
-
-启用这个协议时，必须同时提供失效机制和观察机制。无法可靠维护 `revision`
-时，不要设置 `resolution`。尚未完成的旧计划不会覆盖较新版本的缓存。
-
-:::
+测试使用真实模块文件。源代码变更后先构建，再重启嵌入进程。原生准备及嵌入式编辑服务见
+[Loader API](../loader-api/)。
 
 ## 加载配置文件
 
-`Include.Include` 是 `graft start`
-使用的插件。它读取 YAML 文件并将编辑结果写回；设置 `watch: true`
-后，还会获取你手动做的修改：
+嵌入式程序可通过 `Include.Include` 读取和编辑 YAML，`watch: true`
+协作式监听文件修改。`graft start` 只读取一个版本，不支持 `--watch`。
 
 ```ts
 import { Effect } from "effect"

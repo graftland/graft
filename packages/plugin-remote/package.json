@@ -29,6 +29,10 @@
 			"source": "./src/Capabilities.ts",
 			"default": "./dist/Capabilities.js"
 		},
+		"./Configuration": {
+			"source": "./src/Configuration.ts",
+			"default": "./dist/Configuration.js"
+		},
 		"./Conformance": {
 			"source": "./src/Conformance.ts",
 			"default": "./dist/Conformance.js"
@@ -92,6 +96,7 @@
 			".": "./dist/index.js",
 			"./Artifact": "./dist/Artifact.js",
 			"./Capabilities": "./dist/Capabilities.js",
+			"./Configuration": "./dist/Configuration.js",
 			"./Conformance": "./dist/Conformance.js",
 			"./Contract": "./dist/Contract.js",
 			"./Control": "./dist/Control.js",

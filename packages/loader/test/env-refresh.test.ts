@@ -25,6 +25,7 @@ import {
 	Loader,
 	ModuleResolver,
 } from "../src/index.ts"
+import { fixture, moduleLayer } from "./module-fixtures"
 import { loaderService } from "./utils.ts"
 
 const Setting = Context.Reference(
@@ -53,14 +54,15 @@ const makeLeaf = Effect.map(
 	Ref.make<ReadonlyArray<string>>([]),
 	(observed) => ({
 		observed,
-		leaf: Plugin.make({
-			name: "leaf",
-			config: Schema.String,
-			apply: (value) =>
-				Effect.flatMap(Setting, (setting) =>
-					Ref.update(observed, Array.append(`${value}/${setting}`)),
+		layer: Layer.mergeAll(
+			moduleLayer({ leaf: fixture("env-refresh-observed") }),
+			Layer.succeed(
+				Context.Service<{ readonly observed: typeof observed }>(
+					"loader/env-refresh-observed",
 				),
-		}),
+				{ observed },
+			),
+		),
 	}),
 )
 
@@ -79,7 +81,7 @@ it.effect(
 				VALUE: "a",
 				SETTING: "x",
 			})
-			const { observed, leaf } = yield* makeLeaf
+			const { observed, layer } = yield* makeLeaf
 			yield* Effect.gen(function* () {
 				yield* Graft.plugin(Loader.plugin, [entry])
 				const loader = yield* loaderService
@@ -99,59 +101,11 @@ it.effect(
 				Effect.provide(
 					Layer.provideMerge(
 						Graft.layer,
-						Layer.mergeAll(
-							registry,
-							ConfigProvider.layer(provider),
-							ModuleResolver.fromRecord({ leaf }),
-						),
+						Layer.mergeAll(registry, ConfigProvider.layer(provider), layer),
 					),
 				),
 			)
 		}),
-)
-
-it.effect("reads the environment after a slow import finishes", () =>
-	Effect.gen(function* () {
-		const { variables, provider } = yield* makeEnvironment({
-			VALUE: "a",
-			SETTING: "x",
-		})
-		const { observed, leaf } = yield* makeLeaf
-		const requested = yield* Deferred.make<void>()
-		const imported = yield* Deferred.make<void>()
-		const resolver = Layer.succeed(ModuleResolver.ModuleResolver, {
-			importModule: (specifier) =>
-				Effect.fail(
-					ModuleResolver.ModuleInvalid.make({
-						specifier,
-						cause: "Unused in this fixture",
-					}),
-				),
-			resolve: () =>
-				Deferred.succeed(requested, undefined).pipe(
-					Effect.andThen(Deferred.await(imported)),
-					Effect.as<Plugin.Plugin>(leaf),
-				),
-		})
-		yield* Effect.gen(function* () {
-			yield* Graft.plugin(Loader.plugin, [entry])
-			yield* Deferred.await(requested)
-			yield* Ref.set(variables, { VALUE: "b", SETTING: "y" })
-			yield* Deferred.succeed(imported, undefined)
-			const loader = yield* loaderService
-			yield* loader.ready
-			const values = yield* Ref.get(observed)
-			assert.deepStrictEqual(values, ["b/y"])
-		}).pipe(
-			Effect.scoped,
-			Effect.provide(
-				Layer.provideMerge(
-					Graft.layer,
-					Layer.mergeAll(registry, ConfigProvider.layer(provider), resolver),
-				),
-			),
-		)
-	}),
 )
 
 /** The first activation reads its environment, then waits in intercept resolution until released. */
@@ -159,14 +113,7 @@ const makeSlowLoad = Effect.gen(function* () {
 	const starts = yield* Queue.unbounded<string>()
 	const resolving = yield* Deferred.make<void>()
 	const release = yield* Deferred.make<void>()
-	const leaf = Plugin.make({
-		name: "leaf",
-		config: Schema.String,
-		apply: (value) =>
-			Effect.flatMap(Setting, (setting) =>
-				Effect.asVoid(Queue.offer(starts, `${value}/${setting}`)),
-			),
-	})
+
 	const registry = Intercept.layer([
 		{
 			key: Setting.key,
@@ -182,7 +129,18 @@ const makeSlowLoad = Effect.gen(function* () {
 		starts,
 		resolving,
 		release,
-		layer: Layer.mergeAll(registry, ModuleResolver.fromRecord({ leaf })),
+		layer: Layer.mergeAll(
+			registry,
+			Layer.mergeAll(
+				moduleLayer({ leaf: fixture("env-refresh-leaf-4702") }),
+				Layer.succeed(
+					Context.Service<{ readonly starts: typeof starts }>(
+						"loader/fixture/env-refresh-leaf-4702",
+					),
+					{ starts },
+				),
+			),
+		),
 	}
 })
 
@@ -353,15 +311,7 @@ it.effect("retry refreshes children a loading group already started", () =>
 					),
 				),
 		}
-		const leaf = Plugin.make({
-			name: "leaf",
-			config: Schema.Struct({ id: Schema.String, value: Schema.String }),
-			apply: ({ id, value }) =>
-				Ref.update(latest, HashMap.set(id, value)).pipe(
-					Effect.andThen(Deferred.succeed(started, undefined)),
-					Effect.asVoid,
-				),
-		})
+
 		const ids = Array.makeBy(2, (n) => `leaf-${n}`)
 		const group = {
 			id: "group",
@@ -399,7 +349,16 @@ it.effect("retry refreshes children a loading group already started", () =>
 					Layer.mergeAll(
 						registry,
 						ConfigProvider.layer(provider),
-						ModuleResolver.fromRecord({ leaf }),
+						Layer.mergeAll(
+							moduleLayer({ leaf: fixture("env-refresh-leaf-11643") }),
+							Layer.succeed(
+								Context.Service<{
+									readonly latest: typeof latest
+									readonly started: typeof started
+								}>("loader/fixture/env-refresh-leaf-11643"),
+								{ latest, started },
+							),
+						),
 					),
 				),
 			),

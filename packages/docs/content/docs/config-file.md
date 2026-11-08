@@ -52,7 +52,7 @@ without ids.
 Declare command plugins as top-level entries:
 
 ```yaml
-- name: ./commands.ts
+- name: ./dist/commands.js
   cli: true
 ```
 
@@ -325,10 +325,11 @@ VS Code:
 
 ## Changes while running
 
-With `graft start --watch`, Graft watches the config file. Include merges
-notifications from the entry and physical-target watchers and waits for 100 ms
-without another notification before refreshing. Installing a watcher still
-requests a catch-up read, including after a symlink target changes.
+`graft start` reads one revision and rejects `--watch`. The editing and watcher
+rules below describe directly embedded Include and Loader APIs; they provide
+cooperative lifecycle behavior. Include merges file and physical-target
+notifications, debounces them for 100 ms and requests a catch-up read after
+watcher installation.
 
 Graft then compares the new entries with the running entries:
 
@@ -368,12 +369,13 @@ reconciling.
 
 ### Invalid files
 
-| Situation                             | Behavior                                                                                            |
-| ------------------------------------- | --------------------------------------------------------------------------------------------------- |
-| Invalid file while running            | Graft logs the error and keeps the last valid version.                                              |
-| Invalid first file, with `--watch`    | Graft logs the cause, starts with no entries and keeps watching. Fixing the file loads its entries. |
-| Invalid first file, without `--watch` | Startup fails.                                                                                      |
-| API edit while the file is invalid    | Cannot replace the invalid file with an empty configuration.                                        |
+An invalid first file fails CLI startup. The following rules apply to embedded
+Include.
+
+| Situation                          | Behavior                                                     |
+| ---------------------------------- | ------------------------------------------------------------ |
+| Invalid file while running         | Graft logs the error and keeps the last valid version.       |
+| API edit while the file is invalid | Cannot replace the invalid file with an empty configuration. |
 
 When embedding Include with `initial`, a missing file is created only after YAML
 preparation, ID assignment, full-tree validation and serialization verification

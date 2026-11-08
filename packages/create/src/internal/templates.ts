@@ -111,7 +111,8 @@ const app: Template = {
 		engines,
 		scripts: {
 			start: "graft start",
-			dev: "graft start --watch",
+			build: "tsc -p tsconfig.build.json",
+			dev: "tsc -p tsconfig.build.json && graft start",
 			typecheck: "effect-tsgo tsc",
 		},
 		dependencies: dependencies(context),
@@ -120,15 +121,15 @@ const app: Template = {
 	config: (context) =>
 		header +
 		`- id: hello
-  name: ./src/hello.ts
+  name: ./dist/hello.js
   config:
     message: Hello from Graft!
 - id: greeter
-  name: ./src/greeter.ts
+  name: ./dist/greeter.js
   config:
     greeting: Hello
 - id: ticker
-  name: ./src/ticker.ts
+  name: ./dist/ticker.js
   config:
     name: Graft
 ` +
@@ -154,7 +155,7 @@ const plugin: Template = {
 		files: ["dist"],
 		scripts: {
 			build: "tsc -p tsconfig.build.json",
-			dev: "graft start --watch",
+			dev: "tsc -p tsconfig.build.json && graft start",
 			test: "vitest run",
 			typecheck: "effect-tsgo tsc",
 			prepublishOnly: "tsc -p tsconfig.build.json",
@@ -181,7 +182,7 @@ const plugin: Template = {
 	config: (context) =>
 		header +
 		`- id: greeter
-  name: ./src/index.ts
+  name: ./dist/index.js
   config:
     name: Graft
 ` +
@@ -198,7 +199,7 @@ const minimal: Template = {
 		private: true,
 		type: "module",
 		engines,
-		scripts: { start: "graft start", dev: "graft start --watch" },
+		scripts: { start: "graft start" },
 		dependencies: dependencies(context),
 	}),
 	config: (context) =>

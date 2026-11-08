@@ -9,3 +9,5 @@ export * as Capabilities from "./Capabilities"
 export * as Policy from "./Policy"
 export { UndeclaredFailure } from "./Contract"
 export { TransportError } from "./Errors"
+
+export * as Configuration from "./Configuration"

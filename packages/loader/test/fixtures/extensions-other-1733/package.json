@@ -1,0 +1,6 @@
+{
+	"name": "extensions-other-1733",
+	"version": "1.0.0",
+	"type": "module",
+	"exports": "./index.mjs"
+}

@@ -2,15 +2,12 @@
  * Runs a Graft application from its config file.
  */
 import {
-	Array,
 	Cause,
 	Deferred,
 	Effect,
 	Exit,
-	FileSystem,
 	Layer,
 	Logger,
-	Option,
 	Path,
 	Scope,
 	Semaphore,
@@ -19,8 +16,7 @@ import {
 } from "effect"
 import { NodeServices } from "@effect/platform-node"
 
-import { Graft, Plugin, type Transition } from "@graftland/graft"
-import * as Hmr from "@graftland/hmr"
+import { Graft, type Transition } from "@graftland/graft"
 import {
 	Entry,
 	Include,
@@ -30,38 +26,30 @@ import {
 } from "@graftland/loader"
 
 import { Application, ApplicationError, platform } from "./Application"
-import {
-	layer as env,
-	EnvDir,
-	EnvFile,
-	watchEnvDir,
-	watchEnvFile,
-} from "./internal/env"
+import { layer as env } from "./internal/env"
+import * as Inspection from "./internal/inspection"
 import { layer as intercepts } from "./internal/intercepts"
-import { watchModules } from "./internal/watch"
 
 export interface Options {
 	/** Path of the config file. */
 	readonly config: string
-	/** Reload plugin modules and the config file when they change. */
+	/** Live editing is unsupported for this deployment. */
 	readonly watch: boolean
 	/**
 	 * A `.env` file that `!env` reads when the process environment does not set
-	 * a variable. With `watch`, changes to it are read again.
+	 * a variable.
 	 */
 	readonly envFile?: string | undefined
 	/**
 	 * A directory of secret files that `!env` reads when neither the process
 	 * environment nor `envFile` sets a variable. Each regular file is one
-	 * variable, named after the file. With `watch`, changes are read again.
+	 * variable, named after the file.
 	 */
 	readonly envDir?: string | undefined
 }
 
 /**
- * Loads the entries of the config file and runs until interrupted. Plugin
- * modules are imported through the hot reloader, so bare specifiers resolve
- * from the application directory whether or not `watch` is on.
+ * Loads one configuration revision using inspected module descriptors.
  */
 export const run = (
 	options: Options,
@@ -77,6 +65,12 @@ export const run = (
 	| Tree.InvalidOperation
 > =>
 	Effect.gen(function* () {
+		if (options.watch)
+			return yield* ApplicationError.make({
+				cause: Cause.fail(
+					"Watch and live Loader mutation are unsupported for this deployment",
+				),
+			})
 		const scope = yield* Effect.scope
 		const done = yield* Deferred.make<void, ApplicationError>()
 		const protocol = yield* Semaphore.make(1)
@@ -109,71 +103,21 @@ export const run = (
 		const path = yield* Path.Path
 		const file = path.resolve(options.config)
 		const directory = path.dirname(file)
-		const base = yield* path.toFileUrl(file)
-		const hmr = yield* Hmr.make({ base: base.href })
+		const control = yield* Inspection.Address
 		const resolver = yield* ModuleResolver.make({
 			base: directory,
-			importer: hmr.importerScoped,
-		})
-		const modules = yield* ModuleResolver.make({
-			base: directory,
-			importer: options.watch ? hmr.importModuleScoped : hmr.importModule,
-		})
-		yield* Graft.provide(ModuleResolver.ModuleResolver, {
-			resolve: resolver.resolve,
-			importModule: modules.importModule,
-		})
-		const fs = yield* FileSystem.FileSystem
-		const observe = hmr.observation.pipe(
-			Effect.provideService(FileSystem.FileSystem, fs),
-			Effect.map((source) => ({
-				...source,
-				watch: (files: ReadonlyArray<string>, activation: Scope.Scope) =>
-					source.watch(files, activation).pipe(
-						Effect.mapError((cause) =>
-							ModuleResolver.ModuleInvalid.make({
-								specifier: Array.join(files, ", "),
-								cause,
-							}),
-						),
-					),
-			})),
-		)
-		const included = yield* Graft.plugin(Include.Include, {
-			path: file,
-			watch: options.watch,
+			control,
 		}).pipe(
-			Effect.provideService(
-				ModuleResolver.Watch,
-				options.watch ? Option.some(observe) : Option.none(),
+			Effect.mapError((error) =>
+				ApplicationError.make({ cause: Cause.fail(error) }),
 			),
 		)
+		yield* Graft.provide(ModuleResolver.ModuleResolver, resolver)
+		const included = yield* Graft.plugin(Include.Include, {
+			path: file,
+			watch: false,
+		})
 		yield* included.await
-		if (options.watch) {
-			const { reload } = yield* EnvFile
-			const { reload: reloadDir } = yield* EnvDir
-			const { envFile, envDir } = options
-			const reloader = Plugin.make({
-				name: "@graftland/cli/Start/reloader",
-				inject: [Loader.Loader, FileSystem.FileSystem, Path.Path],
-				apply: () =>
-					Effect.gen(function* () {
-						const loader = yield* Loader.Loader
-						yield* watchModules(hmr, directory, loader.retry).pipe(
-							Effect.forkScoped,
-						)
-						if (envFile !== undefined)
-							yield* watchEnvFile(envFile, reload, loader.retry).pipe(
-								Effect.forkScoped,
-							)
-						if (envDir !== undefined)
-							yield* watchEnvDir(envDir, reloadDir, loader.retry).pipe(
-								Effect.forkScoped,
-							)
-					}),
-			})
-			yield* Graft.plugin(reloader)
-		}
 
 		yield* Effect.logInfo(
 			`Running ${path.relative(process.cwd(), file) || file}`,
@@ -188,6 +132,7 @@ export const run = (
 				Graft.layer,
 				Layer.mergeAll(
 					platform,
+					Inspection.layer,
 					intercepts,
 					env({ file: options.envFile, dir: options.envDir }).pipe(
 						Layer.provide(NodeServices.layer),
@@ -195,5 +140,8 @@ export const run = (
 					Logger.layer([Logger.consolePretty()]),
 				),
 			),
+		),
+		Effect.catchTag("ControlError", (error) =>
+			ApplicationError.make({ cause: Cause.fail(error) }),
 		),
 	)

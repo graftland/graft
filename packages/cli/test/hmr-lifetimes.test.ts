@@ -6,81 +6,23 @@ import {
 	Cause,
 	Deferred,
 	Effect,
-	Exit,
 	Fiber,
 	FileSystem,
 	Logger,
 	Option,
 	Path,
 	Queue,
-	Ref,
-	Schema,
-	Scope,
 	Stream,
-	String,
 } from "effect"
 import { NodeServices } from "@effect/platform-node"
 import { assert, it } from "@effect/vitest"
 
-const runtimeUrl = new URL("../.cache/integration/runtime.mjs", import.meta.url)
-const { Hmr, Graft, ModuleResolver, watchModules } = createRequire(
-	import.meta.url,
-)(runtimeUrl.pathname) as typeof import("./runtime.ts")
-const quote = Schema.encodeEffect(Schema.fromJsonString(Schema.String))
+import type * as Runtime from "./runtime"
 
-it.live(
-	"retains failed module observations after candidate resource cleanup",
-	() =>
-		Effect.gen(function* () {
-			const fs = yield* FileSystem.FileSystem
-			const path = yield* Path.Path
-			const temporary = yield* fs.makeTempDirectoryScoped()
-			const directory = yield* fs.realPath(temporary)
-			const base = (yield* path.toFileUrl(`${directory}/app.mjs`)).href
-			const hmr = yield* Hmr.make({
-				base,
-				include: String.startsWith(new URL(".", base).href),
-			})
-			const resources = yield* Ref.make(0)
-			const parent = yield* Effect.scope
-			const owner = yield* Scope.fork(parent)
-			const resolver = yield* ModuleResolver.make({
-				base: directory,
-				importer: (specifier, options) =>
-					Effect.acquireRelease(
-						Ref.update(resources, (count) => count + 1),
-						() => Ref.update(resources, (count) => count - 1),
-					).pipe(Effect.andThen(hmr.importerScoped(specifier, options))),
-			})
-			yield* fs.writeFileString(`${directory}/plugin.mjs`, "export default ???")
-			const failed = yield* Effect.exit(
-				resolver.resolve("./plugin.mjs").pipe(Scope.provide(owner)),
-			)
-			assert(Exit.isFailure(failed))
-			const released = yield* Ref.get(resources)
-			assert.strictEqual(released, 0)
-			const runtime = yield* quote(
-				new URL("../.cache/integration/plugin.mjs", import.meta.url).href,
-			)
-			const effect = yield* quote(import.meta.resolve("effect"))
-			yield* fs.writeFileString(
-				`${directory}/plugin.mjs`,
-				`import { Plugin } from ${runtime}; import { Effect } from ${effect}; export default Plugin.make({ name: 'recovered', apply: () => Effect.void });`,
-			)
-			const changed = yield* hmr.watch([directory], { debounce: 0 }).pipe(
-				Stream.runHead,
-				Effect.provideService(FileSystem.FileSystem, {
-					...fs,
-					watch: () => Stream.never,
-				}),
-				Effect.timeout("2 seconds"),
-			)
-			assert.strictEqual(Option.getOrThrow(changed)._tag, "Reloaded")
-			yield* Scope.close(owner, Exit.void)
-			const recovered = yield* resolver.resolve("./plugin.mjs")
-			assert.strictEqual(recovered.name, "recovered")
-		}).pipe(Effect.scoped, Effect.provide([Graft.layer, NodeServices.layer])),
-)
+const runtimeUrl = new URL("../.cache/integration/runtime.mjs", import.meta.url)
+const { Hmr, Graft, watchModules }: typeof Runtime = createRequire(
+	import.meta.url,
+)(runtimeUrl.pathname)
 
 it.effect.each(["effect", "scope", "clean"])(
 	"observes real HMR watcher cleanup exactly once (%s)",

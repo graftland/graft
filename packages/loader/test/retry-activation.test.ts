@@ -1,20 +1,10 @@
-import {
-	Array,
-	Context,
-	Deferred,
-	Effect,
-	Layer,
-	Path,
-	Ref,
-	Schema,
-	Stream,
-} from "effect"
+import { Context, Effect, Ref } from "effect"
 import { assert, it } from "@effect/vitest"
 
-import { Graft, Plugin } from "@graftland/graft"
+import { Graft } from "@graftland/graft"
 
-import { Loader, ModuleResolver } from "../src/index.ts"
-import { loaderService, run } from "./utils.ts"
+import { Loader } from "../src/index.ts"
+import { fixture, loaderService, run } from "./utils.ts"
 
 class Gate extends Context.Service<Gate, string>()(
 	"@graftland/loader/test/retry-activation.test/Gate",
@@ -28,26 +18,11 @@ it.effect.each(["direct", "injected", "nested", "injected group"])(
 			const attempts = yield* Ref.make(0)
 			const healthyStarts = yield* Ref.make(0)
 			const healthyUpdates = yield* Ref.make(0)
-			const flaky = Plugin.make({
-				name: "flaky",
-				apply: () =>
-					Effect.gen(function* () {
-						yield* Ref.update(attempts, (n) => n + 1)
-						if (!(yield* Ref.get(available)))
-							return yield* Effect.fail("Temporarily unavailable")
-					}),
-			})
-			const healthy = Plugin.make({
-				name: "healthy",
-				config: Schema.Unknown,
-				apply: () =>
-					Ref.update(healthyStarts, (n) => n + 1).pipe(
-						Effect.as((_next: unknown) =>
-							Ref.update(healthyUpdates, (n) => n + 1).pipe(Effect.as(true)),
-						),
-					),
-			})
-			yield* run(() => ({ flaky, healthy }))(() =>
+
+			yield* run({
+				flaky: fixture("retry-activation-flaky-1330"),
+				healthy: fixture("retry-activation-healthy-1330"),
+			})(() =>
 				Effect.gen(function* () {
 					yield* Graft.provide(Gate, "available")
 					const entries = [
@@ -90,74 +65,21 @@ it.effect.each(["direct", "injected", "nested", "injected group"])(
 					assert.strictEqual(starts, 1)
 					assert.strictEqual(updates, 0)
 				}),
-			)
-		}),
-)
-
-it.effect(
-	"retries failed resolution while retaining unfinished resolution",
-	() =>
-		Effect.gen(function* () {
-			const available = yield* Ref.make(false)
-			const attempts = yield* Ref.make(0)
-			const slowAttempts = yield* Ref.make(0)
-			const slowStarted = yield* Deferred.make<void>()
-			const started = yield* Deferred.make<void>()
-			const plugin = Plugin.make({
-				name: "recovered",
-				apply: () => Deferred.succeed(started, undefined).pipe(Effect.asVoid),
-			})
-			const resolver = ModuleResolver.layer({
-				base: "/app",
-				importer: (name) =>
-					name === "slow"
-						? Ref.update(slowAttempts, (n) => n + 1).pipe(
-								Effect.andThen(Deferred.succeed(slowStarted, undefined)),
-								Effect.andThen(Effect.never),
-							)
-						: Effect.gen(function* () {
-								yield* Ref.update(attempts, (n) => n + 1)
-								if (!(yield* Ref.get(available)))
-									return yield* Effect.fail("Import temporarily unavailable")
-								return { default: plugin }
-							}),
-			}).pipe(Layer.provide(Path.layer))
-			yield* Effect.gen(function* () {
-				yield* Graft.plugin(Loader.plugin, [{ id: "flaky", name: "flaky" }])
-				const loader = yield* loaderService
-				yield* loader.ready
-				yield* loader.create({ id: "slow", name: "slow" })
-				yield* Deferred.await(slowStarted)
-				// A sibling beginning its import does not imply that the failed
-				// entry's concurrent retry has settled.
-				yield* Graft.forks.pipe(
-					Stream.filterEffect((trees) =>
-						Effect.map(Ref.get(attempts), (attempts) => {
-							const failed = (nodes: typeof trees): boolean =>
-								Array.some(
-									nodes,
-									(node) =>
-										(node.name === "flaky" && node.state._tag === "Failed") ||
-										failed(node.children),
-								)
-							return attempts === 2 && failed(trees)
-						}),
-					),
-					Stream.runHead,
-				)
-				yield* Ref.set(available, true)
-				yield* loader.retry
-				yield* Deferred.await(started)
-				// Removal waits for the next target to be reconciled without blocking on slow.
-				yield* loader.remove("slow")
-				yield* loader.ready
-				const imported = yield* Ref.get(attempts)
-				const slow = yield* Ref.get(slowAttempts)
-				assert.strictEqual(imported, 3)
-				assert.strictEqual(slow, 1)
-			}).pipe(
-				Effect.scoped,
-				Effect.provide(Layer.provideMerge(Graft.layer, resolver)),
+			).pipe(
+				Effect.provideService(
+					Context.Service<{
+						readonly attempts: typeof attempts
+						readonly available: typeof available
+					}>("loader/fixture/retry-activation-flaky-1330"),
+					{ attempts, available },
+				),
+				Effect.provideService(
+					Context.Service<{
+						readonly healthyStarts: typeof healthyStarts
+						readonly healthyUpdates: typeof healthyUpdates
+					}>("loader/fixture/retry-activation-healthy-1330"),
+					{ healthyStarts, healthyUpdates },
+				),
 			)
 		}),
 )

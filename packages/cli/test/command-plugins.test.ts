@@ -78,6 +78,10 @@ it.live(
 		Effect.gen(function* () {
 			const fs = yield* FileSystem.FileSystem
 			const directory = yield* fs.makeTempDirectoryScoped()
+			yield* fs.writeFileString(
+				directory + "/package.json",
+				'{"name":"command-fixture","type":"module"}',
+			)
 			yield* install(directory)
 			yield* configure(directory, "Hello")
 			for (const args of [
@@ -102,6 +106,10 @@ it.live(
 		Effect.gen(function* () {
 			const fs = yield* FileSystem.FileSystem
 			const directory = yield* fs.makeTempDirectoryScoped()
+			yield* fs.writeFileString(
+				directory + "/package.json",
+				'{"name":"command-fixture","type":"module"}',
+			)
 			const home = directory + "/home"
 			yield* install(home)
 			yield* configure(home, "Global")
@@ -123,6 +131,10 @@ it.live("keeps protocol-mode help and version off stdout", () =>
 	Effect.gen(function* () {
 		const fs = yield* FileSystem.FileSystem
 		const directory = yield* fs.makeTempDirectoryScoped()
+		yield* fs.writeFileString(
+			directory + "/package.json",
+			'{"name":"command-fixture","type":"module"}',
+		)
 		for (const args of [
 			["start", "--stdio", "--help"],
 			["--stdio", "--version"],
@@ -143,6 +155,10 @@ for (const global of [false, true]) {
 			Effect.gen(function* () {
 				const fs = yield* FileSystem.FileSystem
 				const directory = yield* fs.makeTempDirectoryScoped()
+				yield* fs.writeFileString(
+					directory + "/package.json",
+					'{"name":"command-fixture","type":"module"}',
+				)
 				const home = directory + "/home"
 				const searchPath = yield* Config.String("PATH").pipe(
 					Config.withDefault(""),
@@ -183,6 +199,10 @@ it.live("activates command providers before waiting for their consumers", () =>
 	Effect.gen(function* () {
 		const fs = yield* FileSystem.FileSystem
 		const directory = yield* fs.makeTempDirectoryScoped()
+		yield* fs.writeFileString(
+			directory + "/package.json",
+			'{"name":"command-fixture","type":"module"}',
+		)
 		const fixture = yield* json(
 			new URL("../.cache/integration/command-plugin.mjs", import.meta.url).href,
 		)
@@ -207,6 +227,10 @@ it.live(
 		Effect.gen(function* () {
 			const fs = yield* FileSystem.FileSystem
 			const directory = yield* fs.makeTempDirectoryScoped()
+			yield* fs.writeFileString(
+				directory + "/package.json",
+				'{"name":"command-fixture","type":"module"}',
+			)
 			const fixture = yield* json(
 				new URL("../.cache/integration/command-plugin.mjs", import.meta.url)
 					.href,

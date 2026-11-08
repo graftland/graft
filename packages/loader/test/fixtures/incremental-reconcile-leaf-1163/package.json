@@ -1,0 +1,6 @@
+{
+	"name": "incremental-reconcile-leaf-1163",
+	"version": "1.0.0",
+	"type": "module",
+	"exports": "./index.mjs"
+}

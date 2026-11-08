@@ -6,8 +6,6 @@ import {
 	Effect,
 	Exit,
 	Layer,
-	Record,
-	Path as ResolverPath,
 	Schema,
 	SubscriptionRef,
 } from "effect"
@@ -15,13 +13,14 @@ import { FetchHttpClient, HttpRouter, HttpServerResponse } from "effect/http"
 import { assert, it } from "@effect/vitest"
 
 import { Graft, Plugin } from "@graftland/graft"
-import { Loader, ModuleResolver } from "@graftland/loader"
+import { Loader } from "@graftland/loader"
 
 import * as Http from "../src/Http.ts"
 import server from "../src/index.ts"
 import * as entryModule from "../src/index.ts"
 import router from "../src/router.ts"
 import * as Testing from "../src/Testing.ts"
+import { fixture, moduleLayer } from "./module-fixtures"
 import { capture, logs, request, run, start } from "./utils.ts"
 
 it.live("passes the public listener conformance kit", () =>
@@ -170,26 +169,14 @@ for (const name of ["http", "@graftland/plugin-http"])
 					Layer.fresh(Graft.layer),
 					Layer.merge(
 						FetchHttpClient.layer,
-						Layer.effect(
-							ModuleResolver.ModuleResolver,
-							ModuleResolver.make({
-								base: "/",
-								importer: (specifier) => {
-									const modules: Readonly<Record<string, unknown>> = {
-										http: {},
-										"@graftland/plugin-http": { default: server },
-										"@graftland/plugin-http/router": { default: router },
-									}
-									return Effect.fromOption(
-										Record.get(modules, specifier),
-										() => ({
-											code: "ERR_MODULE_NOT_FOUND",
-											message: "Cannot find package '" + specifier + "'",
-										}),
-									)
-								},
-							}),
-						).pipe(Layer.provide(ResolverPath.layer)),
+						moduleLayer({
+							"@graftland/plugin-http": fixture(
+								"plugin-http-api-documentation-graftland-plugin-http-0",
+							),
+							"@graftland/plugin-http/router": fixture(
+								"plugin-http-api-documentation-graftland-plugin-http-router-1",
+							),
+						}),
 					),
 				),
 			),

@@ -221,7 +221,7 @@ const worker = Effect.fnUntraced(function* (
 	const state = yield* base(command)
 	const script = yield* launcher
 	const native = yield* Effect.try({
-		try: () => new Worker(script),
+		try: () => new Worker(script, { execArgv: [] }),
 		catch: (cause) => NativeFailure.make({ cause: Cause.die(cause) }),
 	}).pipe(Effect.orDie)
 	const handle: Handle = {

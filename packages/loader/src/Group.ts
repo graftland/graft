@@ -48,8 +48,25 @@ import {
 } from "./internal/refresh"
 import { snapshot } from "./internal/snapshot"
 import { copyGroup, groups } from "./internal/validated"
-import { ModuleResolver, Watch } from "./ModuleResolver"
+import { ModuleInvalid, ModuleResolver, Watch } from "./ModuleResolver"
 import { validateGroup, type InvalidOperation } from "./Tree"
+
+const importEntry = Effect.fnUntraced(function* (
+	resolver: ModuleResolver["Service"],
+	entry: Entry,
+) {
+	const descriptor = yield* resolver.resolve(entry.name)
+	const module = yield* Effect.tryPromise({
+		try: () => import(descriptor.location),
+		catch: (cause) => ModuleInvalid.make({ specifier: entry.name, cause }),
+	})
+	return yield* Effect.fromOption(Plugin.fromModule(module), () =>
+		ModuleInvalid.make({
+			specifier: entry.name,
+			cause: "The selected module no longer exports its described plugin",
+		}),
+	)
+})
 
 interface Child {
 	readonly entry: Entry
@@ -367,9 +384,7 @@ const definition = Plugin.make({
 					yield* ScopedRef.set(observations, Effect.scope)
 					const observationScope = yield* ScopedRef.get(observations)
 					const plugin: Plugin.Plugin =
-						entry.group === true
-							? Group
-							: yield* resolver.resolve(entry.name, { observationScope })
+						entry.group === true ? Group : yield* importEntry(resolver, entry)
 					const reportConfig = (plugin: Plugin.Plugin) =>
 						entry.group !== true && Option.isSome(report)
 							? report.value(entry.name, entryLists(plugin.config))

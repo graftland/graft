@@ -1,18 +1,16 @@
 import {
 	Array,
 	ConfigProvider,
+	Context,
 	Effect,
 	FileSystem,
 	Layer,
 	Queue,
-	Record,
 	Schema,
-	SubscriptionRef,
 } from "effect"
 import { FetchHttpClient } from "effect/http"
 import {
 	HttpApi,
-	HttpApiBuilder,
 	HttpApiClient,
 	HttpApiEndpoint,
 	HttpApiGroup,
@@ -20,18 +18,14 @@ import {
 import { NodeServices } from "@effect/platform-node"
 import { assert, it } from "@effect/vitest"
 
-import { Graft, Plugin } from "@graftland/graft"
-import { Entry, Loader, ModuleResolver } from "@graftland/loader"
-import server from "@graftland/plugin-http"
+import { Graft } from "@graftland/graft"
+import { Entry, Loader } from "@graftland/loader"
 import * as Http from "@graftland/plugin-http/Http"
-import router from "@graftland/plugin-http/router"
 
 import { parse } from "yaml"
 
-import * as HttpApis from "../src/HttpApis.ts"
-import composer from "../src/index.ts"
-import scalar from "../src/scalar.ts"
-import { capture, request, waitFor } from "./utils.ts"
+import { fixture, moduleLayer } from "./module-fixtures"
+import { request } from "./utils.ts"
 
 for (const page of ["http", "http-api"])
 	it.live(
@@ -57,43 +51,7 @@ for (const page of ["http", "http-api"])
 					readonly path: `/${string}`
 					readonly routes: Http.Routes["Service"]
 				}>()
-				const probe = Plugin.make({
-					name: "probe",
-					config: Schema.Struct({
-						path: Schema.TemplateLiteral(["/", Schema.String]),
-					}),
-					inject: [Http.Server, Http.Routes],
-					apply: ({ path }) =>
-						Effect.gen(function* () {
-							const api = HttpApi.make("probe").add(
-								HttpApiGroup.make("probe").add(
-									HttpApiEndpoint.get("get", path, { success: Schema.String }),
-								),
-							)
-							yield* HttpApis.serve(
-								api,
-								["probe"],
-								HttpApiBuilder.group(api, "probe", (h) =>
-									h.handle("get", () => Effect.succeed(path)),
-								),
-							)
-							if (page === "http-api") {
-								const document = yield* capture(HttpApis.Document)
-								yield* waitFor(document, ({ spec }) =>
-									Record.has(spec.paths, path),
-								)
-								assert.deepStrictEqual(
-									Record.keys(
-										(yield* SubscriptionRef.get(document)).spec.paths,
-									),
-									[path],
-								)
-							}
-							const server = yield* Http.Server
-							const routes = yield* Http.Routes
-							yield* Queue.offer(results, { url: server.url, path, routes })
-						}),
-				})
+
 				const groups = yield* Effect.forEach(original, (entry, index) =>
 					Effect.gen(function* () {
 						const children = yield* Schema.decodeUnknownEffect(Entry.Entries)(
@@ -145,13 +103,18 @@ for (const page of ["http", "http-api"])
 					Effect.provide(
 						Layer.provideMerge(
 							Layer.fresh(Graft.layer),
-							ModuleResolver.fromRecord({
-								"@graftland/plugin-http": server,
-								"@graftland/plugin-http/router": router,
-								"@graftland/plugin-http-api": composer,
-								"@graftland/plugin-http-api/scalar": scalar,
-								probe,
-							}),
+							Layer.mergeAll(
+								moduleLayer({
+									probe: fixture("documentation-probe-4199"),
+								}),
+								Layer.succeed(
+									Context.Service<{
+										readonly page: typeof page
+										readonly results: typeof results
+									}>("loader/fixture/documentation-probe-4199"),
+									{ page, results },
+								),
+							),
 						),
 					),
 				)

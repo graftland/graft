@@ -19,7 +19,16 @@ export const Artifact = Schema.Struct({
 		entry: Schema.String,
 	}),
 })
+export const ConfigurationModule = Schema.Struct({
+	artifact: Artifact,
+	export: Schema.String,
+	options: Schema.Json,
+})
 export const Deployment = Schema.Struct({
+	environment: Schema.optionalKey(Schema.Array(ConfigurationModule)),
+	moduleSuffix: Schema.optionalKey(Schema.String),
+	inspection: Schema.optionalKey(Schema.Literal("Module")),
+	moduleKind: Schema.optionalKey(Schema.Literals(["Environment", "Resolver"])),
 	artifact: Artifact,
 	contractArtifact: Schema.optionalKey(Artifact),
 	contract: Schema.optionalKey(Schema.String),
@@ -35,6 +44,7 @@ export const Target = Schema.Struct({
 	deployment: Schema.optionalKey(Deployment),
 })
 export const Resolved = Schema.Struct({
+	environmentModules: Schema.optionalKey(Schema.Array(ConfigurationModule)),
 	input: Schema.Json,
 	identity: Schema.String,
 	environment: Schema.String,
@@ -51,6 +61,8 @@ export const Binding = Schema.Struct({
 	),
 })
 export const Description = Schema.Struct({
+	inspectionData: Schema.optionalKey(Schema.Json),
+	moduleExport: Schema.optionalKey(Schema.Literals(["default", "plugin"])),
 	artifact: Schema.String,
 	configuration: Schema.String,
 	environment: Schema.String,
@@ -170,6 +182,7 @@ export const Report = Schema.Union([
 		endpoint: Schema.optionalKey(Endpoint),
 	}),
 	Schema.TaggedStruct("Failed", {
+		reason: Schema.optionalKey(Schema.Literal("PluginExportMissing")),
 		cause: Schema.Json,
 		creation: Schema.Literals(["Unknown", "NotStarted"]),
 		delivery: Schema.optionalKey(Schema.Literal("Unavailable")),

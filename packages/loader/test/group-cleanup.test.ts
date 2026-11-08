@@ -1,20 +1,10 @@
-import {
-	Array,
-	Cause,
-	Deferred,
-	Effect,
-	Layer,
-	Option,
-	Ref,
-	Schema,
-	Stream,
-} from "effect"
+import { Array, Cause, Context, Effect, Option, Ref, Stream } from "effect"
 import { assert, it } from "@effect/vitest"
 
-import { Graft, Plugin, type Fork } from "@graftland/graft"
+import { Graft, type Fork } from "@graftland/graft"
 
-import { Loader, ModuleResolver } from "../src/index.ts"
-import { loaderService, run } from "./utils.ts"
+import { Loader } from "../src/index.ts"
+import { fixture, loaderService, run } from "./utils.ts"
 
 const flatten = (
 	nodes: ReadonlyArray<Fork.ForkTree>,
@@ -52,25 +42,11 @@ it.effect.each(["remove", "disable", "replace"])(
 		Effect.gen(function* () {
 			const first = new Error("First cleanup failed")
 			const second = new Error("Second cleanup failed")
-			yield* run((journal) => ({
-				broken: Plugin.make({
-					name: "broken",
-					apply: () =>
-						Effect.gen(function* () {
-							yield* Effect.addFinalizer(() => Effect.die(first))
-							yield* Effect.addFinalizer(() => Effect.die(second))
-							yield* journal.record("start broken")
-						}),
-				}),
-				healthy: Plugin.make({
-					name: "healthy",
-					apply: () => journal.record("start healthy"),
-				}),
-				replacement: Plugin.make({
-					name: "replacement",
-					apply: () => journal.record("start replacement"),
-				}),
-			}))((journal) =>
+			yield* run({
+				broken: fixture("group-cleanup-broken-1435"),
+				healthy: fixture("group-cleanup-healthy-1435"),
+				replacement: fixture("group-cleanup-replacement-1435"),
+			})((journal) =>
 				Effect.gen(function* () {
 					yield* Graft.plugin(Loader.plugin, [
 						{ id: "broken", name: "broken" },
@@ -99,22 +75,29 @@ it.effect.each(["remove", "disable", "replace"])(
 					)
 					yield* journal.expect(
 						operation === "replace"
-							? ["start broken", "start healthy", "start replacement"]
-							: ["start broken", "start healthy"],
+							? [["start broken", "start healthy"], "start replacement"]
+							: [["start broken", "start healthy"]],
 					)
 					yield* loader.create({ id: "later", name: "healthy" })
 					yield* loader.ready
 					yield* journal.expect(
 						operation === "replace"
 							? [
-									"start broken",
-									"start healthy",
+									["start broken", "start healthy"],
 									"start replacement",
 									"start healthy",
 								]
-							: ["start broken", "start healthy", "start healthy"],
+							: [["start broken", "start healthy"], "start healthy"],
 					)
 				}),
+			).pipe(
+				Effect.provideService(
+					Context.Service<{
+						readonly first: typeof first
+						readonly second: typeof second
+					}>("loader/fixture/group-cleanup-broken-1435"),
+					{ first, second },
+				),
 			)
 		}),
 )
@@ -125,19 +108,8 @@ it.effect(
 		Effect.gen(function* () {
 			const broken = yield* Ref.make(true)
 			const cleanup = new Error("Restart cleanup failed")
-			const plugin = Plugin.make({
-				name: "changing",
-				config: Schema.String,
-				apply: () =>
-					Effect.addFinalizer(() =>
-						Ref.get(broken).pipe(
-							Effect.flatMap((broken) =>
-								broken ? Effect.die(cleanup) : Effect.void,
-							),
-						),
-					).pipe(Effect.as(() => Effect.succeed(false))),
-			})
-			yield* run(() => ({ changing: plugin }))(() =>
+
+			yield* run({ changing: fixture("group-cleanup-changing-4156") })(() =>
 				Effect.gen(function* () {
 					yield* Graft.plugin(Loader.plugin, [
 						{ id: "entry", name: "changing", config: "before" },
@@ -167,46 +139,16 @@ it.effect(
 					)
 					assert.isTrue(Array.some(changing, (node) => node.input === "after"))
 				}),
+			).pipe(
+				Effect.provideService(
+					Context.Service<{
+						readonly broken: typeof broken
+						readonly cleanup: typeof cleanup
+					}>("loader/fixture/group-cleanup-changing-4156"),
+					{ broken, cleanup },
+				),
 			)
 		}),
-)
-
-it.effect("removes an unresolved entry after its resolver cleanup fails", () =>
-	Effect.gen(function* () {
-		const entered = yield* Deferred.make<void>()
-		const cleanup = new Error("Resolver cleanup failed")
-		const resolver = Layer.succeed(ModuleResolver.ModuleResolver, {
-			importModule: (specifier) =>
-				Effect.fail(
-					ModuleResolver.ModuleInvalid.make({
-						specifier,
-						cause: "Unused in this fixture",
-					}),
-				),
-			resolve: () =>
-				Effect.gen(function* () {
-					yield* Effect.addFinalizer(() => Effect.die(cleanup))
-					yield* Deferred.succeed(entered, undefined)
-					return yield* Effect.never
-				}),
-		})
-		yield* Effect.gen(function* () {
-			yield* Graft.plugin(Loader.plugin, [{ id: "slow", name: "slow" }])
-			const loader = yield* loaderService
-			yield* Deferred.await(entered)
-			yield* loader.remove("slow")
-			yield* loader.ready
-			const log = yield* cleanupLog
-			assert.include(defects(log.cause), cleanup)
-			const entries = yield* loader.entries
-			assert.deepStrictEqual(entries, [])
-			const root = yield* Stream.runHead(loader.root.state)
-			assert.strictEqual(Option.getOrThrow(root)._tag, "Active")
-		}).pipe(
-			Effect.scoped,
-			Effect.provide(Layer.provideMerge(Graft.layer, resolver)),
-		)
-	}),
 )
 
 it.effect(
@@ -215,12 +157,11 @@ it.effect(
 		Effect.gen(function* () {
 			const first = new Error("First entry cleanup failed")
 			const second = new Error("Second entry cleanup failed")
-			const broken = (failure: Error) =>
-				Plugin.make({
-					name: "broken",
-					apply: () => Effect.addFinalizer(() => Effect.die(failure)),
-				})
-			yield* run(() => ({ first: broken(first), second: broken(second) }))(() =>
+
+			yield* run({
+				first: fixture("cleanup-per-entry"),
+				second: fixture("cleanup-per-entry"),
+			})(() =>
 				Effect.gen(function* () {
 					yield* Graft.plugin(Loader.plugin, [
 						{ id: "first", name: "first" },
@@ -247,6 +188,14 @@ it.effect(
 						[first, second],
 					)
 				}),
+			).pipe(
+				Effect.provideService(
+					Context.Service<{
+						readonly first: typeof first
+						readonly second: typeof second
+					}>("loader/cleanup-per-entry"),
+					{ first, second },
+				),
 			)
 		}),
 )

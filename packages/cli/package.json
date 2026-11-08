@@ -64,7 +64,8 @@
 		"@graftland/create": "workspace:*",
 		"@graftland/package-manager": "workspace:*",
 		"@effect/platform-node": "4.1.2",
-		"yaml": "2.9.1"
+		"yaml": "2.9.1",
+		"@graftland/plugin-remote": "workspace:*"
 	},
 	"bin": {
 		"graft": "./dist/bin.js"

@@ -1,31 +1,27 @@
 # Graft app
 
-A [Graft](https://github.com/graftland/graft) application. `graft.yml` lists the
-plugins to run:
+[English](README.md) | [简体中文](README.zh-CN.md) | [繁體中文](README.zh-TW.md)
 
-| Plugin    | File             | What it shows                                            |
-| --------- | ---------------- | -------------------------------------------------------- |
-| `hello`   | `src/hello.ts`   | A plugin with config that logs when it starts and stops. |
-| `greeter` | `src/greeter.ts` | A plugin that publishes the `Greeter` service.           |
-| `ticker`  | `src/ticker.ts`  | A plugin that injects `Greeter` and greets every 3 s.    |
+A Graft application. Build the source before starting; `graft.yml` selects the
+captured JavaScript files.
 
-| Script              | What it does                                                        |
-| ------------------- | ------------------------------------------------------------------- |
-| `npm run dev`       | Runs the application and reloads plugins and config as files change |
-| `npm start`         | Runs the application                                                |
-| `npm run typecheck` | Checks types, including Effect diagnostics                          |
+## Run it
 
-Use the same scripts with pnpm (`pnpm dev`) or Yarn (`yarn dev`). Node runs the
-TypeScript sources directly; there is no build step.
+```sh
+npm run dev
+```
 
-## Try it
+Edit `src/hello.ts`, then stop the process and run `npm run dev` again. The new
+message appears. Editing a running application does not reload it.
 
-Run `npm run dev`, then, while it runs:
+## Scripts
 
-| Do this                                                                        | You see                                                                                     |
-| ------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------- |
-| Change the interval in `src/ticker.ts` and save.                               | `Ticker stopped`, then the ticker at the new pace. `hello` and `greeter` are not restarted. |
-| Change `greeting` in `graft.yml` and save.                                     | `Ticker stopped`, `Greeter stopped`, then the new greeting: dependents stop first.          |
-| Add `disabled: true` to the `greeter` entry and save.                          | `Ticker stopped`. The ticker waits as `Pending` until you remove the line.                  |
-| Make `apply` in `src/ticker.ts` fail, such as `Effect.fail("oops")`, and save. | A warning with the cause; the previous ticker keeps greeting.                               |
-| Change `inject: [Greeter]` to `inject: []`.                                    | `npm run typecheck` reports that `apply` uses a service it did not declare.                 |
+| Command             | Behavior                           |
+| ------------------- | ---------------------------------- |
+| `npm run dev`       | Build and start                    |
+| `npm start`         | Start the existing build           |
+| `npm run build`     | Compile `src` to `dist`            |
+| `npm run typecheck` | Check types and Effect diagnostics |
+
+The `greeter` plugin publishes `Greeter`; `ticker` injects it and greets every
+three seconds. The same scripts work with pnpm and Yarn.

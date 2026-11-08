@@ -7,7 +7,7 @@
 		"exactOptionalPropertyTypes": true,
 		"noUncheckedIndexedAccess": true,
 		"skipLibCheck": true,
-		// Node runs the sources directly, stripping their types.
+		// Type checking is separate from the captured JavaScript build.
 		"noEmit": true,
 		"allowImportingTsExtensions": true,
 		"erasableSyntaxOnly": true,

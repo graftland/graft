@@ -4,9 +4,10 @@
 	"type": "module",
 	"description": "An MCP server whose tools are Graft plugins that reload without reconnecting",
 	"scripts": {
-		"start": "graft start --stdio --watch",
+		"start": "graft start --stdio",
 		"test": "vitest run",
-		"start:http": "graft start graft.http.yml --watch"
+		"start:http": "graft start graft.http.yml",
+		"build": "tsdown"
 	},
 	"dependencies": {
 		"@graftland/cli": "workspace:*",
@@ -20,6 +21,7 @@
 		"vitest": "5.1.0",
 		"@graftland/loader": "workspace:*",
 		"@effect/platform-node": "4.1.2",
-		"yaml": "2.9.1"
+		"yaml": "2.9.1",
+		"@graftland/plugin-remote": "workspace:*"
 	}
 }

@@ -1,22 +1,22 @@
 import {
 	Array,
 	ConfigProvider,
+	Context,
 	Effect,
 	MutableList,
 	Predicate,
 	Record,
 	Ref,
 	Result,
-	Schema,
 } from "effect"
 import { assert, it } from "@effect/vitest"
 
-import { Graft, Plugin } from "@graftland/graft"
+import { Graft } from "@graftland/graft"
 
 import { Entry, Loader, Tree } from "../src/index.ts"
 import { equalConfig } from "../src/internal/equalConfig.ts"
 import { snapshot } from "../src/internal/snapshot.ts"
-import { loaderService, run } from "./utils.ts"
+import { fixture, loaderService, run } from "./utils.ts"
 
 const graph = (depth: number, leaf: unknown = { value: 1 }): unknown =>
 	Array.reduce(Array.range(1, depth), leaf, (child) => ({
@@ -114,15 +114,8 @@ it.effect(
 		Effect.gen(function* () {
 			const observed = yield* Ref.make(0)
 			const starts = yield* Ref.make(0)
-			const plugin = Plugin.make({
-				name: "graph",
-				config: Schema.Unknown,
-				apply: (value) =>
-					Ref.set(observed, size(value)).pipe(
-						Effect.andThen(Ref.update(starts, (n) => n + 1)),
-					),
-			})
-			yield* run(() => ({ graph: plugin }))(() =>
+
+			yield* run({ graph: fixture("shared-graph") })(() =>
 				Effect.gen(function* () {
 					yield* Graft.plugin(Loader.plugin, [
 						{ id: "graph", name: "graph", config: graph(16) },
@@ -138,6 +131,14 @@ it.effect(
 					const count = yield* Ref.get(starts)
 					assert.strictEqual(count, 1)
 				}),
+			).pipe(
+				Effect.provideService(
+					Context.Service<{
+						readonly observed: typeof observed
+						readonly starts: typeof starts
+					}>("loader/shared-graph"),
+					{ observed, starts },
+				),
 			)
 		}),
 )

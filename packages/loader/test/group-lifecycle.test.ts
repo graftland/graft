@@ -1,10 +1,10 @@
-import { Context, Effect, Layer, Ref, Schema } from "effect"
+import { Context, Effect } from "effect"
 import { assert, describe, it } from "@effect/vitest"
 
-import { Graft, Plugin } from "@graftland/graft"
+import { Graft } from "@graftland/graft"
 
-import { Loader, ModuleResolver } from "../src/index.ts"
-import { echo, loaderService, makeJournal, run } from "./utils.ts"
+import { Loader } from "../src/index.ts"
+import { fixture, loaderService, run } from "./utils.ts"
 
 class Dependency extends Context.Service<Dependency, string>()(
 	"@graftland/loader/test/group-lifecycle.test/Dependency",
@@ -14,7 +14,7 @@ describe("group lifecycle", () => {
 	it.effect(
 		"settles pending injections and applies their latest config when the service arrives",
 		() =>
-			run((journal) => ({ echo: echo(journal) }))((journal) =>
+			run()((journal) =>
 				Effect.gen(function* () {
 					yield* Graft.plugin(Loader.plugin, [
 						{
@@ -47,85 +47,13 @@ describe("group lifecycle", () => {
 			),
 	)
 
-	it.effect("retries unresolved injected entries inside nested groups", () =>
-		Effect.gen(function* () {
-			const journal = yield* makeJournal
-			const available = yield* Ref.make(false)
-			const resolver = Layer.succeed(ModuleResolver.ModuleResolver, {
-				importModule: (specifier) =>
-					Effect.fail(
-						ModuleResolver.ModuleInvalid.make({
-							specifier,
-							cause: "Unused in this fixture",
-						}),
-					),
-				resolve: (name) =>
-					Effect.flatMap(Ref.get(available), (ok) =>
-						ok
-							? Effect.succeed<Plugin.Plugin>(echo(journal))
-							: Effect.fail(
-									ModuleResolver.ModuleNotFound.make({
-										plugin: name,
-										tried: [name],
-									}),
-								),
-					),
-			})
-			yield* Effect.gen(function* () {
-				yield* Graft.provide(Dependency, "available")
-				yield* Graft.plugin(Loader.plugin, [
-					{
-						id: "group",
-						name: "group",
-						group: true,
-						config: [
-							{
-								id: "nested",
-								name: "group",
-								group: true,
-								config: [
-									{
-										id: "echo",
-										name: "echo",
-										inject: [Dependency.key],
-										config: { text: "recovered" },
-									},
-								],
-							},
-						],
-					},
-				])
-				const loader = yield* loaderService
-				yield* loader.ready
-				yield* journal.expect([])
-				yield* Ref.set(available, true)
-				yield* loader.retry
-				yield* loader.ready
-				yield* journal.expect(["start recovered"])
-			}).pipe(
-				Effect.scoped,
-				Effect.provide(Graft.layer.pipe(Layer.provide(resolver))),
-			)
-		}),
-	)
-
 	it.effect(
 		"removes a provider and its consumer without retaining a lease",
 		() =>
-			run((journal) => ({
-				provider: Plugin.make({
-					name: "provider",
-					apply: () => Graft.provide(Dependency, "value"),
-				}),
-				consumer: Plugin.make({
-					name: "consumer",
-					inject: [Dependency],
-					apply: () =>
-						Effect.acquireRelease(journal.record("start consumer"), () =>
-							journal.record("stop consumer"),
-						),
-				}),
-			}))((journal) =>
+			run({
+				provider: fixture("lifecycle-provider"),
+				consumer: fixture("lifecycle-consumer"),
+			})((journal) =>
 				Effect.gen(function* () {
 					yield* Graft.plugin(Loader.plugin, [
 						{
@@ -150,18 +78,7 @@ describe("group lifecycle", () => {
 	it.effect(
 		"keeps the injected child instance when its update handler accepts config",
 		() =>
-			run((journal) => ({
-				updatable: Plugin.make({
-					name: "updatable",
-					config: Schema.String,
-					apply: (value) =>
-						Effect.gen(function* () {
-							yield* journal.record(`start ${value}`)
-							return (next: string) =>
-								Effect.as(journal.record(`update ${next}`), true)
-						}),
-				}),
-			}))((journal) =>
+			run({ updatable: fixture("updatable") })((journal) =>
 				Effect.gen(function* () {
 					yield* Graft.provide(Dependency, "available")
 					yield* Graft.plugin(Loader.plugin, [

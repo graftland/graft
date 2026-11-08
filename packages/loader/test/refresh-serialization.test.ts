@@ -13,9 +13,10 @@ import {
 import { TestClock } from "effect/testing"
 import { assert, it } from "@effect/vitest"
 
-import { Graft, Plugin } from "@graftland/graft"
+import { Graft } from "@graftland/graft"
 
-import { Entry, Intercept, Loader, ModuleResolver } from "../src/index.ts"
+import { Entry, Intercept, Loader } from "../src/index.ts"
+import { fixture, moduleLayer } from "./module-fixtures"
 import { loaderService } from "./utils.ts"
 
 class Gate extends Context.Service<Gate, string>()(
@@ -36,37 +37,24 @@ it.effect.each(["direct", "nested", "injected", "injected group"])(
 			const laterStarted = yield* Deferred.make<void>()
 			const changed = yield* Ref.make(false)
 			const journal = yield* Ref.make<ReadonlyArray<string>>([])
-			const record = (s: string) => Ref.update(journal, Array.append(s))
 			const setting = Context.Reference("refresh-serialization/Setting", {
 				defaultValue: () => "default",
 			})
-			const leaf = Plugin.make({
-				name: "leaf",
-				config: Schema.String,
-				apply: (value) =>
-					Effect.gen(function* () {
-						yield* record(`start ${value}`)
-						if (value === "c") yield* Deferred.succeed(laterStarted, undefined)
-						return (value: string) =>
-							Effect.gen(function* () {
-								yield* record(`begin ${value}`)
-								if (value === "b") {
-									yield* Deferred.succeed(updating, undefined)
-									yield* Deferred.await(releaseUpdate).pipe(
-										Effect.onInterrupt(() =>
-											Deferred.succeed(cancelled, undefined),
-										),
-									)
-								}
-								if (value === "c")
-									yield* Deferred.succeed(laterStarted, undefined)
-								yield* record(`end ${value}`)
-								return true
-							})
-					}),
-			})
+
 			const environment = Layer.mergeAll(
-				ModuleResolver.fromRecord({ leaf }),
+				Layer.mergeAll(
+					moduleLayer({ leaf: fixture("refresh-serialization-leaf-2256") }),
+					Layer.succeed(
+						Context.Service<{
+							readonly journal: typeof journal
+							readonly laterStarted: typeof laterStarted
+							readonly updating: typeof updating
+							readonly releaseUpdate: typeof releaseUpdate
+							readonly cancelled: typeof cancelled
+						}>("loader/fixture/refresh-serialization-leaf-2256"),
+						{ journal, laterStarted, updating, releaseUpdate, cancelled },
+					),
+				),
 				Intercept.layer([
 					{
 						key: setting.key,

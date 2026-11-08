@@ -1,18 +1,18 @@
 import {
 	Array,
+	Context,
 	Deferred,
-	Duration,
 	Effect,
 	Layer,
 	Logger,
 	MutableRef,
 	Option,
 	Ref,
-	Schedule,
 	Schema,
 	Stream,
 	String,
 	Tracer,
+	type Scope,
 } from "effect"
 import { HttpClient, HttpClientResponse } from "effect/http"
 import { assert, describe, it } from "@effect/vitest"
@@ -24,6 +24,7 @@ import { Exporter } from "@graftland/plugin-otlp/Exporter"
 import http from "@graftland/plugin-otlp/http"
 import * as Testing from "@graftland/plugin-otlp/Testing"
 
+import { fixture, moduleLayer } from "./module-fixtures"
 import thirdParty, { Sink, sink } from "./thirdParty"
 
 const entry = (
@@ -35,9 +36,8 @@ const entry = (
 	config: { exporter: { name: "third-party", config: { label } }, plugins },
 })
 
-const run = <A, E>(
-	effect: Effect.Effect<A, E, Graft.Graft | import("effect").Scope.Scope>,
-) => effect.pipe(Effect.scoped, Effect.provide(Layer.fresh(Graft.layer)))
+const run = <A, E>(effect: Effect.Effect<A, E, Graft.Graft | Scope.Scope>) =>
+	effect.pipe(Effect.scoped, Effect.provide(Layer.fresh(Graft.layer)))
 
 describe("public exporter contract", () => {
 	it.effect(
@@ -47,24 +47,31 @@ describe("public exporter contract", () => {
 				Effect.gen(function* () {
 					const output = yield* sink
 					const starts = yield* Ref.make(0)
-					const worker = Plugin.make({
-						name: "test/worker",
-						apply: () => Ref.update(starts, (n) => n + 1),
-					})
-					const other = Plugin.make({
-						name: "test/other",
-						apply: () => Effect.void,
-					})
+
 					yield* Graft.provide(Sink, output)
-					const resolver = yield* ModuleResolver.ModuleResolver.pipe(
-						Effect.provide(
-							ModuleResolver.fromRecord({
-								"@graftland/plugin-otlp": otlp,
-								"third-party": thirdParty,
-								worker,
-								other,
+					const resolver = yield* Layer.build(
+						Layer.mergeAll(
+							moduleLayer({
+								"@graftland/plugin-otlp": fixture(
+									"plugin-otlp-extensions-graftland-plugin-otlp-0",
+								),
+								"third-party": fixture("plugin-otlp-extensions-third-party-1"),
+								worker: fixture("extensions-worker-1733"),
+								other: fixture("extensions-other-1733"),
 							}),
+							Layer.succeed(
+								Context.Service<{ readonly starts: typeof starts }>(
+									"loader/fixture/extensions-worker-1733",
+								),
+								{ starts },
+							),
 						),
+					).pipe(Effect.map(Context.get(ModuleResolver.ModuleResolver)))
+					yield* Graft.provide(
+						Context.Service<{ readonly starts: typeof starts }>(
+							"loader/fixture/extensions-worker-1733",
+						),
+						{ starts },
 					)
 					yield* Graft.provide(ModuleResolver.ModuleResolver, resolver)
 					const loader = yield* Graft.plugin(Loader.plugin, [entry("first")])
@@ -111,19 +118,30 @@ describe("public exporter contract", () => {
 			Effect.gen(function* () {
 				const output = yield* sink
 				const starts = yield* Ref.make(0)
-				const worker = Plugin.make({
-					name: "test/worker",
-					apply: () => Ref.update(starts, (n) => n + 1),
-				})
+
 				yield* Graft.provide(Sink, output)
-				const resolver = yield* ModuleResolver.ModuleResolver.pipe(
-					Effect.provide(
-						ModuleResolver.fromRecord({
-							"third-party": thirdParty,
-							"another-exporter": thirdParty,
-							worker,
+				const resolver = yield* Layer.build(
+					Layer.mergeAll(
+						moduleLayer({
+							"third-party": fixture("plugin-otlp-extensions-third-party-0"),
+							"another-exporter": fixture(
+								"plugin-otlp-extensions-another-exporter-1",
+							),
+							worker: fixture("extensions-worker-3613"),
 						}),
+						Layer.succeed(
+							Context.Service<{ readonly starts: typeof starts }>(
+								"loader/fixture/extensions-worker-3613",
+							),
+							{ starts },
+						),
 					),
+				).pipe(Effect.map(Context.get(ModuleResolver.ModuleResolver)))
+				yield* Graft.provide(
+					Context.Service<{ readonly starts: typeof starts }>(
+						"loader/fixture/extensions-worker-3613",
+					),
+					{ starts },
 				)
 				yield* Graft.provide(ModuleResolver.ModuleResolver, resolver)
 				const config = entry("first").config
@@ -152,23 +170,29 @@ describe("public exporter contract", () => {
 				Effect.gen(function* () {
 					const output = yield* sink
 					const starts = yield* Ref.make(0)
-					const worker = Plugin.make({
-						name: "test/worker",
-						apply: Effect.fnUntraced(function* () {
-							yield* Ref.update(starts, (n) => n + 1)
-							yield* Effect.addFinalizer(() =>
-								Ref.update(output.journal, Array.append("stop")),
-							)
-						}),
-					})
+
 					yield* Graft.provide(Sink, output)
-					const resolver = yield* ModuleResolver.ModuleResolver.pipe(
-						Effect.provide(
-							ModuleResolver.fromRecord({
-								"third-party": thirdParty,
-								worker,
+					const resolver = yield* Layer.build(
+						Layer.mergeAll(
+							moduleLayer({
+								"third-party": fixture("plugin-otlp-extensions-third-party-0"),
+								worker: fixture("extensions-worker-5027"),
 							}),
+							Layer.succeed(
+								Context.Service<{
+									readonly starts: typeof starts
+									readonly output: typeof output
+								}>("loader/fixture/extensions-worker-5027"),
+								{ starts, output },
+							),
 						),
+					).pipe(Effect.map(Context.get(ModuleResolver.ModuleResolver)))
+					yield* Graft.provide(
+						Context.Service<{
+							readonly starts: typeof starts
+							readonly output: typeof output
+						}>("loader/fixture/extensions-worker-5027"),
+						{ starts, output },
 					)
 					yield* Graft.provide(ModuleResolver.ModuleResolver, resolver)
 					const config = entry("first").config
@@ -252,19 +276,26 @@ it.effect("does not update an unchanged exporter when plugins change", () =>
 	run(
 		Effect.gen(function* () {
 			const starts = yield* Ref.make(0)
-			const exporter = Plugin.make({
-				name: "test/fixedExporter",
-				apply: Effect.fnUntraced(function* () {
-					yield* Ref.update(starts, (n) => n + 1)
-					yield* Graft.provide(Exporter, Tracer.nativeTracer)
-				}),
-			})
-			const worker = Plugin.make({
-				name: "test/worker",
-				apply: () => Effect.void,
-			})
-			const resolver = yield* ModuleResolver.ModuleResolver.pipe(
-				Effect.provide(ModuleResolver.fromRecord({ fixed: exporter, worker })),
+
+			const resolver = yield* Layer.build(
+				Layer.mergeAll(
+					moduleLayer({
+						fixed: fixture("extensions-fixed-7584"),
+						worker: fixture("extensions-worker-7584"),
+					}),
+					Layer.succeed(
+						Context.Service<{ readonly starts: typeof starts }>(
+							"loader/fixture/extensions-fixed-7584",
+						),
+						{ starts },
+					),
+				),
+			).pipe(Effect.map(Context.get(ModuleResolver.ModuleResolver)))
+			yield* Graft.provide(
+				Context.Service<{ readonly starts: typeof starts }>(
+					"loader/fixture/extensions-fixed-7584",
+				),
+				{ starts },
 			)
 			yield* Graft.provide(ModuleResolver.ModuleResolver, resolver)
 			const config = { exporter: { name: "fixed", config: {} }, plugins: [] }
@@ -285,18 +316,29 @@ it.effect(
 			Effect.gen(function* () {
 				const output = yield* sink
 				const starts = yield* Ref.make(0)
-				const worker = Plugin.make({
-					name: "test/worker",
-					apply: () => Ref.update(starts, (n) => n + 1),
-				})
-				const resolver = yield* ModuleResolver.ModuleResolver.pipe(
-					Effect.provide(
-						ModuleResolver.fromRecord({
-							"@graftland/plugin-otlp/http": http,
-							"third-party": thirdParty,
-							worker,
+
+				const resolver = yield* Layer.build(
+					Layer.mergeAll(
+						moduleLayer({
+							"@graftland/plugin-otlp/http": fixture(
+								"plugin-otlp-extensions-graftland-plugin-otlp-http-0",
+							),
+							"third-party": fixture("plugin-otlp-extensions-third-party-1"),
+							worker: fixture("extensions-worker-8451"),
 						}),
+						Layer.succeed(
+							Context.Service<{ readonly starts: typeof starts }>(
+								"loader/fixture/extensions-worker-8451",
+							),
+							{ starts },
+						),
 					),
+				).pipe(Effect.map(Context.get(ModuleResolver.ModuleResolver)))
+				yield* Graft.provide(
+					Context.Service<{ readonly starts: typeof starts }>(
+						"loader/fixture/extensions-worker-8451",
+					),
+					{ starts },
 				)
 				yield* Graft.provide(ModuleResolver.ModuleResolver, resolver)
 				yield* Graft.provide(Sink, output)
@@ -349,15 +391,13 @@ it.effect("isolates two exporter instances", () =>
 	run(
 		Effect.gen(function* () {
 			const output = yield* sink
-			const worker = Plugin.make({
-				name: "test/worker",
-				apply: () => Effect.void,
-			})
-			const resolver = yield* ModuleResolver.ModuleResolver.pipe(
-				Effect.provide(
-					ModuleResolver.fromRecord({ "third-party": thirdParty, worker }),
-				),
-			)
+
+			const resolver = yield* Layer.build(
+				moduleLayer({
+					"third-party": fixture("plugin-otlp-extensions-third-party-0"),
+					worker: fixture("extensions-worker-10154"),
+				}),
+			).pipe(Effect.map(Context.get(ModuleResolver.ModuleResolver)))
 			yield* Graft.provide(ModuleResolver.ModuleResolver, resolver)
 			yield* Graft.provide(Sink, output)
 			const first = yield* Graft.plugin(otlp, entry("first").config)
@@ -406,95 +446,90 @@ it.effect("rejects an exporter that replaces its tracer on update", () =>
 for (const phase of ["startup", "task"] as const) {
 	it.effect(
 		`recovers the traced subtree after an exporter ${phase} retry without a config change`,
-		() => {
-			const logs = MutableRef.make<ReadonlyArray<string>>([])
-			return run(
-				Effect.gen(function* () {
-					const attempts = yield* Ref.make(0)
-					const starts = yield* Ref.make(0)
-					const started = yield* Deferred.make<void>()
-					const stopped = yield* Deferred.make<void>()
-					const recovered = yield* Deferred.make<void>()
-					const retrying = yield* Deferred.make<void>()
-					const resume = yield* Deferred.make<void>()
-					const exporter = Plugin.make({
-						name: "test/retryingExporter",
-						retry: Schedule.fromStep(
-							Effect.succeed(() =>
-								Deferred.succeed(retrying, undefined).pipe(
-									Effect.andThen(Deferred.await(resume)),
-									Effect.as([0, Duration.zero] as [number, Duration.Duration]),
-								),
+		() =>
+			Effect.gen(function* () {
+				const logs = MutableRef.make<ReadonlyArray<string>>([])
+				const attempts = yield* Ref.make(0)
+				const starts = yield* Ref.make(0)
+				const started = yield* Deferred.make<void>()
+				const stopped = yield* Deferred.make<void>()
+				const recovered = yield* Deferred.make<void>()
+				const retrying = yield* Deferred.make<void>()
+				const resume = yield* Deferred.make<void>()
+
+				const RetryGate = Context.Reference<
+					Option.Option<{
+						readonly retrying: typeof retrying
+						readonly resume: typeof resume
+					}>
+				>("otlp/retry-gate", { defaultValue: () => Option.none() })
+				return yield* run(
+					Effect.gen(function* () {
+						yield* Graft.provide(
+							Context.Service<{
+								readonly attempts: typeof attempts
+								readonly phase: typeof phase
+								readonly started: typeof started
+								readonly retrying: typeof retrying
+								readonly resume: typeof resume
+							}>("otlp/retrying-exporter"),
+							{ attempts, phase, started, retrying, resume },
+						)
+						yield* Graft.provide(
+							Context.Service<{
+								readonly attempts: typeof attempts
+								readonly starts: typeof starts
+								readonly started: typeof started
+								readonly stopped: typeof stopped
+								readonly recovered: typeof recovered
+							}>("otlp/retrying-traced-worker"),
+							{ attempts, starts, started, stopped, recovered },
+						)
+
+						const resolver = yield* Layer.build(
+							moduleLayer({
+								exporter: fixture("retrying-exporter"),
+								worker: fixture("retrying-traced-worker"),
+							}),
+						).pipe(Effect.map(Context.get(ModuleResolver.ModuleResolver)))
+						yield* Graft.provide(ModuleResolver.ModuleResolver, resolver)
+						const fork = yield* Graft.plugin(otlp, {
+							exporter: { name: "exporter" },
+							plugins: [{ name: "worker" }],
+						})
+						yield* Deferred.await(retrying)
+						if (phase === "task") yield* Deferred.await(stopped)
+						yield* fork.stable
+						const snapshot = yield* Stream.runHead(fork.state)
+						const waiting = Option.getOrThrow(snapshot)
+						assert.equal(waiting._tag, "Active")
+						const before = yield* Ref.get(starts)
+						assert.equal(before, phase === "startup" ? 0 : 1)
+						yield* Deferred.succeed(resume, undefined)
+						yield* Deferred.await(recovered)
+						const after = yield* Ref.get(starts)
+						assert.equal(after, phase === "startup" ? 1 : 2)
+						const count = yield* Ref.get(attempts)
+						assert.equal(count, 2)
+						yield* fork.dispose
+						assert.lengthOf(
+							Array.filter(
+								MutableRef.get(logs),
+								String.includes(`exporter ${phase} failure`),
 							),
-						),
-						apply: Effect.fnUntraced(function* () {
-							const attempt = yield* Ref.getAndUpdate(attempts, (n) => n + 1)
-							if (attempt === 0 && phase === "startup")
-								return yield* Effect.fail("exporter startup failure")
-							yield* Graft.provide(
-								Exporter,
-								Tracer.make({ span: Tracer.nativeTracer.span }),
-							)
-							if (attempt === 0)
-								yield* Plugin.fork(
-									Deferred.await(started).pipe(
-										Effect.andThen(Effect.fail("exporter task failure")),
-									),
-								)
-						}),
-					})
-					const worker = Plugin.make({
-						name: "test/retryWorker",
-						apply: Effect.fnUntraced(function* () {
-							yield* Ref.update(starts, (n) => n + 1)
-							yield* Effect.addFinalizer(() =>
-								Deferred.succeed(stopped, undefined),
-							)
-							yield* Deferred.succeed(started, undefined)
-							if ((yield* Ref.get(attempts)) === 2)
-								yield* Deferred.succeed(recovered, undefined)
-						}),
-					})
-					const resolver = yield* ModuleResolver.ModuleResolver.pipe(
-						Effect.provide(ModuleResolver.fromRecord({ exporter, worker })),
-					)
-					yield* Graft.provide(ModuleResolver.ModuleResolver, resolver)
-					const fork = yield* Graft.plugin(otlp, {
-						exporter: { name: "exporter" },
-						plugins: [{ name: "worker" }],
-					})
-					yield* Deferred.await(retrying)
-					if (phase === "task") yield* Deferred.await(stopped)
-					yield* fork.stable
-					const snapshot = yield* Stream.runHead(fork.state)
-					const waiting = Option.getOrThrow(snapshot)
-					assert.equal(waiting._tag, "Active")
-					const before = yield* Ref.get(starts)
-					assert.equal(before, phase === "startup" ? 0 : 1)
-					yield* Deferred.succeed(resume, undefined)
-					yield* Deferred.await(recovered)
-					const after = yield* Ref.get(starts)
-					assert.equal(after, phase === "startup" ? 1 : 2)
-					const count = yield* Ref.get(attempts)
-					assert.equal(count, 2)
-					yield* fork.dispose
-					assert.lengthOf(
-						Array.filter(
-							MutableRef.get(logs),
-							String.includes(`exporter ${phase} failure`),
-						),
-						1,
-					)
-				}),
-			).pipe(
-				Effect.provide(
-					Logger.layer([
-						Logger.map(Logger.formatJson, (line) =>
-							MutableRef.update(logs, Array.append(line)),
-						),
-					]),
-				),
-			)
-		},
+							1,
+						)
+					}),
+				).pipe(
+					Effect.provide(
+						Logger.layer([
+							Logger.map(Logger.formatJson, (line) =>
+								MutableRef.update(logs, Array.append(line)),
+							),
+						]),
+					),
+					Effect.provideService(RetryGate, Option.some({ retrying, resume })),
+				)
+			}),
 	)
 }

@@ -15,7 +15,7 @@ import { Graft } from "@graftland/graft"
 import { parse } from "yaml"
 
 import { Include, Loader } from "../src/index.ts"
-import { echo, loaderService, run } from "./utils.ts"
+import { loaderService, run } from "./utils.ts"
 
 const isStoreError = Schema.is(Loader.StoreError)
 
@@ -52,7 +52,7 @@ describe("YAML alias edits", () => {
 		it.effect(
 			`can ${operation} a child inside an aliased group without changing the source`,
 			() =>
-				run((journal) => ({ echo: echo(journal) }))(() =>
+				run()(() =>
 					Effect.gen(function* () {
 						const { fs, file, loader } = yield* setup(`- id: source
   name: unused
@@ -85,7 +85,7 @@ describe("YAML alias edits", () => {
 		)
 	}
 	it.effect("reuses an anonymous entry's id when its config is an alias", () =>
-		run((journal) => ({ echo: echo(journal) }))(() =>
+		run()(() =>
 			Effect.gen(function* () {
 				const anonymous =
 					"- id: a\n  name: echo\n  config: &shared { text: original }\n- name: echo\n  config: *shared\n"
@@ -106,7 +106,7 @@ describe("YAML alias edits", () => {
 		it.effect(
 			`preserves alias values when an anchor is changed by ${operation}`,
 			() =>
-				run((journal) => ({ echo: echo(journal) }))(() =>
+				run()(() =>
 					Effect.gen(function* () {
 						const { fs, file, loader } = yield* setup()
 						if (operation === "remove entry") yield* loader.remove("a")
@@ -139,7 +139,7 @@ describe("YAML alias edits", () => {
 	}
 
 	it.effect("materializes nested aliases and preserves environment tags", () =>
-		run((journal) => ({ echo: echo(journal) }))((journal) =>
+		run()((journal) =>
 			Effect.gen(function* () {
 				const { fs, file, loader } = yield* setup(`- id: a
   name: echo
@@ -165,7 +165,7 @@ describe("YAML alias edits", () => {
 	it.effect(
 		"returns serialization failures through StoreError without changing the file",
 		() =>
-			run((journal) => ({ echo: echo(journal) }))(() =>
+			run()(() =>
 				Effect.gen(function* () {
 					const { fs, file, loader } = yield* setup()
 					const before = yield* loader.entries
@@ -188,7 +188,7 @@ describe("YAML alias edits", () => {
 	it.effect(
 		"returns unresolved aliases as typed failures and recovers after repair",
 		() =>
-			run((journal) => ({ echo: echo(journal) }))(() =>
+			run()(() =>
 				Effect.gen(function* () {
 					const { fs, file, loader } = yield* setup()
 					yield* fs.writeFileString(

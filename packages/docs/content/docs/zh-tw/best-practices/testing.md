@@ -298,43 +298,34 @@ await Effect.runPromise(
 
 ## 測試設定項目
 
-`Loader.plugin` 執行保存在記憶體中的設定項目，`ModuleResolver.fromRecord`
-把項目的名稱對應到外掛，因此完全不需要檔案：
+Loader 測試使用真實的已建置模組檔案，透過正式控制協定解析與準備。嵌入式組合測試與原生隔離證據分開記錄。
 
 ```ts
-import { Deferred, Effect } from "effect"
+import { Effect, HashSet } from "effect"
 import { assert, it } from "@effect/vitest"
 
-import { Graft } from "@graftland/graft"
-import { Loader, ModuleResolver } from "@graftland/loader"
+import type { Kernel } from "@graftland/graft"
+import * as Control from "@graftland/plugin-remote/Control"
 
-import { run } from "./run.ts"
-import { Mailer, welcome } from "./welcome.ts"
+declare const control: Control.Address
+declare const target: Kernel.Target
 
-const resolver = ModuleResolver.fromRecord({ welcome })
-
-it.effect("loads welcome from an entry", () =>
+it.live("describes a captured fixture and settles its inspection unit", () =>
 	Effect.gen(function* () {
-		const sent = yield* Deferred.make<string>()
-		yield* Graft.provide(Mailer, {
-			send: (to) => Effect.asVoid(Deferred.succeed(sent, to)),
-		})
-		yield* Graft.plugin(Loader.plugin, [
-			{ id: "welcome", name: "welcome", config: { to: "alice@example.com" } },
-		])
-		const to = yield* Deferred.await(sent)
-		assert.strictEqual(to, "alice@example.com")
-	}).pipe(run, Effect.provide(resolver)),
+		const client = yield* Control.connect(control)
+		const prepared = yield* client.inspect({ instance: "fixture", target })
+		assert.equal(prepared.exitEvidence, "Exited")
+		assert.equal(HashSet.size(prepared.unconfirmedUnits), 0)
+	}).pipe(Effect.scoped),
 )
 ```
 
-| 規則      | 細節                                                                                                                                                    |
-| --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 名稱      | `fromRecord` 依項目的 `name` 精確查找，不套用[命名慣例](../../config-file/#外掛名稱)。找不到名稱時以 `ModuleNotFound` 失敗。                            |
-| `Loader`  | 這個服務發布在註冊表中，而不是環境中。要編輯設定項目或呼叫 `loader.ready`，請在一個探測用的外掛中注入 `Loader.Loader`，再透過 `Deferred` 把它交給測試。 |
-| 等待      | 編輯在儲存後就回傳，此時外掛尚未變更。斷言前先呼叫 `loader.ready`；請參閱[編輯提供的保證](../../loader-api/#編輯提供的保證)。                           |
-| `!env`    | 在檔案中會寫 `!env` 的位置改寫 `new Entry.Env({ name })`，並用 `ConfigProvider.fromEnvRecord` 提供變數。                                                |
-| YAML 檔案 | 把 `graft.yml` 寫入 `fs.makeTempDirectoryScoped()` 建立的目錄，載入 `Include.Include`，並在環境中加入 `NodeServices.layer`。                            |
+| 證據       | 斷言                                                      |
+| ---------- | --------------------------------------------------------- |
+| 解析       | 完整名稱優先、歧義、缺少模組及損壞依賴。                  |
+| 準備       | 不呼叫 apply 即檢查設定與 intercept，並確認檢查單元退出。 |
+| 歸屬       | 分別以屏障回報進入、清理和原生退出。                      |
+| 嵌入式觀察 | 提供一般資料服務並宣告注入；解析器輸入為模組路徑。        |
 
 ## 測試安裝後的整合
 

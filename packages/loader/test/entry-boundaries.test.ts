@@ -15,7 +15,7 @@ import { expectTypeOf } from "vitest"
 import { parse } from "yaml"
 
 import { Include, Loader, Tree, type Entry } from "../src/index.ts"
-import { echo, loaderService, run } from "./utils.ts"
+import { loaderService, run } from "./utils.ts"
 
 const setup = Effect.fn("setup")(function* (text: string) {
 	const fs = yield* FileSystem.FileSystem
@@ -30,7 +30,7 @@ const setup = Effect.fn("setup")(function* (text: string) {
 })
 
 it.effect("preserves anonymous group identity and running children", () =>
-	run((journal) => ({ echo: echo(journal) }))((journal) =>
+	run()((journal) =>
 		Effect.gen(function* () {
 			const text =
 				"- name: group\n  group: true\n  config:\n    - name: echo\n      config: { text: unchanged }\n"
@@ -47,7 +47,7 @@ it.effect("preserves anonymous group identity and running children", () =>
 )
 
 it.effect("updates an accepted nested entry with an unknown field", () =>
-	run(() => ({}))(() =>
+	run()(() =>
 		Effect.gen(function* () {
 			const { loader } = yield* setup(
 				"- id: group\n  name: group\n  group: true\n  config:\n    - id: child\n      name: unused\n      disabled: true\n      note: keep\n",
@@ -58,7 +58,7 @@ it.effect("updates an accepted nested entry with an unknown field", () =>
 )
 
 it.effect("loads a group with omitted config as an empty group", () =>
-	run(() => ({}))(() =>
+	run()(() =>
 		Effect.gen(function* () {
 			yield* Graft.plugin(Loader.plugin, [
 				{ id: "empty", name: "group", group: true },
@@ -82,7 +82,7 @@ it.effect("loads a group with omitted config as an empty group", () =>
 it.effect(
 	"restores nested anonymous identities without collapsing identical groups",
 	() =>
-		run((journal) => ({ echo: echo(journal) }))((journal) =>
+		run()((journal) =>
 			Effect.gen(function* () {
 				const branch =
 					"    - name: group\n      group: true\n      config:\n        - name: echo\n          config: { text: unchanged }\n"
@@ -107,7 +107,7 @@ for (const nested of [false, true]) {
 	it.effect(
 		`preserves metadata through edits and rereads at ${nested ? "nested" : "root"} depth`,
 		() =>
-			run(() => ({}))(() =>
+			run()(() =>
 				Effect.gen(function* () {
 					const child =
 						"- id: child\n  name: unused\n  disabled: true\n  note: { text: keep } # handwritten metadata\n"
@@ -153,7 +153,7 @@ for (const nested of [false, true]) {
 it.effect(
 	"normalizes empty groups on file reads, creates, and config removal",
 	() =>
-		run(() => ({}))(() =>
+		run()(() =>
 			Effect.gen(function* () {
 				const { fs, file, loader } = yield* setup(
 					"- id: outer\n  name: group\n  group: true\n",
@@ -182,7 +182,7 @@ it.effect(
 it.effect(
 	"retains in-memory metadata while normalizing nested empty groups",
 	() =>
-		run(() => ({}))(() =>
+		run()(() =>
 			Effect.gen(function* () {
 				yield* Graft.plugin(Loader.plugin, [
 					{
@@ -232,7 +232,7 @@ it("validates known fields at every depth despite accepting metadata", () => {
 })
 
 it.effect("rejects malformed nested fields before writing assigned ids", () =>
-	run(() => ({}))(() =>
+	run()(() =>
 		Effect.gen(function* () {
 			const fs = yield* FileSystem.FileSystem
 			const directory = yield* fs.makeTempDirectoryScoped()

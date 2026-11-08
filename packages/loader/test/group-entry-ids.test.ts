@@ -1,24 +1,15 @@
-import { Effect, Option, Ref, Schema, Stream } from "effect"
+import { Effect, Option, Stream } from "effect"
 import { assert, it } from "@effect/vitest"
 
-import { Graft, Plugin } from "@graftland/graft"
+import { Graft } from "@graftland/graft"
 
-import { Entry, Group } from "../src/index"
-import { run } from "./utils"
+import { Group } from "../src/index"
+import { fixture, run } from "./utils"
 
 it.effect(
 	"loads anonymous embedded entries and keeps existing activations on insertion",
 	() =>
-		run((journal) => ({
-			worker: Plugin.make({
-				name: "worker",
-				apply: () => journal.record("worker"),
-			}),
-			other: Plugin.make({
-				name: "other",
-				apply: () => journal.record("other"),
-			}),
-		}))((journal) =>
+		run({ worker: fixture("worker"), other: fixture("other") })((journal) =>
 			Effect.gen(function* () {
 				const fork = yield* Graft.plugin(Group.Group, [{ name: "worker" }])
 				yield* fork.stable
@@ -34,31 +25,22 @@ it.effect(
 	"derives the same CurrentId in separate runtimes and distinct ids under two hosts",
 	() =>
 		Effect.gen(function* () {
-			const ids = yield* Ref.make<ReadonlyArray<string>>([])
-			const worker = Plugin.make({
-				name: "worker",
-				apply: () =>
-					Effect.flatMap(Entry.CurrentId, (id) =>
-						Ref.update(ids, (values) => [...values, Option.getOrThrow(id)]),
-					),
-			})
-			const host = Plugin.make({
-				name: "host",
-				config: Schema.Struct({ plugins: Entry.Entries }),
-				apply: ({ plugins }) =>
-					Graft.plugin(Group.Group, plugins).pipe(Effect.asVoid),
-			})
-			const start = run(() => ({ worker, host }))(() =>
-				Effect.gen(function* () {
-					const fork = yield* Graft.plugin(Group.Group, [{ name: "worker" }])
-					yield* fork.stable
-				}),
+			const start = run({ worker: fixture("identity"), host: fixture("host") })(
+				(journal) =>
+					Effect.gen(function* () {
+						const fork = yield* Graft.plugin(Group.Group, [{ name: "worker" }])
+						yield* fork.stable
+						return yield* journal.events
+					}),
 			)
-			yield* start
-			yield* start
-			const first = yield* Ref.get(ids)
-			assert.equal(first[0], first[1])
-			yield* run(() => ({ worker, host }))(() =>
+			const first = yield* start
+			const second = yield* start
+			assert.lengthOf(first, 1)
+			assert.deepEqual(first, second)
+			const all = yield* run({
+				worker: fixture("identity"),
+				host: fixture("host"),
+			})((journal) =>
 				Effect.gen(function* () {
 					const fork = yield* Graft.plugin(Group.Group, [
 						{
@@ -79,19 +61,19 @@ it.effect(
 						},
 					])
 					yield* fork.stable
+					return yield* journal.events
 				}),
 			)
-			const all = yield* Ref.get(ids)
-			assert.lengthOf(all, 5)
-			assert.notEqual(all[2], all[3])
-			assert.notEqual(all[3], all[4])
+			assert.lengthOf(all, 3)
+			assert.notEqual(all[0], all[1])
+			assert.notEqual(all[1], all[2])
 		}),
 )
 
 it.effect(
 	"assigns missing ids while rejecting duplicate explicit ids at the embedded group boundary",
 	() =>
-		run(() => ({}))(() =>
+		run()(() =>
 			Effect.gen(function* () {
 				const fork = yield* Graft.plugin(Group.Group, [
 					{ id: "same", name: "one" },
@@ -105,19 +87,7 @@ it.effect(
 )
 
 it.effect("uses each hosted child's config schema", () =>
-	run((journal) => ({
-		host: Plugin.make({
-			name: "host",
-			config: Schema.Struct({ plugins: Entry.Entries }),
-			apply: ({ plugins }) =>
-				Graft.plugin(Group.Group, plugins).pipe(Effect.asVoid),
-		}),
-		child: Plugin.make({
-			name: "child",
-			config: Schema.Struct({ message: Schema.String }),
-			apply: ({ message }) => journal.record(message),
-		}),
-	}))((journal) =>
+	run({ host: fixture("host"), child: fixture("child") })((journal) =>
 		Effect.gen(function* () {
 			const fork = yield* Graft.plugin(Group.Group, [
 				{

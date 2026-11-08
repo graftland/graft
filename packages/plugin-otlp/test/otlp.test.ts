@@ -3,6 +3,7 @@ import { createServer } from "node:http"
 
 import {
 	Array,
+	Context,
 	Effect,
 	Layer,
 	Logger,
@@ -27,12 +28,12 @@ import { NodeHttpServer } from "@effect/platform-node"
 import { assert, describe, it } from "@effect/vitest"
 
 import { Graft, Plugin } from "@graftland/graft"
-import { ModuleResolver } from "@graftland/loader"
 import * as Testing from "@graftland/plugin-otlp/Testing"
 
 import { Http } from "../src/Config.ts"
 import http from "../src/http.ts"
 import otlp from "../src/index.ts"
+import { fixture, moduleLayer } from "./module-fixtures"
 
 const Span = Schema.Struct({
 	name: Schema.String,
@@ -111,7 +112,7 @@ const quiet = (name: string) => Plugin.make({ name, apply: () => Effect.void })
 
 const run = <A, E>(
 	effect: Effect.Effect<A, E, Graft.Graft | Scope.Scope>,
-	plugins: Readonly<Record<string, Plugin.Plugin>>,
+	plugins: Readonly<Record<string, string>>,
 ) =>
 	effect.pipe(
 		Effect.scoped,
@@ -120,9 +121,11 @@ const run = <A, E>(
 				Layer.fresh(Graft.layer),
 				Layer.mergeAll(
 					FetchHttpClient.layer,
-					ModuleResolver.fromRecord({
+					moduleLayer({
 						...plugins,
-						"@graftland/plugin-otlp/http": http,
+						"@graftland/plugin-otlp/http": fixture(
+							"plugin-otlp-tuning-graftland-plugin-otlp-http-1",
+						),
 					}),
 				),
 			),
@@ -148,16 +151,16 @@ describe("otlp", () => {
 			assert.isTrue(Array.contains(batch.spans, "graft.plugin inside"))
 			assert.isFalse(Array.contains(batch.spans, "graft.plugin outside"))
 		}).pipe((effect) =>
-			run(effect, { inside: quiet("inside"), outside: quiet("outside") }),
+			run(effect, {
+				inside: fixture("otlp-inside-factory-0"),
+				outside: fixture("otlp-outside-factory-1"),
+			}),
 		),
 	)
 
 	it.live("swaps the endpoint without restarting the subtree", () => {
 		const starts = Ref.makeUnsafe(0)
-		const counted = Plugin.make({
-			name: "counted",
-			apply: () => Ref.update(starts, (count) => count + 1),
-		})
+
 		return Effect.gen(function* () {
 			const first = yield* collector
 			const second = yield* collector
@@ -176,7 +179,16 @@ describe("otlp", () => {
 			yield* fork.dispose
 			const flushed = yield* Queue.take(first.received)
 			assert.isTrue(Array.contains(flushed.spans, "graft.plugin counted"))
-		}).pipe((effect) => run(effect, { counted }))
+		}).pipe((effect) =>
+			run(effect, { counted: fixture("otlp-counted-5324") }).pipe(
+				Effect.provideService(
+					Context.Service<{ readonly starts: typeof starts }>(
+						"loader/fixture/otlp-counted-5324",
+					),
+					{ starts },
+				),
+			),
+		)
 	})
 
 	it.live("fails on an entry that is not an entry", () =>
@@ -249,7 +261,9 @@ it.live(
 				key: "replicas",
 				value: { intValue: 2 },
 			})
-		}).pipe((effect) => run(effect, { inside: quiet("inside") })),
+		}).pipe((effect) =>
+			run(effect, { inside: fixture("otlp-inside-factory-0") }),
+		),
 )
 
 it.live(

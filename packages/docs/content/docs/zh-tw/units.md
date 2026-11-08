@@ -51,6 +51,22 @@ export const inspect = Effect.flatMap(Kernel.Kernel, (kernel) =>
 | 觀察 | `getPreparation`、`preparations`、`inspections` 及 `units` 顯示剩餘工作與準確的退出證據。 |
 | 等待 | 中斷提交等待者不會取消執行階段擁有的檢查。                                                |
 
+## 單元環境
+
+每個單元建構自己的 Node 服務、HTTP 用戶端、時鐘和記錄器。自訂環境與 intercept 模組匯出 Layer，透過
+`Configuration.Options`
+接收 JSON 選項。有序設定建構新的 Layer；復原時重新建構，並依目前策略重新解析原始參照。
+
+| 準備方式 | 行為                                                     |
+| -------- | -------------------------------------------------------- |
+| 模組解析 | 在可丟棄單元中檢查匯出形式，不解碼外掛輸入或呼叫 apply。 |
+| 部署檢查 | 建構環境模組並解碼設定，不呼叫 apply 或取得服務資源。    |
+| 執行     | 重新建構環境，並重新核對已檢查的宣告。                   |
+| 截止時間 | 終止單元並要求原生退出證據；缺少證據時仍保留未結工作。   |
+
+透過 [Loader 準備](../loader-api/)
+登記不可變的 intercept 模組。函式、Schema、Context 和 Layer 不會出現在部署資料中。
+
 ## 選擇部署位置
 
 | 部署位置  | 執行擁有者                                                           |

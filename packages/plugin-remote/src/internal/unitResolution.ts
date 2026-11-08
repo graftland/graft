@@ -66,6 +66,21 @@ export const fingerprint = Effect.fnUntraced(function* (value: Schema.Json) {
 		new TextEncoder().encode(encoded),
 	)
 })
+export const validationEnvironment = Effect.fnUntraced(function* (
+	placement: Kernel.Placement,
+	modules: ReadonlyArray<Kernel.ConfigurationModule> = [],
+) {
+	if (modules.length === 0) return environment(placement)
+	const identity = yield* fingerprint(
+		Array.map(modules, (module) => ({
+			artifact: module.artifact.identity.digest,
+			entry: module.artifact.identity.entry,
+			export: module.export,
+			options: module.options,
+		})),
+	)
+	return `${environment(placement)}/configuration@${identity}`
+})
 export const resolve = Effect.fnUntraced(function* (
 	command: Kernel.Command,
 ): Effect.fn.Return<
@@ -77,9 +92,25 @@ export const resolve = Effect.fnUntraced(function* (
 		command.target.deployment?.input ?? {},
 		command.policy?.values ?? {},
 	)
+	const environmentModules = yield* Effect.forEach(
+		command.target.deployment?.environment ?? [],
+		Effect.fnUntraced(function* (module) {
+			return {
+				...module,
+				options: yield* resolveValue(
+					module.options,
+					command.policy?.values ?? {},
+				),
+			}
+		}),
+	)
 	return {
+		...(environmentModules.length === 0 ? {} : { environmentModules }),
 		input,
 		identity: yield* fingerprint(input),
-		environment: environment(command.target.placement),
+		environment: yield* validationEnvironment(
+			command.target.placement,
+			environmentModules,
+		),
 	}
 })

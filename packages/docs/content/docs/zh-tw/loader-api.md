@@ -3,60 +3,56 @@ title: Loader API
 description: 從外掛和程式碼讀取與編輯設定項目，以及每次編輯提供的保證。
 ---
 
-載入器會發布一個 `Loader`
-服務。外掛注入它，就能讀取並編輯[設定檔](../config-file/)中的項目：
+透過公開控制協定準備不可變的外掛描述符。模組匯入和設定檢查在可丟棄單元中執行；準備流程等待這些單元退出後才回傳。
 
-```ts import.meta.vitest name="loader-api: edit entries from a plugin"
-import { Deferred, Effect, Layer } from "effect"
+## 準備部署
 
-import { Graft, Plugin } from "@graftland/graft"
-import { Entry, Loader, ModuleResolver } from "@graftland/loader"
+`ModuleResolver`
+回傳捕獲的位置、匯出、解析基準、來源及已宣告外部依賴的觀察結果，不回傳 Plugin、Schema、Context 或 Layer。完整套件名稱優先，短名歧義會失敗；相對名稱以宣告它的 include 目錄為基準。
 
-const admin = Plugin.make({
-	name: "app/admin",
-	inject: [Loader.Loader],
-	apply: () =>
-		Effect.gen(function* () {
-			const loader = yield* Loader.Loader
-			const id = yield* loader.create({ name: "./plugins/cron.mjs" })
-			yield* loader.update(id, { config: { every: "5 minutes" } })
-			yield* loader.update("api", { disabled: true })
-		}),
+```ts
+import { Effect, HashMap } from "effect"
+
+import { ModuleResolver, Preparation } from "@graftland/loader"
+import type * as Control from "@graftland/plugin-remote/Control"
+
+declare const control: Control.Address
+
+export const prepared = Effect.gen(function* () {
+	const resolver = yield* ModuleResolver.make({ base: "/app", control })
+	const module = yield* resolver.resolve("@acme/graft-plugin-api")
+	const settings = yield* resolver.resolve("./dist/settings.js", {
+		kind: "Environment",
+	})
+	const prepare = yield* Preparation.make({
+		control,
+		intercepts: HashMap.make(["app/Settings", settings]),
+	})
+	return yield* prepare.inspect({
+		instance: "api",
+		module,
+		input: { port: 8080 },
+		intercept: [{ key: "app/Settings", patch: { color: "red" } }],
+	})
 })
-
-const cron = Plugin.make({ name: "app/cron", apply: () => Effect.void })
-const api = Plugin.make({ name: "app/api", apply: () => Effect.void })
-const resolver = ModuleResolver.fromRecord({ "./plugins/cron.mjs": cron, api })
-
-const entries = await Effect.runPromise(
-	Effect.gen(function* () {
-		const loaderFork = yield* Graft.plugin(Loader.plugin, [
-			{ id: "api", name: "api" },
-		])
-		yield* loaderFork.await
-		const fork = yield* Graft.plugin(admin)
-		yield* fork.await
-		const read = yield* Deferred.make<ReadonlyArray<Entry.Entry>>()
-		const probe = Plugin.make({
-			name: "app/probe",
-			inject: [Loader.Loader],
-			apply: () =>
-				Loader.Loader.pipe(
-					Effect.flatMap((loader) => Deferred.into(loader.entries, read)),
-					Effect.asVoid,
-				),
-		})
-		yield* Graft.plugin(probe)
-		return yield* Deferred.await(read)
-	}).pipe(
-		Effect.scoped,
-		Effect.provide(Layer.provideMerge(Graft.layer, resolver)),
-	),
-)
-
-entries[0]?.disabled // => true
-entries[1]?.config // => { every: "5 minutes" }
 ```
+
+透過 `ModuleResolver.make` 的 `resolver: { artifact, options }`
+使用自訂解析。模組預設匯出的 Effect 從 `Configuration.Options` 讀取
+`name`、`base` 和
+`options`，回傳描述資料。它在一次性單元中執行，結果經過獨立檢查後才使用。本地模組須屬於包含
+`package.json` 的套件；先將 TypeScript 建置成 JavaScript。
+
+| 識別         | 規則                                                                                     |
+| ------------ | ---------------------------------------------------------------------------------------- |
+| 程式碼授權   | 包含外掛、契約和有序設定模組的識別。呼叫者提供的識別不符時，核心拒絕請求。               |
+| 驗證環境     | 包含解析後的設定選項及模組順序。復原時重新解析原始參照。                                 |
+| 外部相依項目 | 已宣告相依項目的位置和版本只是觀察結果，不是擷取的位元組。未宣告的動態匯入不在此清單內。 |
+
+## 嵌入式編輯
+
+嵌入式 `Loader`
+服務讀寫協作式應用程式的設定項目，不提供核心 Change 結局或依終止進行的回收。以下規則適用於這個嵌入式服務。
 
 樹中存在受管理 fork 時，Loader 在呼叫儲存修改之前拒絕編輯、重新整理和重試。繞過保護見[執行轉換](../transitions/)。
 

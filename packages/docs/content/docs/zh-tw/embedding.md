@@ -3,7 +3,8 @@ title: 在自己的程式中使用 Graft
 description: 在自己的 Effect 程式中執行外掛，無需 CLI。
 ---
 
-CLI 是建立在這些函式庫之上的一個小程式。你可以用同樣的方式，在自己的 Effect 程式中執行 Graft。
+**嵌入式 Graft**
+在你的 Effect 程式內組合外掛。生命週期是協作式的，不提供核心 Change 結果、隔離或依靠終止完成的資源回收。
 
 | 你想要…                 | 使用                                | 章節                               |
 | ----------------------- | ----------------------------------- | ---------------------------------- |
@@ -31,11 +32,12 @@ const program = Effect.gen(function* () {
 	return yield* Effect.never
 })
 
-program.pipe(
-	Effect.scoped,
-	Effect.provide(Layer.provideMerge(Graft.layer, NodeServices.layer)),
-	NodeRuntime.runMain,
-)
+export const run = () =>
+	program.pipe(
+		Effect.scoped,
+		Effect.provide(Layer.provideMerge(Graft.layer, NodeServices.layer)),
+		NodeRuntime.runMain,
+	)
 ```
 
 Layer 環境中的服務對每個外掛都可用，這裡就是 Node.js 的服務。請參閱[來自環境的服務](../services/#來自環境的服務)。
@@ -71,101 +73,53 @@ export const hello = Plugin.make({
 
 ## 載入設定項目
 
-`Loader.plugin`
-執行保存在記憶體中的[設定項目](../config-file/#設定項目欄位)清單。透過 `Loader`
-服務所做的編輯只會改變這份清單。這些項目需要 `ModuleResolver` 把名稱轉成外掛：
-
-```ts import.meta.vitest name="embedding: load entries"
-import { Effect, Layer, Option, Stream } from "effect"
-
-import { Graft } from "@graftland/graft"
-import { Loader, ModuleResolver } from "@graftland/loader"
-
-import { greeter, hello } from "./plugins.ts"
-
-const program = Effect.gen(function* () {
-	yield* Graft.plugin(Loader.plugin, [
-		{ id: "greeter", name: "greeter", config: { greeting: "Hello" } },
-		{ id: "hello", name: "hello" },
-	])
-	return yield* Graft.logs.pipe(
-		Stream.map((log) => log.message),
-		Stream.runHead,
-	)
-})
-
-const resolver = ModuleResolver.fromRecord({ greeter, hello })
-
-await Effect.runPromise(
-	program.pipe(
-		Effect.scoped,
-		Effect.provide(Layer.provideMerge(Graft.layer, resolver)),
-	),
-) // => Option.some(["Hello, world!"])
-```
-
-`Group.Group`
-也接受沒有 id 的項目。插入不同名稱的項目不會改變既有項目的衍生 id；插入或移動同名項目時，請明確指定 id。見[託管項目](../plugins/#託管項目)。
-
-### 選擇解析器
-
-| 解析器                                     | 如何找到外掛                                                     | 適用於                 |
-| ------------------------------------------ | ---------------------------------------------------------------- | ---------------------- |
-| `ModuleResolver.fromRecord(table)`         | 從固定的表中查找。                                               | 打包後的應用程式、測試 |
-| `ModuleResolver.layer({ base, importer })` | 匯入模組。相對名稱從 `base` 解析，套件名稱透過 `importer` 解析。 | 含有外掛檔案的應用程式 |
-
-通常 `importer` 是寫在你應用程式中的
-`(specifier) => import(specifier)`，這樣它才能找到你應用程式的相依套件。
-
-在應用程式中，把解析器提供在環境中，與 Node.js 服務放在一起：
+嵌入式 `Loader.plugin`
+依設定項目清單載入建置後的模組。解析需要有效的公開控制端點來執行可丟棄檢查；相對 include 保留宣告它的目錄。
 
 ```ts
-import { Effect, Layer, type Scope } from "effect"
+import { Effect, Layer } from "effect"
 import { NodeRuntime, NodeServices } from "@effect/platform-node"
 
 import { Graft } from "@graftland/graft"
-import type { ModuleResolver } from "@graftland/loader"
+import { Loader, ModuleResolver } from "@graftland/loader"
+import type * as Control from "@graftland/plugin-remote/Control"
 
-declare const program: Effect.Effect<never, never, Graft.Graft | Scope.Scope>
-declare const resolver: Layer.Layer<ModuleResolver.ModuleResolver>
-
-program.pipe(
-	Effect.scoped,
-	Effect.provide(
-		Layer.provideMerge(
-			Graft.layer,
-			Layer.mergeAll(NodeServices.layer, resolver),
-		),
-	),
-	NodeRuntime.runMain,
+declare const control: Control.Address
+const resolver = ModuleResolver.layer({ base: "/app", control }).pipe(
+	Layer.provide(NodeServices.layer),
 )
+export const run = () =>
+	Effect.gen(function* () {
+		const fork = yield* Graft.plugin(Loader.plugin, [
+			{ id: "hello", name: "./dist/hello.js" },
+		])
+		yield* fork.stable
+	}).pipe(
+		Effect.scoped,
+		Effect.provide(
+			Layer.provideMerge(
+				Graft.layer,
+				Layer.mergeAll(NodeServices.layer, resolver),
+			),
+		),
+		NodeRuntime.runMain,
+	)
 ```
 
-### 解析計畫
+| 邊界       | 規則                                                       |
+| ---------- | ---------------------------------------------------------- |
+| 解析       | 回傳可序列化描述符，在可丟棄單元中檢查可執行程式。         |
+| 嵌入式啟用 | 在嵌入它的行程中執行，以協作方式管理 scope。               |
+| 設定       | 原生準備只傳遞 JSON 和不可變模組身分。                     |
+| 保證       | 嵌入式 fork 不提供 Change 結局、強制回收或程式碼卸載保證。 |
 
-`ModuleResolver.make` 快取的是正規化後的候選計畫，從不快取匯入器的結果。
-
-- 沒有選用的 `resolution` 環境時，每次呼叫仍會先嘗試原始名稱，再嘗試命名慣例。
-- 成功的匯入器在每次呼叫時都會執行，因此自訂匯入器保有每次呼叫的行為和資源 scope。
-
-`resolution` 環境可以略過已知不存在的候選項目：
-
-| 成員                                        | 作用                                                                                                             |
-| ------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| `revision`                                  | 回傳解析環境版本的 Effect。在安裝、移除或其他解析變更之後推進它，以捨棄已快取的計畫，包括否定的決定。            |
-| `exists(specifier)`                         | 檢查正規化後的候選項目，但不匯入也不取得資源。候選項目的優先順序保持不變。                                       |
-| `observe(specifiers, { observationScope })` | 每次解析都會執行，包括快取命中和失敗的計畫，以保留對不存在的名稱或路徑的觀察。其資源遵循候選項目和觀察的 scope。 |
-
-:::caution選擇啟用時，請同時提供失效機制和觀察。如果沒有可靠的
-`revision`，請不要設定 `resolution`。較舊的進行中計畫不能覆寫較新的已快取版本。
-
-:::
+測試使用真實模組檔案。原始碼變更後先建置，再重新啟動嵌入行程。原生準備和嵌入式編輯服務請見
+[Loader API](../loader-api/)。
 
 ## 載入設定檔
 
-`Include.Include` 是 `graft start`
-背後的外掛。它讀取 YAML 檔案，並把編輯寫回該檔案。使用 `watch: true`
-時，它也會接收你手動所做的變更：
+嵌入式程式可透過 `Include.Include` 讀取和編輯 YAML，`watch: true`
+協作式監看檔案修改。`graft start` 只讀取一個版本，不支援 `--watch`。
 
 ```ts
 import { Effect } from "effect"

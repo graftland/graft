@@ -1,0 +1,6 @@
+{
+	"name": "extensions-worker-8451",
+	"version": "1.0.0",
+	"type": "module",
+	"exports": "./index.mjs"
+}

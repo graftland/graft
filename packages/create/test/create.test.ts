@@ -77,11 +77,14 @@ describe("create", () => {
 				".gitignore",
 				".vscode/extensions.json",
 				"README.md",
+				"README.zh-CN.md",
+				"README.zh-TW.md",
 				"graft.yml",
 				"package.json",
 				"src/greeter.ts",
 				"src/hello.ts",
 				"src/ticker.ts",
+				"tsconfig.build.json",
 				"tsconfig.json",
 			])
 			const { yaml, entries } = yield* readConfig(
@@ -91,17 +94,17 @@ describe("create", () => {
 			assert.deepStrictEqual(entries, [
 				{
 					id: "hello",
-					name: "./src/hello.ts",
+					name: "./dist/hello.js",
 					config: { message: "Hello from Graft!" },
 				},
 				{
 					id: "greeter",
-					name: "./src/greeter.ts",
+					name: "./dist/greeter.js",
 					config: { greeting: "Hello" },
 				},
 				{
 					id: "ticker",
-					name: "./src/ticker.ts",
+					name: "./dist/ticker.js",
 					config: { name: "Graft" },
 				},
 			])
@@ -115,7 +118,8 @@ describe("create", () => {
 				engines: { node: ">=22.19.0" },
 				scripts: {
 					start: "graft start",
-					dev: "graft start --watch",
+					build: "tsc -p tsconfig.build.json",
+					dev: "tsc -p tsconfig.build.json && graft start",
 					typecheck: "effect-tsgo tsc",
 				},
 				dependencies: {
@@ -147,6 +151,8 @@ describe("create", () => {
 				".gitignore",
 				".vscode/extensions.json",
 				"README.md",
+				"README.zh-CN.md",
+				"README.zh-TW.md",
 				"graft.yml",
 				"package.json",
 				"src/index.ts",
@@ -156,7 +162,7 @@ describe("create", () => {
 			])
 			const { entries } = yield* readConfig(path.join(directory, "graft.yml"))
 			assert.deepStrictEqual(entries, [
-				{ id: "greeter", name: "./src/index.ts", config: { name: "Graft" } },
+				{ id: "greeter", name: "./dist/index.js", config: { name: "Graft" } },
 			])
 			const manifest = yield* readJson(path.join(directory, "package.json"))
 			assert.deepInclude(manifest, {
@@ -222,7 +228,7 @@ describe("create", () => {
 			assert.deepStrictEqual(entries, [])
 			const manifest = yield* readJson(path.join(directory, "package.json"))
 			assert.deepInclude(manifest, {
-				scripts: { start: "graft start", dev: "graft start --watch" },
+				scripts: { start: "graft start" },
 			})
 		}).pipe(run),
 	)
@@ -264,17 +270,17 @@ describe("create", () => {
 			assert.deepStrictEqual(parse(appText), [
 				{
 					id: "hello",
-					name: "./src/hello.ts",
+					name: "./dist/hello.js",
 					config: { message: "Hello from Graft!" },
 				},
 				{
 					id: "greeter",
-					name: "./src/greeter.ts",
+					name: "./dist/greeter.js",
 					config: { greeting: "Hello" },
 				},
 				{
 					id: "ticker",
-					name: "./src/ticker.ts",
+					name: "./dist/ticker.js",
 					config: { name: "Graft" },
 				},
 				{ name: "@graftland/plugin-review" },

@@ -55,6 +55,24 @@ budget.
 | Observation | `getPreparation`, `preparations`, `inspections` and `units` expose remaining work and exact exit evidence.                    |
 | Waiting     | Interrupting a submit waiter leaves runtime-owned inspection running.                                                         |
 
+## Unit environments
+
+Each unit builds its own Node services, HTTP client, clock and logger. Custom
+environment and intercept modules export Layers and receive JSON options through
+`Configuration.Options`. Ordered recipes build fresh Layers; recovery rebuilds
+them and resolves raw references under the current policy.
+
+| Preparation           | Behavior                                                                                   |
+| --------------------- | ------------------------------------------------------------------------------------------ |
+| Module resolution     | Checks the export form in a disposable unit; does not decode plugin input or apply it.     |
+| Deployment inspection | Builds environment modules and decodes configuration without apply or serving resources.   |
+| Execution             | Rebuilds the environment and rechecks the inspected declarations.                          |
+| Deadlines             | Terminate the unit and require native exit evidence; missing evidence remains outstanding. |
+
+Use [Loader preparation](../loader-api/) to register immutable intercept
+modules. Functions, Schemas, Contexts and Layers never travel in deployment
+data.
+
 ## Choose placement
 
 | Placement | Execution owner                                                                                  |

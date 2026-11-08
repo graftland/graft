@@ -2,12 +2,10 @@ import { Array, Cause, HashMap, Option } from "effect"
 import { assert } from "@effect/vitest"
 
 import * as Core from "../src/internal/decisionCore.ts"
+import { deploymentIdentity } from "../src/internal/deploymentIdentity"
 
-export const target = (identity = "next"): Core.Target => ({
-	identity,
-	placement: "Worker",
-	overlap: false,
-	deployment: {
+export const target = (identity = "next"): Core.Target => {
+	const deployment: Core.DeploymentData = {
 		artifact: {
 			directory: "/artifacts/" + identity,
 			identity: {
@@ -19,8 +17,14 @@ export const target = (identity = "next"): Core.Target => ({
 		},
 		contract: "contract.js",
 		input: { value: 1 },
-	},
-})
+	}
+	return {
+		identity: deploymentIdentity(deployment),
+		placement: "Worker",
+		overlap: false,
+		deployment,
+	}
+}
 export const initial = (maxUnits = 3) =>
 	Core.empty({
 		authority: "preparation-test",

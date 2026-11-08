@@ -1,0 +1,6 @@
+{
+	"name": "self-removing",
+	"version": "1.0.0",
+	"type": "module",
+	"exports": "./index.mjs"
+}

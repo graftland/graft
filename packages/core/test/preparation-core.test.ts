@@ -2,6 +2,7 @@ import { Array, Cause, HashMap, HashSet, Option } from "effect"
 import { assert, it } from "@effect/vitest"
 
 import * as Core from "../src/internal/decisionCore.ts"
+import { deploymentIdentity } from "../src/internal/deploymentIdentity"
 import {
 	command,
 	described,
@@ -17,6 +18,34 @@ import {
 	spawned,
 	target,
 } from "./preparation-fixture.ts"
+
+it("inspects an unregistered Loader module without creating an instance or a Change (F2)", () => {
+	const request = { ...input(), instance: "not-yet-admitted" }
+	const first = prepare(initial(), request, true)
+	assert.equal(first.reply._tag, "Preparing")
+	assert.isFalse(HashMap.has(first.state.instances, request.instance))
+	assert.equal(HashMap.size(first.state.changes), 0)
+	assert.equal(HashMap.size(first.state.claims), 1)
+})
+
+it("refuses serving authority for a module-only inspection descriptor (I1, F2)", () => {
+	const original = target()
+	const deployment = original.deployment
+	if (deployment === undefined)
+		return assert.fail("Expected fixture deployment")
+	const request: Core.Input = {
+		...input(),
+		target: {
+			...original,
+			deployment: { ...deployment, inspection: "Module" },
+		},
+	}
+	const denied = prepare(initial(), request)
+	assert.equal(denied.reply._tag, "Rejected")
+	assert.equal(HashMap.size(denied.state.claims), 0)
+	assert.equal(HashMap.size(denied.state.changes), 0)
+	assert.lengthOf(denied.commands, 0)
+})
 
 it("owns inspection capacity and observer identity before dispatch without locking an instance (I2, I4, I5)", () => {
 	const first = prepare()
@@ -347,7 +376,7 @@ it("uses the reserved recovery claim for a fresh Describe of a previously servin
 	)
 	const ended = exit(describedState, inspection.id).state
 	const execution = command(ended, change, "Spawn")
-	assert.equal(execution.target.identity, "old")
+	assert.equal(execution.target.identity, target("old").identity)
 	assert.equal(execution.description?.configuration, "config-2")
 	assert.equal(execution.token.term, 2)
 })
@@ -451,5 +480,79 @@ it("keeps an inspection execution failure with its own preparation and preserves
 	assert.include(
 		Cause.pretty(Option.getOrThrow(Core.getPreparation(ended, p)).cause),
 		"Native channel error",
+	)
+})
+
+it("rejects forged native code identity before resolving or spawning an inspection (I1, F2)", () => {
+	const deployment = Option.getOrThrow(
+		Option.fromNullishOr(target().deployment),
+	)
+	const forged = prepare(
+		initial(),
+		{
+			...input(),
+			target: {
+				...target(),
+				deployment: { ...deployment, moduleSuffix: "?unapproved" },
+			},
+		},
+		true,
+	)
+	assert.equal(forged.reply._tag, "Rejected")
+	assert.lengthOf(forged.commands, 0)
+	assert.equal(HashMap.size(forged.state.preparations), 0)
+})
+it("snapshots native environment recipes and resolved module options before retaining them (I1, F2)", () => {
+	const options = { value: "before" }
+	const artifact = {
+		directory: "/environment",
+		identity: {
+			version: 1,
+			algorithm: "sha256",
+			digest: "environment",
+			entry: "index.js",
+		},
+	} satisfies Core.ArtifactData
+	const recipe = { artifact, export: "default", options }
+	const deployment = Option.getOrThrow(
+		Option.fromNullishOr(target().deployment),
+	)
+	const desired = { ...deployment, environment: [recipe] }
+	const request = {
+		...input(),
+		target: {
+			...target(),
+			identity: deploymentIdentity(desired),
+			deployment: desired,
+		},
+	}
+	const first = prepare(initial(), request, true)
+	options.value = "after"
+	artifact.identity.digest = "changed"
+	const p = Option.getOrThrow(HashMap.get(first.state.preparations, id(first)))
+	assert.deepEqual(p.request.target.deployment?.environment?.[0]?.options, {
+		value: "before",
+	})
+	assert.equal(
+		p.request.target.deployment?.environment?.[0]?.artifact.identity.digest,
+		"environment",
+	)
+	const resolvedState = report(
+		first.state,
+		command(first.state, id(first), "Resolve"),
+		{ _tag: "Resolved", value: { ...resolved, environmentModules: [recipe] } },
+	)
+	options.value = "after report"
+	artifact.identity.digest = "changed after report"
+	const saved = Option.getOrThrow(
+		HashMap.get(resolvedState.preparations, id(first)),
+	)
+	const resolution = Option.getOrThrow(saved.resolution)
+	assert.deepEqual(resolution.environmentModules?.[0]?.options, {
+		value: "after",
+	})
+	assert.equal(
+		resolution.environmentModules?.[0]?.artifact.identity.digest,
+		"changed",
 	)
 })

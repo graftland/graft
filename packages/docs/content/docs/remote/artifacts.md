@@ -43,8 +43,9 @@ same directory; a corrupted existing copy is rejected instead of overwritten.
 | ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Package      | A directory containing `package.json` and a built `.js`, `.mjs` or `.cjs` entry.                                                                                                                                       |
 | Entry        | A normalized relative path inside the directory.                                                                                                                                                                       |
-| Files        | Regular files and directories only. All symlinks, including escaping links, are rejected. Sockets, devices and other special files are unsupported.                                                                    |
-| Store        | Outside the source directory, including after resolving filesystem aliases.                                                                                                                                            |
+| Files        | Regular files and directories only. Symlinks on captured paths, including escaping links, are rejected. Sockets, devices and other special files are unsupported.                                                      |
+| Store        | Outside the captured closure, including after resolving filesystem aliases. A store inside an explicitly excluded directory is allowed.                                                                                |
+| Exclusions   | Normalized package-relative paths. The selected entry and package.json must remain captured; excluded paths are not traversed.                                                                                         |
 | Dependencies | Files inside the directory are captured, including real `node_modules` directories. Imports outside it are not captured or pinned. Bundle implementation dependencies or keep the external runtime installation fixed. |
 | Trust        | This is content identity, not a sandbox. The store and runtime installation must be controlled by the operator.                                                                                                        |
 
@@ -55,3 +56,7 @@ Do not modify captured directories. Verification detects changed content; it
 does not repair it. Workspace layouts with symlinked dependencies must be built
 into a supported package directory first. Code shipping, dependency installation
 and automatic transitions are not provided by this API.
+
+Loader descriptors mark declared external runtime dependencies as uncaptured.
+Their observed versions and locations do not pin their bytes. The inventory
+covers declarations; undeclared dynamic imports remain outside that inventory.

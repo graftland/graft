@@ -24,6 +24,37 @@ const setup = Effect.gen(function* () {
 	}
 })
 const runtime = NodeServices.layer
+
+it.live(
+	"captures package bytes while excluding its nested artifact store and uncaptured dependencies (F2)",
+	() =>
+		Effect.gen(function* () {
+			const { fs, directory, options } = yield* setup
+			yield* fs.makeDirectory(directory + "/node_modules")
+			yield* fs.symlink(
+				directory + "/index.js",
+				directory + "/node_modules/dependency",
+			)
+			const artifact = yield* Artifact.capture({
+				...options,
+				store: directory + "/.graft/artifacts",
+				exclude: ["node_modules", ".graft"],
+			})
+			const dependencies = yield* fs.exists(
+				artifact.directory + "/node_modules",
+			)
+			const store = yield* fs.exists(artifact.directory + "/.graft")
+			assert.isFalse(dependencies)
+			assert.isFalse(store)
+			yield* Artifact.verify(artifact)
+			const again = yield* Artifact.capture({
+				...options,
+				store: directory + "/.graft/artifacts",
+				exclude: ["node_modules", ".graft"],
+			})
+			assert.deepEqual(again, artifact)
+		}).pipe(Effect.scoped, Effect.provide(runtime)),
+)
 it.live(
 	"captures deterministic versioned identities and isolates the original files",
 	() =>

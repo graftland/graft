@@ -1,0 +1,6 @@
+{
+	"name": "plugin-mcp-server-unix-acme-graft-plugin-mcp-unix-2",
+	"version": "1.0.0",
+	"type": "module",
+	"exports": "./index.mjs"
+}

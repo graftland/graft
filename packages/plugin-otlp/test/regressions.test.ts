@@ -3,6 +3,7 @@ import { createServer } from "node:http"
 
 import {
 	Array,
+	Context,
 	Deferred,
 	Effect,
 	Exit,
@@ -23,11 +24,10 @@ import {
 import { NodeHttpServer } from "@effect/platform-node"
 import { assert, describe, it } from "@effect/vitest"
 
-import { Graft, Plugin } from "@graftland/graft"
-import { ModuleResolver } from "@graftland/loader"
+import { Graft } from "@graftland/graft"
 
-import http from "../src/http.ts"
 import otlp from "../src/index.ts"
+import { fixture, moduleLayer } from "./module-fixtures"
 
 const Span = Schema.Struct({
 	name: Schema.String,
@@ -97,7 +97,7 @@ const collector = Effect.gen(function* () {
 
 const run = <A, E>(
 	effect: Effect.Effect<A, E, Graft.Graft | Scope.Scope>,
-	plugins: Readonly<Record<string, Plugin.Plugin>>,
+	plugins: Readonly<Record<string, string>>,
 ) =>
 	effect.pipe(
 		Effect.scoped,
@@ -106,9 +106,11 @@ const run = <A, E>(
 				Layer.fresh(Graft.layer),
 				Layer.mergeAll(
 					FetchHttpClient.layer,
-					ModuleResolver.fromRecord({
+					moduleLayer({
 						...plugins,
-						"@graftland/plugin-otlp/http": http,
+						"@graftland/plugin-otlp/http": fixture(
+							"plugin-otlp-tuning-graftland-plugin-otlp-http-1",
+						),
 					}),
 				),
 			),
@@ -121,17 +123,7 @@ describe("review regressions", () => {
 			const started = Deferred.makeUnsafe<void>()
 			const finish = Deferred.makeUnsafe<void>()
 			const completed = Deferred.makeUnsafe<void>()
-			const worker = Plugin.make({
-				name: "worker",
-				apply: () =>
-					Plugin.fork(
-						Deferred.succeed(started, undefined).pipe(
-							Effect.andThen(Deferred.await(finish)),
-							Effect.withSpan("across-swap"),
-							Effect.andThen(Deferred.succeed(completed, undefined)),
-						),
-					).pipe(Effect.asVoid),
-			})
+
 			return Effect.gen(function* () {
 				const first = yield* collector
 				const second = yield* collector
@@ -156,14 +148,24 @@ describe("review regressions", () => {
 						Array.contains(batch.spans, "across-swap"),
 					),
 				)
-			}).pipe((effect) => run(effect, { worker }))
+			}).pipe((effect) =>
+				run(effect, { worker: fixture("regressions-worker-4534") }).pipe(
+					Effect.provideService(
+						Context.Service<{
+							readonly started: typeof started
+							readonly finish: typeof finish
+							readonly completed: typeof completed
+						}>("loader/fixture/regressions-worker-4534"),
+						{ started, finish, completed },
+					),
+				),
+			)
 		})
 	}
 })
 
-it.live("reports an invalid explicit entry id on update", () => {
-	const worker = Plugin.make({ name: "worker", apply: () => Effect.void })
-	return Effect.gen(function* () {
+it.live("reports an invalid explicit entry id on update", () =>
+	Effect.gen(function* () {
 		const { url } = yield* collector
 		const config = {
 			url,
@@ -177,18 +179,16 @@ it.live("reports an invalid explicit entry id on update", () => {
 		yield* fork.stable
 		const settled = yield* Effect.exit(fork.await)
 		assert.isTrue(Exit.isFailure(settled))
-	}).pipe((effect) => run(effect, { worker }))
-})
+	}).pipe((effect) =>
+		run(effect, { worker: fixture("regressions-worker-5236") }),
+	),
+)
 
 it.live(
 	"does not restart anonymous entries when a different name is inserted first",
 	() => {
 		const starts = Ref.makeUnsafe(0)
-		const worker = Plugin.make({
-			name: "worker",
-			apply: () => Ref.update(starts, (count) => count + 1),
-		})
-		const other = Plugin.make({ name: "other", apply: () => Effect.void })
+
 		return Effect.gen(function* () {
 			const target = yield* collector
 			const config = {
@@ -207,6 +207,18 @@ it.live(
 			yield* fork.stable
 			const after = yield* Ref.get(starts)
 			assert.equal(after, 1)
-		}).pipe((effect) => run(effect, { worker, other }))
+		}).pipe((effect) =>
+			run(effect, {
+				worker: fixture("regressions-worker-6106"),
+				other: fixture("regressions-other-6106"),
+			}).pipe(
+				Effect.provideService(
+					Context.Service<{ readonly starts: typeof starts }>(
+						"loader/fixture/regressions-worker-6106",
+					),
+					{ starts },
+				),
+			),
+		)
 	},
 )

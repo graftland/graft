@@ -1,0 +1,6 @@
+{
+	"name": "plugin-mcp-server-lifecycle-[http.name]-4",
+	"version": "1.0.0",
+	"type": "module",
+	"exports": "./index.mjs"
+}

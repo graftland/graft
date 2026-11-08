@@ -297,43 +297,34 @@ await Effect.runPromise(
 
 ## 测试配置项
 
-`Loader.plugin` 运行保存在内存中的配置项，`ModuleResolver.fromRecord`
-把配置项的名称解析为插件，因此不需要任何文件：
+Loader 测试使用真实的已构建模块文件，通过生产控制协议解析和准备。嵌入式组合测试与原生隔离证据分别记录。
 
 ```ts
-import { Deferred, Effect } from "effect"
+import { Effect, HashSet } from "effect"
 import { assert, it } from "@effect/vitest"
 
-import { Graft } from "@graftland/graft"
-import { Loader, ModuleResolver } from "@graftland/loader"
+import type { Kernel } from "@graftland/graft"
+import * as Control from "@graftland/plugin-remote/Control"
 
-import { run } from "./run.ts"
-import { Mailer, welcome } from "./welcome.ts"
+declare const control: Control.Address
+declare const target: Kernel.Target
 
-const resolver = ModuleResolver.fromRecord({ welcome })
-
-it.effect("loads welcome from an entry", () =>
+it.live("describes a captured fixture and settles its inspection unit", () =>
 	Effect.gen(function* () {
-		const sent = yield* Deferred.make<string>()
-		yield* Graft.provide(Mailer, {
-			send: (to) => Effect.asVoid(Deferred.succeed(sent, to)),
-		})
-		yield* Graft.plugin(Loader.plugin, [
-			{ id: "welcome", name: "welcome", config: { to: "alice@example.com" } },
-		])
-		const to = yield* Deferred.await(sent)
-		assert.strictEqual(to, "alice@example.com")
-	}).pipe(run, Effect.provide(resolver)),
+		const client = yield* Control.connect(control)
+		const prepared = yield* client.inspect({ instance: "fixture", target })
+		assert.equal(prepared.exitEvidence, "Exited")
+		assert.equal(HashSet.size(prepared.unconfirmedUnits), 0)
+	}).pipe(Effect.scoped),
 )
 ```
 
-| 规则      | 说明                                                                                                                                          |
-| --------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| 名称      | `fromRecord` 按配置项的 `name` 精确查找，不应用[命名约定](../../config-file/#插件名称)。未知名称以 `ModuleNotFound` 失败。                    |
-| `Loader`  | 该服务发布在注册表中，而不是环境中。要编辑配置项或调用 `loader.ready`，在一个探针插件中注入 `Loader.Loader`，再通过 `Deferred` 把它交给测试。 |
-| 等待      | 编辑在保存后即返回，此时插件还没有变化。断言前先调用 `loader.ready`，见[编辑提供的保证](../../loader-api/#编辑提供的保证)。                   |
-| `!env`    | 在文件中会写 `!env` 的位置写 `new Entry.Env({ name })`，并用 `ConfigProvider.fromEnvRecord` 提供变量。                                        |
-| YAML 文件 | 加载 `Include.Include`，指向写入 `fs.makeTempDirectoryScoped()` 的 `graft.yml`，并在环境中加入 `NodeServices.layer`。                         |
+| 证据       | 断言                                                      |
+| ---------- | --------------------------------------------------------- |
+| 解析       | 完整名称优先、歧义、缺失模块和损坏依赖。                  |
+| 准备       | 不调用 apply 即检查配置与 intercept，并确认检查单元退出。 |
+| 归属       | 分别用屏障报告进入、清理和原生退出。                      |
+| 嵌入式观察 | 提供普通数据服务并声明注入；解析器输入为模块路径。        |
 
 ## 测试安装后的集成
 

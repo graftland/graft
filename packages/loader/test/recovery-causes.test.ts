@@ -7,124 +7,22 @@ import {
 	FileSystem,
 	Layer,
 	Option,
-	Path,
 	PlatformError,
-	Ref,
-	Schema,
 	Stream,
 } from "effect"
 import { assert, it } from "@effect/vitest"
 
-import { Graft, Plugin } from "@graftland/graft"
+import { Graft } from "@graftland/graft"
 
-import { Entry, Loader, ModuleResolver } from "../src/index.ts"
+import { Entry, Loader } from "../src/index.ts"
 import { atomicWrite } from "../src/internal/atomicWrite.ts"
+import { fixture, moduleLayer } from "./module-fixtures"
 import { loaderService, run } from "./utils.ts"
-
-const missing = () =>
-	Object.assign(
-		new Error("Cannot find package 'demo' imported from /app/index.js"),
-		{ code: "ERR_MODULE_NOT_FOUND" },
-	)
-const plugin = Plugin.make({ name: "fallback", apply: () => Effect.void })
-
-it.effect.each(["failure", "defect", "interruption"])(
-	"preserves an importer cleanup %s instead of trying a fallback",
-	(kind) =>
-		Effect.gen(function* () {
-			const absent = missing()
-			const cleanup = new Error("Importer cleanup failed")
-			const calls = yield* Ref.make<ReadonlyArray<string>>([])
-			const resolver = yield* ModuleResolver.make({
-				base: "/app",
-				importer: (name) =>
-					Ref.update(calls, Array.append(name)).pipe(
-						Effect.andThen(
-							name === "demo"
-								? Effect.acquireUseRelease(
-										Effect.void,
-										() => Effect.fail(absent),
-										() =>
-											kind === "failure"
-												? Effect.fail(cleanup)
-												: kind === "defect"
-													? Effect.die(cleanup)
-													: Effect.interrupt,
-									)
-								: Effect.succeed({ default: plugin }),
-						),
-					),
-			})
-			const exit = yield* Effect.exit(resolver.resolve("demo"))
-			assert(Exit.isFailure(exit))
-			assert.strictEqual(exit.cause.reasons.length, 2)
-			const failures = Array.filter(exit.cause.reasons, Cause.isFailReason)
-			assert.deepStrictEqual(
-				Array.map(failures, (reason) =>
-					reason.error._tag === "ModuleInvalid"
-						? reason.error.cause
-						: reason.error,
-				),
-				kind === "failure"
-					? [absent, cleanup]
-					: kind === "defect"
-						? []
-						: [absent],
-			)
-			if (kind === "defect")
-				assert.deepStrictEqual(
-					Array.map(
-						Array.filter(exit.cause.reasons, Cause.isDieReason),
-						(reason) => reason.defect,
-					),
-					[absent, cleanup],
-				)
-			assert.strictEqual(Cause.hasDies(exit.cause), kind === "defect")
-			assert.strictEqual(
-				Cause.hasInterrupts(exit.cause),
-				kind === "interruption",
-			)
-			const attempted = yield* Ref.get(calls)
-			assert.deepStrictEqual(attempted, ["demo"])
-		}).pipe(Effect.scoped, Effect.provide(Path.layer)),
-)
-
-it.effect(
-	"falls back after a lone missing candidate and successful cleanup",
-	() =>
-		Effect.gen(function* () {
-			const released = yield* Ref.make(false)
-			const resolver = yield* ModuleResolver.make({
-				base: "/app",
-				importer: (name) =>
-					name === "demo"
-						? Effect.acquireUseRelease(
-								Effect.void,
-								() => Effect.fail(missing()),
-								() => Ref.set(released, true),
-							)
-						: name === "graft-plugin-demo"
-							? Effect.fail(
-									Object.assign(
-										new Error(
-											"Cannot find package 'graft-plugin-demo' imported from /app/index.js",
-										),
-										{ code: "ERR_MODULE_NOT_FOUND" },
-									),
-								)
-							: Effect.succeed({ default: plugin }),
-			})
-			const resolved = yield* resolver.resolve("demo")
-			const cleaned = yield* Ref.get(released)
-			assert.strictEqual(resolved, plugin)
-			assert.isTrue(cleaned)
-		}).pipe(Effect.scoped, Effect.provide(Path.layer)),
-)
 
 it.effect.each(["stat", "read"])(
 	"does not recover a composite NotFound from %s",
 	(stage) =>
-		run(() => ({}))(() =>
+		run()(() =>
 			Effect.gen(function* () {
 				const fs = yield* FileSystem.FileSystem
 				const directory = yield* fs.makeTempDirectoryScoped()
@@ -191,11 +89,7 @@ it.effect(
 					() => Effect.fail(second),
 				),
 			)
-			const plugin = Plugin.make({
-				name: "consumer",
-				config: Schema.Unknown,
-				apply: () => Effect.void,
-			})
+
 			yield* Effect.gen(function* () {
 				yield* Graft.plugin(Loader.plugin, [
 					{ id: "consumer", name: "consumer" },
@@ -223,7 +117,9 @@ it.effect(
 					Graft.layer.pipe(
 						Layer.provideMerge(
 							Layer.merge(
-								ModuleResolver.fromRecord({ consumer: plugin }),
+								moduleLayer({
+									consumer: fixture("recovery-causes-consumer-6312"),
+								}),
 								ConfigProvider.layer(provider),
 							),
 						),

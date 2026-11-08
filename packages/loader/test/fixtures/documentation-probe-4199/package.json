@@ -1,0 +1,6 @@
+{
+	"name": "documentation-probe-4199",
+	"version": "1.0.0",
+	"type": "module",
+	"exports": "./index.mjs"
+}

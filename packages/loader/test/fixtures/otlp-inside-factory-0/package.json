@@ -1,0 +1,6 @@
+{
+	"name": "otlp-inside-factory-0",
+	"version": "1.0.0",
+	"type": "module",
+	"exports": "./index.mjs"
+}

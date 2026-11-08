@@ -34,14 +34,10 @@ names and aliases are reserved; duplicates stop startup. Commands are loaded
 once per invocation, including help. `--no-plugins` skips discovery so you can
 repair a broken declaration. Business entries do not run during discovery.
 
-With `start --watch`, an invalid project config temporarily contributes no
-command plugins. The CLI logs the cause and the application watcher waits for a
-valid file; restart the CLI to load its command entries.
-
 ## graft start
 
 ```sh
-graft start [config] [--watch] [--env-file <path>] [--env-dir <path>] [--stdio]
+graft start [config] [--env-file <path>] [--env-dir <path>] [--stdio]
 ```
 
 Runs the application that a [config file](../config-file/) describes. `config`
@@ -58,110 +54,45 @@ carries protocol bytes; logs, help and errors go to stderr.
 
 | Option              | What it does                                                                                               |
 | ------------------- | ---------------------------------------------------------------------------------------------------------- |
-| `--watch`, `-w`     | Watches the config file and plugin modules. See [Watch mode](#watch-mode).                                 |
 | `--env-file <path>` | Reads a `.env` file for [`!env`](../config-file/#environment-variables) tags. See [Env files](#env-files). |
 | `--env-dir <path>`  | Reads a directory with one file per variable for `!env` tags. See [Env directories](#env-directories).     |
 
 ### Env files
 
-| Behavior       | Detail                                                                                                                                                              |
-| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Path           | A relative path is relative to the current directory.                                                                                                               |
-| Priority       | A variable set in the process environment wins over the file, even when set to an empty string.                                                                     |
-| Missing file   | The command stops.                                                                                                                                                  |
-| With `--watch` | Saving the file reads it again and retries the loader, so entries whose values changed are updated. If the file cannot be read, the previous values stay in effect. |
-| Scope          | The file feeds Effect's `ConfigProvider`, so both `!env` and any `Config` a plugin reads use it. It does not change `process.env`.                                  |
-
-With `--watch`, `.env` files also use polling and watcher recovery:
-
-| Item                | Behavior                                                                                                                                                                          |
-| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `.env` path polling | The requested path is reread every second, resolving symbolic links again. This detects saves to targets outside the config directory, link retargeting and missed notifications. |
-| Changed contents    | Only changed contents retry the loader.                                                                                                                                           |
-| Read failures       | Keep the last values and are logged; polling continues.                                                                                                                           |
-| Watcher failures    | Logged. The watcher is installed again after one second.                                                                                                                          |
+| Behavior     | Detail                                                                                                                             |
+| ------------ | ---------------------------------------------------------------------------------------------------------------------------------- |
+| Path         | A relative path is relative to the current directory.                                                                              |
+| Priority     | A variable set in the process environment wins over the file, even when set to an empty string.                                    |
+| Missing file | The command stops.                                                                                                                 |
+| Scope        | The file feeds Effect's `ConfigProvider`, so both `!env` and any `Config` a plugin reads use it. It does not change `process.env`. |
 
 ### Env directories
 
 `graft start --env-dir /run/secrets` reads secrets mounted as files, such as
 Docker secrets or a Kubernetes Secret volume.
 
-| Behavior          | Detail                                                                                                                                                                   |
-| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Variables         | Each regular file is one variable, named after the file. Symbolic links to files count; hidden entries and subdirectories are skipped.                                   |
-| Value             | The file's contents without trailing line breaks. An empty file sets an empty value.                                                                                     |
-| Priority          | After the process environment and `--env-file`.                                                                                                                          |
-| Missing directory | The command stops.                                                                                                                                                       |
-| With `--watch`    | Watched and polled every second like [env files](#env-files). Only changed values retry the loader. If the directory cannot be read, the previous values stay in effect. |
-| Path and scope    | As for env files.                                                                                                                                                        |
+| Behavior          | Detail                                                                                                                                 |
+| ----------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| Variables         | Each regular file is one variable, named after the file. Symbolic links to files count; hidden entries and subdirectories are skipped. |
+| Value             | The file's contents without trailing line breaks. An empty file sets an empty value.                                                   |
+| Priority          | After the process environment and `--env-file`.                                                                                        |
+| Missing directory | The command stops.                                                                                                                     |
+| Path and scope    | As for env files.                                                                                                                      |
 
 ### Invalid first configuration
 
-| Mode              | Behavior                                                                                                                                                                                                                          |
-| ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Without `--watch` | The CLI reports the cause and exits with a nonzero status.                                                                                                                                                                        |
-| With `--watch`    | The CLI logs the first failure and waits for a valid configuration. It does not restart. The loader has no entries until it reads the first valid document, and edits through its API still cannot overwrite an invalid document. |
+The CLI reports the cause and exits with a nonzero status.
 
 ### Watch mode
 
-With `--watch`, the CLI watches two kinds of change:
-
-| Change                                                                                                | Handled by                                                                      |
-| ----------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
-| YAML configuration                                                                                    | The loader. See [Changes while running](../config-file/#changes-while-running). |
-| `.js`, `.mjs`, `.cjs`, `.ts`, `.mts` and `.cts` files under the config directory (not `node_modules`) | Incremental [module reloads](../hot-reload/).                                   |
-
-How the two interact:
-
-- Editing YAML does not import all entries again, and does not restart every
-  plugin that comes from a module. Unchanged healthy entries and their
-  environment values are left alone.
-- Removing or disabling an entry releases its module lease, so an invalid module
-  that nobody uses cannot block reloads of other entries. Pending and failed
-  entries keep their leases.
-- If plugin exports that used to be shared now differ, or replacement identities
-  conflict, the CLI reports the affected modules and asks for a restart. Running
-  plugins stay as they are.
-
-How the CLI drives reload:
-
-1. It calls `hmr.watch` with a module-file filter.
-2. After each attempt that ends with `Reloaded`, `RolledBack`, `RecoveryFailed`
-   or `Skipped`, it calls `loader.retry`, to retry failed entries and refresh
-   `!env` values. `RolledBack` logs one warning per plugin that failed to start
-   or timed out, with `graft.fork` and `graft.plugin`, and the `Cause` of a
-   failure. `RecoveryFailed` logs errors for both the replacement and recovery
-   failures, with the same annotations and full causes. It says that the
-   previous code failed to restart.
-3. Reload and retry failures are logged with their complete `Cause`, and
-   watching goes on.
-
-YAML and module watchers use native filesystem notifications, without polling.
-The YAML watcher rereads the file after installation to catch changes during
-setup. If either watcher backend fails, the failure is logged; that watcher is
-not reinstalled.
-
-Shutdown failures are logged with their complete `Cause`. A cause combining
-interruption with an error or defect is logged in full; pure interruption is
-normal cancellation.
-
-For how changes are detected, see [Hot reload](../hot-reload/#change-detection).
+`--watch` and `-w` are rejected. Start reads one configuration revision. Rebuild
+changed modules and restart the process to apply edits.
 
 ### Restart requirements
 
-The CLI reports `Restart required` instead of a successful reload in two cases.
-All existing plugins stay running.
-
-| Case                                                                                           |
-| ---------------------------------------------------------------------------------------------- |
-| Native loading abilities (`node:module`, including `createRequire` and cached `require(esm)`). |
-| A local entry or helper symlink points to a new target.                                        |
-
-Known native-loading requirements are reported even without a file event, so a
-missed startup notification cannot leave the limitation silent. Unchanged
-periodic reports are suppressed. Symlink target checks are part of the periodic
-check, so identical source bytes and lost native notifications cannot hide a
-target change.
+Restart after changing configuration, environment sources or installed packages.
+Directly embedded applications can use the cooperative [HMR API](../hmr-api/);
+it does not provide kernel isolation or termination-based cleanup.
 
 ### Logs and intercepts
 
@@ -219,26 +150,25 @@ With `--yes`, or when stdin or stdout is not a terminal, it asks nothing and
 
 ### Templates
 
-| Template  | For                                                                                                          | Files besides `package.json` and `graft.yml`                                                                                       |
-| --------- | ------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------- |
-| `app`     | An application. `graft.yml` loads the example plugins: `hello`, and `ticker` using the service of `greeter`. | `src/hello.ts`, `src/greeter.ts`, `src/ticker.ts`, `tsconfig.json`, `README.md`, `.vscode/extensions.json`, `.gitignore`           |
-| `plugin`  | A plugin package to [publish](../plugins/#publish-a-plugin).                                                 | `src/index.ts`, `test/index.test.ts`, `tsconfig.json`, `tsconfig.build.json`, `README.md`, `.vscode/extensions.json`, `.gitignore` |
-| `minimal` | Only the config file, with no entries besides those from `--plugin`.                                         | `.gitignore`                                                                                                                       |
+| Template  | For                                                                                                          | Files besides `package.json` and `graft.yml`                                                                                                                                          |
+| --------- | ------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `app`     | An application. `graft.yml` loads the example plugins: `hello`, and `ticker` using the service of `greeter`. | `src/hello.ts`, `src/greeter.ts`, `src/ticker.ts`, `tsconfig.json`, `tsconfig.build.json`, `README.md`, `README.zh-CN.md`, `README.zh-TW.md`, `.vscode/extensions.json`, `.gitignore` |
+| `plugin`  | A plugin package to [publish](../plugins/#publish-a-plugin).                                                 | `src/index.ts`, `test/index.test.ts`, `tsconfig.json`, `tsconfig.build.json`, `README.md`, `.vscode/extensions.json`, `.gitignore`                                                    |
+| `minimal` | Only the config file, with no entries besides those from `--plugin`.                                         | `.gitignore`                                                                                                                                                                          |
 
-| Script      | `app`                 | `plugin`                                      | `minimal`             |
-| ----------- | --------------------- | --------------------------------------------- | --------------------- |
-| `dev`       | `graft start --watch` | `graft start --watch`, loading `src/index.ts` | `graft start --watch` |
-| `start`     | `graft start`         |                                               | `graft start`         |
-| `test`      |                       | `vitest run`                                  |                       |
-| `typecheck` | `effect-tsgo tsc`     | `effect-tsgo tsc`                             |                       |
-| `build`     |                       | Compiles `src` to `dist`                      |                       |
+| Script      | `app`                                       | `plugin`                                    | `minimal`     |
+| ----------- | ------------------------------------------- | ------------------------------------------- | ------------- |
+| `dev`       | `tsc -p tsconfig.build.json && graft start` | `tsc -p tsconfig.build.json && graft start` |               |
+| `start`     | `graft start`                               |                                             | `graft start` |
+| `test`      |                                             | `vitest run`                                |               |
+| `typecheck` | `effect-tsgo tsc`                           | `effect-tsgo tsc`                           |               |
+| `build`     | `tsc -p tsconfig.build.json`                | `tsc -p tsconfig.build.json`                |               |
 
 - Every project depends on the same Graft version as the command, and
   `graft.yml` points to its [editor schema](../config-file/#editor-support),
   `./graft.schema.json`.
-- Node runs the TypeScript of `app` directly, so it has no build step. A
-  `plugin` package is built, because Node does not strip types inside
-  `node_modules`.
+- `app` and `plugin` compile TypeScript into `dist`. The config selects built
+  JavaScript files so captured artifacts can run in native units.
 - `.vscode/extensions.json` recommends the YAML extension, which completes
   `graft.yml` from its schema. The TypeScript projects also report Effect
   diagnostics in `typecheck`.

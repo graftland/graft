@@ -12,7 +12,6 @@ import { NodeServices } from "@effect/platform-node"
 import { assert, it } from "@effect/vitest"
 
 import { Graft } from "@graftland/graft"
-import { ModuleResolver } from "@graftland/loader"
 import { Artifact } from "@graftland/plugin-remote"
 
 import { validate } from "../src/internal/journal"
@@ -45,11 +44,8 @@ const setup = Effect.fnUntraced(function* () {
 	yield* write(path.join(stage, "release.json"), release)
 	const id = (yield* Artifact.directoryIdentity(stage)).digest
 	yield* fs.rename(stage, path.join(store, id))
-	const resolver = yield* ModuleResolver.make({
-		base: store,
-		importer: (specifier) => import(specifier),
-	})
-	return { fs, path, store, id, resolver }
+
+	return { fs, path, store, id }
 })
 
 it.effect(

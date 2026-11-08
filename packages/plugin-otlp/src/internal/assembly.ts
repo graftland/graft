@@ -26,7 +26,18 @@ export default Plugin.make({
 	apply: Effect.fnUntraced(function* (config) {
 		const resolver = yield* ModuleResolver.ModuleResolver
 		const selected = yield* reference(config)
-		const definition = yield* resolver.resolve(selected.name)
+		const descriptor = yield* resolver.resolve(selected.name)
+		const module = yield* Effect.tryPromise({
+			try: () => import(descriptor.location),
+			catch: (cause) =>
+				ModuleResolver.ModuleInvalid.make({ specifier: selected.name, cause }),
+		})
+		const definition = yield* Effect.fromOption(Plugin.fromModule(module), () =>
+			ModuleResolver.ModuleInvalid.make({
+				specifier: selected.name,
+				cause: "The selected module no longer exports its described plugin",
+			}),
+		)
 		const provider = yield* Graft.plugin(definition, selected.config)
 		yield* provider.stable
 		const settings = yield* Ref.make(selected.config)

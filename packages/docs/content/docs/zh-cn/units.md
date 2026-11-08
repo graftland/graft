@@ -51,6 +51,22 @@ export const inspect = Effect.flatMap(Kernel.Kernel, (kernel) =>
 | 观察 | `getPreparation`、`preparations`、`inspections` 和 `units` 显示剩余工作及准确的退出证据。 |
 | 等待 | 中断提交等待者不会取消运行时拥有的检查。                                                  |
 
+## 单元环境
+
+每个单元构建自己的 Node 服务、HTTP 客户端、时钟和日志器。自定义环境与 intercept 模块导出 Layer，通过
+`Configuration.Options`
+接收 JSON 选项。有序配置构建新的 Layer；恢复时重新构建，并按当前策略重新解析原始引用。
+
+| 准备方式 | 行为                                                     |
+| -------- | -------------------------------------------------------- |
+| 模块解析 | 在可丢弃单元中检查导出形式，不解码插件输入或调用 apply。 |
+| 部署检查 | 构建环境模块、解码配置，不调用 apply 或获取服务资源。    |
+| 执行     | 重新构建环境，并重新核对检查过的声明。                   |
+| 截止时间 | 终止单元并要求原生退出证据；缺失证据仍保留未结工作。     |
+
+通过 [Loader 准备](../loader-api/)
+登记不可变的 intercept 模块。函数、Schema、Context 和 Layer 不会出现在部署数据中。
+
 ## 选择部署位置
 
 | 部署位置  | 执行所有者                                                           |

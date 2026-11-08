@@ -5,8 +5,6 @@ import {
 	Deferred,
 	Effect,
 	Exit,
-	Layer,
-	MutableList,
 	Option,
 	Queue,
 	Ref,
@@ -17,7 +15,7 @@ import { assert, it } from "@effect/vitest"
 
 import { Graft, Plugin } from "@graftland/graft"
 
-import { Entry, Intercept, Loader, ModuleResolver, Tree } from "../src/index.ts"
+import { Entry, Intercept, Loader, Tree } from "../src/index.ts"
 import { loaderService, run } from "./utils.ts"
 
 const logged = (message: string) =>
@@ -33,7 +31,7 @@ const logged = (message: string) =>
 it.effect.each(["throw", "die"])(
 	"settles a Store.apply %s and continues processing edits",
 	(mode) =>
-		run(() => ({}))(() =>
+		run()(() =>
 			Effect.gen(function* () {
 				const current = yield* Ref.make<ReadonlyArray<Entry.Entry>>([])
 				const defect = new Error("Store apply crashed")
@@ -85,7 +83,7 @@ it.effect.each(["throw", "die"])(
 it.effect(
 	"settles an already dequeued request when closing after a synchronous throw",
 	() =>
-		run(() => ({}))(() =>
+		run()(() =>
 			Effect.gen(function* () {
 				const entered = yield* Deferred.make<void>()
 				const replied =
@@ -125,7 +123,7 @@ it.effect(
 it.effect(
 	"reads a throwing refresh getter inside the per-notification boundary",
 	() =>
-		run(() => ({}))(() =>
+		run()(() =>
 			Effect.gen(function* () {
 				const queue = yield* Queue.unbounded<void>()
 				const broken = yield* Ref.make(true)
@@ -160,7 +158,7 @@ it.effect(
 )
 
 it.effect("logs a throwing external getter without disabling API edits", () =>
-	run(() => ({}))(() =>
+	run()(() =>
 		Effect.gen(function* () {
 			const defect = new Error("Notification construction crashed")
 			const store: Loader.Store = {
@@ -183,20 +181,15 @@ it.effect("logs a throwing external getter without disabling API edits", () =>
 )
 
 const Settings = Context.Reference(
-	"@graftland/loader/test/extension-boundaries.test/Settings",
+	"loader/test/extension-boundaries/Settings",
 	{ defaultValue: () => "default" },
 )
-it.effect.each(["merge", "registration", "resolver"])(
+it.effect.each(["merge", "registration"])(
 	"isolates a synchronous %s callback defect and permits retry",
 	(stage) =>
 		Effect.gen(function* () {
 			const defect = new Error("Extension callback crashed")
 			const broken = yield* Ref.make(true)
-			const started = yield* Ref.make(0)
-			const plugin = Plugin.make({
-				name: "extension",
-				apply: () => Ref.update(started, (n) => n + 1),
-			})
 			const registration = Intercept.make(
 				Settings,
 				Schema.String,
@@ -205,102 +198,41 @@ it.effect.each(["merge", "registration", "resolver"])(
 					return patch
 				},
 			)
-			const environment = Layer.merge(
-				Layer.succeed(ModuleResolver.ModuleResolver, {
-					importModule: (specifier) =>
-						Effect.fail(
-							ModuleResolver.ModuleInvalid.make({
-								specifier,
-								cause: "Unused in this fixture",
-							}),
-						),
-					resolve: () => {
-						if (stage === "resolver" && Ref.getUnsafe(broken)) throw defect
-						return Effect.succeed(plugin)
+			const environment = Intercept.layer([
+				{
+					key: Settings.key,
+					schema: Schema.Unknown,
+					resolve: (input) => {
+						if (stage === "registration" && Ref.getUnsafe(broken)) throw defect
+						return registration.resolve(input)
 					},
-				}),
-				Intercept.layer([
-					{
-						key: Settings.key,
-						schema: Schema.Unknown,
-						resolve: (input) => {
-							if (stage === "registration" && Ref.getUnsafe(broken))
-								throw defect
-							return registration.resolve(input)
+				},
+			])
+			yield* run()((journal) =>
+				Effect.gen(function* () {
+					yield* Graft.plugin(Loader.plugin, [
+						{
+							id: "extension",
+							name: "echo",
+							config: { text: "started" },
+							intercept: { [Settings.key]: "patched" },
 						},
-					},
-				]),
-			)
-			yield* Effect.gen(function* () {
-				yield* Graft.plugin(Loader.plugin, [
-					{
-						id: "extension",
-						name: "extension",
-						intercept: { [Settings.key]: "patched" },
-					},
-				])
-				const loader = yield* loaderService
-				yield* loader.ready
-				const record = yield* Graft.logs.pipe(
-					Stream.filter((entry) => Cause.hasDies(entry.cause)),
-					Stream.runHead,
-				)
-				assert.strictEqual(
-					Cause.squash(Option.getOrThrow(record).cause),
-					defect,
-				)
-				yield* Ref.set(broken, false)
-				yield* loader.retry
-				yield* loader.ready
-				const count = yield* Ref.get(started)
-				assert.strictEqual(count, 1)
-			}).pipe(
-				Effect.scoped,
-				Effect.provide(Layer.provideMerge(Graft.layer, environment)),
-			)
+					])
+					const loader = yield* loaderService
+					yield* loader.ready
+					const record = yield* Graft.logs.pipe(
+						Stream.filter((entry) => Cause.hasDies(entry.cause)),
+						Stream.runHead,
+					)
+					assert.strictEqual(
+						Cause.squash(Option.getOrThrow(record).cause),
+						defect,
+					)
+					yield* Ref.set(broken, false)
+					yield* loader.retry
+					yield* loader.ready
+					yield* journal.expect(["start started"])
+				}),
+			).pipe(Effect.provide(environment))
 		}),
-)
-
-it.effect("defers bundled module getters until resolution runs", () =>
-	Effect.gen(function* () {
-		const defect = new Error("Bundled module getter crashed")
-		const entered = yield* Deferred.make<void>()
-		const table: Readonly<Record<string, Plugin.Plugin>> = {
-			get bundled(): Plugin.Plugin {
-				Deferred.doneUnsafe(entered, Effect.void)
-				throw defect
-			},
-		}
-		yield* Effect.gen(function* () {
-			const resolver = yield* ModuleResolver.ModuleResolver
-			const resolving = resolver.resolve("bundled")
-			const early = yield* Deferred.isDone(entered)
-			assert.isFalse(early)
-			const exit = yield* Effect.exit(resolving)
-			assert(Exit.isFailure(exit))
-			assert.strictEqual(Cause.squash(exit.cause), defect)
-		}).pipe(Effect.scoped, Effect.provide(ModuleResolver.fromRecord(table)))
-	}),
-)
-
-it.effect("defers bundled raw module getters until import runs", () =>
-	Effect.gen(function* () {
-		const reads = MutableList.make<void>()
-		const defect = new Error("Raw module getter crashed")
-		const table: Readonly<Record<string, Plugin.Plugin>> = {
-			get bundled(): Plugin.Plugin {
-				MutableList.append(reads, undefined)
-				throw defect
-			},
-		}
-		yield* Effect.gen(function* () {
-			const resolver = yield* ModuleResolver.ModuleResolver
-			const importing = resolver.importModule("bundled")
-			assert.strictEqual(MutableList.toArray(reads).length, 0)
-			const exit = yield* Effect.exit(importing)
-			assert(Exit.isFailure(exit))
-			assert.strictEqual(Cause.squash(exit.cause), defect)
-			assert.strictEqual(MutableList.toArray(reads).length, 1)
-		}).pipe(Effect.scoped, Effect.provide(ModuleResolver.fromRecord(table)))
-	}),
 )

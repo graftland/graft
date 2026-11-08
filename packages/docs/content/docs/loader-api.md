@@ -5,60 +5,62 @@ description:
   guarantees.
 ---
 
-The loader publishes a `Loader` service. Plugins inject it to read and edit the
-entries of a [config file](../config-file/):
+Prepare immutable plugin descriptors through the public control protocol. Module
+imports and configuration checks run in disposable units; preparation waits for
+their exit before returning.
 
-```ts import.meta.vitest name="loader-api: edit entries from a plugin"
-import { Deferred, Effect, Layer } from "effect"
+## Prepare a deployment
 
-import { Graft, Plugin } from "@graftland/graft"
-import { Entry, Loader, ModuleResolver } from "@graftland/loader"
+`ModuleResolver` returns captured location, export, resolution base, provenance
+and declared external dependency observations. It never returns a Plugin,
+Schema, Context or Layer. Exact package names win; ambiguous short names fail.
+Relative names use the declaring include directory.
 
-const admin = Plugin.make({
-	name: "app/admin",
-	inject: [Loader.Loader],
-	apply: () =>
-		Effect.gen(function* () {
-			const loader = yield* Loader.Loader
-			const id = yield* loader.create({ name: "./plugins/cron.mjs" })
-			yield* loader.update(id, { config: { every: "5 minutes" } })
-			yield* loader.update("api", { disabled: true })
-		}),
+```ts
+import { Effect, HashMap } from "effect"
+
+import { ModuleResolver, Preparation } from "@graftland/loader"
+import type * as Control from "@graftland/plugin-remote/Control"
+
+declare const control: Control.Address
+
+export const prepared = Effect.gen(function* () {
+	const resolver = yield* ModuleResolver.make({ base: "/app", control })
+	const module = yield* resolver.resolve("@acme/graft-plugin-api")
+	const settings = yield* resolver.resolve("./dist/settings.js", {
+		kind: "Environment",
+	})
+	const prepare = yield* Preparation.make({
+		control,
+		intercepts: HashMap.make(["app/Settings", settings]),
+	})
+	return yield* prepare.inspect({
+		instance: "api",
+		module,
+		input: { port: 8080 },
+		intercept: [{ key: "app/Settings", patch: { color: "red" } }],
+	})
 })
-
-const cron = Plugin.make({ name: "app/cron", apply: () => Effect.void })
-const api = Plugin.make({ name: "app/api", apply: () => Effect.void })
-const resolver = ModuleResolver.fromRecord({ "./plugins/cron.mjs": cron, api })
-
-const entries = await Effect.runPromise(
-	Effect.gen(function* () {
-		const loaderFork = yield* Graft.plugin(Loader.plugin, [
-			{ id: "api", name: "api" },
-		])
-		yield* loaderFork.await
-		const fork = yield* Graft.plugin(admin)
-		yield* fork.await
-		const read = yield* Deferred.make<ReadonlyArray<Entry.Entry>>()
-		const probe = Plugin.make({
-			name: "app/probe",
-			inject: [Loader.Loader],
-			apply: () =>
-				Loader.Loader.pipe(
-					Effect.flatMap((loader) => Deferred.into(loader.entries, read)),
-					Effect.asVoid,
-				),
-		})
-		yield* Graft.plugin(probe)
-		return yield* Deferred.await(read)
-	}).pipe(
-		Effect.scoped,
-		Effect.provide(Layer.provideMerge(Graft.layer, resolver)),
-	),
-)
-
-entries[0]?.disabled // => true
-entries[1]?.config // => { every: "5 minutes" }
 ```
+
+Custom resolution uses `resolver: { artifact, options }` on
+`ModuleResolver.make`. The module's default Effect reads `Configuration.Options`
+containing `name`, `base` and `options`, and returns descriptor data. It runs in
+a disposable unit; its result is checked independently before use. A local
+module must belong to a package containing `package.json`; build TypeScript into
+JavaScript first.
+
+| Identity               | Rule                                                                                                                                    |
+| ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| Code authorization     | Includes the plugin, contract and ordered configuration module identities. The core rejects a caller-supplied identity that differs.    |
+| Validation environment | Includes resolved configuration options and their module order. Recovery resolves raw references again.                                 |
+| External dependencies  | Declared dependency locations and versions are observations, not captured bytes. Undeclared dynamic imports are outside this inventory. |
+
+## Embedded edits
+
+The embedded `Loader` service reads and edits a cooperative application’s
+entries. It provides no kernel Change outcomes or termination-based reclamation.
+The rules below apply to this embedded service.
 
 For a tree containing a managed fork, Loader rejects edits, refreshes and retry
 before invoking store mutations. See [Execution transitions](../transitions/)

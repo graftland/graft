@@ -119,95 +119,69 @@ Reference 也可以列在 `inject` 中。
 
 ## 設定檔 intercept
 
-`Graft.intercept` 是有型別的程式碼 API；載入器的 YAML `intercept`
-欄位則是不受信任的邊界，不接受任意字串鍵，必須明確註冊。
+原生準備流程傳遞有序的 JSON 修補和不可變的環境模組描述符。解碼與合併程式在檢查單元和執行單元中執行。環境模組匯出 Layer，`Configuration.Options`
+提供編碼後的選項。
 
-每個註冊項目包含三個部分：
+```ts title="settings.ts"
+import { Context, Effect, Layer, Schema } from "effect"
 
-| 部分      | 說明                                     |
-| --------- | ---------------------------------------- |
-| Reference | `Context.Reference` 物件。               |
-| Schema    | 解碼設定的輸入。                         |
-| 合併函式  | 有型別的函式 `(outer, patch) => value`。 |
+import { Configuration } from "@graftland/plugin-remote"
 
-請在執行載入器的環境中註冊，與外掛解析器和其他平台服務放在一起：
-
-```ts import.meta.vitest name="intercepts: register a reference"
-import { Context, Effect, Layer, Schema, Stream } from "effect"
-
-import { Graft, Plugin } from "@graftland/graft"
-import { Intercept, Loader, ModuleResolver } from "@graftland/loader"
-
-const Settings = Context.Reference("app/Settings", {
+export const Settings = Context.Reference("app/Settings", {
 	defaultValue: () => ({ color: "blue", size: 12 }),
 })
-
-const references = Intercept.layer([
-	Intercept.make(
-		Settings,
-		Schema.Struct({
-			color: Schema.optionalKey(Schema.String),
-			size: Schema.optionalKey(Schema.Finite),
-		}),
-		(outer, patch) => ({ ...outer, ...patch }),
-	),
-])
-
-const show = Plugin.make({
-	name: "app/show",
-	apply: () => Effect.flatMap(Settings, Effect.log),
+const Patch = Schema.Struct({
+	color: Schema.optionalKey(Schema.Trim),
+	size: Schema.optionalKey(Schema.Finite),
 })
-
-const environment = Layer.merge(references, ModuleResolver.fromRecord({ show }))
-const runtime = Layer.provideMerge(Graft.layer, environment)
-
-const [line] = await Effect.runPromise(
+export default Layer.effect(
+	Settings,
 	Effect.gen(function* () {
-		yield* Graft.plugin(Loader.plugin, [
-			{
-				id: "show",
-				name: "show",
-				intercept: { "app/Settings": { color: "red" } },
-			},
-		])
-		return yield* Graft.logs.pipe(Stream.take(1), Stream.runCollect)
-	}).pipe(Effect.scoped, Effect.provide(runtime)),
+		const input = yield* Configuration.Options
+		const patch = yield* Schema.decodeUnknownEffect(Patch)(input)
+		const outer = yield* Settings
+		return { ...outer, ...patch }
+	}),
 )
-line?.message // => [{ color: "red", size: 12 }]
 ```
 
-在 `graft.yml` 中，同一個設定項目寫成：
+依 Reference 的鍵登記模組描述符，再準備外掛；準備不會啟用外掛。
 
-```yaml title="graft.yml"
-- id: show
-  name: show
-  intercept:
-    app/Settings:
-      color: red
+```ts
+import { Effect, HashMap } from "effect"
+
+import { ModuleResolver, Preparation } from "@graftland/loader"
+import type * as Control from "@graftland/plugin-remote/Control"
+
+declare const control: Control.Address
+
+export const prepared = Effect.gen(function* () {
+	const resolver = yield* ModuleResolver.make({ base: "/app", control })
+	const module = yield* resolver.resolve("@acme/graft-plugin-api")
+	const settings = yield* resolver.resolve("./dist/settings.js", {
+		kind: "Environment",
+	})
+	const prepare = yield* Preparation.make({
+		control,
+		intercepts: HashMap.make(["app/Settings", settings]),
+	})
+	return yield* prepare.inspect({
+		instance: "api",
+		module,
+		input: { port: 8080 },
+		intercept: [{ key: "app/Settings", patch: { color: "red" } }],
+	})
+})
 ```
 
-值的合併方式：
+| 輸入           | 規則                                                                   |
+| -------------- | ---------------------------------------------------------------------- |
+| 繼承           | 先套用父層修補，再套用子層修補；每份設定都建構新的 Layer。             |
+| 未登記的鍵     | 在啟動單元前回傳 `PreparationFailed`，原因為 `UnregisteredIntercept`。 |
+| 無效修補       | 檢查保留完整 cause 並失敗，不呼叫外掛的 apply。                        |
+| 函式和活動物件 | 因不是 JSON 資料而遭拒。                                               |
+| 復原           | 重新建構環境，並依目前策略重新解析參照。                               |
 
-- 巢狀設定項目的補丁會接收父層的值，同層項目保留各自的值。
-- Schema 在合併函式執行前解碼輸入，且不能依賴解碼服務。
-- 合併函式的回傳型別必須符合 Reference。
-- 純量取代或需要整體驗證的設定，可使用完整值 Schema，搭配
-  `(_, value) => value`。
-
-失敗情況：
-
-| 問題       | 錯誤                                              |
-| ---------- | ------------------------------------------------- |
-| 鍵尚未註冊 | `UnregisteredReference`                           |
-| 值無效     | `InvalidIntercept`，並在 cause 中保留 Schema 錯誤 |
-
-這兩種情況下，該設定項目的外掛都不會啟動。
-
-:::note
-
-註冊表預設為空。請在建立載入器之前，透過宿主環境提供註冊表；載入器所管理的樹中的外掛，不能透過發布服務來註冊 Reference。預設的 CLI 註冊了
-`References.CurrentLogAnnotations`（合併註解欄位）和
-`References.MinimumLogLevel`（驗證後取代日誌層級）；其他 Reference 需要由自訂的宿主註冊。直接從程式碼使用的、有型別的
-`Graft.intercept` API 不受此影響。
-
-:::
+明確嵌入的應用程式可用 `Intercept.make` 和 `Intercept.layer`
+登記單元內的解碼與合併邏輯。這些函式和環境服務不會跨越原生邊界。準備流程請見
+[Loader API](../loader-api/)，協作式組合請見[嵌入](../embedding/)。

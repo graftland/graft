@@ -11,10 +11,10 @@ import {
 } from "effect"
 import { assert, describe, it } from "@effect/vitest"
 
-import { Graft, Plugin, type Fork } from "@graftland/graft"
+import { Graft, type Fork } from "@graftland/graft"
 
 import { Intercept, Loader } from "../src/index.ts"
-import { loaderService, run } from "./utils.ts"
+import { fixture, loaderService, run } from "./utils.ts"
 
 const Settings = Context.Reference(
 	"@graftland/loader/test/intercept.test/Settings",
@@ -62,14 +62,8 @@ describe("registered intercepts", () => {
 				const values = yield* Ref.make<
 					ReadonlyArray<Context.Service.Shape<typeof Settings>>
 				>([])
-				const probe = Plugin.make({
-					name: "settings",
-					apply: () =>
-						Effect.flatMap(Settings, (value) =>
-							Ref.update(values, Array.append(value)),
-						),
-				})
-				yield* run(() => ({ settings: probe }))(() =>
+
+				yield* run({ settings: fixture("intercept-settings-1780") })(() =>
 					Effect.gen(function* () {
 						yield* Graft.plugin(Loader.plugin, [
 							{
@@ -95,19 +89,22 @@ describe("registered intercepts", () => {
 							{ color: "blue", size: 12 },
 						])
 					}),
-				).pipe(Effect.provide(settingsLayer))
+				).pipe(
+					Effect.provideService(
+						Context.Service<{ readonly values: typeof values }>(
+							"loader/fixture/intercept-settings-1780",
+						),
+						{ values },
+					),
+					Effect.provide(settingsLayer),
+				)
 			}),
 	)
 
 	it.effect(
 		"fails an unregistered key even when the entry also awaits a missing injection",
 		() =>
-			run(() => ({
-				settings: Plugin.make({
-					name: "settings",
-					apply: () => Effect.die("The invalid entry must not start"),
-				}),
-			}))(() =>
+			run({ settings: fixture("intercept-settings-2671") })(() =>
 				Effect.gen(function* () {
 					yield* Graft.plugin(Loader.plugin, [
 						{
@@ -132,14 +129,8 @@ describe("registered intercepts", () => {
 			Effect.gen(function* () {
 				const observed =
 					yield* Deferred.make<Context.Service.Shape<typeof Settings>>()
-				const probe = Plugin.make({
-					name: "settings",
-					apply: () =>
-						Effect.flatMap(Settings, (value) =>
-							Deferred.succeed(observed, value).pipe(Effect.asVoid),
-						),
-				})
-				yield* run(() => ({ settings: probe }))(() =>
+
+				yield* run({ settings: fixture("intercept-settings-3722") })(() =>
 					Effect.gen(function* () {
 						yield* Graft.plugin(Loader.plugin, [
 							{
@@ -163,7 +154,15 @@ describe("registered intercepts", () => {
 						const value = yield* Deferred.await(observed)
 						assert.deepStrictEqual(value, { color: "blue", size: 24 })
 					}),
-				).pipe(Effect.provide(settingsLayer))
+				).pipe(
+					Effect.provideService(
+						Context.Service<{ readonly observed: typeof observed }>(
+							"loader/fixture/intercept-settings-3722",
+						),
+						{ observed },
+					),
+					Effect.provide(settingsLayer),
+				)
 			}),
 	)
 
@@ -174,14 +173,8 @@ describe("registered intercepts", () => {
 				{ defaultValue: () => false },
 			)
 			const observed = yield* Deferred.make<boolean>()
-			const probe = Plugin.make({
-				name: "formal",
-				apply: () =>
-					Effect.flatMap(formal, (value) =>
-						Deferred.succeed(observed, value).pipe(Effect.asVoid),
-					),
-			})
-			yield* run(() => ({ formal: probe }))(() =>
+
+			yield* run({ formal: fixture("intercept-formal-5098") })(() =>
 				Effect.gen(function* () {
 					yield* Graft.plugin(Loader.plugin, [
 						{ id: "formal", name: "formal", intercept: { [formal.key]: true } },
@@ -192,6 +185,12 @@ describe("registered intercepts", () => {
 					assert.isTrue(value)
 				}),
 			).pipe(
+				Effect.provideService(
+					Context.Service<{ readonly observed: typeof observed }>(
+						"loader/fixture/intercept-formal-5098",
+					),
+					{ observed },
+				),
 				Effect.provide(
 					Intercept.layer([
 						Intercept.make(formal, Schema.Boolean, (_, value) => value),
@@ -211,14 +210,8 @@ describe("registered intercepts", () => {
 				readonly color: string
 				readonly size: number
 			}>()
-			const plugin = Plugin.make({
-				name: "settings",
-				apply: () =>
-					Effect.flatMap(Settings, (settings) =>
-						Deferred.succeed(observed, settings).pipe(Effect.asVoid),
-					),
-			})
-			yield* run(() => ({ settings: plugin }))(() =>
+
+			yield* run({ settings: fixture("intercept-settings-6225") })(() =>
 				Effect.gen(function* () {
 					yield* Graft.plugin(Loader.plugin, [
 						{
@@ -233,6 +226,12 @@ describe("registered intercepts", () => {
 					assert.deepStrictEqual(settings, { color: "red", size: 12 })
 				}),
 			).pipe(
+				Effect.provideService(
+					Context.Service<{ readonly observed: typeof observed }>(
+						"loader/fixture/intercept-settings-6225",
+					),
+					{ observed },
+				),
 				Effect.provide(
 					Intercept.layer([
 						Intercept.make(

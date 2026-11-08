@@ -1,12 +1,12 @@
-import { Array, Effect, FileSystem, Schema } from "effect"
+import { Array, Effect, FileSystem } from "effect"
 import { assert, it } from "@effect/vitest"
 
-import { Graft, Plugin } from "@graftland/graft"
+import { Graft } from "@graftland/graft"
 
 import { parse } from "yaml"
 
 import { Include } from "../src/index.ts"
-import { loaderService, run } from "./utils.ts"
+import { fixture, loaderService, run } from "./utils.ts"
 
 const source =
 	"- &template\n  name: unused\n  disabled: true\n- name: observer\n  config: *template # Keep the observer comment\n"
@@ -14,19 +14,7 @@ const source =
 it.effect(
 	"keeps an anonymous alias consumer's input and identity across rereads",
 	() =>
-		run((journal) => ({
-			observer: Plugin.make({
-				name: "observer",
-				config: Schema.Unknown,
-				apply: (config) =>
-					Effect.gen(function* () {
-						assert.deepStrictEqual(config, { name: "unused", disabled: true })
-						yield* Effect.acquireRelease(journal.record("start observer"), () =>
-							journal.record("stop observer"),
-						)
-					}),
-			}),
-		}))((journal) =>
+		run({ observer: fixture("observer") })((journal) =>
 			Effect.gen(function* () {
 				const fs = yield* FileSystem.FileSystem
 				const directory = yield* fs.makeTempDirectoryScoped()
@@ -60,7 +48,7 @@ it.effect(
 it.effect(
 	"protects aliases to ancestors of anonymous entries without materializing unrelated aliases",
 	() =>
-		run(() => ({}))(() =>
+		run()(() =>
 			Effect.gen(function* () {
 				const fs = yield* FileSystem.FileSystem
 				const directory = yield* fs.makeTempDirectoryScoped()
@@ -101,7 +89,7 @@ it.effect(
 it.effect(
 	"keeps distinct alias occurrences when an anchor name is reused",
 	() =>
-		run(() => ({}))(() =>
+		run()(() =>
 			Effect.gen(function* () {
 				const fs = yield* FileSystem.FileSystem
 				const directory = yield* fs.makeTempDirectoryScoped()

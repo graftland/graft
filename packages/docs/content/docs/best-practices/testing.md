@@ -307,43 +307,36 @@ await Effect.runPromise(
 
 ## Test config entries
 
-`Loader.plugin` runs entries kept in memory, and `ModuleResolver.fromRecord`
-turns their names into plugins, so no files are needed:
+Use real built module files for Loader tests. Resolve and prepare them through
+the production control protocol. Keep embedded composition tests separate from
+native isolation evidence.
 
 ```ts
-import { Deferred, Effect } from "effect"
+import { Effect, HashSet } from "effect"
 import { assert, it } from "@effect/vitest"
 
-import { Graft } from "@graftland/graft"
-import { Loader, ModuleResolver } from "@graftland/loader"
+import type { Kernel } from "@graftland/graft"
+import * as Control from "@graftland/plugin-remote/Control"
 
-import { run } from "./run.ts"
-import { Mailer, welcome } from "./welcome.ts"
+declare const control: Control.Address
+declare const target: Kernel.Target
 
-const resolver = ModuleResolver.fromRecord({ welcome })
-
-it.effect("loads welcome from an entry", () =>
+it.live("describes a captured fixture and settles its inspection unit", () =>
 	Effect.gen(function* () {
-		const sent = yield* Deferred.make<string>()
-		yield* Graft.provide(Mailer, {
-			send: (to) => Effect.asVoid(Deferred.succeed(sent, to)),
-		})
-		yield* Graft.plugin(Loader.plugin, [
-			{ id: "welcome", name: "welcome", config: { to: "alice@example.com" } },
-		])
-		const to = yield* Deferred.await(sent)
-		assert.strictEqual(to, "alice@example.com")
-	}).pipe(run, Effect.provide(resolver)),
+		const client = yield* Control.connect(control)
+		const prepared = yield* client.inspect({ instance: "fixture", target })
+		assert.equal(prepared.exitEvidence, "Exited")
+		assert.equal(HashSet.size(prepared.unconfirmedUnits), 0)
+	}).pipe(Effect.scoped),
 )
 ```
 
-| Rule          | Detail                                                                                                                                                                                          |
-| ------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Names         | `fromRecord` looks up an entry's `name` exactly, without the [naming conventions](../../config-file/#plugin-names). An unknown name fails with `ModuleNotFound`.                                |
-| `Loader`      | The service is published in the registry, not the environment. To edit entries or call `loader.ready`, inject `Loader.Loader` in a probe plugin that hands it to the test through a `Deferred`. |
-| Waiting       | An edit returns once it is saved, before the plugins change. Call `loader.ready` before asserting; see [What an edit promises](../../loader-api/#what-an-edit-promises).                        |
-| `!env`        | Write `new Entry.Env({ name })` where the file would have `!env`, and supply the variables with `ConfigProvider.fromEnvRecord`.                                                                 |
-| The YAML file | Load `Include.Include` with a `graft.yml` written into `fs.makeTempDirectoryScoped()`, and `NodeServices.layer` in the environment.                                                             |
+| Evidence              | Assertion                                                                                        |
+| --------------------- | ------------------------------------------------------------------------------------------------ |
+| Resolution            | Exact-name precedence, ambiguity, missing modules and broken dependencies.                       |
+| Preparation           | Configuration and intercepts are checked without apply; inspection exit is confirmed.            |
+| Ownership             | Barriers report entry, cleanup and native exit separately.                                       |
+| Embedded observations | Supply ordinary data services and declare their injection; resolver inputs contain module paths. |
 
 ## Test the installed integration
 

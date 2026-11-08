@@ -11,7 +11,16 @@ export interface ArtifactData {
 		readonly entry: string
 	}
 }
+export interface ConfigurationModule {
+	readonly artifact: ArtifactData
+	readonly export: string
+	readonly options: Schema.Json
+}
 export interface DeploymentData {
+	readonly environment?: ReadonlyArray<ConfigurationModule>
+	readonly moduleSuffix?: string
+	readonly inspection?: "Module"
+	readonly moduleKind?: "Environment" | "Resolver"
 	readonly contractArtifact?: ArtifactData
 	readonly artifact: ArtifactData
 	readonly contract?: string
@@ -19,6 +28,7 @@ export interface DeploymentData {
 	readonly runner?: { readonly socket: string; readonly owner: string }
 }
 export interface ResolvedInput {
+	readonly environmentModules?: ReadonlyArray<ConfigurationModule>
 	readonly input: Schema.Json
 	readonly identity: string
 	readonly environment: string
@@ -65,6 +75,8 @@ export interface RouteView {
 	readonly routes: ReadonlyArray<BindingRoute>
 }
 export interface Description {
+	readonly inspectionData?: Schema.Json
+	readonly moduleExport?: "default" | "plugin"
 	readonly artifact: string
 	readonly configuration: string
 	readonly environment: string
@@ -372,6 +384,7 @@ export type Report =
 	  }
 	| {
 			readonly _tag: "Failed"
+			readonly reason?: "PluginExportMissing"
 			readonly cause: Cause.Cause<unknown>
 			readonly creation: "NotStarted" | "Unknown"
 			readonly delivery?: "Unavailable"
@@ -581,6 +594,7 @@ export type Event =
 	  }
 	| { readonly _tag: "Shutdown"; readonly now: number }
 export type Rejection =
+	| "PluginExportMissing"
 	| "IncompatibleBinding"
 	| "DescriptionFailed"
 	| "Unauthorized"

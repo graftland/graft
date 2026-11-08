@@ -63,6 +63,7 @@ const Outcome = Schema.Literals([
 const Rejection = Schema.Literals([
 	"IncompatibleBinding",
 	"DescriptionFailed",
+	"PluginExportMissing",
 	"Unauthorized",
 	"Closing",
 	"UnsupportedTarget",

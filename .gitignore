@@ -8,6 +8,7 @@ devenv.local.yaml
 node_modules
 
 .cache/
+.graft/
 
 .DS_Store
 

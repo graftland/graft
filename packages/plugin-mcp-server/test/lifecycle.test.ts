@@ -15,12 +15,13 @@ import { NodeServices } from "@effect/platform-node"
 import { assert, it } from "@effect/vitest"
 
 import { Graft, Plugin, type Fork } from "@graftland/graft"
-import { Include, Loader, ModuleResolver } from "@graftland/loader"
+import { Include, Loader } from "@graftland/loader"
 
 import http from "../src/http.ts"
 import core from "../src/index.ts"
 import { isolate, Server } from "../src/Server.ts"
 import stdio from "../src/stdio.ts"
+import { fixture, moduleLayer } from "./module-fixtures"
 
 it.effect(
 	"transport configuration is local; core configuration restarts consumers but not contributors",
@@ -125,13 +126,25 @@ for (const full of [false, true]) {
 				Effect.provide(
 					Graft.layer.pipe(
 						Layer.provideMerge([
-							ModuleResolver.fromRecord({
-								[core.name]: core,
-								"mcp-server": core,
-								[stdio.name]: stdio,
-								"mcp-server/stdio": stdio,
-								[http.name]: http,
-								"mcp-server/http": http,
+							moduleLayer({
+								[core.name]: fixture(
+									"plugin-mcp-server-lifecycle-[core.name]-0",
+								),
+								"mcp-server": fixture(
+									"plugin-mcp-server-lifecycle-mcp-server-1",
+								),
+								[stdio.name]: fixture(
+									"plugin-mcp-server-lifecycle-[stdio.name]-2",
+								),
+								"mcp-server/stdio": fixture(
+									"plugin-mcp-server-lifecycle-mcp-server-stdio-3",
+								),
+								[http.name]: fixture(
+									"plugin-mcp-server-lifecycle-[http.name]-4",
+								),
+								"mcp-server/http": fixture(
+									"plugin-mcp-server-lifecycle-mcp-server-http-5",
+								),
 							}),
 							Stdio.layerTest({ stdin: Stream.never }),
 						]),
@@ -185,7 +198,9 @@ it.effect("MCP group isolation anchors survive Loader id write-back", () =>
 			Graft.layer.pipe(
 				Layer.provideMerge([
 					NodeServices.layer,
-					ModuleResolver.fromRecord({ "mcp-server": core }),
+					moduleLayer({
+						"mcp-server": fixture("plugin-mcp-server-lifecycle-mcp-server-0"),
+					}),
 				]),
 			),
 		),

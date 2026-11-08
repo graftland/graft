@@ -4,13 +4,12 @@ import { assert, it } from "@effect/vitest"
 import { Graft, Plugin, Transition } from "@graftland/graft"
 
 import { Loader } from "../src/index"
-import { loaderService, run } from "./utils"
+import { fixture, loaderService, run } from "./utils"
 
 it.effect(
 	"rejects managed-tree edits before calling a store or changing its target",
-	() => {
-		const managed = Plugin.make({ name: "managed", apply: () => Effect.void })
-		return run(() => ({ managed }))(() =>
+	() =>
+		run({ managed: fixture("noop") })(() =>
 			Effect.gen(function* () {
 				const writes = yield* Ref.make(0)
 				const initial = [{ id: "integration", name: "managed" }]
@@ -46,6 +45,5 @@ it.effect(
 			}),
 		).pipe(
 			Effect.provideService(Transition.UnitMember, Option.some("integration")),
-		)
-	},
+		),
 )

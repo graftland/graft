@@ -2,7 +2,6 @@ import {
 	Array,
 	Cause,
 	DateTime,
-	Deferred,
 	Effect,
 	Exit,
 	FileSystem,
@@ -13,10 +12,10 @@ import {
 } from "effect"
 import { assert, describe, it } from "@effect/vitest"
 
-import { Graft, Plugin, type Fork } from "@graftland/graft"
+import { Graft, type Fork } from "@graftland/graft"
 
 import { Entry, Group, Include, Loader, Tree } from "../src/index.ts"
-import { echo, loaderService, run } from "./utils.ts"
+import { fixture, loaderService, run } from "./utils.ts"
 
 const cycle = () => {
 	const value: Record<string, unknown> = { text: "cycle" }
@@ -46,7 +45,6 @@ const expectCyclicEntry = Effect.fn("expectCyclicEntry")(function* (
 describe("configuration graphs", () => {
 	it.effect("isolates a cyclic group when Group is used without Loader", () =>
 		Effect.gen(function* () {
-			const started = yield* Deferred.make<void>()
 			const children: Entry.Entry[] = []
 			children.push({
 				id: "loop",
@@ -54,19 +52,15 @@ describe("configuration graphs", () => {
 				group: true,
 				config: children,
 			})
-			yield* run(() => ({
-				healthy: Plugin.make({
-					name: "healthy",
-					apply: () => Deferred.succeed(started, undefined).pipe(Effect.asVoid),
-				}),
-			}))(() =>
+			yield* run({ healthy: fixture("started") })((journal) =>
 				Effect.gen(function* () {
 					const group = yield* Graft.plugin(Group.Group, [
 						{ id: "cyclic", name: "group", group: true, config: children },
 						{ id: "healthy", name: "healthy" },
 					])
 					yield* group.await
-					yield* Deferred.await(started)
+					yield* group.stable
+					yield* journal.expect(["started"])
 				}),
 			)
 		}),
@@ -74,7 +68,7 @@ describe("configuration graphs", () => {
 	it.effect(
 		"repairs an anchored cyclic config while preserving another entry's old value",
 		() =>
-			run((journal) => ({ echo: echo(journal) }))((journal) =>
+			run()((journal) =>
 				Effect.gen(function* () {
 					const fs = yield* FileSystem.FileSystem
 					const path = yield* Path.Path
@@ -100,7 +94,7 @@ describe("configuration graphs", () => {
 	it.effect(
 		"isolates a cyclic YAML entry and permits later edits and removal",
 		() =>
-			run((journal) => ({ echo: echo(journal) }))((journal) =>
+			run()((journal) =>
 				Effect.gen(function* () {
 					const fs = yield* FileSystem.FileSystem
 					const path = yield* Path.Path
@@ -134,7 +128,7 @@ describe("configuration graphs", () => {
 	it.effect(
 		"recovers after cyclic in-memory configs and intercepts are replaced",
 		() =>
-			run((journal) => ({ echo: echo(journal) }))((journal) =>
+			run()((journal) =>
 				Effect.gen(function* () {
 					yield* Graft.plugin(Loader.plugin, [])
 					const loader = yield* loaderService
@@ -185,7 +179,7 @@ describe("configuration graphs", () => {
 	it.effect(
 		"rejects cycles in the group topology before traversing entries",
 		() =>
-			run(() => ({}))(() =>
+			run()(() =>
 				Effect.gen(function* () {
 					const entries: Entry.Entry[] = []
 					entries.push({

@@ -42,6 +42,7 @@ import type {
 	Unit,
 	Working,
 } from "./decisionState.ts"
+import { deploymentIdentity } from "./deploymentIdentity"
 import * as Preparation from "./preparationCore"
 
 export const getPreparation = Preparation.get
@@ -1001,8 +1002,10 @@ const requested = (s: Working, input: Input, inspect = false): Working => {
 	if (input.key !== undefined && HashMap.has(s.preparationKeys, input.key))
 		return Preparation.start(s, request, inspect)
 	if (!s.open) return reject(s, "Closing")
-	if (!HashMap.has(s.instances, input.instance))
+	if (!inspect && !HashMap.has(s.instances, input.instance))
 		return reject(s, "UnsupportedTarget")
+	if (!inspect && input.target.deployment?.inspection === "Module")
+		return reject(s, "Unsupported")
 	if (!validBudget(request.budget, request.trial))
 		return reject(s, "InvalidBudget")
 	if (
@@ -1013,6 +1016,8 @@ const requested = (s: Working, input: Input, inspect = false): Working => {
 	if (input.target.placement === "Runner" && input.strategy === "Overlap")
 		return reject(s, "Unsupported")
 	if (input.target.deployment === undefined)
+		return reject(s, "UnsupportedTarget")
+	if (input.target.identity !== deploymentIdentity(input.target.deployment))
 		return reject(s, "UnsupportedTarget")
 	if (!Preparation.authorized(s, input.instance, input.target))
 		return reject(s, "Unauthorized")

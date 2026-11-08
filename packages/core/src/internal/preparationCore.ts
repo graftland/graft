@@ -371,7 +371,8 @@ const valid = (p: Preparation, d: Description): boolean =>
 			d.configuration === r.identity &&
 			d.environment === r.environment &&
 			d.protocol === 1 &&
-			d.members === 1,
+			d.members ===
+				(p.request.target.deployment?.moduleKind !== undefined ? 0 : 1),
 	)
 const finish = (s: Working, p: Preparation): Working => {
 	if (!ended(s, p)) return s
@@ -650,7 +651,7 @@ const failedReport = (
 					})),
 				}
 			: s
-	return fail(confirmed, p, "DescriptionFailed", result.cause)
+	return fail(confirmed, p, result.reason ?? "DescriptionFailed", result.cause)
 }
 const describedReport = (
 	s: Working,

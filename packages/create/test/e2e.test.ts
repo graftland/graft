@@ -102,6 +102,14 @@ describe("generated projects", () => {
 				const directory = yield* generate("app")
 				const checked = yield* exec(bin.tsc, ["-p", "."], directory)
 				assert.strictEqual(checked.code, 0, checked.output)
+				const built = yield* exec(
+					bin.tsc,
+					["-p", "tsconfig.build.json"],
+					directory,
+				)
+				assert.equal(built.code, 0, built.output)
+				const capturedEntry = yield* fs.exists(`${directory}/dist/hello.js`)
+				assert.isTrue(capturedEntry)
 				const schema = yield* exec(
 					process.execPath,
 					[bin.graft, "schema"],

@@ -1,17 +1,28 @@
 # Graft plugin
 
-A [Graft](https://github.com/graftland/graft) plugin package. `src/index.ts`
-defines the plugin, and `graft.yml` loads it for local runs.
+[English](README.md) | [简体中文](README.zh-CN.md) | [繁體中文](README.zh-TW.md)
 
-| Script              | What it does                                                    |
-| ------------------- | --------------------------------------------------------------- |
-| `npm run dev`       | Runs the plugin from `graft.yml` and reloads it as files change |
-| `npm test`          | Runs the tests in `test/`                                       |
-| `npm run typecheck` | Checks types, including Effect diagnostics                      |
-| `npm run build`     | Compiles `src` to `dist`, which is what the package publishes   |
+A Graft plugin package. `src/index.ts` defines the plugin; `graft.yml` loads its
+built `dist/index.js`.
 
-Use the same scripts with pnpm (`pnpm dev`) or Yarn (`yarn dev`).
+## Run it
 
-Graft resolves the short name `example` to `@graftland/plugin-example` or
-`graft-plugin-example`. Packages named otherwise must be listed in `graft.yml`
-by their full name.
+```sh
+npm run dev
+```
+
+After editing, stop the process and run `npm run dev` again. There is no
+automatic reload.
+
+## Scripts
+
+| Command             | Behavior                              |
+| ------------------- | ------------------------------------- |
+| `npm run dev`       | Build and start                       |
+| `npm test`          | Run `test/`                           |
+| `npm run typecheck` | Check types and Effect diagnostics    |
+| `npm run build`     | Compile `src` to the published `dist` |
+
+Use the same scripts with pnpm or Yarn. An exact plugin package name wins;
+otherwise the short name `example` tries `@graftland/plugin-example` and
+`graft-plugin-example`. Name the package in full if both exist.

@@ -1,0 +1,6 @@
+{
+	"name": "serialization-worker-2874",
+	"version": "1.0.0",
+	"type": "module",
+	"exports": "./index.mjs"
+}

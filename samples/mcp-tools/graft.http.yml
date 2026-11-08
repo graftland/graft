@@ -10,10 +10,10 @@
 - id: http
   name: "@graftland/plugin-mcp-server/http"
 - id: content
-  name: ./src/plugins/content.ts
+  name: ./dist/plugins/content.js
 - id: clock
-  name: ./src/plugins/clock.ts
+  name: ./dist/plugins/clock.js
 - id: todo-store
-  name: ./src/plugins/todo-store.ts
+  name: ./dist/plugins/todo-store.js
 - id: todo
-  name: ./src/plugins/todo.ts
+  name: ./dist/plugins/todo.js

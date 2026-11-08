@@ -5,7 +5,6 @@ import {
 	Context,
 	Effect,
 	FileSystem,
-	Layer,
 	Option,
 	Ref,
 	Schema,
@@ -13,16 +12,10 @@ import {
 } from "effect"
 import { assert, it } from "@effect/vitest"
 
-import { Graft, Plugin, type Fork } from "@graftland/graft"
+import { Graft, type Fork } from "@graftland/graft"
 
-import {
-	Entry,
-	Include,
-	Intercept,
-	Loader,
-	ModuleResolver,
-} from "../src/index.ts"
-import { loaderService, run } from "./utils.ts"
+import { Entry, Include, Intercept, Loader } from "../src/index.ts"
+import { fixture, loaderService, run } from "./utils.ts"
 
 const Setting = Context.Reference(
 	"@graftland/loader/test/intercept-env.test/Setting",
@@ -41,15 +34,8 @@ it.effect.each(["literal", "env"])(
 	(mode) =>
 		Effect.gen(function* () {
 			const observations = yield* Ref.make<ReadonlyArray<unknown>>([])
-			const leaf = Plugin.make({
-				name: "leaf",
-				config: Schema.String,
-				apply: (config) =>
-					Effect.flatMap(Setting, (setting) =>
-						Ref.update(observations, Array.append({ config, setting })),
-					),
-			})
-			yield* run(() => ({ leaf }))(() =>
+
+			yield* run({ leaf: fixture("intercept-env-leaf-1214") })(() =>
 				Effect.gen(function* () {
 					const fs = yield* FileSystem.FileSystem
 					const directory = yield* fs.makeTempDirectoryScoped()
@@ -75,7 +61,15 @@ it.effect.each(["literal", "env"])(
 					if (mode === "env")
 						assert.include(text, `"${Setting.key}": !env GREETING`)
 				}),
-			).pipe(Effect.provide(registry))
+			).pipe(
+				Effect.provideService(
+					Context.Service<{ readonly observations: typeof observations }>(
+						"loader/fixture/intercept-env-leaf-1214",
+					),
+					{ observations },
+				),
+				Effect.provide(registry),
+			)
 		}),
 )
 
@@ -100,11 +94,8 @@ it.effect(
 				),
 			])
 			const seen = yield* Ref.make<unknown>(undefined)
-			const leaf = Plugin.make({
-				name: "leaf",
-				apply: () => Effect.flatMap(Settings, (value) => Ref.set(seen, value)),
-			})
-			yield* run(() => ({ leaf }))(() =>
+
+			yield* run({ leaf: fixture("intercept-env-leaf-3174") })(() =>
 				Effect.gen(function* () {
 					yield* Graft.plugin(Loader.plugin, [
 						{
@@ -120,7 +111,15 @@ it.effect(
 					const observed = yield* Ref.get(seen)
 					assert.deepStrictEqual(observed, { tags: ["hi"], label: "default" })
 				}),
-			).pipe(Effect.provide(registration))
+			).pipe(
+				Effect.provideService(
+					Context.Service<{ readonly seen: typeof seen }>(
+						"loader/fixture/intercept-env-leaf-3174",
+					),
+					{ seen },
+				),
+				Effect.provide(registration),
+			)
 		}),
 )
 
@@ -129,14 +128,8 @@ it.effect.each([true, false])(
 	(disabled) =>
 		Effect.gen(function* () {
 			const observed = yield* Ref.make<ReadonlyArray<string>>([])
-			const leaf = Plugin.make({
-				name: "leaf",
-				apply: () =>
-					Effect.flatMap(Setting, (value) =>
-						Ref.update(observed, Array.append(value)),
-					),
-			})
-			yield* run(() => ({ leaf }))(() =>
+
+			yield* run({ leaf: fixture("intercept-env-leaf-4082") })(() =>
 				Effect.gen(function* () {
 					const children = [
 						{
@@ -187,7 +180,15 @@ it.effect.each([true, false])(
 						)
 					}
 				}),
-			).pipe(Effect.provide(registry))
+			).pipe(
+				Effect.provideService(
+					Context.Service<{ readonly observed: typeof observed }>(
+						"loader/fixture/intercept-env-leaf-4082",
+					),
+					{ observed },
+				),
+				Effect.provide(registry),
+			)
 		}),
 )
 
@@ -197,49 +198,49 @@ it.effect(
 		Effect.gen(function* () {
 			const available = yield* Ref.make(false)
 			const observed = yield* Ref.make<ReadonlyArray<string>>([])
-			const leaf = Plugin.make({
-				name: "leaf",
-				apply: () =>
-					Effect.flatMap(Setting, (value) =>
-						Ref.update(observed, Array.append(value)),
-					),
-			})
+
 			const provider = ConfigProvider.make(() =>
 				Effect.map(Ref.get(available), (available) =>
 					available ? ConfigProvider.makeValue("recovered") : undefined,
 				),
 			)
-			const environment = Layer.mergeAll(
-				registry,
-				ConfigProvider.layer(provider),
-				ModuleResolver.fromRecord({ leaf }),
-			)
-			yield* Effect.gen(function* () {
-				yield* Graft.plugin(Loader.plugin, [
-					{
-						id: "leaf",
-						name: "leaf",
-						intercept: { [Setting.key]: new Entry.Env({ name: "SETTING" }) },
-					},
-				])
-				const loader = yield* loaderService
-				yield* loader.ready
-				const initial = yield* Ref.get(observed)
-				assert.deepStrictEqual(initial, [])
-				yield* Ref.set(available, true)
-				yield* loader.retry
-				yield* loader.ready
-				const recovered = yield* Ref.get(observed)
-				assert.deepStrictEqual(recovered, ["recovered"])
-				yield* loader.update("leaf", {
-					intercept: { [Setting.key]: "replacement" },
-				})
-				yield* loader.ready
-				const replaced = yield* Ref.get(observed)
-				assert.deepStrictEqual(replaced, ["recovered", "replacement"])
-			}).pipe(
-				Effect.scoped,
-				Effect.provide(Layer.provideMerge(Graft.layer, environment)),
+			const environment = ConfigProvider.layer(provider)
+			yield* run(
+				{ leaf: fixture("intercept-env-leaf-6493") },
+				environment,
+			)(() =>
+				Effect.gen(function* () {
+					yield* Graft.plugin(Loader.plugin, [
+						{
+							id: "leaf",
+							name: "leaf",
+							intercept: { [Setting.key]: new Entry.Env({ name: "SETTING" }) },
+						},
+					])
+					const loader = yield* loaderService
+					yield* loader.ready
+					const initial = yield* Ref.get(observed)
+					assert.deepStrictEqual(initial, [])
+					yield* Ref.set(available, true)
+					yield* loader.retry
+					yield* loader.ready
+					const recovered = yield* Ref.get(observed)
+					assert.deepStrictEqual(recovered, ["recovered"])
+					yield* loader.update("leaf", {
+						intercept: { [Setting.key]: "replacement" },
+					})
+					yield* loader.ready
+					const replaced = yield* Ref.get(observed)
+					assert.deepStrictEqual(replaced, ["recovered", "replacement"])
+				}),
+			).pipe(
+				Effect.provideService(
+					Context.Service<{ readonly observed: typeof observed }>(
+						"loader/fixture/intercept-env-leaf-6493",
+					),
+					{ observed },
+				),
+				Effect.provide(registry),
 			)
 		}),
 )
@@ -249,11 +250,8 @@ it.effect(
 	() =>
 		Effect.gen(function* () {
 			const started = yield* Ref.make(false)
-			const leaf = Plugin.make({
-				name: "leaf",
-				apply: () => Ref.set(started, true),
-			})
-			yield* run(() => ({ leaf }))(() =>
+
+			yield* run({ leaf: fixture("intercept-env-leaf-7537") })(() =>
 				Effect.gen(function* () {
 					yield* Graft.plugin(Loader.plugin, [
 						{
@@ -280,6 +278,12 @@ it.effect(
 					assert.strictEqual(error.key, Setting.key)
 				}),
 			).pipe(
+				Effect.provideService(
+					Context.Service<{ readonly started: typeof started }>(
+						"loader/fixture/intercept-env-leaf-7537",
+					),
+					{ started },
+				),
 				Effect.provide(
 					Intercept.layer([
 						Intercept.make(

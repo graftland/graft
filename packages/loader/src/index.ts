@@ -7,6 +7,7 @@ export * as Include from "./Include"
 export * as Intercept from "./Intercept"
 export * as Loader from "./Loader"
 export * as ModuleResolver from "./ModuleResolver"
+export * as Preparation from "./Preparation"
 export * as Tree from "./Tree"
 
 export { ConfigDirectory } from "./ConfigDirectory"

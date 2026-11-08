@@ -16,6 +16,8 @@ import * as Interpreter from "./internal/kernel"
 import { UnknownChange } from "./internal/observation"
 import { UnitControl } from "./internal/unitControl"
 
+export { deploymentIdentity } from "./internal/deploymentIdentity"
+
 export { UnknownChange } from "./internal/observation"
 
 export type {
@@ -48,6 +50,7 @@ export type {
 	Reply,
 	ArtifactData,
 	DeploymentData,
+	ConfigurationModule,
 	ResolvedInput,
 	Description,
 	BindingDeclaration,

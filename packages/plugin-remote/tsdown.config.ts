@@ -21,6 +21,7 @@ export default defineConfig({
 		"src/index.ts",
 		"src/Artifact.ts",
 		"src/Contract.ts",
+		"src/Configuration.ts",
 		"src/Units.ts",
 		"src/Control.ts",
 		"src/Policy.ts",

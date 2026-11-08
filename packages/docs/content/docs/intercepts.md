@@ -125,102 +125,73 @@ References may also appear in `inject`.
 
 ## Config-file intercepts
 
-`Graft.intercept` is a typed code API. The loader's YAML `intercept` field is an
-untrusted boundary, so it does not accept any string key. Keys must be
-registered explicitly.
+Native preparation carries ordered JSON patches and immutable environment module
+descriptors. Decode and merge code runs inside the inspection and execution
+units. An environment module exports a Layer; `Configuration.Options` supplies
+its encoded options.
 
-Each registration has three parts:
+```ts title="settings.ts"
+import { Context, Effect, Layer, Schema } from "effect"
 
-| Part           | What it is                                  |
-| -------------- | ------------------------------------------- |
-| Reference      | The `Context.Reference` object.             |
-| Schema         | Decodes the configured input.               |
-| Merge function | A typed function `(outer, patch) => value`. |
+import { Configuration } from "@graftland/plugin-remote"
 
-Register them in the environment that runs the loader, next to its plugin
-resolver and any other platform services:
-
-```ts import.meta.vitest name="intercepts: register a reference"
-import { Context, Effect, Layer, Schema, Stream } from "effect"
-
-import { Graft, Plugin } from "@graftland/graft"
-import { Intercept, Loader, ModuleResolver } from "@graftland/loader"
-
-const Settings = Context.Reference("app/Settings", {
+export const Settings = Context.Reference("app/Settings", {
 	defaultValue: () => ({ color: "blue", size: 12 }),
 })
-
-const references = Intercept.layer([
-	Intercept.make(
-		Settings,
-		Schema.Struct({
-			color: Schema.optionalKey(Schema.String),
-			size: Schema.optionalKey(Schema.Finite),
-		}),
-		(outer, patch) => ({ ...outer, ...patch }),
-	),
-])
-
-const show = Plugin.make({
-	name: "app/show",
-	apply: () => Effect.flatMap(Settings, Effect.log),
+const Patch = Schema.Struct({
+	color: Schema.optionalKey(Schema.Trim),
+	size: Schema.optionalKey(Schema.Finite),
 })
-
-const environment = Layer.merge(references, ModuleResolver.fromRecord({ show }))
-const runtime = Layer.provideMerge(Graft.layer, environment)
-
-const [line] = await Effect.runPromise(
+export default Layer.effect(
+	Settings,
 	Effect.gen(function* () {
-		yield* Graft.plugin(Loader.plugin, [
-			{
-				id: "show",
-				name: "show",
-				intercept: { "app/Settings": { color: "red" } },
-			},
-		])
-		return yield* Graft.logs.pipe(Stream.take(1), Stream.runCollect)
-	}).pipe(Effect.scoped, Effect.provide(runtime)),
+		const input = yield* Configuration.Options
+		const patch = yield* Schema.decodeUnknownEffect(Patch)(input)
+		const outer = yield* Settings
+		return { ...outer, ...patch }
+	}),
 )
-line?.message // => [{ color: "red", size: 12 }]
 ```
 
-In `graft.yml`, the same entry is:
+Register the module descriptor by reference key, then prepare a plugin without
+activating it.
 
-```yaml title="graft.yml"
-- id: show
-  name: show
-  intercept:
-    app/Settings:
-      color: red
+```ts
+import { Effect, HashMap } from "effect"
+
+import { ModuleResolver, Preparation } from "@graftland/loader"
+import type * as Control from "@graftland/plugin-remote/Control"
+
+declare const control: Control.Address
+
+export const prepared = Effect.gen(function* () {
+	const resolver = yield* ModuleResolver.make({ base: "/app", control })
+	const module = yield* resolver.resolve("@acme/graft-plugin-api")
+	const settings = yield* resolver.resolve("./dist/settings.js", {
+		kind: "Environment",
+	})
+	const prepare = yield* Preparation.make({
+		control,
+		intercepts: HashMap.make(["app/Settings", settings]),
+	})
+	return yield* prepare.inspect({
+		instance: "api",
+		module,
+		input: { port: 8080 },
+		intercept: [{ key: "app/Settings", patch: { color: "red" } }],
+	})
+})
 ```
 
-How values combine:
+| Input                      | Rule                                                                       |
+| -------------------------- | -------------------------------------------------------------------------- |
+| Inheritance                | Parent patches precede child patches. Every recipe builds a fresh Layer.   |
+| Unknown key                | `PreparationFailed` with `UnregisteredIntercept`, before unit work.        |
+| Invalid patch              | Inspection fails with its full cause; the plugin is not applied.           |
+| Functions and live objects | Rejected as non-JSON input.                                                |
+| Recovery                   | Rebuilds the environment and resolves references under the current policy. |
 
-- A nested entry's patch receives its parent's value. Siblings keep their own
-  values.
-- Schemas decode input before the merge function runs, and must not need
-  decoding services.
-- The merge function's return type must match the Reference.
-- For a scalar replacement, or for settings you want to check as a whole, use
-  `(_, value) => value` with a full-value schema.
-
-Failures:
-
-| Problem               | Error                                                  |
-| --------------------- | ------------------------------------------------------ |
-| Key is not registered | `UnregisteredReference`                                |
-| Value is invalid      | `InvalidIntercept`, with the schema error as its cause |
-
-In both cases the entry's plugin does not start.
-
-:::note
-
-The registry is empty by default. Provide it in the host environment before you
-create the loader; a plugin inside the managed tree cannot register references
-by publishing a service. The stock CLI registers
-`References.CurrentLogAnnotations` (merges annotation fields) and
-`References.MinimumLogLevel` (replaces the level after a check). Other
-references need a custom host registration. This does not change the typed
-`Graft.intercept` API that you use directly from code.
-
-:::
+In an explicitly embedded application, `Intercept.make` and `Intercept.layer`
+register unit-local decoders and merges. These functions and the ambient
+environment do not cross a native boundary. See [Loader API](../loader-api/) for
+preparation and [embedding](../embedding/) for cooperative composition.

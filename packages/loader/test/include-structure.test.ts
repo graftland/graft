@@ -7,13 +7,13 @@ import { vi } from "vitest"
 import { parse } from "yaml"
 
 import { Include } from "../src/index.ts"
-import { echo, loaderService, run } from "./utils.ts"
+import { loaderService, run } from "./utils.ts"
 
 describe("aliased entry structure", () => {
 	it.effect(
 		"assigns distinct stable ids in aliased groups without changing ordinary config",
 		() =>
-			run((journal) => ({ echo: echo(journal) }))((journal) =>
+			run()((journal) =>
 				Effect.gen(function* () {
 					const fs = yield* FileSystem.FileSystem
 					const path = yield* Path.Path
@@ -71,7 +71,7 @@ describe("aliased entry structure", () => {
 		it.effect(
 			`rejects invalid aliased structure without rewriting it: ${String.includes("source")(config) ? "duplicate ids" : "cycle"}`,
 			() =>
-				run(() => ({}))(() =>
+				run()(() =>
 					Effect.gen(function* () {
 						const fs = yield* FileSystem.FileSystem
 						const path = yield* Path.Path
@@ -92,7 +92,7 @@ describe("aliased entry structure", () => {
 it.effect.each(["null", "42", "invalid"])(
 	"rejects an explicit non-array group config without rewriting it: %s",
 	(config) =>
-		run(() => ({}))(() =>
+		run()(() =>
 			Effect.gen(function* () {
 				const fs = yield* FileSystem.FileSystem
 				const directory = yield* fs.makeTempDirectoryScoped()
@@ -111,7 +111,7 @@ it.effect.each(["null", "42", "invalid"])(
 it.effect(
 	"matches duplicate anonymous entries without quadratic bucket materialization",
 	() =>
-		run(() => ({}))(() =>
+		run()(() =>
 			Effect.gen(function* () {
 				const fs = yield* FileSystem.FileSystem
 				const directory = yield* fs.makeTempDirectoryScoped()

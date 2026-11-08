@@ -1,0 +1,6 @@
+{
+	"name": "plugin-otlp-extensions-another-exporter-1",
+	"version": "1.0.0",
+	"type": "module",
+	"exports": "./index.mjs"
+}

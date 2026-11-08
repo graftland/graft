@@ -4,11 +4,11 @@ import { describe, it } from "@effect/vitest"
 import { Graft } from "@graftland/graft"
 
 import { Loader } from "../src/index.ts"
-import { echo, loaderService, run } from "./utils.ts"
+import { loaderService, run } from "./utils.ts"
 
 describe("loader", () => {
 	it.effect("reconciles the running tree with every edit", () =>
-		run((journal) => ({ echo: echo(journal) }))((journal) =>
+		run()((journal) =>
 			Effect.gen(function* () {
 				yield* Graft.plugin(Loader.plugin, [
 					{ id: "a", name: "echo", config: { text: "a" } },
@@ -21,7 +21,7 @@ describe("loader", () => {
 				])
 				const loader = yield* loaderService
 				yield* loader.ready
-				yield* journal.expect(["start a", "start b"])
+				yield* journal.expect([["start a", "start b"]])
 
 				yield* loader.update("b", { config: { text: "b2" } })
 				yield* loader.ready
@@ -35,14 +35,12 @@ describe("loader", () => {
 				yield* loader.remove("g")
 				yield* loader.ready
 				yield* journal.expect([
-					"start a",
-					"start b",
+					["start a", "start b"],
 					"stop b",
 					"start b2",
 					"start c",
 					"stop a",
-					"stop c",
-					"stop b2",
+					["stop c", "stop b2"],
 				])
 			}),
 		),
@@ -51,7 +49,7 @@ describe("loader", () => {
 	it.effect(
 		"keeps an entry whose plugin cannot be found as a failed fork",
 		() =>
-			run(() => ({}))(() =>
+			run()(() =>
 				Effect.gen(function* () {
 					yield* Graft.plugin(Loader.plugin, [
 						{ id: "missing", name: "nowhere" },

@@ -4,13 +4,13 @@ import { it } from "@effect/vitest"
 import { Graft } from "@graftland/graft"
 
 import { Entry, Loader } from "../src/index.ts"
-import { echo, loaderService, run } from "./utils.ts"
+import { loaderService, run } from "./utils.ts"
 
 for (const disabled of [true, false]) {
 	it.effect(
 		`keeps missing environment values local to a ${disabled ? "disabled" : "failed"} child on load and update`,
 		() =>
-			run((journal) => ({ echo: echo(journal) }))((journal) =>
+			run()((journal) =>
 				Effect.gen(function* () {
 					const children = (text: string) => [
 						{

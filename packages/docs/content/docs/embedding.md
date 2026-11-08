@@ -3,8 +3,9 @@ title: Use Graft in your program
 description: Run plugins from your own Effect program, without the CLI.
 ---
 
-The CLI is a small program built on top of the libraries. You can run Graft from
-your own Effect program in the same way.
+**Embedded Graft** composes plugins inside your Effect program. Its lifecycle is
+cooperative; it provides no kernel Change outcomes, isolation or
+termination-based reclamation.
 
 | You want to…                        | Use                                    | Section                                       |
 | ----------------------------------- | -------------------------------------- | --------------------------------------------- |
@@ -33,11 +34,12 @@ const program = Effect.gen(function* () {
 	return yield* Effect.never
 })
 
-program.pipe(
-	Effect.scoped,
-	Effect.provide(Layer.provideMerge(Graft.layer, NodeServices.layer)),
-	NodeRuntime.runMain,
-)
+export const run = () =>
+	program.pipe(
+		Effect.scoped,
+		Effect.provide(Layer.provideMerge(Graft.layer, NodeServices.layer)),
+		NodeRuntime.runMain,
+	)
 ```
 
 Services in the layer's environment are available to every plugin. Here these
@@ -75,108 +77,56 @@ export const hello = Plugin.make({
 
 ## Load entries
 
-`Loader.plugin` runs a list of [entries](../config-file/#entry-fields) kept in
-memory. Edits made through the `Loader` service change only that list. The
-entries need a `ModuleResolver` to turn names into plugins:
-
-```ts import.meta.vitest name="embedding: load entries"
-import { Effect, Layer, Option, Stream } from "effect"
-
-import { Graft } from "@graftland/graft"
-import { Loader, ModuleResolver } from "@graftland/loader"
-
-import { greeter, hello } from "./plugins.ts"
-
-const program = Effect.gen(function* () {
-	yield* Graft.plugin(Loader.plugin, [
-		{ id: "greeter", name: "greeter", config: { greeting: "Hello" } },
-		{ id: "hello", name: "hello" },
-	])
-	return yield* Graft.logs.pipe(
-		Stream.map((log) => log.message),
-		Stream.runHead,
-	)
-})
-
-const resolver = ModuleResolver.fromRecord({ greeter, hello })
-
-await Effect.runPromise(
-	program.pipe(
-		Effect.scoped,
-		Effect.provide(Layer.provideMerge(Graft.layer, resolver)),
-	),
-) // => Option.some(["Hello, world!"])
-```
-
-`Group.Group` also accepts entries without ids. It derives stable ids for
-different-name insertions; use explicit ids when inserting or moving same-name
-siblings. See [Host entries](../plugins/#host-entries).
-
-### Choosing a resolver
-
-| Resolver                                   | How it finds plugins                                                                   | Suits                          |
-| ------------------------------------------ | -------------------------------------------------------------------------------------- | ------------------------------ |
-| `ModuleResolver.fromRecord(table)`         | From a fixed table.                                                                    | Bundled applications, tests    |
-| `ModuleResolver.layer({ base, importer })` | Imports modules. Relative names resolve from `base`, package names through `importer`. | Applications with plugin files |
-
-Usually `importer` is `(specifier) => import(specifier)` written in your
-application, so that it finds your application's dependencies.
-
-In an application, provide the resolver in the environment, next to the Node.js
-services:
+Embedded `Loader.plugin` loads built modules named by a list of entries.
+Resolution uses a live public control endpoint for disposable inspection.
+Relative includes keep their declaring directory.
 
 ```ts
-import { Effect, Layer, type Scope } from "effect"
+import { Effect, Layer } from "effect"
 import { NodeRuntime, NodeServices } from "@effect/platform-node"
 
 import { Graft } from "@graftland/graft"
-import type { ModuleResolver } from "@graftland/loader"
+import { Loader, ModuleResolver } from "@graftland/loader"
+import type * as Control from "@graftland/plugin-remote/Control"
 
-declare const program: Effect.Effect<never, never, Graft.Graft | Scope.Scope>
-declare const resolver: Layer.Layer<ModuleResolver.ModuleResolver>
-
-program.pipe(
-	Effect.scoped,
-	Effect.provide(
-		Layer.provideMerge(
-			Graft.layer,
-			Layer.mergeAll(NodeServices.layer, resolver),
-		),
-	),
-	NodeRuntime.runMain,
+declare const control: Control.Address
+const resolver = ModuleResolver.layer({ base: "/app", control }).pipe(
+	Layer.provide(NodeServices.layer),
 )
+export const run = () =>
+	Effect.gen(function* () {
+		const fork = yield* Graft.plugin(Loader.plugin, [
+			{ id: "hello", name: "./dist/hello.js" },
+		])
+		yield* fork.stable
+	}).pipe(
+		Effect.scoped,
+		Effect.provide(
+			Layer.provideMerge(
+				Graft.layer,
+				Layer.mergeAll(NodeServices.layer, resolver),
+			),
+		),
+		NodeRuntime.runMain,
+	)
 ```
 
-### Resolution plans
+| Boundary            | Rule                                                                                   |
+| ------------------- | -------------------------------------------------------------------------------------- |
+| Resolution          | Returns a serializable descriptor; checks executable code in a disposable unit.        |
+| Embedded activation | Runs in the embedding process and cooperatively owns its scopes.                       |
+| Configuration       | Native preparation transfers JSON and immutable module identities.                     |
+| Guarantees          | Embedded forks have no Change outcome, forced reclamation or code-unloading guarantee. |
 
-`ModuleResolver.make` caches normalized candidate plans, never importer results.
-
-- Without the optional `resolution` environment, each call still tries the
-  original name before the naming conventions.
-- The successful importer runs on every call, so custom importers keep their
-  per-call behavior and resource scopes.
-
-A `resolution` environment can skip candidates known to be absent:
-
-| Member                                      | What it does                                                                                                                                                                       |
-| ------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `revision`                                  | An Effect returning the resolution-environment version. Advance it after installation, removal or another resolution change to discard cached plans, including negative decisions. |
-| `exists(specifier)`                         | Checks a normalized candidate without importing it or acquiring resources. Candidate priority stays unchanged.                                                                     |
-| `observe(specifiers, { observationScope })` | Runs on every resolve, including cache hits and failed plans, to retain observations of missing names or paths. Its resources follow the candidate and observation scopes.         |
-
-:::caution
-
-Supply both invalidation and observation when opting in. Without a reliable
-`revision`, leave `resolution` unset. An older in-flight plan cannot overwrite a
-newer cached revision.
-
-:::
+Use real module files in tests. Build source changes and restart the embedded
+process. [Loader API](../loader-api/) describes native preparation and the
+embedded editing service.
 
 ## Load a config file
 
-`Include.Include` is the plugin behind `graft start`. It reads a YAML file and
-writes edits back to it. With `watch: true`, it also picks up changes that you
-make by hand:
+An embedded program can use `Include.Include` to read and edit YAML. Its
+`watch: true` option observes file edits cooperatively. `graft start` reads one
+revision and rejects `--watch`:
 
 ```ts
 import { Effect } from "effect"

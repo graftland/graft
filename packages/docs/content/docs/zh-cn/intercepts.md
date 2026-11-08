@@ -119,95 +119,69 @@ Reference 也可以列在 `inject` 中。
 
 ## 配置文件中的 intercept
 
-`Graft.intercept` 是类型化的代码 API；加载器的 YAML `intercept`
-字段则是不可信边界，不接受任意字符串键，必须显式登记。
+原生准备过程传递有序的 JSON 补丁和不可变的环境模块描述符。解码和合并代码在检查单元与执行单元中运行。环境模块导出 Layer，`Configuration.Options`
+提供编码后的选项。
 
-每项登记包含三部分：
+```ts title="settings.ts"
+import { Context, Effect, Layer, Schema } from "effect"
 
-| 部分      | 说明                                   |
-| --------- | -------------------------------------- |
-| Reference | `Context.Reference` 对象。             |
-| Schema    | 解码配置的输入。                       |
-| 合并函数  | 类型化函数 `(outer, patch) => value`。 |
+import { Configuration } from "@graftland/plugin-remote"
 
-在运行加载器的环境中登记，与插件解析器和其他平台服务放在一起：
-
-```ts import.meta.vitest name="intercepts: register a reference"
-import { Context, Effect, Layer, Schema, Stream } from "effect"
-
-import { Graft, Plugin } from "@graftland/graft"
-import { Intercept, Loader, ModuleResolver } from "@graftland/loader"
-
-const Settings = Context.Reference("app/Settings", {
+export const Settings = Context.Reference("app/Settings", {
 	defaultValue: () => ({ color: "blue", size: 12 }),
 })
-
-const references = Intercept.layer([
-	Intercept.make(
-		Settings,
-		Schema.Struct({
-			color: Schema.optionalKey(Schema.String),
-			size: Schema.optionalKey(Schema.Finite),
-		}),
-		(outer, patch) => ({ ...outer, ...patch }),
-	),
-])
-
-const show = Plugin.make({
-	name: "app/show",
-	apply: () => Effect.flatMap(Settings, Effect.log),
+const Patch = Schema.Struct({
+	color: Schema.optionalKey(Schema.Trim),
+	size: Schema.optionalKey(Schema.Finite),
 })
-
-const environment = Layer.merge(references, ModuleResolver.fromRecord({ show }))
-const runtime = Layer.provideMerge(Graft.layer, environment)
-
-const [line] = await Effect.runPromise(
+export default Layer.effect(
+	Settings,
 	Effect.gen(function* () {
-		yield* Graft.plugin(Loader.plugin, [
-			{
-				id: "show",
-				name: "show",
-				intercept: { "app/Settings": { color: "red" } },
-			},
-		])
-		return yield* Graft.logs.pipe(Stream.take(1), Stream.runCollect)
-	}).pipe(Effect.scoped, Effect.provide(runtime)),
+		const input = yield* Configuration.Options
+		const patch = yield* Schema.decodeUnknownEffect(Patch)(input)
+		const outer = yield* Settings
+		return { ...outer, ...patch }
+	}),
 )
-line?.message // => [{ color: "red", size: 12 }]
 ```
 
-在 `graft.yml` 中，同一配置项写作：
+按 Reference 的键登记模块描述符，再准备插件；准备不会激活插件。
 
-```yaml title="graft.yml"
-- id: show
-  name: show
-  intercept:
-    app/Settings:
-      color: red
+```ts
+import { Effect, HashMap } from "effect"
+
+import { ModuleResolver, Preparation } from "@graftland/loader"
+import type * as Control from "@graftland/plugin-remote/Control"
+
+declare const control: Control.Address
+
+export const prepared = Effect.gen(function* () {
+	const resolver = yield* ModuleResolver.make({ base: "/app", control })
+	const module = yield* resolver.resolve("@acme/graft-plugin-api")
+	const settings = yield* resolver.resolve("./dist/settings.js", {
+		kind: "Environment",
+	})
+	const prepare = yield* Preparation.make({
+		control,
+		intercepts: HashMap.make(["app/Settings", settings]),
+	})
+	return yield* prepare.inspect({
+		instance: "api",
+		module,
+		input: { port: 8080 },
+		intercept: [{ key: "app/Settings", patch: { color: "red" } }],
+	})
+})
 ```
 
-值的合并规则：
+| 输入           | 规则                                                                   |
+| -------------- | ---------------------------------------------------------------------- |
+| 继承           | 先应用父级补丁，再应用子级补丁；每份配置都构建新的 Layer。             |
+| 未登记的键     | 在启动单元前返回 `PreparationFailed`，原因为 `UnregisteredIntercept`。 |
+| 无效补丁       | 检查保留完整 cause 并失败，不调用插件的 apply。                        |
+| 函数和活动对象 | 因不是 JSON 数据而被拒绝。                                             |
+| 恢复           | 重新构建环境，并按当前策略重新解析引用。                               |
 
-- 嵌套配置项的补丁接收父级值，兄弟项保留各自的值。
-- Schema 在合并函数运行前解码输入，且不能依赖解码服务。
-- 合并函数的返回类型必须匹配 Reference。
-- 标量替换或需要整体校验的设置，可使用完整值 Schema，配合
-  `(_, value) => value`。
-
-失败情形：
-
-| 问题     | 错误                                         |
-| -------- | -------------------------------------------- |
-| 键未登记 | `UnregisteredReference`                      |
-| 值无效   | `InvalidIntercept`，cause 中保留 Schema 错误 |
-
-这两种情况下，该配置项的插件都不会启动。
-
-:::note
-
-登记表默认为空。应在创建加载器前通过宿主环境提供登记表；加载器管理树中的插件不能通过发布服务来登记 Reference。默认 CLI 登记了
-`References.CurrentLogAnnotations`（合并日志注解字段）和
-`References.MinimumLogLevel`（校验后替换日志级别）；其他 Reference 需要由自定义宿主登记。直接从代码使用的类型化
-`Graft.intercept` API 不受此影响。
-
-:::
+显式嵌入的应用可以用 `Intercept.make` 和 `Intercept.layer`
+登记单元内部的解码与合并逻辑。这些函数和环境服务不会跨越原生边界。准备过程见
+[Loader API](../loader-api/)，协作式组合见[嵌入](../embedding/)。

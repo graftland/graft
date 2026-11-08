@@ -8,7 +8,7 @@ import { run } from "./utils.ts"
 
 describe("tree edit validation", () => {
 	it.effect("rejects duplicate initial ids before starting children", () =>
-		run(() => ({}))(() =>
+		run()(() =>
 			Effect.gen(function* () {
 				const fork = yield* Graft.plugin(Loader.plugin, [
 					{ id: "duplicate", name: "first" },

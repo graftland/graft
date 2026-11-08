@@ -82,7 +82,10 @@ export const declaredError = Remote.Contract.make({
 export const loader = Loader.plugin
 export const include = Include.Include
 export const group = Group.Group
-export const resolver = ModuleResolver.fromRecord({ plain })
+export const resolver = ModuleResolver.make({
+	base: "/app",
+	control: { port: 12345, host: "127.0.0.1", token: "public-api" },
+})
 export const load = Graft.plugin(Loader.plugin, [])
 export const loadFile = Graft.plugin(Include.Include, { path: "graft.yml" })
 export default Plugin.make({ name: "default", apply: () => Effect.void })

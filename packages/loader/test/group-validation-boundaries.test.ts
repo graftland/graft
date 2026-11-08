@@ -4,7 +4,7 @@ import { assert, it } from "@effect/vitest"
 import { Graft, type Fork } from "@graftland/graft"
 
 import { Group, Tree, type Entry } from "../src/index.ts"
-import { echo, run } from "./utils.ts"
+import { run } from "./utils.ts"
 
 const flatten = (
 	nodes: ReadonlyArray<Fork.ForkTree>,
@@ -35,7 +35,7 @@ const wrap = (
 it.effect.each([0, 1, 3])(
 	"keeps Group IDs local at depth %s on load and update",
 	(depth) =>
-		run((journal) => ({ echo: echo(journal) }))((journal) =>
+		run()((journal) =>
 			Effect.gen(function* () {
 				const branches = (right: string) =>
 					Array.map(["left", "right"], (side) => ({
@@ -58,12 +58,11 @@ it.effect.each([0, 1, 3])(
 				const root = yield* Graft.plugin(Group.Group, initial)
 				yield* root.await
 				yield* settled
-				yield* journal.expect(["start left", "start right"])
+				yield* journal.expect([["start left", "start right"]])
 				yield* root.update(wrap(depth, branches("updated")))
 				yield* settled
 				yield* journal.expect([
-					"start left",
-					"start right",
+					["start left", "start right"],
 					"stop right",
 					"start updated",
 				])
@@ -74,7 +73,7 @@ it.effect.each([0, 1, 3])(
 it.effect(
 	"isolates a malformed descendant group and accepts its later repair",
 	() =>
-		run((journal) => ({ echo: echo(journal) }))((journal) =>
+		run()((journal) =>
 			Effect.gen(function* () {
 				const children = (duplicate: boolean) =>
 					wrap(1, [
@@ -108,7 +107,7 @@ it.effect(
 it.effect(
 	"rejects cyclic group topology without blocking a healthy sibling",
 	() =>
-		run((journal) => ({ echo: echo(journal) }))((journal) =>
+		run()((journal) =>
 			Effect.gen(function* () {
 				const cyclic: {
 					id: string

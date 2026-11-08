@@ -4,7 +4,6 @@ import {
 	Layer,
 	Option,
 	Record,
-	Path as ResolverPath,
 	Schema,
 	Stream,
 	SubscriptionRef,
@@ -21,10 +20,8 @@ import {
 import { assert, it } from "@effect/vitest"
 
 import { Graft, Plugin } from "@graftland/graft"
-import { Loader, ModuleResolver } from "@graftland/loader"
-import server from "@graftland/plugin-http"
+import { Loader } from "@graftland/loader"
 import * as Http from "@graftland/plugin-http/Http"
-import router from "@graftland/plugin-http/router"
 
 import { Config, UiConfig } from "../src/Config.ts"
 import * as HttpApis from "../src/HttpApis.ts"
@@ -33,6 +30,7 @@ import { compose } from "../src/internal/compose.ts"
 import scalar from "../src/scalar.ts"
 import { entries } from "../src/schema.ts"
 import swagger from "../src/swagger.ts"
+import { fixture, moduleLayer } from "./module-fixtures"
 import { capture, request, run, start, waitFor } from "./utils.ts"
 
 it.effect(
@@ -109,34 +107,9 @@ it.live(
 					Layer.fresh(Graft.layer),
 					Layer.merge(
 						FetchHttpClient.layer,
-						Layer.effect(
-							ModuleResolver.ModuleResolver,
-							ModuleResolver.make({
-								base: "/",
-								importer: (specifier) => {
-									const modules: Readonly<Record<string, unknown>> = {
-										http: {},
-										"@graftland/plugin-http": { default: server },
-										"@graftland/plugin-http/router": { default: router },
-										"@graftland/plugin-http-api": { default: composer },
-										"@graftland/plugin-http-api/scalar": {
-											default: scalar,
-										},
-										"@graftland/plugin-http-api/swagger": {
-											default: swagger,
-										},
-										entry: { default: entry },
-									}
-									return Effect.fromOption(
-										Record.get(modules, specifier),
-										() => ({
-											code: "ERR_MODULE_NOT_FOUND",
-											message: "Cannot find package '" + specifier + "'",
-										}),
-									)
-								},
-							}),
-						).pipe(Layer.provide(ResolverPath.layer)),
+						moduleLayer({
+							entry: fixture("entry-api"),
+						}),
 					),
 				),
 			),

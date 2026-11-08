@@ -17,7 +17,7 @@ import { ProtocolOutput } from "../Application"
 import { Commands, type Environment } from "../Commands"
 import * as Configuration from "./commandConfig"
 import * as Registry from "./commandRegistry"
-import * as Importer from "./importer"
+import * as Inspection from "./inspection"
 import { reserve } from "./protocolOutput"
 
 class CommandPluginError extends Schema.TaggedError<
@@ -56,9 +56,20 @@ const activate = Effect.fnUntraced(function* (
 	).pipe(Effect.uninterruptible)
 	const path = yield* Path.Path
 	const directory = path.dirname(entry.file)
-	const importer = yield* Importer.make(directory)
-	const resolver = yield* ModuleResolver.make({ base: directory, importer })
-	const plugin = yield* resolver.resolve(entry.name)
+	const control = yield* Inspection.Address
+	const resolver = yield* ModuleResolver.make({ base: directory, control })
+	const descriptor = yield* resolver.resolve(entry.name)
+	const module = yield* Effect.tryPromise({
+		try: () => import(descriptor.location),
+		catch: (cause) =>
+			ModuleResolver.ModuleInvalid.make({ specifier: entry.name, cause }),
+	})
+	const plugin = yield* Effect.fromOption(Plugin.fromModule(module), () =>
+		ModuleResolver.ModuleInvalid.make({
+			specifier: entry.name,
+			cause: "The selected module no longer exports its described plugin",
+		}),
+	)
 	const input = yield* Entry.resolveEnv(entry.config)
 	const owner = Plugin.make({
 		name: `command:${entry.name}`,
@@ -105,7 +116,7 @@ const execute = <Name extends string, Input, ContextInput>(
 	args: ReadonlyArray<string>,
 ): Effect.Effect<void, CliError.CliError, Environment> =>
 	Command.runWith(command, { version })(args)
-export const run = Effect.fnUntraced(function* (
+const runCommands = Effect.fnUntraced(function* (
 	builtins: ReadonlyArray<Command.Command.Any>,
 	root: Command.Command<
 		"graft",
@@ -158,6 +169,12 @@ export const run = Effect.fnUntraced(function* (
 		),
 	)
 })
+
+export const run = (...args: Parameters<typeof runCommands>) =>
+	runCommands(...args).pipe(
+		// @effect-diagnostics-next-line strictEffectProvide:off -- This is the composition root for non-start embedded command plugins and their inspection owner.
+		Effect.provide(Inspection.layer),
+	)
 
 const usage = (message: string) =>
 	Console.error(message).pipe(

@@ -39,6 +39,8 @@ export interface CaptureOptions {
 	readonly directory: string
 	readonly entry: string
 	readonly store: string
+	/** Package-relative directories outside the captured closure. */
+	readonly exclude?: ReadonlyArray<string>
 }
 export class ArtifactError extends Schema.TaggedError<
 	ArtifactError,
@@ -49,10 +51,17 @@ export class ArtifactError extends Schema.TaggedError<
 }) {}
 const invalid = (detail: string) => ArtifactError.make({ detail })
 
+const excluded = (relative: string, paths: ReadonlyArray<string>): boolean =>
+	Array.some(
+		paths,
+		(path) => relative === path || String.startsWith(path + "/")(relative),
+	)
+
 const hashDirectory = Effect.fnUntraced(function* (
 	directory: string,
 	prefix: string,
 	copy?: string,
+	exclude: ReadonlyArray<string> = [],
 ) {
 	const fs = yield* FileSystem.FileSystem
 	const path = yield* Path.Path
@@ -61,6 +70,7 @@ const hashDirectory = Effect.fnUntraced(function* (
 		relative: string,
 	): Effect.fn.Return<void, ArtifactError | PlatformError.PlatformError> {
 		const filename = path.join(directory, relative)
+		if (excluded(relative, exclude)) return
 		const info = yield* fs.lstat(filename)
 		if (info.type !== "File" && info.type !== "Directory")
 			return yield* invalid(
@@ -100,6 +110,7 @@ const inspect = Effect.fnUntraced(function* (
 	directory: string,
 	entry: string,
 	copy?: string,
+	exclude: ReadonlyArray<string> = [],
 ) {
 	const fs = yield* FileSystem.FileSystem
 	const path = yield* Path.Path
@@ -124,6 +135,7 @@ const inspect = Effect.fnUntraced(function* (
 		directory,
 		`graft-artifact-sha256-v1\0${entry.length}:${entry}\0`,
 		copy,
+		exclude,
 	)
 	if ((yield* fs.lstat(path.join(directory, entry))).type !== "File")
 		return yield* invalid("The implementation entry must be a regular file")
@@ -199,10 +211,32 @@ export const capture = Effect.fnUntraced(
 		const path = yield* Path.Path
 		const directory = path.resolve(options.directory)
 		const store = path.resolve(options.store)
+		const exclude = options.exclude ?? []
+		if (
+			Array.some(
+				exclude,
+				(entry) =>
+					entry === "" ||
+					entry === "." ||
+					entry === ".." ||
+					path.isAbsolute(entry) ||
+					entry !== path.normalize(entry) ||
+					String.startsWith("../")(entry),
+			)
+		)
+			return yield* invalid(
+				"Capture exclusions must be normalized package-relative paths",
+			)
+		if (excluded(options.entry, exclude) || excluded("package.json", exclude))
+			return yield* invalid(
+				"The selected implementation and package metadata must be captured",
+			)
 		const relative = path.relative(directory, store)
 		if (
 			relative === "" ||
-			(!String.startsWith("../")(relative) && !path.isAbsolute(relative))
+			(!String.startsWith("../")(relative) &&
+				!path.isAbsolute(relative) &&
+				!excluded(relative, exclude))
 		)
 			return yield* invalid(
 				"The artifact store must be outside the source directory",
@@ -214,7 +248,8 @@ export const capture = Effect.fnUntraced(
 		if (
 			realRelative === "" ||
 			(!String.startsWith("../")(realRelative) &&
-				!path.isAbsolute(realRelative))
+				!path.isAbsolute(realRelative) &&
+				!excluded(realRelative, exclude))
 		)
 			return yield* invalid(
 				"The artifact store must be outside the source directory",
@@ -223,9 +258,9 @@ export const capture = Effect.fnUntraced(
 			directory: store,
 			prefix: ".capture-",
 		})
-		const before = yield* inspect(directory, options.entry, stage)
+		const before = yield* inspect(directory, options.entry, stage, exclude)
 		const copied = yield* inspect(stage, options.entry)
-		const after = yield* inspect(directory, options.entry)
+		const after = yield* inspect(directory, options.entry, undefined, exclude)
 		if (before.digest !== copied.digest || before.digest !== after.digest)
 			return yield* invalid("The source changed during artifact capture")
 		const destination = path.join(store, `sha256-v1-${copied.digest}`)

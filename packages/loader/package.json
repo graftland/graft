@@ -32,14 +32,16 @@
 	},
 	"peerDependencies": {
 		"effect": "4.1.*",
-		"@graftland/graft": "workspace:^"
+		"@graftland/graft": "workspace:^",
+		"@graftland/plugin-remote": "workspace:^"
 	},
 	"devDependencies": {
 		"@effect/vitest": "4.1.2",
 		"effect": "4.1.2",
 		"vitest": "5.1.0",
 		"@effect/platform-node": "4.1.2",
-		"@graftland/graft": "workspace:*"
+		"@graftland/graft": "workspace:*",
+		"@graftland/plugin-remote": "workspace:*"
 	},
 	"dependencies": {
 		"yaml": "2.9.1"

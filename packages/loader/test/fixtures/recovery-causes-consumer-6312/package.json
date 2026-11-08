@@ -1,0 +1,6 @@
+{
+	"name": "recovery-causes-consumer-6312",
+	"version": "1.0.0",
+	"type": "module",
+	"exports": "./index.mjs"
+}

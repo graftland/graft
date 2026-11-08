@@ -1,0 +1,6 @@
+{
+	"name": "plugin-http-api-documentation-graftland-plugin-http-api-2",
+	"version": "1.0.0",
+	"type": "module",
+	"exports": "./index.mjs"
+}

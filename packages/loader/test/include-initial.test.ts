@@ -7,7 +7,7 @@ import { Entry, Include, Tree } from "../src/index.ts"
 import { loaderService, run } from "./utils.ts"
 
 it.effect("validates initial entries before committing a new file", () =>
-	run(() => ({}))(() =>
+	run()(() =>
 		Effect.gen(function* () {
 			const fs = yield* FileSystem.FileSystem
 			const directory = yield* fs.makeTempDirectoryScoped()
@@ -30,7 +30,7 @@ it.effect("validates initial entries before committing a new file", () =>
 it.effect(
 	"rejects malformed descendants and cyclic topology without creating a file",
 	() =>
-		run(() => ({}))(() =>
+		run()(() =>
 			Effect.gen(function* () {
 				const fs = yield* FileSystem.FileSystem
 				const directory = yield* fs.makeTempDirectoryScoped()
@@ -70,7 +70,7 @@ it.effect(
 it.effect(
 	"commits anonymous initial entries once, with all IDs and original Env tags",
 	() =>
-		run(() => ({}))(() =>
+		run()(() =>
 			Effect.gen(function* () {
 				const fs = yield* FileSystem.FileSystem
 				const directory = yield* fs.makeTempDirectoryScoped()
@@ -119,7 +119,7 @@ it.effect(
 it.effect(
 	"keeps an existing file even when the unused initial value is invalid",
 	() =>
-		run(() => ({}))(() =>
+		run()(() =>
 			Effect.gen(function* () {
 				const fs = yield* FileSystem.FileSystem
 				const directory = yield* fs.makeTempDirectoryScoped()

@@ -15,12 +15,12 @@ import { TestClock } from "effect/testing"
 import { assert, it } from "@effect/vitest"
 
 import { Graft, Plugin } from "@graftland/graft"
-import { ModuleResolver } from "@graftland/loader"
 import otlp from "@graftland/plugin-otlp"
 import { Exporter } from "@graftland/plugin-otlp/Exporter"
 import http from "@graftland/plugin-otlp/http"
 
-const worker = Plugin.make({ name: "test/worker", apply: () => Effect.void })
+import { fixture, moduleLayer } from "./module-fixtures"
+
 const base = {
 	url: "http://collector/v1/traces",
 	serviceName: "test",
@@ -28,7 +28,12 @@ const base = {
 }
 const layer = Layer.fresh(Graft.layer).pipe(
 	Layer.provideMerge(
-		ModuleResolver.fromRecord({ worker, "@graftland/plugin-otlp/http": http }),
+		moduleLayer({
+			worker: fixture("tuning-worker-763"),
+			"@graftland/plugin-otlp/http": fixture(
+				"plugin-otlp-tuning-graftland-plugin-otlp-http-1",
+			),
+		}),
 	),
 )
 

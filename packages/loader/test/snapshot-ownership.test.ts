@@ -16,12 +16,12 @@ import { Graft, Plugin } from "@graftland/graft"
 
 import { Entry, Loader, Tree } from "../src/index.ts"
 import { snapshot } from "../src/internal/snapshot.ts"
-import { echo, loaderService, run } from "./utils.ts"
+import { loaderService, run } from "./utils.ts"
 
 it.effect(
 	"keeps the accepted target independent from the caller config object",
 	() =>
-		run((journal) => ({ echo: echo(journal) }))((journal) =>
+		run()((journal) =>
 			Effect.gen(function* () {
 				yield* Graft.plugin(Loader.plugin, [])
 				const loader = yield* loaderService
@@ -91,7 +91,7 @@ it("does not trust a caller's shallow freeze and preserves record and array stru
 it.effect(
 	"owns initial data and exposes only frozen targets through entries and changes",
 	() =>
-		run((journal) => ({ echo: echo(journal) }))((journal) =>
+		run()((journal) =>
 			Effect.gen(function* () {
 				const config = { text: "before" }
 				const note = { label: "keep" }
@@ -125,7 +125,7 @@ it.effect(
 it.effect(
 	"captures queued edits before their caller can mutate the submitted data",
 	() =>
-		run(() => ({}))(() =>
+		run()(() =>
 			Effect.gen(function* () {
 				const entered = yield* Deferred.make<void>()
 				const release = yield* Deferred.make<void>()
@@ -174,7 +174,7 @@ it.effect(
 )
 
 it.effect("owns targets returned by custom store apply and refresh", () =>
-	run(() => ({}))(() =>
+	run()(() =>
 		Effect.gen(function* () {
 			const notifications = yield* Queue.unbounded<void>()
 			const config = { text: "applied" }
@@ -210,7 +210,7 @@ it.effect("owns targets returned by custom store apply and refresh", () =>
 )
 
 it.effect("rejects cyclic arrays per entry and reconciles a later repair", () =>
-	run((journal) => ({ echo: echo(journal) }))((journal) =>
+	run()((journal) =>
 		Effect.gen(function* () {
 			const loop: Array<unknown> = []
 			loop[0] = loop
