@@ -123,12 +123,33 @@ export function releaseManifest(manifest, version, names) {
 	return result
 }
 
+/** A release tag must describe the versions already committed by Changesets. */
+export function validateReleaseVersions(release, manifests) {
+	if (release.snapshot) return
+	const mismatches = manifests
+		.filter(
+			(manifest) => !manifest.private && manifest.version !== release.version,
+		)
+		.map(
+			(manifest) =>
+				`${manifest.name}: ${manifest.version ?? "missing version"}`,
+		)
+	if (mismatches.length > 0)
+		throw new Error(
+			`Release tag v${release.version} does not match public package versions (${mismatches.join(", ")}). Merge the Version Packages pull request before tagging.`,
+		)
+}
+
 function pack(root, output, ref, sha) {
 	const release = releaseVersion(ref, sha)
 	const packages = packageManifests(root)
 		.map((file) => ({ file, original: readFileSync(file, "utf8") }))
 		.map((entry) => ({ ...entry, manifest: JSON.parse(entry.original) }))
 		.filter((entry) => !entry.manifest.private)
+	validateReleaseVersions(
+		release,
+		packages.map((entry) => entry.manifest),
+	)
 	const names = new Set(packages.map((entry) => entry.manifest.name))
 	mkdirSync(output, { recursive: true })
 	try {

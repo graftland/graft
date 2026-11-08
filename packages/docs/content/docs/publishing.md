@@ -1,51 +1,78 @@
 ---
 title: Publishing
 description:
-  How Graft is checked, published to npm and GitHub Packages, and how the docs
-  are deployed.
+  Add changesets, review version updates, and publish Graft packages and release
+  notes.
 ---
 
-This page is for contributors who check or publish Graft.
+Graft uses **Changesets** to record user-facing changes and prepare package
+versions and changelogs. CI publishes the checked packages when a maintainer
+pushes the matching version tag.
 
 ## Checks
 
-Run every command in the project's devenv shell:
+Run commands from the repository root in the project's devenv shell:
 
 ```sh
-devenv shell -- pnpm install
+devenv shell -- pnpm install --frozen-lockfile
 devenv shell -- pnpm build
 devenv shell -- pnpm typecheck
-devenv shell -- pnpm test
+devenv shell -- pnpm vitest run --project <package>
 devenv shell -- pnpm test:packages
 ```
 
-Entering the shell formats the code with treefmt. `pnpm test:packages` tests the
-release script.
+Shell entry formats files with treefmt. Run the tests for each package you
+change; `pnpm test:packages` checks packing, publishing and release notes.
 
-The CLI's build also writes `packages/cli/schema.json`, the
-[JSON Schema of the config file](../config-file/#editor-support), from the
-loader's entry fields and the intercepts the CLI registers. It is not committed;
-each release packs the one its build generated.
+## Add a changeset
 
-`pnpm test` checks every published entry for types that cannot be named through
-public exports, and emits declarations for unannotated consumer examples. If it
-fails, remove implementation types from the public signature or export a type
-that belongs to the public contract; do not add annotations to the examples to
-hide the problem.
+Include a changeset in a pull request that changes public packages:
+
+```sh
+devenv shell -- pnpm changeset
+```
+
+| Choice             | Rule                                                                                                                                                 |
+| ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Packages           | Select the affected public packages. All public `@graftland/*` packages belong to one fixed group and receive the same version.                      |
+| Bump               | Use `patch` for fixes, `minor` for features, and mark breaking changes with migration instructions. While on 0.x, breaking changes use a minor bump. |
+| Summary            | Describe the user-visible behavior. Put **Breaking** changes first and explain how to update.                                                        |
+| Private workspaces | Samples, docs and benchmarks are neither versioned nor tagged.                                                                                       |
+| No public change   | Documentation-only and test-only pull requests need no changeset.                                                                                    |
+
+Commit the generated `.changeset/*.md` with the change. Check the pending
+versions with `devenv shell -- pnpm changeset status`.
+
+## Version Packages pull request
+
+On pushes to `main` in `graftland/graft`, `.github/workflows/release.yml` opens
+or updates **Version Packages**. It consumes the pending changesets, updates
+package versions and writes each public package's `CHANGELOG.md`. Review and
+merge that pull request before tagging. This workflow never publishes packages
+or creates a GitHub Release, and it does not run on forks.
+
+Enable **Allow GitHub Actions to create and approve pull requests** in the
+repository's Actions settings. The workflow uses `GITHUB_TOKEN`; a maintainer
+with write access selects **Approve workflows to run** on the generated pull
+request to start its checks before merging.
 
 ## GitHub Actions
 
-The workflow `.github/workflows/ci.yml` runs for pull requests, for pushes to
-`main`, and for tags like `v1.2.3` or `v1.2.3-beta.0`.
+`.github/workflows/ci.yml` runs for pull requests, pushes to `main`, and version
+tags such as `v1.2.3` or `v1.2.3-beta.0`.
 
-| Job               | When            | What it does                                                                  |
-| ----------------- | --------------- | ----------------------------------------------------------------------------- |
-| `check`           | Always          | Checks formatting, builds, typechecks, tests, and packs every public package. |
-| `github-packages` | Pushes and tags | Publishes the packed files to GitHub Packages.                                |
-| `npm`             | Tags            | Publishes the packed files to npm with trusted publishing.                    |
+| Job               | When                                      | What it does                                                                              |
+| ----------------- | ----------------------------------------- | ----------------------------------------------------------------------------------------- |
+| `check`           | Always                                    | Checks formatting, builds, typechecks, tests release scripts and packs public packages.   |
+| `test`            | Always                                    | Tests every package and sample.                                                           |
+| `github-packages` | Pushes and tags, after `check` and `test` | Publishes the checked files to GitHub Packages.                                           |
+| `npm`             | Tags, after `check` and `test`            | Publishes the checked files to npm with trusted publishing.                               |
+| `github-release`  | Tags, after `npm` succeeds                | Creates one GitHub Release with the version's changelog entries from all public packages. |
 
-The publishing jobs run only after `check` passes. They publish exactly the
-files that `check` packed and tested, and never build again.
+Publishing uses exactly the files that `check` packed, without rebuilding.
+Release notes deduplicate identical entries and identify their packages.
+Prerelease tags create prerelease GitHub Releases. A rerun keeps an existing
+GitHub Release unchanged.
 
 ### Publishing queues
 
@@ -82,10 +109,11 @@ Other workflows that publish these packages must use the same group.
 
 ## Versions
 
-All packages are released together with one version. `pnpm packages:pack` sets
-that version in every public package, pins the dependencies between them to it,
-packs the packages into `.release/` and writes the hash of each file to
-`.release/release.json`.
+All public packages share one committed version. For a release tag, packing
+requires every public `package.json` version to equal the tag's version; a
+mismatch stops before packing. Snapshots derive their version from the commit.
+`pnpm packages:pack` pins dependencies between public packages to the packed
+version and writes the files and their integrity hashes to `.release/`.
 
 | Event                      | Version                    | npm tag                  | Published to            |
 | -------------------------- | -------------------------- | ------------------------ | ----------------------- |
@@ -170,19 +198,31 @@ cannot make registry reads and writes atomic.
 
 ## Publish a version
 
-1. Make sure `main` passes CI.
-2. Tag the commit and push the tag, such as `v1.2.3`. While Graft is on 0.x,
-   release plain versions such as `v0.3.0`: a 0.x version already says the API
-   may change, so it needs no `-beta` suffix. Prerelease tags such as
-   `v1.2.3-beta.0` remain available:
+1. **Merge** the Version Packages pull request and wait for `main` to pass CI.
+2. **Tag** that commit with its committed package version and push the tag:
 
    ```sh
-   git tag v1.2.3
-   git push origin v1.2.3
+   git tag v0.6.0
+   git push origin v0.6.0
    ```
 
-3. The `npm` job waits for the `npm` environment, if it needs approval, and then
-   publishes.
+3. **Check** the tag's CI run. The `npm` job waits for the `npm` environment if
+   it requires approval. After npm succeeds, `github-release` creates the
+   combined GitHub Release.
+
+While Graft is on 0.x, use plain versions such as `v0.6.0`. To prepare an
+`alpha`, `beta` or `rc` prerelease, use Changesets' prerelease mode so manifests
+and changelogs contain the exact prerelease version before tagging:
+
+```sh
+devenv shell -- pnpm changeset pre enter beta
+devenv shell -- pnpm changeset-version
+```
+
+Review and merge those changes before tagging `v0.6.0-beta.0`. When the series
+is ready for a stable release, run `devenv shell -- pnpm changeset pre exit` and
+let Version Packages prepare the stable version. Do not version packages
+manually in parallel with the automated pull request.
 
 ### Trusted publishing
 
@@ -277,8 +317,8 @@ before the select existed get it too.
 - Use the same file names in every folder.
 - Link between pages with relative links, such as `../plugins/`, so that links
   work under the site's base path.
-- Prefer tables, numbered steps and short lists over long paragraphs. Open a
-  page with what it covers, and end it with where to go next.
+- Prefer tables, numbered steps and short lists over long paragraphs. State each
+  fact once and end where the content ends.
 - Every README has `README.zh-CN.md` and `README.zh-TW.md` translations next to
   it, written from the English README. If you change an English README or an
   English docs page, update the translations in the same change.

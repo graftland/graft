@@ -1,18 +1,28 @@
 import assert from "node:assert/strict"
 import { execFile, spawnSync } from "node:child_process"
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import {
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs"
 import { createServer } from "node:http"
+import { createRequire } from "node:module"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { test } from "node:test"
-import { fileURLToPath } from "node:url"
+import { fileURLToPath, pathToFileURL } from "node:url"
 import { promisify } from "node:util"
 
 import {
 	publicationPlan,
 	releaseManifest,
 	releaseVersion,
+	validateReleaseVersions,
 } from "./packages.mjs"
+import { packageManifests } from "./workspace.mjs"
 
 const sha = "0123456789abcdef0123456789abcdef01234567"
 
@@ -601,4 +611,181 @@ test("empty or malformed tag responses fail closed while a missing package can p
 	const absent = publishWith("npm", "beta", "package-missing")
 	assert.equal(absent.status, 0, absent.stderr)
 	assert.match(absent.calls[0], /--tag beta/)
+})
+
+test("release tags must match every public manifest before packing", () => {
+	const manifests = [
+		{ name: "@graftland/graft", version: "0.6.0" },
+		{ name: "@graftland/loader", version: "0.5.0" },
+		{ name: "@graftland/cli" },
+		{ name: "@graftland/docs", version: "0.0.0", private: true },
+	]
+	assert.throws(
+		() => validateReleaseVersions(releaseVersion("v0.6.0", sha), manifests),
+		/Release tag v0\.6\.0.*@graftland\/loader: 0\.5\.0.*@graftland\/cli: missing version.*Version Packages/,
+	)
+	assert.doesNotThrow(() =>
+		validateReleaseVersions(releaseVersion("", sha), manifests),
+	)
+	assert.doesNotThrow(() =>
+		validateReleaseVersions(releaseVersion("v0.6.0", sha), [
+			manifests[0],
+			manifests[3],
+		]),
+	)
+})
+
+test("prerelease tags require the exact prerelease manifest version", () => {
+	const release = releaseVersion("v0.6.0-beta.1", sha)
+	assert.throws(
+		() =>
+			validateReleaseVersions(release, [
+				{ name: "@graftland/graft", version: "0.6.0" },
+			]),
+		/Release tag v0\.6\.0-beta\.1/,
+	)
+	assert.doesNotThrow(() =>
+		validateReleaseVersions(release, [
+			{ name: "@graftland/graft", version: "0.6.0-beta.1" },
+		]),
+	)
+})
+
+test("a mismatched release tag exits before packing or changing manifests", (t) => {
+	const root = mkdtempSync(join(tmpdir(), "graft-pack-version-"))
+	t.after(() => rmSync(root, { recursive: true, force: true }))
+	mkdirSync(join(root, "packages/core"), { recursive: true })
+	const file = join(root, "packages/core/package.json")
+	const original = JSON.stringify({
+		name: "@graftland/graft",
+		version: "0.5.0",
+	})
+	writeFileSync(file, original)
+	const output = join(root, "packed")
+	const result = spawnSync(
+		process.execPath,
+		[fileURLToPath(new URL("./packages.mjs", import.meta.url)), "pack", output],
+		{
+			cwd: root,
+			encoding: "utf8",
+			env: { ...process.env, RELEASE_REF: "v0.6.0", RELEASE_SHA: sha },
+		},
+	)
+	assert.equal(result.status, 1)
+	assert.match(
+		result.stderr,
+		/Release tag v0\.6\.0 does not match.*@graftland\/graft: 0\.5\.0/,
+	)
+	assert.equal(readFileSync(file, "utf8"), original)
+	assert.equal(existsSync(output), false)
+})
+
+test("Changesets fixes exactly the public packages at one committed version", () => {
+	const root = fileURLToPath(new URL("../", import.meta.url))
+	const manifests = packageManifests(root).map((file) =>
+		JSON.parse(readFileSync(file, "utf8")),
+	)
+	const names = manifests
+		.filter((manifest) => !manifest.private)
+		.map((manifest) => manifest.name)
+		.sort()
+	const config = JSON.parse(
+		readFileSync(join(root, ".changeset/config.json"), "utf8"),
+	)
+	assert.equal(config.fixed.length, 1)
+	assert.deepEqual([...config.fixed[0]].sort(), names)
+	assert.deepEqual(config.privatePackages, { version: false, tag: false })
+	assert.equal(
+		new Set(
+			manifests
+				.filter((manifest) => !manifest.private)
+				.map((manifest) => manifest.version),
+		).size,
+		1,
+	)
+})
+
+test("a fixed 0.x release with internal peers remains a minor release", async () => {
+	const cliRequire = createRequire(
+		import.meta.resolve("@changesets/cli/package.json"),
+	)
+	const [{ assembleReleasePlan }, { validateConfig }] = await Promise.all([
+		import(
+			pathToFileURL(cliRequire.resolve("@changesets/assemble-release-plan"))
+				.href
+		),
+		import(pathToFileURL(cliRequire.resolve("@changesets/config")).href),
+	])
+	const rootDir = join(tmpdir(), "graft-release-fixture")
+	const packages = {
+		rootDir,
+		rootPackage: {
+			dir: rootDir,
+			packageJson: { name: "release-fixture", private: true },
+		},
+		packages: [
+			{
+				dir: join(rootDir, "core"),
+				packageJson: { name: "@graftland/graft", version: "0.5.0" },
+			},
+			{
+				dir: join(rootDir, "plugin"),
+				packageJson: {
+					name: "@graftland/plugin",
+					version: "0.5.0",
+					peerDependencies: { "@graftland/graft": "workspace:^" },
+				},
+			},
+			{
+				dir: join(rootDir, "docs"),
+				packageJson: {
+					name: "@graftland/docs",
+					version: "0.0.0",
+					private: true,
+					devDependencies: { "@graftland/graft": "workspace:*" },
+				},
+			},
+		],
+	}
+	const { config, errors } = validateConfig(
+		{
+			changelog: false,
+			commit: false,
+			access: "public",
+			baseBranch: "main",
+			linked: [],
+			ignore: [],
+			fixed: [["@graftland/graft", "@graftland/plugin"]],
+			privatePackages: { version: false, tag: false },
+		},
+		packages,
+	)
+	assert.equal(errors, undefined)
+	const { releases } = assembleReleasePlan(
+		[
+			{
+				id: "feature",
+				summary: "Support controlled plugin changes.",
+				releases: [{ name: "@graftland/graft", type: "minor" }],
+			},
+		],
+		packages,
+		config,
+	)
+	assert.deepEqual(
+		releases
+			.filter((release) => release.type !== "none")
+			.map(({ name, type, newVersion }) => ({ name, type, newVersion })),
+		[
+			{ name: "@graftland/graft", type: "minor", newVersion: "0.6.0" },
+			{ name: "@graftland/plugin", type: "minor", newVersion: "0.6.0" },
+		],
+	)
+	assert.ok(
+		releases
+			.filter((release) => release.name === "@graftland/docs")
+			.every(
+				(release) => release.type === "none" && release.newVersion === "0.0.0",
+			),
+	)
 })

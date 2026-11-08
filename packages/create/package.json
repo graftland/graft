@@ -3,7 +3,7 @@
 	"engines": {
 		"node": ">=22.19.0"
 	},
-	"version": "0.0.0",
+	"version": "0.5.0",
 	"type": "module",
 	"description": "Generates a new Graft project: npm create @graftland, and graft create",
 	"license": "Apache-2.0",
