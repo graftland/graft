@@ -867,6 +867,8 @@ export interface MemberOperation {
 		| "Completed"
 		| "Failed"
 		| "Unconfirmed"
+	/** The members started again after stopping; revoked members only stop. */
+	readonly restart: HashSet.HashSet<string>
 	readonly retry: boolean
 	readonly currentMember: Option.Option<string>
 	readonly resolutions: HashMap.HashMap<string, ResolvedInput>

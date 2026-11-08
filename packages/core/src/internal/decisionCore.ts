@@ -3137,13 +3137,14 @@ const superviseMembers = (
 			cause,
 			false,
 		)
-	const started = Members.start(s, unit, affected, cause, true)
-	// A revoked target is never granted again, so restarting it is not an attempt.
+	// A revoked target only stops: it is never granted again, so it is no attempt
+	// and does not hold back its authorized co-members.
 	const permitted = HashSet.filter(affected, (id) =>
 		Option.exists(HashMap.get(unit.members, id), (member) =>
 			Preparation.authorized(s, id, member.target),
 		),
 	)
+	const started = Members.start(s, unit, affected, cause, true, permitted)
 	return started.nextMemberOperation === s.nextMemberOperation
 		? defer(s, { kind: "Members", unit: unit.id, members: affected, cause })
 		: Supervisor.attempted(started, permitted)

@@ -266,3 +266,96 @@ it("defers a supervisor restart that admission finds busy and does not count it 
 	assert.equal(fact(busy.state).attempts.length, 0)
 	assert.isFalse(fact(busy.state).escalated)
 })
+
+it("restarts the authorized members of a unit while a revoked co-member stays stopped (C7, C8)", () => {
+	const pair = Core.make({
+		authority: "supervision",
+		maxUnits: 4,
+		declarations: Array.map(
+			declaredMembers([
+				{ id: "a", target: target("a") },
+				{ id: "b", target: target("b") },
+			]),
+			(member) => ({
+				...member,
+				placement: Option.none(),
+				...(member.instance === "a"
+					? { localProvides: ["ab"] }
+					: { localRequires: [{ key: "ab", optional: false }] }),
+			}),
+		),
+		realms: rootRealms,
+	})
+	const revoked = Core.reduce(pair, {
+		_tag: "PolicyChanged",
+		instance: "b",
+		allowed: ["another-identity"],
+		values: {},
+		now: pair.now,
+	}).state
+	const stopAll = (state: Core.State, members: Iterable<string>): Core.State =>
+		Array.reduce(Array.fromIterable(members), state, (s, id) =>
+			Option.match(Executions.current(s, id), {
+				onNone: () => s,
+				onSome: ({ unit, member }) =>
+					member.phase === "Stopped" || member.phase === "NotStarted"
+						? s
+						: Core.reduce(s, {
+								_tag: "MemberStopped",
+								unit: unit.id,
+								incarnation: unit.incarnation,
+								observer: unit.spawn,
+								member: id,
+								term: member.term,
+								generation: member.generation,
+								cleanup: { _tag: "Completed" },
+								cause: Cause.empty,
+								now: s.now,
+							}).state,
+			}),
+		)
+	const drive = (state: Core.State, remaining = 50): Core.State => {
+		assert.isAbove(remaining, 0, "The member operation did not settle")
+		const command = Array.findFirst(
+			HashMap.values(state.commands),
+			(c) =>
+				c.disposition === "Pending" &&
+				String.startsWith("member-operation-")(c.change) &&
+				c.kind !== "ArmTimer" &&
+				c.kind !== "CancelTimer" &&
+				c.kind !== "Publish",
+		)
+		if (Option.isNone(command)) return state
+		const c = command.value
+		return drive(
+			c.kind === "StopMembers"
+				? report(stopAll(state, c.subjects), c)
+				: report(
+						state,
+						c,
+						c.kind === "Resolve"
+							? {
+									_tag: "Resolved",
+									value: { input: {}, identity: "fresh", environment: "test" },
+								}
+							: undefined,
+					),
+			remaining - 1,
+		)
+	}
+	const current = Option.getOrThrow(Executions.current(revoked, "a"))
+	const failed = Core.reduce(revoked, {
+		_tag: "MemberFailed",
+		unit: current.unit.id,
+		incarnation: current.unit.incarnation,
+		observer: current.unit.spawn,
+		member: "a",
+		term: current.member.term,
+		generation: current.member.generation,
+		cause: Cause.fail("Ordinary member failure"),
+		now: revoked.now,
+	}).state
+	const after = drive(failed)
+	assert.isTrue(Executions.healthy(after, "a"))
+	assert.isFalse(Executions.healthy(after, "b"))
+})
