@@ -41,18 +41,18 @@ const fixture = Effect.fn(function* (
 		recorderEntry === "release"
 			? yield* Artifact.capture({
 					directory: new URL("../", import.meta.url).pathname,
-					entry: "dist/Recorder.js",
+					module: "dist/Recorder.js",
 					exclude: ["node_modules", ".cache", "src", "test"],
 					store,
 				})
 			: yield* Artifact.capture({
 					directory: new URL("./fixtures/recorded/", import.meta.url).pathname,
-					entry: "withholding.mjs",
+					module: "withholding.mjs",
 					store,
 				})
 	const business = yield* Artifact.capture({
 		directory: new URL("./fixtures/recorded/", import.meta.url).pathname,
-		entry: "business.mjs",
+		module: "business.mjs",
 		store,
 	})
 	const recorder = Units.target({

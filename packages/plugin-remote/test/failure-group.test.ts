@@ -1,8 +1,8 @@
 import { Cause, Deferred, Effect, Exit, Fiber, Schema, TxRef } from "effect"
 import { assert, describe, it } from "@effect/vitest"
 
-import * as Release from "@graftland/graft/Release"
-import { ReleaseInterrupted } from "@graftland/graft/Release"
+import * as Finalization from "@graftland/graft/Finalization"
+import { FinalizationInterrupted } from "@graftland/graft/Finalization"
 
 import * as FailureGroup from "../src/internal/FailureGroup"
 
@@ -166,11 +166,11 @@ for (const nested of [false, true]) {
 						const closed = yield* Effect.exit(group.close)
 						assert(Exit.isFailure(closed))
 						const release = Cause.squash(closed.cause)
-						assert(Schema.is(ReleaseInterrupted)(release))
+						assert(Schema.is(FinalizationInterrupted)(release))
 						assert.isTrue(Cause.hasInterruptsOnly(release.cause))
 					}).pipe(Effect.scoped, Effect.exit)
 					assert(Exit.isFailure(exit))
-					assert(Schema.is(ReleaseInterrupted)(Cause.squash(exit.cause)))
+					assert(Schema.is(FinalizationInterrupted)(Cause.squash(exit.cause)))
 				}),
 		)
 	}
@@ -213,18 +213,18 @@ for (const finalizer of ["masked", "interruptible", "self", "die"]) {
 						assert.deepStrictEqual(cause, closed.cause)
 						const released = Cause.squash(closed.cause)
 						if (finalizer === "self") {
-							assert(Schema.is(ReleaseInterrupted)(released))
+							assert(Schema.is(FinalizationInterrupted)(released))
 							assert.isTrue(Cause.hasInterruptsOnly(released.cause))
 						} else assert.strictEqual(released, defect)
 					}
-				}).pipe(Release.scoped, Effect.exit)
+				}).pipe(Finalization.scoped, Effect.exit)
 				if (finalizer === "masked" || finalizer === "interruptible")
 					assert.deepStrictEqual(result, Exit.void)
 				else {
 					assert(Exit.isFailure(result))
 					const released = Cause.squash(result.cause)
 					if (finalizer === "self")
-						assert(Schema.is(ReleaseInterrupted)(released))
+						assert(Schema.is(FinalizationInterrupted)(released))
 					else assert.strictEqual(released, defect)
 				}
 			}),

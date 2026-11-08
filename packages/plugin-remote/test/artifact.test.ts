@@ -20,7 +20,7 @@ const setup = Effect.gen(function* () {
 		root,
 		directory,
 		store,
-		options: { directory, store, entry: "index.js" },
+		options: { directory, store, module: "index.js" },
 	}
 })
 const runtime = NodeServices.layer
@@ -82,7 +82,7 @@ it.live(
 )
 
 it.live(
-	"includes file names, package contents and the selected entry in the identity",
+	"includes file names, package contents and the selected module in the identity",
 	() =>
 		Effect.gen(function* () {
 			const { fs, directory, options } = yield* setup
@@ -91,7 +91,7 @@ it.live(
 				'export default "original"',
 			)
 			const first = yield* Artifact.capture(options)
-			const other = yield* Artifact.capture({ ...options, entry: "other.js" })
+			const other = yield* Artifact.capture({ ...options, module: "other.js" })
 			assert.notEqual(first.identity.digest, other.identity.digest)
 			yield* fs.writeFileString(
 				directory + "/package.json",
@@ -121,7 +121,7 @@ it.live(
 				"nested/../index.js",
 			]) {
 				const observed5 = yield* Effect.flip(
-					Artifact.capture({ ...options, entry }),
+					Artifact.capture({ ...options, module: entry }),
 				)
 				assert.equal(observed5._tag, "ArtifactError")
 			}

@@ -36,10 +36,10 @@ Use `Plugin.fork(effect)` for background work that a plugin owns.
 
 - Concurrent and repeated callers share the same cleanup result.
 - `CleanupError.cause` keeps all the original failure reasons. If release of a
-  framework-owned Scope is interrupted, Graft reports a `ReleaseInterrupted`
-  defect whose `cause` retains the original interruption. This keeps release
-  failures visible through nested events and background tasks; ordinary
-  cancellation remains an interruption.
+  framework-owned Scope is interrupted, Graft reports a
+  `FinalizationInterrupted` defect whose `cause` retains the original
+  interruption. This keeps release failures visible through nested events and
+  background tasks; ordinary cancellation remains an interruption.
 - Cleanup continues through resource release and dependency lease release, even
   when a finalizer fails.
 - Activation failures also include cleanup failures in `Failed.cause`.
@@ -95,12 +95,12 @@ Plugin identity is object reference identity.
 
 ## Resource release
 
-Use `Release.scoped` when interrupted finalizers must remain visible through
-enclosing cancellation. `Release.close` does the same for an existing scope.
-When the release cause contains only interrupts, a finalizer’s own interruption
-becomes a `ReleaseInterrupted` defect carrying the original cause; expected
-external cancellation remains an Interrupt. Causes containing other failures
-stay unchanged.
+Use `Finalization.scoped` when interrupted finalizers must remain visible
+through enclosing cancellation. `Finalization.close` does the same for an
+existing scope. When the release cause contains only interrupts, a finalizer’s
+own interruption becomes a `FinalizationInterrupted` defect carrying the
+original cause; expected external cancellation remains an Interrupt. Causes
+containing other failures stay unchanged.
 
 ## Documentation
 

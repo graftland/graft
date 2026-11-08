@@ -79,7 +79,7 @@ export const fixture = Effect.fnUntraced(function* (
 	)
 	const contractArtifact = yield* Artifact.capture({
 		directory: contractDirectory,
-		entry: "provider.js",
+		module: "provider.js",
 		store: path.join(directory, "contracts"),
 	})
 	const shared = yield* quote(
@@ -103,18 +103,18 @@ export const fixture = Effect.fnUntraced(function* (
 	return {
 		nested: yield* Artifact.capture({
 			directory: providerDirectory,
-			entry: "nested.js",
+			module: "nested.js",
 			store: path.join(directory, "nested"),
 		}),
 		contractArtifact,
 		provider: yield* Artifact.capture({
 			directory: providerDirectory,
-			entry: "plugin.js",
+			module: "plugin.js",
 			store: path.join(directory, "providers"),
 		}),
 		consumer: yield* Artifact.capture({
 			directory: consumerDirectory,
-			entry: "plugin.js",
+			module: "plugin.js",
 			store: path.join(directory, "consumers"),
 		}),
 		directory,

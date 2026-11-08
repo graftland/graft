@@ -40,7 +40,7 @@ export const stage = Effect.fnUntraced(function* (
 	)
 	return yield* Artifact.capture({
 		directory: source,
-		entry: "plugin.js",
+		module: "plugin.js",
 		store: path.join(directory, "artifacts"),
 	})
 })

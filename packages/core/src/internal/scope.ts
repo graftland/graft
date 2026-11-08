@@ -1,6 +1,6 @@
 import { Cause, Deferred, Effect, Exit, Ref, Scope } from "effect"
 
-import * as Release from "../Release"
+import * as Finalization from "../Finalization"
 
 /** Keep ownership until cleanup finishes, even if a dispose caller is cancelled. */
 export const ownedScope = Effect.fnUntraced(function* <E = never>(
@@ -34,7 +34,7 @@ export const ownedScope = Effect.fnUntraced(function* <E = never>(
 		yield* Effect.gen(function* () {
 			const result = yield* Effect.exit(
 				Effect.gen(function* () {
-					const closed = yield* Effect.exit(Release.close(scope, exit))
+					const closed = yield* Effect.exit(Finalization.close(scope, exit))
 					const observed = yield* Effect.exit(afterClose)
 					if (Exit.isFailure(closed))
 						return yield* Effect.failCause(
@@ -47,7 +47,7 @@ export const ownedScope = Effect.fnUntraced(function* <E = never>(
 				}),
 			)
 			yield* Deferred.done(ready, result)
-			yield* Release.close(link, exit).pipe(
+			yield* Finalization.close(link, exit).pipe(
 				Effect.catchCause((cause) =>
 					Effect.logError("Closing fork ownership failed", cause),
 				),
@@ -103,7 +103,7 @@ export const ownedScope = Effect.fnUntraced(function* <E = never>(
 					: // The explicit close caller owns the result: it receives it, or the worker logs it if that caller was interrupted.
 						Effect.asVoid(Effect.exit(Deferred.await(ready))),
 			),
-			Effect.ensuring(Release.close(workers, exit)),
+			Effect.ensuring(Finalization.close(workers, exit)),
 		),
 	)
 	return { scope, close }

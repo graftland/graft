@@ -394,7 +394,7 @@ const load = Effect.fnUntraced(function* (
 			? Option.some(
 					path.join(
 						deployment.artifact.directory,
-						deployment.artifact.identity.entry,
+						deployment.artifact.identity.module,
 					),
 				)
 			: path.resolveWithin(deployment.artifact.directory, deployment.module)
@@ -497,7 +497,7 @@ const describeTree = Effect.fnUntraced(function* (
 		return yield* UnitFault.make({
 			detail: "Description requires a captured deployment",
 		})
-	const selected = deployment.module ?? deployment.artifact.identity.entry
+	const selected = deployment.module ?? deployment.artifact.identity.module
 	const identity = `${deployment.artifact.identity.digest}/${selected}`
 	if (HashSet.has(ancestors, identity))
 		return yield* UnitFault.make({

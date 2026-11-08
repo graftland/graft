@@ -30,9 +30,11 @@ test("preserves core exports, re-exports, overloads, and local Schema fields", a
 	})
 	const project = await app.convert()
 	assert.equal(project.children.length, entries.length)
-	const release = project.children.find((entry) => entry.name === "Release")
-	assert.deepEqual(release.children.map((child) => child.name).sort(), [
-		"ReleaseInterrupted",
+	const finalization = project.children.find(
+		(entry) => entry.name === "Finalization",
+	)
+	assert.deepEqual(finalization.children.map((child) => child.name).sort(), [
+		"FinalizationInterrupted",
 		"close",
 		"scoped",
 	])
@@ -69,12 +71,12 @@ test("preserves core exports, re-exports, overloads, and local Schema fields", a
 	assert.deepEqual(index.children.map((child) => child.name).sort(), [
 		"Change",
 		"Event",
+		"Finalization",
 		"Fork",
 		"Graft",
 		"Kernel",
 		"Manifest",
 		"Plugin",
-		"Release",
 		"Transition",
 		"Trust",
 	])

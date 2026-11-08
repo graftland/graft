@@ -282,7 +282,7 @@ it.live(
 			)
 			const resolver = yield* ModuleResolver.make({ base, control })
 			const descriptor = yield* resolver.resolve("conditional")
-			assert.equal(descriptor.artifact.identity.entry, "index.mjs")
+			assert.equal(descriptor.artifact.identity.module, "index.mjs")
 		}).pipe(Effect.scoped, Effect.provide(platform)),
 	15000,
 )
@@ -298,7 +298,7 @@ const resolverModule = Effect.fnUntraced(function* (body: string) {
 	)
 	const artifact = yield* Artifact.capture({
 		directory: fixture.path.join(fixture.base, "node_modules/custom-resolver"),
-		entry: "index.mjs",
+		module: "index.mjs",
 		store: fixture.path.join(fixture.base, "artifacts"),
 	})
 	return { ...fixture, artifact }

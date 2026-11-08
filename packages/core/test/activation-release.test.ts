@@ -11,8 +11,8 @@ import {
 } from "effect"
 import { assert, it } from "@effect/vitest"
 
+import { FinalizationInterrupted } from "../src/Finalization.ts"
 import { Fork, Graft, Plugin } from "../src/index.ts"
-import { ReleaseInterrupted } from "../src/Release.ts"
 import { run } from "./utils.ts"
 
 for (const phase of ["Loading", "Active"]) {
@@ -72,7 +72,7 @@ for (const phase of ["Loading", "Active"]) {
 									assert(Schema.is(Fork.CleanupError)(error))
 									const released = Cause.squash(error.cause)
 									if (finalizer === "self") {
-										assert(Schema.is(ReleaseInterrupted)(released))
+										assert(Schema.is(FinalizationInterrupted)(released))
 										assert.isTrue(Cause.hasInterruptsOnly(released.cause))
 									} else if (finalizer === "interruptible") {
 										assert.isTrue(Cause.hasInterruptsOnly(error.cause))

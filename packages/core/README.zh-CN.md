@@ -28,7 +28,7 @@ npm install @graftland/graft effect
 - 并发调用和重复调用共享同一个清理结果。
 - `CleanupError.cause`
   保留所有原始失败原因。框架管理的 Scope 在释放时发生纯中断，会以
-  `ReleaseInterrupted` defect 报告，原始中断保存在它的 `cause`
+  `FinalizationInterrupted` defect 报告，原始中断保存在它的 `cause`
   中。这样，释放失败经过嵌套事件或后台任务仍能传到调用方；正常取消仍按中断处理。
 - 即使某个 finalizer 失败，清理仍会继续完成资源释放和依赖 lease 的释放。
 - activation 失败时，`Failed.cause` 也包含清理失败。
@@ -63,9 +63,9 @@ npm install @graftland/graft effect
 ## 资源释放
 
 需要让 finalizer 自身的中断在外层取消后仍可见时，使用
-`Release.scoped`。已有 Scope 可用 `Release.close`
+`Finalization.scoped`。已有 Scope 可用 `Finalization.close`
 关闭。仅当释放 cause 全部由中断组成时，释放过程自己产生的中断才会成为携带原始 cause 的
-`ReleaseInterrupted`
+`FinalizationInterrupted`
 defect；预期的外部取消仍是 Interrupt。含有其他失败的 cause 原样保留。
 
 ## 文档

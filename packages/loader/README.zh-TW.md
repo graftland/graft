@@ -49,7 +49,7 @@ Loader 如何處理失敗：
   都被延遲到受保護的操作內部執行。同步擲出的錯誤會被回報為 defect，不會讓回覆懸空，也不會停止之後的編輯。
 - 存取 `external`
   被延遲到它的串流失敗邊界內部。出現 defect 時，通知會停止並記錄日誌，API 編輯仍然可用。
-- 模組候選項的後備，要求恰好有一個失敗，並且該失敗表明候選項不存在。如果同時出現清理失敗、defect 或中斷，就不會使用後備，並保留完整的 Cause。
+- 說明符寫法的後備，要求恰好有一個失敗，並且該失敗表明寫法不存在。如果同時出現清理失敗、defect 或中斷，就不會使用後備，並保留完整的 Cause。
 - Resolver 和 intercept 回呼在項目啟用內部執行。意外的同步擲出會使該項目失敗，並保留原始 cause。
 
 ## API 編輯
@@ -298,7 +298,7 @@ importer。`resolve`
 `resolve(name, { observationScope })`
 可以指定獨立的觀察 scope；resolver 將它作為第二個參數傳給 importer。Group 按設定項目持有觀察 scope，並用
 `ScopedRef`
-在重試時取代代次。失敗候選的資源仍立即清理。省略選項時，觀察歸呼叫端 scope 所有。
+在重試時取代代次。失敗寫法的資源仍立即清理。省略選項時，觀察歸呼叫端 scope 所有。
 
 - 解析成功之後，一般的設定更新、待處理的注入和失敗的外掛啟用，都會保留 resolver 租約。
 - 重新啟動生命週期會先釋放舊租約，再取得新的租約。這包括解析期間的設定變化，以及從準備失敗中復原。
@@ -323,6 +323,6 @@ watch 模式同時監聽入口目錄和目前目標目錄。入口連結改變�
 
 `ModuleResolver.make` 的選用 `resolution`
 協定快取解析計畫，不快取 importer 結果。`revision`
-在安裝、移除或解析環境變更後必須更新；`exists` 只檢查候選是否存在；`observe`
+在安裝、移除或解析環境變更後必須更新；`exists` 只檢查寫法是否存在；`observe`
 在每次解析（包括快取命中）中取得觀察租約。未提供此協定時，每次仍以原名稱優先執行 importer。詳見
 [Resolution plans](./README.md#resolution-plans)。

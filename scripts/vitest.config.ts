@@ -8,6 +8,7 @@ export default defineProject({
 			"phase2-boundary.test.mjs",
 			"gateway-sample.test.mjs",
 			"isolated-home.test.mjs",
+			"check-names.test.mjs",
 		],
 		globalSetup: ["./isolated-home.mjs", "./public-api-setup.mjs"],
 	},

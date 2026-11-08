@@ -53,7 +53,7 @@ export default Layer.effect(Setting, Effect.gen(function* () {
 	)
 	return yield* Artifact.capture({
 		directory,
-		entry: "index.mjs",
+		module: "index.mjs",
 		store: path.join(root, "artifacts"),
 	})
 })

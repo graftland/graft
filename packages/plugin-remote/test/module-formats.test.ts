@@ -31,7 +31,7 @@ for (const placement of ["Worker", "Process"] as const)
 				})
 				const artifact = yield* Artifact.capture({
 					directory: new URL("./fixtures/commonjs/", import.meta.url).pathname,
-					entry: "index.cjs",
+					module: "index.cjs",
 					store: path.join(directory, "artifacts"),
 				})
 				const target = Units.target({

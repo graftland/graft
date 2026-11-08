@@ -126,7 +126,7 @@ devenv shell -- pnpm typecheck
 devenv shell -- pnpm test
 ```
 
-检查项、发布流程和文档站点见[发布](https://graftland.github.io/graft/zh-cn/releases/)。
+检查项、发布流程和文档站点见[发版](https://graftland.github.io/graft/zh-cn/publishing/)。
 
 ## 许可证
 

@@ -185,7 +185,7 @@ const revoked = (state: State, statement: T.Statement) =>
 		HashSet.has(state.revocations, reference),
 	)
 const rejected = (entry: string, reason: T.Unapproved["reason"]) =>
-	T.Unapproved.make({ entry, reason })
+	T.Unapproved.make({ instance: entry, reason })
 export const comparison = Effect.fnUntraced(function* (
 	entry: string,
 	candidate: string,
@@ -460,7 +460,7 @@ export const publish = Effect.fnUntraced(function* (
 				snapshot(publication),
 			).pipe(
 				Effect.mapError((error) =>
-					Trust.RegistrationError.make({
+					Trust.AdmissionRegistrationError.make({
 						message: "Invalid projection payload",
 						cause: Cause.fail(error),
 					}),
@@ -482,13 +482,13 @@ export const publish = Effect.fnUntraced(function* (
 					(a, b) => a.service === b.service && a.operation === b.operation,
 				).length !== values.length
 			)
-				return yield* Trust.RegistrationError.make({
+				return yield* Trust.AdmissionRegistrationError.make({
 					message: "A logical view must declare each service/operation once",
 				})
 			const after = { ...decoded, values }
 			const state = yield* TxRef.get(stateRef)
 			if (state.closed)
-				return yield* Trust.RegistrationError.make({
+				return yield* Trust.AdmissionRegistrationError.make({
 					message: "Policy is closed",
 				})
 			const before: Trust.Publication = {
@@ -764,10 +764,10 @@ export class Audit extends Context.Service<
 	Audit,
 	{
 		/** May wait interruptibly for the audit owner to finish initialization. */
-		readonly ready: Effect.Effect<void, Trust.RegistrationError>
+		readonly ready: Effect.Effect<void, Trust.AdmissionRegistrationError>
 		readonly record: (
 			change: ProjectionChange,
-		) => Effect.Effect<void, Trust.RegistrationError>
+		) => Effect.Effect<void, Trust.AdmissionRegistrationError>
 	}
 >()("@graftland/plugin-remote/internal/policy/Audit") {}
 export const ProjectionChange = Schema.Struct({

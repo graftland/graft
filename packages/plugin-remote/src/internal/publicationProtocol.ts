@@ -10,7 +10,7 @@ export const Request = Schema.Struct({
 })
 export const Response = Schema.toCodecJson(
 	Schema.Exit(
-		Manifest.Entry,
+		Manifest.EntryMetadata,
 		Schema.Defect({ includeStack: true }),
 		Schema.Defect({ includeStack: true }),
 	),

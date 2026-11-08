@@ -45,7 +45,7 @@ const fixture = Effect.fn(function* (
 		Effect.fn(function* ([instance, entry]) {
 			const artifact = yield* Artifact.capture({
 				directory: new URL("./fixtures/group/", import.meta.url).pathname,
-				entry,
+				module: entry,
 				store: path.join(directory, "artifacts"),
 			})
 			const target = Units.target({

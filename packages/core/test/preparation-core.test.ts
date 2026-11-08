@@ -568,7 +568,7 @@ it("snapshots native environment recipes and resolved module options before reta
 			version: 1,
 			algorithm: "sha256",
 			digest: "environment",
-			entry: "index.js",
+			module: "index.js",
 		},
 	} satisfies Core.ArtifactData
 	const recipe = { artifact, export: "default", options }

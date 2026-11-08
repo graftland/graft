@@ -12,14 +12,14 @@ import {
 } from "effect"
 import { assert, it } from "@effect/vitest"
 
+import { FinalizationInterrupted } from "../src/Finalization.ts"
 import { Fork, Graft, Plugin } from "../src/index.ts"
-import { ReleaseInterrupted } from "../src/Release.ts"
 
 const assertReleaseInterruption = <E>(cause: Cause.Cause<E>) => {
 	assert.isAbove(cause.reasons.length, 0)
 	for (const reason of cause.reasons) {
 		assert(reason._tag === "Die")
-		assert(Schema.is(ReleaseInterrupted)(reason.defect))
+		assert(Schema.is(FinalizationInterrupted)(reason.defect))
 		assert.isTrue(Cause.hasInterruptsOnly(reason.defect.cause))
 	}
 }

@@ -237,7 +237,7 @@ export const build = Effect.fnUntraced(
 					)
 				const artifact = yield* Artifact.capture({
 					directory,
-					entry: selected.implementation,
+					module: selected.implementation,
 					store: path.join(stage, "artifacts"),
 				})
 				const captured = yield* request.metadataOnly === true

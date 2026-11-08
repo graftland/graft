@@ -13,7 +13,7 @@ import {
 	TxRef,
 } from "effect"
 
-import * as Release from "@graftland/graft/Release"
+import * as Finalization from "@graftland/graft/Finalization"
 
 import { cleanupCause } from "./cleanup"
 
@@ -90,7 +90,7 @@ export const make = Effect.fnUntraced(function* <E>(): Effect.fn.Return<
 				const waiting = yield* Effect.exit(restore(Fiber.await(worker)))
 				if (Exit.isFailure(waiting)) yield* Fiber.interrupt(worker)
 				const body = yield* Fiber.await(worker)
-				const closed = yield* Effect.exit(Release.close(scope, body))
+				const closed = yield* Effect.exit(Finalization.close(scope, body))
 				// Forwarding this exact cancellation from a finalizer is indistinguishable from acknowledging it.
 				const expected =
 					Exit.isFailure(waiting) &&
@@ -102,7 +102,7 @@ export const make = Effect.fnUntraced(function* <E>(): Effect.fn.Return<
 					)
 				const bodyCause =
 					Exit.isFailure(body) && !expected ? body.cause : Cause.empty
-				// Release.close marks independent interruptions; an unmarked one is pending cancellation.
+				// Finalization.close marks independent interruptions; an unmarked one is pending cancellation.
 				const releaseCause =
 					Exit.isFailure(closed) && !Cause.hasInterruptsOnly(closed.cause)
 						? closed.cause
@@ -115,7 +115,7 @@ export const make = Effect.fnUntraced(function* <E>(): Effect.fn.Return<
 							bodyCause.reasons,
 							(reason) =>
 								reason._tag === "Die" &&
-								Schema.is(Release.ReleaseInterrupted)(reason.defect),
+								Schema.is(Finalization.FinalizationInterrupted)(reason.defect),
 						)
 						? bodyCause
 						: Cause.empty,

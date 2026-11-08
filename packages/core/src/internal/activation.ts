@@ -39,10 +39,10 @@ import {
 	TxRef,
 } from "effect"
 
+import * as Finalization from "../Finalization"
 import { ForkState } from "../Fork"
 import { Graft, ServiceConflict } from "../Graft"
 import { isOptional, UnitTerm, type Update } from "../Plugin"
-import * as Release from "../Release"
 import * as Transition from "../Transition"
 import { publicationCycle, resolutionChanged } from "./dependencies"
 import { setState } from "./forkState"
@@ -563,9 +563,9 @@ export const supervise = Effect.fnUntraced(function* (
 			// Leased services may need these workers during consumer finalization.
 			// Unmarked interruptions have unresolved attribution; retain their full causes.
 			const tasksClosed = yield* Effect.exit(
-				Release.close(running.tasks.scope, exit),
+				Finalization.close(running.tasks.scope, exit),
 			)
-			const closed = yield* Effect.exit(Release.close(running.scope, exit))
+			const closed = yield* Effect.exit(Finalization.close(running.scope, exit))
 			const released = yield* Effect.exit(
 				Effect.tx(
 					Generations.settle(runtime, node, running.activation.generation),

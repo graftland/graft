@@ -10,7 +10,7 @@ export const Selection = Schema.Struct({
 	entry: Manifest.PublicEntry,
 })
 export const Configuration = Schema.Struct({
-	host: Manifest.Host,
+	host: Manifest.HostProfile,
 	entries: Schema.Array(Selection),
 	catalog: Schema.Array(Selection),
 })

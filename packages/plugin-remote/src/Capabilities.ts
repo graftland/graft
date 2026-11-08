@@ -23,8 +23,8 @@ import { type Graft } from "@graftland/graft"
 import * as Contract from "./Contract"
 import * as Policy from "./Policy"
 
-export class Denied extends Schema.TaggedError<
-	Denied,
+export class CapabilityDenied extends Schema.TaggedError<
+	CapabilityDenied,
 	{ readonly brand: unique symbol }
 >()("CapabilityDenied", {
 	reason: Schema.Literals([
@@ -51,10 +51,10 @@ export class Broker extends Context.Service<
 	{
 		readonly http: (
 			request: HttpRequest,
-		) => Effect.Effect<string, Denied | RpcClientError.RpcClientError>
+		) => Effect.Effect<string, CapabilityDenied | RpcClientError.RpcClientError>
 		readonly read: (
 			request: FileRequest,
-		) => Effect.Effect<string, Denied | RpcClientError.RpcClientError>
+		) => Effect.Effect<string, CapabilityDenied | RpcClientError.RpcClientError>
 	}
 >()("@graftland/plugin-remote/Capabilities/Broker") {}
 export const group = RpcGroup.make(
@@ -64,7 +64,7 @@ export const group = RpcGroup.make(
 		Rpc.make("Http", {
 			payload: HttpRequest,
 			success: Schema.String,
-			error: Denied,
+			error: CapabilityDenied,
 		}),
 	),
 	Contract.operation(
@@ -73,7 +73,7 @@ export const group = RpcGroup.make(
 		Rpc.make("Read", {
 			payload: FileRequest,
 			success: Schema.String,
-			error: Denied,
+			error: CapabilityDenied,
 		}),
 	),
 )
@@ -98,7 +98,7 @@ export const make = Effect.fnUntraced(function* (
 	const admitted = Policy.check(entry, candidate).pipe(
 		Effect.provideContext(environment),
 		Effect.mapError((error) =>
-			Denied.make({
+			CapabilityDenied.make({
 				reason: error.reason === "Revoked" ? "Revoked" : "Unapproved",
 			}),
 		),
@@ -118,11 +118,14 @@ export const make = Effect.fnUntraced(function* (
 							),
 						)
 					const error = Cause.findError(cause)
-					if (Result.isSuccess(error) && Schema.is(Denied)(error.success)) {
-						const denied: Denied = error.success
+					if (
+						Result.isSuccess(error) &&
+						Schema.is(CapabilityDenied)(error.success)
+					) {
+						const denied: CapabilityDenied = error.success
 						return yield* denied
 					}
-					return yield* Denied.make({ reason: "Unavailable" })
+					return yield* CapabilityDenied.make({ reason: "Unavailable" })
 				}),
 			),
 		)
@@ -136,10 +139,10 @@ export const make = Effect.fnUntraced(function* (
 					(grant) => grant._tag === "Http" && grant.id === request.grant,
 				)
 				if (Option.isNone(grant) || grant.value._tag !== "Http")
-					return yield* Denied.make({ reason: "DestinationDenied" })
+					return yield* CapabilityDenied.make({ reason: "DestinationDenied" })
 				const url = yield* Effect.try({
 					try: () => new URL(request.url),
-					catch: () => Denied.make({ reason: "DestinationDenied" }),
+					catch: () => CapabilityDenied.make({ reason: "DestinationDenied" }),
 				})
 				if (
 					url.origin !== grant.value.origin ||
@@ -147,7 +150,7 @@ export const make = Effect.fnUntraced(function* (
 					url.password !== "" ||
 					!["https:", "http:"].includes(url.protocol)
 				)
-					return yield* Denied.make({ reason: "DestinationDenied" })
+					return yield* CapabilityDenied.make({ reason: "DestinationDenied" })
 				const credential =
 					grant.value.credential === undefined
 						? undefined
@@ -167,13 +170,15 @@ export const make = Effect.fnUntraced(function* (
 								}),
 							)
 						if (response.status >= 300 && response.status < 400)
-							return yield* Denied.make({ reason: "DestinationDenied" })
+							return yield* CapabilityDenied.make({
+								reason: "DestinationDenied",
+							})
 						const bytes = yield* Stream.runFoldEffect(
 							response.stream,
 							() => new Uint8Array(),
 							(before, chunk) =>
 								before.byteLength + chunk.byteLength > 1048576
-									? Denied.make({ reason: "ResponseLimit" })
+									? CapabilityDenied.make({ reason: "ResponseLimit" })
 									: Effect.succeed(new Uint8Array([...before, ...chunk])),
 						)
 						return new TextDecoder().decode(bytes)
@@ -182,7 +187,7 @@ export const make = Effect.fnUntraced(function* (
 			}).pipe(
 				Effect.catchTag("ConfigError", (error) =>
 					Effect.logError("Host credential unavailable", error).pipe(
-						Effect.andThen(Denied.make({ reason: "Unavailable" })),
+						Effect.andThen(CapabilityDenied.make({ reason: "Unavailable" })),
 					),
 				),
 			),
@@ -195,7 +200,7 @@ export const make = Effect.fnUntraced(function* (
 					(grant) => grant._tag === "Files" && grant.id === request.grant,
 				)
 				if (Option.isNone(grant) || grant.value._tag !== "Files")
-					return yield* Denied.make({ reason: "FileDenied" })
+					return yield* CapabilityDenied.make({ reason: "FileDenied" })
 				const directory = grant.value.directory
 				return yield* safe(
 					Effect.gen(function* () {
@@ -207,16 +212,16 @@ export const make = Effect.fnUntraced(function* (
 							relative === ".." ||
 							String.startsWith("../")(relative)
 						)
-							return yield* Denied.make({ reason: "FileDenied" })
+							return yield* CapabilityDenied.make({ reason: "FileDenied" })
 						const stat = yield* fs.stat(target)
 						if (stat.type !== "File")
-							return yield* Denied.make({ reason: "FileDenied" })
+							return yield* CapabilityDenied.make({ reason: "FileDenied" })
 						const bytes = yield* Stream.runFoldEffect(
 							fs.stream(target, { bytesToRead: 1048577 }),
 							() => new Uint8Array(),
 							(before, chunk) =>
 								before.byteLength + chunk.byteLength > 1048576
-									? Denied.make({ reason: "ResponseLimit" })
+									? CapabilityDenied.make({ reason: "ResponseLimit" })
 									: Effect.succeed(new Uint8Array([...before, ...chunk])),
 						)
 						return new TextDecoder().decode(bytes)

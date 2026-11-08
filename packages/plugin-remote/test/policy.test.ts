@@ -621,7 +621,7 @@ it.effect("rejects audit failure without changing the approved view", () =>
 					Ref.get(failed).pipe(
 						Effect.flatMap((reject) =>
 							reject
-								? Trust.RegistrationError.make({
+								? Trust.AdmissionRegistrationError.make({
 										message: "Audit write failed",
 									})
 								: Effect.void,

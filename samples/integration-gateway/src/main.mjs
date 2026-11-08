@@ -185,10 +185,10 @@ const prepare = Effect.fnUntraced(function* (placement) {
 		directory: cache,
 	})
 	const source = fileURLToPath(new URL("units", import.meta.url))
-	const capture = (entry) =>
+	const capture = (module) =>
 		Artifact.capture({
 			directory: source,
-			entry,
+			module,
 			store: path.join(directory, "artifacts"),
 		})
 	const contractArtifact = yield* capture("provider-contract.mjs")

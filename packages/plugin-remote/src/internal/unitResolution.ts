@@ -74,7 +74,7 @@ export const validationEnvironment = Effect.fnUntraced(function* (
 	const identity = yield* fingerprint(
 		Array.map(modules, (module) => ({
 			artifact: module.artifact.identity.digest,
-			entry: module.artifact.identity.entry,
+			entry: module.artifact.identity.module,
 			export: module.export,
 			options: module.options,
 		})),

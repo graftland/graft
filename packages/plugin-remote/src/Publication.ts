@@ -165,7 +165,7 @@ export const provenance = Effect.fn("Publication.provenance")(function* (
 		return yield* failure(`No manifest entry ${entry}`)
 	const artifact = yield* Artifact.identify({
 		directory,
-		entry: selected.implementation,
+		module: selected.implementation,
 	})
 	const after = yield* readJson(path.join(directory, "package.json")).pipe(
 		Effect.flatMap(Schema.decodeUnknownEffect(Manifest.Package)),

@@ -136,7 +136,8 @@ export interface Options {
 }
 const isPath = (name: string) =>
 	String.startsWith(".")(name) || String.startsWith("/")(name)
-export const candidates = (name: string): ReadonlyArray<string> =>
+/** The specifier spellings tried for a short plugin name, in order. */
+export const spellings = (name: string): ReadonlyArray<string> =>
 	isPath(name) || String.includes(":")(name) || String.startsWith("@")(name)
 		? [name]
 		: [name, `@graftland/plugin-${name}`, `graft-plugin-${name}`]
@@ -312,7 +313,7 @@ const inspectModule = Effect.fnUntraced(function* (
 		status.result.value.description.moduleExport === undefined
 	)
 		return yield* ModuleInvalid.make({
-			specifier: artifact.identity.entry,
+			specifier: artifact.identity.module,
 			cause: status.cause,
 			preparation: status.id,
 		})
@@ -371,7 +372,7 @@ const capture = Effect.fnUntraced(function* (
 	]
 	const artifact = yield* Artifact.capture({
 		directory: owner.directory,
-		entry: path.relative(owner.directory, file),
+		module: path.relative(owner.directory, file),
 		store,
 		exclude,
 	}).pipe(
@@ -413,7 +414,7 @@ const capture = Effect.fnUntraced(function* (
 		kind,
 		artifact,
 		location:
-			pathToFileURL(path.join(artifact.directory, artifact.identity.entry))
+			pathToFileURL(path.join(artifact.directory, artifact.identity.module))
 				.href + suffix,
 		base,
 		export: exported,
@@ -483,7 +484,7 @@ const resolveCustom = Effect.fnUntraced(function* (
 		pathToFileURL(
 			path.join(
 				descriptor.artifact.directory,
-				descriptor.artifact.identity.entry,
+				descriptor.artifact.identity.module,
 			),
 		).href + descriptor.suffix
 	if (descriptor.kind !== kind || descriptor.location !== location)
@@ -563,7 +564,7 @@ export const make = Effect.fnUntraced(function* (options: Options) {
 					options.resolver,
 					options,
 				)
-			const tried = candidates(name)
+			const tried = spellings(name)
 			const [written, ...conventions] = tried
 			const exact =
 				written === undefined
@@ -577,8 +578,8 @@ export const make = Effect.fnUntraced(function* (options: Options) {
 					conventions.length === 0)
 			)
 				return yield* exact.failure
-			const inspected = yield* Effect.forEach(conventions, (candidate) =>
-				attempt(candidate, base, kind),
+			const inspected = yield* Effect.forEach(conventions, (spelling) =>
+				attempt(spelling, base, kind),
 			)
 			const found = Array.getSomes(inspected)
 			const [only, ...rest] = found

@@ -84,7 +84,7 @@ const fixture = Effect.fnUntraced(function* () {
 	)
 	const contractArtifact = yield* Artifact.capture({
 		directory: contract!,
-		entry: "emitter.js",
+		module: "emitter.js",
 		store: path.join(directory, "contracts"),
 	})
 	const shared = yield* quote(
@@ -106,12 +106,12 @@ const fixture = Effect.fnUntraced(function* () {
 		contractArtifact,
 		emitter: yield* Artifact.capture({
 			directory: emitter!,
-			entry: "plugin.js",
+			module: "plugin.js",
 			store: path.join(directory, "emitters"),
 		}),
 		subscriber: yield* Artifact.capture({
 			directory: subscriber!,
-			entry: "plugin.js",
+			module: "plugin.js",
 			store: path.join(directory, "subscribers"),
 		}),
 	}

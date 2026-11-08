@@ -12,8 +12,8 @@ import {
 	TxRef,
 } from "effect"
 
+import * as Finalization from "../Finalization"
 import { ProbeError } from "../Fork"
-import * as Release from "../Release"
 
 export interface Probe {
 	readonly run: Effect.Effect<void, ProbeError>
@@ -41,7 +41,7 @@ export const register = Effect.fnUntraced(function* <A, E, R>(
 ) {
 	const context = yield* Effect.context<R>()
 	const fibers = yield* FiberSet.make<void, ProbeError>()
-	const checked = Release.scoped(
+	const checked = Finalization.scoped(
 		Effect.flatMap(Effect.scope, (scope) =>
 			effect.pipe(
 				Effect.provideContext(Context.add(context, Scope.Scope, scope)),

@@ -1,17 +1,17 @@
 import { Cause, Effect, Exit, Fiber, Schema, Scope } from "effect"
 import { assert, it } from "@effect/vitest"
 
-import * as Release from "../src/Release.ts"
+import * as Finalization from "../src/Finalization.ts"
 import { observeClose } from "./scope-close-attribution-fixture.ts"
 
 it.effect(
 	"marks a self-interrupted finalizer while retaining pending cancellation",
 	() =>
 		Effect.gen(function* () {
-			const result = yield* observeClose(Release.close, "self")
+			const result = yield* observeClose(Finalization.close, "self")
 			assert(Exit.isFailure(result.closed))
 			const defect = Cause.squash(result.closed.cause)
-			assert(Schema.is(Release.ReleaseInterrupted)(defect))
+			assert(Schema.is(Finalization.FinalizationInterrupted)(defect))
 			assert.deepStrictEqual(
 				[...Cause.interruptors(defect.cause)],
 				[result.closer],
@@ -29,7 +29,7 @@ for (const finalizer of ["masked", "interruptible"] as const) {
 		`does not mark ${finalizer} finalization as an independent interruption`,
 		() =>
 			Effect.gen(function* () {
-				const result = yield* observeClose(Release.close, finalizer)
+				const result = yield* observeClose(Finalization.close, finalizer)
 				assert.deepStrictEqual(result.before, Exit.void)
 				assert(Exit.isFailure(result.outer))
 				assert.isTrue(Cause.hasInterruptsOnly(result.outer.cause))
@@ -48,7 +48,7 @@ for (const timing of ["before failure", "after failure"] as const) {
 		`currently misclassifies a joined interruption when cancellation arrives ${timing}`,
 		() =>
 			Effect.gen(function* () {
-				const result = yield* observeClose(Release.close, "joined", timing)
+				const result = yield* observeClose(Finalization.close, "joined", timing)
 				assert(Exit.isFailure(result.closed))
 				// Characterize the bug, not the desired contract: both interruptions have
 				// the same initiator, but the joined child's failure is independent.
@@ -73,10 +73,10 @@ it.effect(
 			assert(Exit.isFailure(childExit))
 			const scope = yield* Scope.make()
 			yield* Scope.addFinalizer(scope, Fiber.join(child))
-			const closed = yield* Effect.exit(Release.close(scope, Exit.void))
+			const closed = yield* Effect.exit(Finalization.close(scope, Exit.void))
 			assert(Exit.isFailure(closed))
 			const defect = Cause.squash(closed.cause)
-			assert(Schema.is(Release.ReleaseInterrupted)(defect))
+			assert(Schema.is(Finalization.FinalizationInterrupted)(defect))
 			assert.deepStrictEqual(
 				[...Cause.interruptors(defect.cause)],
 				[...Cause.interruptors(childExit.cause)],

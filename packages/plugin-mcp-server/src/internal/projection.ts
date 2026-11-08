@@ -233,7 +233,7 @@ export const projection = (
 				for (const conflict of currentExtensions.conflicts) {
 					if (!Array.some(priorStates, (state) => same(state, conflict)))
 						yield* Effect.logWarning(
-							Extensions.Conflict.make({ key: conflict.key }),
+							Extensions.ExtensionConflict.make({ key: conflict.key }),
 						)
 				}
 				for (const failure of currentExtensions.failures) {

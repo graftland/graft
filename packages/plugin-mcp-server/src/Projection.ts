@@ -324,13 +324,13 @@ export interface Description {
 	readonly operation: string
 	readonly metadata: Metadata
 }
-export interface Change {
+export interface Revision {
 	readonly revision: number
 	readonly before: ReadonlyArray<Description>
 	readonly after: ReadonlyArray<Description>
 }
 /** Applications may persist these events for later review. No approval is performed here. */
-export const Changed = Event.make<[change: Change]>(
+export const Changed = Event.make<[change: Revision]>(
 	"@graftland/plugin-mcp-server/Projection/Changed",
 )
 
@@ -338,7 +338,7 @@ export interface Controller<R> {
 	readonly update: (
 		bindings: ReadonlyArray<Binding<R>>,
 	) => Effect.Effect<void, ProjectionError>
-	readonly history: Effect.Effect<ReadonlyArray<Change>>
+	readonly history: Effect.Effect<ReadonlyArray<Revision>>
 	/** Validate before running the action; concurrent actions fail without queuing. Admitted work belongs to the contributor. */
 	readonly updateAfter: <A, E, R2>(
 		action: Effect.Effect<A, E, R2>,
@@ -430,7 +430,7 @@ export const offer = <R>(
 				operation,
 				value: metadata,
 			}))
-		const registrationError = (cause: Trust.RegistrationError) =>
+		const registrationError = (cause: Trust.AdmissionRegistrationError) =>
 			ProjectionError.make({
 				service: "projection",
 				operation: "approval",
@@ -458,14 +458,14 @@ export const offer = <R>(
 				Effect.mapError(registrationError),
 			)
 
-		const initialChange: Change = {
+		const initialChange: Revision = {
 			revision: 1,
 			before: [],
 			after: descriptions(initial),
 		}
 		const current = yield* Ref.make<{
 			readonly registration: Tools.Registration
-			readonly history: ReadonlyArray<Change>
+			readonly history: ReadonlyArray<Revision>
 		}>({ registration: first, history: [initialChange] })
 		yield* Effect.addFinalizer(() => Event.emit(Catalog.Changed))
 		yield* Event.on(Catalog.Offered, () =>
@@ -481,7 +481,7 @@ export const offer = <R>(
 				const next = yield* registration(items)
 				const change = yield* Ref.modify(current, (state) => {
 					const previous = state.history.at(-1)!
-					const change: Change = {
+					const change: Revision = {
 						revision: previous.revision + 1,
 						before: previous.after,
 						after: descriptions(items),

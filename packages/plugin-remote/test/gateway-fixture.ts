@@ -170,7 +170,7 @@ export const gateway = Effect.fnUntraced(function* (
 		)
 	const contractArtifact = yield* Artifact.capture({
 		directory: contractDirectory,
-		entry: "provider.js",
+		module: "provider.js",
 		store: path.join(directory, "contracts"),
 	})
 	const shared = yield* quote(
@@ -207,12 +207,12 @@ export const gateway = Effect.fnUntraced(function* (
 	)
 	const provider = yield* Artifact.capture({
 		directory: implementationDirectory,
-		entry: "provider.js",
+		module: "provider.js",
 		store: path.join(directory, "providers"),
 	})
 	const consumerArtifact = yield* Artifact.capture({
 		directory: implementationDirectory,
-		entry: "consumer.js",
+		module: "consumer.js",
 		store: path.join(directory, "consumers"),
 	})
 	const runner =

@@ -69,5 +69,5 @@ export const inspect = Effect.fn("Publication.inspectEntry")(function* (
 				"\n",
 			),
 		)
-	return { ...entry, ...metadata } satisfies Manifest.Entry
+	return { ...entry, ...metadata } satisfies Manifest.EntryMetadata
 })

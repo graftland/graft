@@ -36,7 +36,7 @@ import { TransportError } from "../Errors"
 import type { Channel } from "../Transport"
 import * as FailureGroup from "./FailureGroup"
 import { defaults, type Limits } from "./Limits"
-import { EndOfStream, maxPayload } from "./runner/Framing"
+import { maxPayload, RunnerEndOfStream } from "./runner/Framing"
 
 export type { Channel } from "../Transport"
 
@@ -708,7 +708,7 @@ const read = Effect.fnUntraced(function* (state: State, raw: unknown) {
 		)
 		if (message._tag === "Eof")
 			return yield* TransportError.make({
-				cause: Cause.fail(EndOfStream.make({})),
+				cause: Cause.fail(RunnerEndOfStream.make({})),
 			})
 		const key = new RequestKey({
 			endpoint: current.endpoint,
@@ -776,7 +776,7 @@ const reader = (state: State) =>
 		Stream.runForEach((raw) => read(state, raw)),
 		Effect.andThen(
 			Effect.fail(
-				TransportError.make({ cause: Cause.fail(EndOfStream.make({})) }),
+				TransportError.make({ cause: Cause.fail(RunnerEndOfStream.make({})) }),
 			),
 		),
 	)

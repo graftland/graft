@@ -185,13 +185,13 @@ Every enabled entry gets a lifecycle fork before its module starts resolving.
 
 Pending service injections and failed forks still count as settled.
 
-Effect importers acquire resources in a separate scope for each module
-candidate:
+Effect importers acquire resources in a separate scope for each specifier
+spelling they try:
 
-- A failed candidate is released before trying the next name.
+- A failed spelling is released before trying the next one.
 - A cleanup failure prevents fallback and is kept together with the import
   failure.
-- A successful candidate's resources remain owned by the entry lifecycle.
+- The resources of the spelling that loads remain owned by the entry lifecycle.
 
 ## Environment variables
 

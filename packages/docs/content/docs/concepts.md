@@ -6,18 +6,37 @@ description: The few ideas that the rest of the documentation builds on.
 Graft runs an application as a **tree of plugins**. This page names the parts.
 Each row links to the page that explains it.
 
-## The parts
+## Core words
 
-| Concept       | What it is                                                                 | Learn more                     |
-| ------------- | -------------------------------------------------------------------------- | ------------------------------ |
-| **Plugin**    | A value that describes how to start something.                             | [Plugins](../plugins/)         |
-| **Fork**      | One running instance of a plugin, with its own config and `Scope`.         | [Lifecycle](../lifecycle/)     |
-| **Service**   | An Effect `Context` key with a value, published and withdrawn at run time. | [Services](../services/)       |
-| **Event**     | A typed token. Handlers belong to the plugin that registered them.         | [Events](../events/)           |
-| **Realm**     | A boundary for which services and events a fork can see.                   | [Realms](../isolation/)        |
-| **Intercept** | A change to a `Context.Reference` for one fork and everything below it.    | [Intercepts](../intercepts/)   |
-| **Entry**     | One line of `graft.yml`. It loads one plugin.                              | [Config file](../config-file/) |
-| **Loader**    | Turns a list of entries into forks, and keeps them in sync with edits.     | [Loader API](../loader-api/)   |
+Each of these words has one meaning in every package and page.
+
+| Word                 | Meaning                                                                                       | Learn more                                       |
+| -------------------- | --------------------------------------------------------------------------------------------- | ------------------------------------------------ |
+| **Plugin**           | A value that declares and implements one capability: config, dependencies, services, startup. | [Plugins](../plugins/)                           |
+| **Instance**         | A plugin in a deployment with a stable identity. A Loader entry id is an instance name.       | [Config file](../config-file/)                   |
+| **Service**          | An Effect service. Graft adds publication, withdrawal and leases at run time.                 | [Services](../services/)                         |
+| **Contract**         | An Effect `RpcGroup` plus the identity of each operation.                                     | [Remote contracts](../remote/contracts/)         |
+| **Realm**            | The boundary within which services and contributions are visible.                             | [Realms](../isolation/)                          |
+| **Deployment group** | Instances that share one unit and are affected together when it ends.                         | [Units](../units/)                               |
+| **Unit**             | A Worker, child process or runner execution that hosts instances.                             | [Units](../units/)                               |
+| **Generation**       | One execution of an instance, from start to end.                                              | [Changes](../transitions/)                       |
+| **Placement**        | The kind of unit and who manages it.                                                          | [Units](../units/)                               |
+| **Artifact**         | Content-addressed plugin code whose bytes do not change while it runs.                        | [Artifacts](../remote/artifacts/)                |
+| **Release**          | Immutable artifacts, config (secrets as references) and deployment declarations.              | [Application releases](../application-releases/) |
+| **Change**           | One identified change to the running state.                                                   | [Changes](../transitions/)                       |
+| **Outcome**          | How a Change ended, with its evidence.                                                        | [Outcomes](../transitions/#outcomes)             |
+| **Probe**            | A named health check that a plugin registers.                                                 | [Probes](../probes/)                             |
+| **Trust policy**     | Operator rules for trust tiers, grants, approval and revocation.                              | [Trust](../trust/)                               |
+
+## Other terms
+
+| Term          | Meaning                                                                  | Learn more                     |
+| ------------- | ------------------------------------------------------------------------ | ------------------------------ |
+| **Fork**      | The handle of a running plugin, with its own config and `Scope`.         | [Lifecycle](../lifecycle/)     |
+| **Event**     | A typed token. Handlers belong to the plugin that registered them.       | [Events](../events/)           |
+| **Intercept** | A change to a `Context.Reference` for one fork and everything below it.  | [Intercepts](../intercepts/)   |
+| **Entry**     | One line of `graft.yml`. It deploys one instance.                        | [Config file](../config-file/) |
+| **Loader**    | Turns a list of entries into Changes, and keeps them in sync with edits. | [Loader API](../loader-api/)   |
 
 ## How the parts relate
 

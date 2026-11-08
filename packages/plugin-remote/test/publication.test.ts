@@ -108,12 +108,12 @@ it.effect(
 			const before = yield* Artifact.directoryIdentity(directory)
 			const first = yield* Artifact.capture({
 				directory,
-				entry: "first.js",
+				module: "first.js",
 				store: root + "/store",
 			})
 			const second = yield* Artifact.capture({
 				directory,
-				entry: "second.js",
+				module: "second.js",
 				store: root + "/store",
 			})
 			const firstDirectory = yield* Artifact.directoryIdentity(first.directory)
@@ -190,7 +190,7 @@ it.effect(
 			)
 			const artifact = yield* Artifact.capture({
 				directory: source,
-				entry: "index.js",
+				module: "index.js",
 				store: root + "/store",
 			})
 			for (const name of ["constructor", "toString", "__proto__"]) {

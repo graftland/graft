@@ -1,15 +1,15 @@
-/** Scoped resource release that distinguishes pure release interruption from cancellation. */
+/** Scope finalization that distinguishes an interrupted finalizer from cancellation. */
 import { Array, Cause, Effect, Exit, Result, Schema, Scope } from "effect"
 
-/** Resource release was interrupted, rather than successfully cancelled. */
-export class ReleaseInterrupted extends Schema.TaggedError<
-	ReleaseInterrupted,
+/** A finalizer was interrupted, rather than the work being cancelled. */
+export class FinalizationInterrupted extends Schema.TaggedError<
+	FinalizationInterrupted,
 	{ readonly brand: unique symbol }
->()("ReleaseInterrupted", {
+>()("FinalizationInterrupted", {
 	cause: Schema.Cause(Schema.Never, Schema.Unknown),
 }) {
 	override get message() {
-		return "Resource release was interrupted"
+		return "Finalization was interrupted"
 	}
 }
 
@@ -38,7 +38,7 @@ const markReleaseInterrupts = Effect.fnUntraced(function* (
 		Cause.combine(
 			Cause.fromReasons(cancelled),
 			Cause.die(
-				ReleaseInterrupted.make({
+				FinalizationInterrupted.make({
 					cause: Cause.fromReasons(interrupted),
 				}),
 			),
@@ -49,7 +49,7 @@ const markReleaseInterrupts = Effect.fnUntraced(function* (
 /**
  * Closes a scope without losing interrupted finalizers through enclosing cancellation.
  * When the release cause contains only interrupts, pending external cancellation
- * remains an Interrupt; release itself becomes a ReleaseInterrupted defect carrying
+ * remains an Interrupt; release itself becomes a FinalizationInterrupted defect carrying
  * the original cause. Causes containing other failures remain unchanged.
  */
 export const close = (

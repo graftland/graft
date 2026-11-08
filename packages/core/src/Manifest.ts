@@ -57,7 +57,7 @@ export const Services = Schema.Struct({
 	implements: Schema.Array(Service),
 })
 export type Services = typeof Services.Type
-export const Entry = Schema.Struct({
+export const EntryMetadata = Schema.Struct({
 	implementation: Schema.NonEmptyString,
 	contracts: Schema.Array(Schema.NonEmptyString),
 	requirements: Requirements,
@@ -65,7 +65,7 @@ export const Entry = Schema.Struct({
 	services: Services,
 	operations: Schema.Array(Operation),
 })
-export type Entry = typeof Entry.Type
+export type EntryMetadata = typeof EntryMetadata.Type
 /** A package root or a concrete public subpath; patterns and traversal are not entries. */
 export const PublicEntry = Schema.String.check(
 	Schema.isPattern(
@@ -74,7 +74,7 @@ export const PublicEntry = Schema.String.check(
 )
 export const Manifest = Schema.Struct({
 	version: Schema.Literal(1),
-	entries: Schema.Record(Schema.String, Entry),
+	entries: Schema.Record(Schema.String, EntryMetadata),
 })
 export type Manifest = typeof Manifest.Type
 export const Package = Schema.Struct({
@@ -87,7 +87,7 @@ export const Package = Schema.Struct({
 	graft: Manifest,
 })
 export type Package = typeof Package.Type
-export const Host = Schema.Struct({
+export const HostProfile = Schema.Struct({
 	node: Schema.NonEmptyString,
 	effect: Schema.NonEmptyString,
 	graft: Schema.NonEmptyString,
@@ -97,7 +97,7 @@ export const Host = Schema.Struct({
 	services: Schema.Array(Service),
 	operations: Schema.Array(Operation),
 })
-export type Host = typeof Host.Type
+export type HostProfile = typeof HostProfile.Type
 export interface Selection {
 	readonly id: string
 	readonly package: Package
@@ -131,7 +131,10 @@ export interface Declaration {
 export const operationId = (operation: Plugin.OperationIdentity) =>
 	`${operation.name}@${operation.version}`
 /** Own-property lookup also handles arbitrary entry names supplied by embedded callers. */
-export const getEntry = (manifest: Manifest, name: string): Entry | undefined =>
+export const getEntry = (
+	manifest: Manifest,
+	name: string,
+): EntryMetadata | undefined =>
 	Option.getOrUndefined(Record.get(manifest.entries, name))
 const sorted = (values: ReadonlyArray<string>) =>
 	Array.sort(Array.dedupe(values), Order.String)
@@ -305,7 +308,7 @@ const missingProvenance = (
 
 /** Checks a flat selected deployment; the catalog suggests providers but does not enable them. */
 export const check = (
-	host: Host,
+	host: HostProfile,
 	selected: ReadonlyArray<Selection>,
 	catalog: ReadonlyArray<Selection> = [],
 ): ReadonlyArray<Diagnostic> => {

@@ -1,5 +1,5 @@
 ---
-title: Releases
+title: Publishing
 description:
   How Graft is checked, published to npm and GitHub Packages, and how the docs
   are deployed.
@@ -168,7 +168,7 @@ cannot make registry reads and writes atomic.
 
 :::
 
-## Release a version
+## Publish a version
 
 1. Make sure `main` passes CI.
 2. Tag the commit and push the tag, such as `v1.2.3`. While Graft is on 0.x,

@@ -150,7 +150,7 @@ export default defineConfig({
 				{
 					label: "Project",
 					translations: { "zh-CN": "项目", "zh-TW": "專案" },
-					items: ["releases"],
+					items: ["publishing"],
 				},
 				// Generated from the public entries at build time; always the last group.
 				{

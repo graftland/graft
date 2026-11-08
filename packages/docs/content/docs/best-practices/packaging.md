@@ -227,12 +227,12 @@ plugin. [`graft schema`](../../cli/#graft-schema) finds the module through the
 
 ## Support Graft versions
 
-| Range                | Rule                                                                                                                                                          |
-| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `@graftland/*` peers | While Graft is 0.x, [any release may change the API](../../releases/#release-a-version). `^0.4.0` accepts only 0.4.x; widen it after you test the next minor. |
-| `effect` peer        | Use the range that the `@graftland/graft` versions you support declare, such as `4.1.*`.                                                                      |
-| `devDependencies`    | Exact versions inside your peer ranges, so your tests run against a release you claim.                                                                        |
-| Your own version     | A breaking config or key change, as above, is a new major.                                                                                                    |
+| Range                | Rule                                                                                                                                                            |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `@graftland/*` peers | While Graft is 0.x, [any release may change the API](../../publishing/#publish-a-version). `^0.4.0` accepts only 0.4.x; widen it after you test the next minor. |
+| `effect` peer        | Use the range that the `@graftland/graft` versions you support declare, such as `4.1.*`.                                                                        |
+| `devDependencies`    | Exact versions inside your peer ranges, so your tests run against a release you claim.                                                                          |
+| Your own version     | A breaking config or key change, as above, is a new major.                                                                                                      |
 
 ## Try the package in an application
 

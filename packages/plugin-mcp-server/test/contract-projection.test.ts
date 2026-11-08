@@ -264,7 +264,7 @@ it.effect(
 			Effect.gen(function* () {
 				const entered = yield* Deferred.make<void>()
 				const release = yield* Deferred.make<void>()
-				const events = yield* Ref.make<ReadonlyArray<Projection.Change>>([])
+				const events = yield* Ref.make<ReadonlyArray<Projection.Revision>>([])
 				yield* Event.on(Projection.Changed, (change) =>
 					Ref.update(events, (all) => [...all, change]),
 				)

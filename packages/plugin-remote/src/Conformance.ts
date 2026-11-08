@@ -102,7 +102,7 @@ export const roundTrip = Effect.fn("Conformance.roundTrip")(
 )
 
 export interface Suite {
-	readonly entry: Manifest.Entry
+	readonly entry: Manifest.EntryMetadata
 	readonly examples: ReadonlyArray<Example>
 	readonly cancellation: Cancellation
 	readonly timeout?: Duration.Input

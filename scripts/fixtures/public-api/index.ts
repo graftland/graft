@@ -101,7 +101,7 @@ export const commands = Plugin.make({
 
 export const capture = Remote.Artifact.capture({
 	directory: "./built-plugin",
-	entry: "index.js",
+	module: "index.js",
 	store: "./artifacts",
 })
 export const probePlugin = Plugin.make({
@@ -115,7 +115,7 @@ export const unitTarget = Remote.Units.target({
 			version: 1,
 			algorithm: "sha256",
 			digest: "a".repeat(64),
-			entry: "plugin.js",
+			module: "plugin.js",
 		},
 		directory: "./captured",
 	},

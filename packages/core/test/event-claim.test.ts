@@ -17,9 +17,9 @@ import { assert, describe, it } from "@effect/vitest"
 
 import { expectTypeOf } from "vitest"
 
+import * as Finalization from "../src/Finalization.ts"
 import { Event } from "../src/index.ts"
 import { RuntimeContext } from "../src/internal/runtimeContext"
-import * as Release from "../src/Release.ts"
 import { run } from "./utils.ts"
 
 const Listener = Context.Reference<string>("event-claim/Listener", {
@@ -134,10 +134,10 @@ describe("consumed once visibility", () => {
 describe("fast path lifecycle controls", () => {
 	it("keeps scope closure free of typed errors and service requirements", () => {
 		expectTypeOf<
-			Effect.Error<ReturnType<typeof Release.close>>
+			Effect.Error<ReturnType<typeof Finalization.close>>
 		>().toEqualTypeOf<never>()
 		expectTypeOf<
-			Effect.Services<ReturnType<typeof Release.close>>
+			Effect.Services<ReturnType<typeof Finalization.close>>
 		>().toEqualTypeOf<never>()
 	})
 

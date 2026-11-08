@@ -28,7 +28,7 @@ it.live(
 					kind: "Plugin",
 					artifact,
 					location: new URL(
-						artifact.identity.entry,
+						artifact.identity.module,
 						`file://${artifact.directory}/`,
 					).href,
 					suffix: "",
@@ -39,7 +39,7 @@ it.live(
 					provenance: {
 						specifier: "fixture",
 						source: new URL(
-							artifact.identity.entry,
+							artifact.identity.module,
 							`file://${artifact.directory}/`,
 						).href,
 					},
@@ -70,7 +70,7 @@ it.live(
 				kind: "Plugin",
 				artifact,
 				location: new URL(
-					artifact.identity.entry,
+					artifact.identity.module,
 					`file://${artifact.directory}/`,
 				).href,
 				suffix: "",
@@ -81,7 +81,7 @@ it.live(
 				provenance: {
 					specifier: "fixture",
 					source: new URL(
-						artifact.identity.entry,
+						artifact.identity.module,
 						`file://${artifact.directory}/`,
 					).href,
 				},

@@ -11,8 +11,8 @@ import {
 } from "effect"
 import { assert, describe, it } from "@effect/vitest"
 
+import { FinalizationInterrupted } from "../src/Finalization.ts"
 import { Event, Graft, Plugin } from "../src/index.ts"
-import { ReleaseInterrupted } from "../src/Release.ts"
 import { makeJournal, run } from "./utils.ts"
 
 const resource = (alive: Ref.Ref<boolean>) =>
@@ -279,7 +279,7 @@ for (const mode of ["emit", "parallel", "bail", "waterfall"]) {
 				const exit = yield* Fiber.await(dispatch)
 				assert(Exit.isFailure(exit))
 				const interruption = Cause.squash(exit.cause)
-				assert(Schema.is(ReleaseInterrupted)(interruption))
+				assert(Schema.is(FinalizationInterrupted)(interruption))
 				assert.isTrue(Cause.hasInterruptsOnly(interruption.cause))
 				assert.isTrue(
 					Array.some(

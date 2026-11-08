@@ -559,3 +559,26 @@ it("does not attach later instance-owned call failures to a concluded Change tha
 	assert.strictEqual(before.cause, after.cause)
 	assert.strictEqual(before.conclusion, after.conclusion)
 })
+
+it("admits no new call to a provider whose target was revoked, and keeps an admitted call (C7, I9)", () => {
+	const revoke = (s: Core.State) =>
+		Core.reduce(s, {
+			_tag: "PolicyChanged",
+			instance: "provider",
+			allowed: ["another-identity"],
+			values: {},
+			now: s.now,
+		}).state
+	const admitted = requested()
+	const before = revoke(admitted)
+	assert.isTrue(one(before).credit)
+	const fresh = requested(revoke(setup()))
+	const calls = Array.fromIterable(HashMap.values(fresh.calls))
+	assert.isFalse(Array.some(calls, (c) => c.credit))
+	assert.isFalse(
+		Array.some(
+			Array.fromIterable(HashMap.values(fresh.commands)),
+			(c) => c.kind === "CallRegister" || c.kind === "CallGrant",
+		),
+	)
+})

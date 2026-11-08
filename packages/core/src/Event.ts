@@ -19,10 +19,10 @@ import {
 } from "effect"
 import { identity } from "effect/Function"
 
+import * as Finalization from "./Finalization"
 import { Graft } from "./Graft"
 import { realmOf, Realms, type Handler } from "./internal/runtime"
 import { RuntimeContext } from "./internal/runtimeContext"
-import * as Release from "./Release"
 
 const TypeId = "~@graftland/graft/Event"
 
@@ -183,7 +183,7 @@ const register = Effect.fnUntraced(function* <
 		run: (args) =>
 			Effect.updateContext(
 				// Restore services first; the invocation then supplies its own Scope.
-				Release.scoped(Effect.suspend(() => handler(...args))),
+				Finalization.scoped(Effect.suspend(() => handler(...args))),
 				(caller: Context.Context<never>) =>
 					Context.add(context, Origins, Context.get(caller, Origins)),
 			),
@@ -356,7 +356,7 @@ const invoke = <Args extends ReadonlyArray<unknown>, Out, E>(
 				),
 			)
 			return handler.once
-				? Effect.onExit(run, (exit) => Release.close(handler.scope, exit))
+				? Effect.onExit(run, (exit) => Finalization.close(handler.scope, exit))
 				: run
 		}),
 	)
@@ -415,7 +415,7 @@ const dispatchParallel = Effect.fnUntraced(function* <
 				if (cause.reasons.length > 0) return yield* Effect.failCause(cause)
 			}),
 	)
-}, Release.scoped)
+}, Finalization.scoped)
 
 /**
  * Calls every handler concurrently and returns the outcome of each one that
@@ -474,7 +474,7 @@ const dispatchSettle = Effect.fnUntraced(function* <
 					)
 			}),
 	)
-}, Release.scoped)
+}, Finalization.scoped)
 
 /** Calls handlers in order until one returns `Some`. */
 export const bail = <Args extends ReadonlyArray<unknown>, A, E>(
@@ -579,7 +579,7 @@ export const waterfall: <I, O, E, R>(
 			const handler = handlers[index]
 			if (handler === undefined)
 				return Effect.suspend(() => last(input)).pipe(
-					Release.scoped,
+					Finalization.scoped,
 					Effect.updateContext<never, Exclude<R, Scope.Scope>>((caller) =>
 						Context.add(context, Origins, Context.get(caller, Origins)),
 					),

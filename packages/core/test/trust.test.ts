@@ -92,7 +92,9 @@ it.effect(
 					TxRef.get(reject).pipe(
 						Effect.flatMap((value) =>
 							value
-								? Trust.RegistrationError.make({ message: "Audit unavailable" })
+								? Trust.AdmissionRegistrationError.make({
+										message: "Audit unavailable",
+									})
 								: Effect.void,
 						),
 					),

@@ -13,7 +13,7 @@ export const target = (identity = "next"): Core.Target => {
 				version: 1,
 				algorithm: "sha256",
 				digest: identity,
-				entry: "plugin.js",
+				module: "plugin.js",
 			},
 		},
 		contract: "contract.js",

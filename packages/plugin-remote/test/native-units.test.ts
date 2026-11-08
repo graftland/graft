@@ -38,7 +38,7 @@ it.effect(
 						algorithm: "sha256",
 						digest:
 							"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-						entry: "plugin.js",
+						module: "plugin.js",
 					},
 				},
 				input: { mode: "test" },

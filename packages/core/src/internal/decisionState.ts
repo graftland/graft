@@ -8,7 +8,7 @@ export interface ArtifactData {
 		readonly version: 1
 		readonly algorithm: "sha256"
 		readonly digest: string
-		readonly entry: string
+		readonly module: string
 	}
 }
 export interface ConfigurationModule {

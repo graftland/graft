@@ -33,7 +33,7 @@ export type { Tasks } from "./internal/tasks"
 /** Brands a plugin definition; `isPlugin` checks for it. */
 export const TypeId = "~@graftland/graft/Plugin"
 /** Keys the input and error contract that keeps a definition's types invariant. */
-export const Contract = "~@graftland/graft/Plugin/Contract"
+export const Variance = "~@graftland/graft/Plugin/Variance"
 
 /**
  * Marks a dependency as optional: the plugin starts without it and restarts
@@ -144,8 +144,8 @@ export const probe: <A, E, R>(
 // A definition has one input/error contract even when referenced through aliases.
 export type Plugin<Config = any, Input = any, E = any> = 0 extends 1 & Input
 	? 0 extends 1 & E
-		? Omit<Definition<Config, any, any>, typeof Contract> & {
-				readonly [Contract]: unknown
+		? Omit<Definition<Config, any, any>, typeof Variance> & {
+				readonly [Variance]: unknown
 			}
 		: Definition<Config, Input, E | Schema.SchemaError>
 	: Definition<Config, Input, E | Schema.SchemaError>
@@ -169,7 +169,7 @@ export interface DeploymentMetadata {
 export type { ResourceDeclaration, PlacementRequirement } from "./Kernel"
 export interface Definition<in out Config, in out Input, in out E> {
 	readonly [TypeId]: typeof TypeId
-	readonly [Contract]: {
+	readonly [Variance]: {
 		readonly input: 0 extends 1 & Input ? unknown : (value: Input) => Input
 		readonly error: 0 extends 1 & E ? unknown : (value: E) => E
 	}
@@ -287,7 +287,7 @@ export const make: {
 	// The runtime uses its own identity keys, so copied definitions are supported too.
 	return Equal.byReference({
 		[TypeId]: TypeId,
-		[Contract]: { input: identity, error: identity },
+		[Variance]: { input: identity, error: identity },
 		name: options.name,
 		config: schema,
 		inject: options.inject ?? [],

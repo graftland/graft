@@ -124,9 +124,9 @@ await Effect.runPromise(status.pipe(Effect.scoped, Effect.provide(Graft.layer)))
 | `Event.parallel` is cancelled               | It waits for the cleanup of every call, then combines the interruption with the failures and defects that already happened, including cleanup failures. |
 
 If release of a framework-owned Scope is interrupted, Graft reports a
-`ReleaseInterrupted` defect whose `cause` retains the original interruption.
-This keeps release failures visible through nested events and background tasks;
-ordinary cancellation remains an interruption.
+`FinalizationInterrupted` defect whose `cause` retains the original
+interruption. This keeps release failures visible through nested events and
+background tasks; ordinary cancellation remains an interruption.
 
 ## Middleware
 

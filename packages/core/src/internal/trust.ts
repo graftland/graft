@@ -34,24 +34,24 @@ export const empty: State = {
 const same = Schema.toEquivalence(Schema.Json)
 export interface Condition {
 	readonly authority: Option.Option<T.Authority>
-	readonly entry: string
-	readonly candidate: string
+	readonly instance: string
+	readonly attempt: string
 	readonly revision: number
 }
 export const snapshot = Effect.fnUntraced(function* (
 	runtime: Runtime,
-	entry: string,
-	candidate: string,
+	instance: string,
+	attempt: string,
 ) {
-	yield* admission(runtime, entry, candidate)
+	yield* admission(runtime, instance, attempt)
 	const state = yield* TxRef.get(runtime.trust)
 	const revision = Option.isNone(state.authority)
 		? 0
-		: (yield* state.authority.value.compare(entry, candidate)).revision
+		: (yield* state.authority.value.compare(instance, attempt)).revision
 	return {
 		authority: state.authority,
-		entry,
-		candidate,
+		instance,
+		attempt,
 		revision,
 	} satisfies Condition
 })
@@ -62,7 +62,7 @@ export const verify = Effect.fnUntraced(function* (
 	const state = yield* TxRef.get(runtime.trust)
 	if (state.closed)
 		return yield* T.Unapproved.make({
-			entry: condition.entry,
+			instance: condition.instance,
 			reason: "Closed",
 		})
 	if (
@@ -72,47 +72,50 @@ export const verify = Effect.fnUntraced(function* (
 		)
 	)
 		return yield* T.Unapproved.make({
-			entry: condition.entry,
+			instance: condition.instance,
 			reason: "AuthorityChanged",
 		})
 	if (Option.isNone(state.authority)) return
 	const comparison = yield* state.authority.value.compare(
-		condition.entry,
-		condition.candidate,
+		condition.instance,
+		condition.attempt,
 	)
 	if (comparison.revision !== condition.revision)
 		return yield* T.Unapproved.make({
-			entry: condition.entry,
+			instance: condition.instance,
 			reason: `Authorization version changed from ${condition.revision} to ${comparison.revision}`,
 		})
 })
 export const admission = (
 	runtime: Runtime,
-	entry: string,
-	candidate?: string,
+	instance: string,
+	attempt?: string,
 ) =>
 	Effect.gen(function* () {
 		const state = yield* TxRef.get(runtime.trust)
 		if (state.closed)
-			return yield* T.Unapproved.make({ entry, reason: "Closed" })
+			return yield* T.Unapproved.make({ instance, reason: "Closed" })
 		if (Option.isNone(state.authority)) {
 			yield* TxRef.set(runtime.trust, { ...state, used: true })
 			return
 		}
-		if (candidate === undefined)
-			return yield* T.Unapproved.make({ entry, reason: "UnregisteredAttempt" })
-		const comparison = yield* state.authority.value.compare(entry, candidate)
+		if (attempt === undefined)
+			return yield* T.Unapproved.make({
+				instance,
+				reason: "UnregisteredAttempt",
+			})
+		const comparison = yield* state.authority.value.compare(instance, attempt)
 		if (Option.isNone(comparison.approved))
-			return yield* T.Unapproved.make({ entry, reason: comparison.missing })
+			return yield* T.Unapproved.make({ instance, reason: comparison.missing })
 		if (!same(comparison.current, comparison.approved.value))
-			return yield* T.Unapproved.make({ entry, reason: "ChangedStatement" })
+			return yield* T.Unapproved.make({ instance, reason: "ChangedStatement" })
 	})
 export const check = Effect.fnUntraced(function* (
-	entry: string,
-	candidate?: string,
+	instance: string,
+	attempt?: string,
 ) {
 	const { runtime } = yield* RuntimeContext
-	yield* admission(runtime, entry, candidate).pipe(Effect.tx)
+	yield* admission(runtime, instance, attempt).pipe(Effect.tx)
 })
 export const register = Effect.fnUntraced(function* (authority: T.Authority) {
 	const { runtime } = yield* RuntimeContext
@@ -129,7 +132,7 @@ export const register = Effect.fnUntraced(function* (authority: T.Authority) {
 					previous.used ||
 					Option.isSome(previous.authority)
 				)
-					return yield* T.RegistrationError.make({
+					return yield* T.AdmissionRegistrationError.make({
 						message:
 							"Install one admission authority before entries or projections are used",
 					})
@@ -153,7 +156,7 @@ export const publish = Effect.fnUntraced(function* (
 				publication,
 			).pipe(
 				Effect.mapError((error) =>
-					T.RegistrationError.make({
+					T.AdmissionRegistrationError.make({
 						message: "Invalid logical view publication",
 						cause: Cause.fail(error),
 					}),
@@ -169,7 +172,7 @@ export const publish = Effect.fnUntraced(function* (
 					Effect.gen(function* () {
 						const state = yield* TxRef.get(runtime.trust)
 						if (state.closed)
-							return yield* T.RegistrationError.make({
+							return yield* T.AdmissionRegistrationError.make({
 								message: "Admission authority is closed",
 							})
 						if (
@@ -220,7 +223,7 @@ export const publish = Effect.fnUntraced(function* (
 										(owner) => owner.token === token && !owner.closing,
 									)
 								)
-									return yield* T.RegistrationError.make({
+									return yield* T.AdmissionRegistrationError.make({
 										message: "Logical view owner is closed",
 									})
 								return state.authority

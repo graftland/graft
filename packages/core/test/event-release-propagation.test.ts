@@ -10,8 +10,8 @@ import {
 } from "effect"
 import { assert, it } from "@effect/vitest"
 
+import { FinalizationInterrupted } from "../src/Finalization.ts"
 import { Event, Fork, Graft, Plugin } from "../src/index.ts"
-import { ReleaseInterrupted } from "../src/Release.ts"
 import { run } from "./utils.ts"
 
 for (const shape of ["emit", "parallel", "next", "last", "task"]) {
@@ -71,7 +71,7 @@ for (const shape of ["emit", "parallel", "next", "last", "task"]) {
 					const cleanup = Cause.squash(exit.cause)
 					assert(Schema.is(Fork.CleanupError)(cleanup))
 					const interrupted = Cause.squash(cleanup.cause)
-					assert(Schema.is(ReleaseInterrupted)(interrupted))
+					assert(Schema.is(FinalizationInterrupted)(interrupted))
 					assert.isTrue(Cause.hasInterruptsOnly(interrupted.cause))
 					assert.isTrue(
 						Array.some(

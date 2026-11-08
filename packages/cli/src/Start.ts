@@ -76,7 +76,7 @@ const packaged = Effect.fnUntraced(function* (module: URL) {
 	const directory = yield* packageOf(file)
 	return yield* Artifact.capture({
 		directory,
-		entry: path.relative(directory, file),
+		module: path.relative(directory, file),
 		store: path.join(directory, ".cache", "units"),
 		exclude: ["node_modules", ".cache", ".graft", "src", "test"],
 	})

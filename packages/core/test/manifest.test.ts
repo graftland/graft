@@ -13,7 +13,7 @@ const service: Manifest.Service = {
 	key: "example/Reader",
 	operations: [operation.identity],
 }
-const host: Manifest.Host = {
+const host: Manifest.HostProfile = {
 	node: "22.22.0",
 	effect: "4.1.2",
 	graft: "0.0.0",
@@ -23,7 +23,7 @@ const host: Manifest.Host = {
 	services: [],
 	operations: [],
 }
-const entry: Manifest.Entry = {
+const entry: Manifest.EntryMetadata = {
 	implementation: "dist/index.js",
 	contracts: ["@example/contract"],
 	requirements: {
@@ -427,7 +427,7 @@ it.effect(
 	"rejects host bindings without package provenance even when they satisfy a consumer",
 	() =>
 		Effect.gen(function* () {
-			const incomplete = yield* Schema.decodeEffect(Manifest.Host)({
+			const incomplete = yield* Schema.decodeEffect(Manifest.HostProfile)({
 				...host,
 				services: [service],
 				operations: [],

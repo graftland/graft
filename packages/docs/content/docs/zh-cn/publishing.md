@@ -1,5 +1,5 @@
 ---
-title: 发布
+title: 发版
 description: 检查 Graft、发布到 npm 和 GitHub Packages，以及部署文档站。
 ---
 

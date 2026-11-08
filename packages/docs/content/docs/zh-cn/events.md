@@ -117,7 +117,7 @@ await Effect.runPromise(status.pipe(Effect.scoped, Effect.provide(Graft.layer)))
 | 处理函数主动中断，或因其他原因取消 | 它完整的 `Cause` 会通过派发传播，清理产生的 defect 也会传播。             |
 | 取消 `Event.parallel`              | 先等待所有调用清理完成，再将中断与已经发生的失败、defect 及清理失败合并。 |
 
-框架管理的 Scope 在释放时发生纯中断，会以 `ReleaseInterrupted`
+框架管理的 Scope 在释放时发生纯中断，会以 `FinalizationInterrupted`
 defect 报告，原始中断保存在它的 `cause`
 中。这样，释放失败经过嵌套事件或后台任务仍能传到调用方；正常取消仍按中断处理。
 

@@ -48,7 +48,7 @@ Loader 如何处理失败：
   都被延迟到受保护的操作内部执行。同步抛出的错误会被报告为 defect，不会让回复悬空，也不会停止之后的编辑。
 - 访问 `external`
   被延迟到它的流失败边界内部。出现 defect 时，通知会停止并记录日志，API 编辑仍然可用。
-- 模块候选项的回退，要求恰好有一个失败，并且该失败表明候选项不存在。如果同时出现清理失败、defect 或中断，就不会回退，并保留完整的 Cause。
+- 说明符写法的回退，要求恰好有一个失败，并且该失败表明写法不存在。如果同时出现清理失败、defect 或中断，就不会回退，并保留完整的 Cause。
 - Resolver 和 intercept 回调在条目激活内部运行。意外的同步抛出会使该条目失败，并保留原始 cause。
 
 ## API 编辑
@@ -297,7 +297,7 @@ importer。`resolve`
 `resolve(name, { observationScope })`
 可以指定独立的观察 scope；resolver 将它作为第二个参数传给 importer。Group 按配置项持有观察 scope，并用
 `ScopedRef`
-在重试时替换代次。失败候选的资源仍立即清理。省略选项时，观察归调用方 scope 所有。
+在重试时替换代次。失败写法的资源仍立即清理。省略选项时，观察归调用方 scope 所有。
 
 - 解析成功之后，普通的配置更新、待处理的注入和失败的插件激活，都会保留 resolver 租约。
 - 重启生命周期会先释放旧租约，再获取新的租约。这包括解析期间的配置变化，以及从准备失败中恢复。
@@ -322,6 +322,6 @@ watch 模式同时监听入口目录和当前目标目录。入口链接改变�
 
 `ModuleResolver.make` 的可选 `resolution`
 协议缓存解析计划，不缓存 importer 结果。`revision`
-在安装、移除或解析环境变化后必须更新；`exists` 只检查候选是否存在；`observe`
+在安装、移除或解析环境变化后必须更新；`exists` 只检查写法是否存在；`observe`
 在每次解析（包括缓存命中）中取得观察租约。未提供该协议时，每次仍按原名称优先执行 importer。详见
 [Resolution plans](./README.md#resolution-plans)。

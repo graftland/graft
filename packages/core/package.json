@@ -32,6 +32,10 @@
 			"source": "./src/Event.ts",
 			"default": "./dist/Event.js"
 		},
+		"./Finalization": {
+			"source": "./src/Finalization.ts",
+			"default": "./dist/Finalization.js"
+		},
 		"./Fork": {
 			"source": "./src/Fork.ts",
 			"default": "./dist/Fork.js"
@@ -51,10 +55,6 @@
 		"./Plugin": {
 			"source": "./src/Plugin.ts",
 			"default": "./dist/Plugin.js"
-		},
-		"./Release": {
-			"source": "./src/Release.ts",
-			"default": "./dist/Release.js"
 		},
 		"./Transition": {
 			"source": "./src/Transition.ts",
@@ -83,12 +83,12 @@
 			".": "./dist/index.js",
 			"./Change": "./dist/Change.js",
 			"./Event": "./dist/Event.js",
+			"./Finalization": "./dist/Finalization.js",
 			"./Fork": "./dist/Fork.js",
 			"./Graft": "./dist/Graft.js",
 			"./Kernel": "./dist/Kernel.js",
 			"./Manifest": "./dist/Manifest.js",
 			"./Plugin": "./dist/Plugin.js",
-			"./Release": "./dist/Release.js",
 			"./Transition": "./dist/Transition.js",
 			"./Trust": "./dist/Trust.js",
 			"./package.json": "./package.json"

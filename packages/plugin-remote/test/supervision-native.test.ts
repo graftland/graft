@@ -38,7 +38,7 @@ it.live(
 			const directory = yield* fs.makeTempDirectoryScoped({ directory: cache })
 			const artifact = yield* Artifact.capture({
 				directory: new URL("./fixtures/group/", import.meta.url).pathname,
-				entry: "crashing.mjs",
+				module: "crashing.mjs",
 				store: path.join(directory, "artifacts"),
 			})
 			const target = Units.target({

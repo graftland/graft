@@ -25,7 +25,7 @@ const descriptor = Effect.fnUntraced(function* (
 ) {
 	const path = yield* Path.Path
 	const url = yield* path.toFileUrl(
-		path.join(artifact.directory, artifact.identity.entry),
+		path.join(artifact.directory, artifact.identity.module),
 	)
 	return ModuleResolver.Descriptor.make({
 		kind,
@@ -91,12 +91,12 @@ export default Layer.effect(Setting,Effect.gen(function*(){const patch=yield* Sc
 	const store = path.join(directory, "artifacts")
 	const pluginArtifact = yield* Artifact.capture({
 		directory: source,
-		entry: "plugin.mjs",
+		module: "plugin.mjs",
 		store,
 	})
 	const environmentArtifact = yield* Artifact.capture({
 		directory: source,
-		entry: "environment.mjs",
+		module: "environment.mjs",
 		store,
 	})
 	return {

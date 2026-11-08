@@ -3020,9 +3020,15 @@ const superviseMembers = (
 			false,
 		)
 	const started = Members.start(s, unit, affected, cause, true)
+	// A revoked target is never granted again, so restarting it is not an attempt.
+	const permitted = HashSet.filter(affected, (id) =>
+		Option.exists(HashMap.get(unit.members, id), (member) =>
+			Preparation.authorized(s, id, member.target),
+		),
+	)
 	return started.nextMemberOperation === s.nextMemberOperation
 		? defer(s, { kind: "Members", unit: unit.id, members: affected, cause })
-		: Supervisor.attempted(started, affected)
+		: Supervisor.attempted(started, permitted)
 }
 const defer = (s: Working, restart: PendingRestart): Working => ({
 	...s,
@@ -3039,8 +3045,11 @@ const superviseUnit = (
 	members: HashSet.HashSet<string>,
 	cause: Cause.Cause<unknown>,
 ): Working => {
+	// Current policy decides: a revoked target is not redeployed, and is not an attempt.
 	const declared = HashSet.filter(members, (id) =>
-		HashMap.has(s.graph.declarations, id),
+		Option.exists(HashMap.get(s.graph.declarations, id), (m) =>
+			Preparation.authorized(s, id, m.target),
+		),
 	)
 	if (!s.open || HashSet.size(declared) === 0) return s
 	if (!Supervisor.allows(s, declared)) return Supervisor.escalate(s, declared)

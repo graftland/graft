@@ -12,7 +12,7 @@ export default defineConfig({
 		"src/Plugin.ts",
 		"src/Event.ts",
 		"src/Fork.ts",
-		"src/Release.ts",
+		"src/Finalization.ts",
 		"src/Transition.ts",
 		"src/Trust.ts",
 		"src/Manifest.ts",

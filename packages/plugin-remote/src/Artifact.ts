@@ -21,7 +21,7 @@ export const Identity = Schema.Struct({
 	version: Schema.Literal(1),
 	algorithm: Schema.Literal("sha256"),
 	digest: Schema.String.check(Schema.isPattern(/^[a-f0-9]{64}$/)),
-	entry: Schema.NonEmptyString,
+	module: Schema.NonEmptyString,
 })
 export type Identity = typeof Identity.Type
 export const Artifact = Schema.Struct({
@@ -37,7 +37,7 @@ export const Metadata = Schema.Struct({
 export type Metadata = typeof Metadata.Type
 export interface CaptureOptions {
 	readonly directory: string
-	readonly entry: string
+	readonly module: string
 	readonly store: string
 	/** Package-relative directories outside the captured closure. */
 	readonly exclude?: ReadonlyArray<string>
@@ -108,38 +108,38 @@ const hashDirectory = Effect.fnUntraced(function* (
 })
 const inspect = Effect.fnUntraced(function* (
 	directory: string,
-	entry: string,
+	module: string,
 	copy?: string,
 	exclude: ReadonlyArray<string> = [],
 ) {
 	const fs = yield* FileSystem.FileSystem
 	const path = yield* Path.Path
 	if (
-		path.isAbsolute(entry) ||
-		entry !== path.normalize(entry) ||
-		entry === ".." ||
-		String.startsWith("../")(entry)
+		path.isAbsolute(module) ||
+		module !== path.normalize(module) ||
+		module === ".." ||
+		String.startsWith("../")(module)
 	)
 		return yield* invalid(
-			"The implementation entry must be a normalized path inside the artifact",
+			"The implementation module must be a normalized path inside the artifact",
 		)
 	if (
 		!Array.some([".js", ".mjs", ".cjs"], (extension) =>
-			String.endsWith(extension)(entry),
+			String.endsWith(extension)(module),
 		)
 	)
 		return yield* invalid(
-			"Artifacts require a built JavaScript implementation entry",
+			"Artifacts require a built JavaScript implementation module",
 		)
 	const digest = yield* hashDirectory(
 		directory,
-		`graft-artifact-sha256-v1\0${entry.length}:${entry}\0`,
+		`graft-artifact-sha256-v1\0${module.length}:${module}\0`,
 		copy,
 		exclude,
 	)
-	if ((yield* fs.lstat(path.join(directory, entry))).type !== "File")
-		return yield* invalid("The implementation entry must be a regular file")
-	return Identity.make({ version: 1, algorithm: "sha256", entry, digest })
+	if ((yield* fs.lstat(path.join(directory, module))).type !== "File")
+		return yield* invalid("The implementation module must be a regular file")
+	return Identity.make({ version: 1, algorithm: "sha256", module, digest })
 })
 
 const filesystemError = (cause: PlatformError.PlatformError) =>
@@ -148,7 +148,7 @@ const filesystemError = (cause: PlatformError.PlatformError) =>
 		cause: Cause.fail(cause),
 	})
 
-/** Rehashes the captured directory, including its selected entry; performs no import. */
+/** Rehashes the captured directory, including its selected module; performs no import. */
 export const verify = Effect.fnUntraced(
 	function* (artifact: Artifact) {
 		const decoded = yield* Schema.decodeEffect(Artifact)(artifact).pipe(
@@ -159,7 +159,7 @@ export const verify = Effect.fnUntraced(
 				}),
 			),
 		)
-		const actual = yield* inspect(decoded.directory, decoded.identity.entry)
+		const actual = yield* inspect(decoded.directory, decoded.identity.module)
 		if (actual.digest !== decoded.identity.digest)
 			return yield* invalid("Artifact digest mismatch")
 		return actual
@@ -227,7 +227,7 @@ export const capture = Effect.fnUntraced(
 			return yield* invalid(
 				"Capture exclusions must be normalized package-relative paths",
 			)
-		if (excluded(options.entry, exclude) || excluded("package.json", exclude))
+		if (excluded(options.module, exclude) || excluded("package.json", exclude))
 			return yield* invalid(
 				"The selected implementation and package metadata must be captured",
 			)
@@ -258,9 +258,9 @@ export const capture = Effect.fnUntraced(
 			directory: store,
 			prefix: ".capture-",
 		})
-		const before = yield* inspect(directory, options.entry, stage, exclude)
-		const copied = yield* inspect(stage, options.entry)
-		const after = yield* inspect(directory, options.entry, undefined, exclude)
+		const before = yield* inspect(directory, options.module, stage, exclude)
+		const copied = yield* inspect(stage, options.module)
+		const after = yield* inspect(directory, options.module, undefined, exclude)
 		if (before.digest !== copied.digest || before.digest !== after.digest)
 			return yield* invalid("The source changed during artifact capture")
 		const destination = path.join(store, `sha256-v1-${copied.digest}`)
@@ -295,14 +295,14 @@ export const capture = Effect.fnUntraced(
 export const implementation = Effect.fnUntraced(function* (artifact: Artifact) {
 	yield* verify(artifact)
 	const path = yield* Path.Path
-	return pathToFileURL(path.join(artifact.directory, artifact.identity.entry))
+	return pathToFileURL(path.join(artifact.directory, artifact.identity.module))
 		.href
 })
 
 /** Hashes a resolved built package without importing it or creating a captured copy. */
 export const identify = Effect.fnUntraced(
-	function* (options: { readonly directory: string; readonly entry: string }) {
-		return yield* inspect(options.directory, options.entry)
+	function* (options: { readonly directory: string; readonly module: string }) {
+		return yield* inspect(options.directory, options.module)
 	},
 	Effect.catchTag("PlatformError", filesystemError),
 )

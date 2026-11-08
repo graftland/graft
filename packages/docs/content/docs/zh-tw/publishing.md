@@ -1,5 +1,5 @@
 ---
-title: 發佈
+title: 發版
 description: Graft 如何檢查、發佈到 npm 和 GitHub Packages，以及文件如何部署。
 ---
 

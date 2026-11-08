@@ -7,7 +7,7 @@ import type { Manifest } from "@graftland/graft"
 
 import * as Conformance from "../src/Conformance"
 
-const entry: Manifest.Entry = {
+const entry: Manifest.EntryMetadata = {
 	implementation: "index.js",
 	contracts: [],
 	requirements: {

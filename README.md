@@ -151,8 +151,8 @@ devenv shell -- pnpm typecheck
 devenv shell -- pnpm test
 ```
 
-See [Releases](https://graftland.github.io/graft/releases/) for the checks, the
-release process and the docs site.
+See [Publishing](https://graftland.github.io/graft/publishing/) for the checks,
+the release process and the docs site.
 
 ## License
 

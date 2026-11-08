@@ -1,6 +1,6 @@
 import { Cause, Deferred, Effect, Exit, FiberSet, Ref, Scope } from "effect"
 
-import * as Release from "../Release"
+import * as Finalization from "../Finalization"
 
 // This requirement carries asynchronous errors to Plugin.make; it has no public service key.
 declare const TaskErrors: unique symbol
@@ -27,7 +27,7 @@ export const run = <A, E, R>(group: Group, effect: Effect.Effect<A, E, R>) =>
 			Effect.gen(function* () {
 				const scope = yield* Scope.make()
 				const body = yield* Effect.exit(restore(Scope.provide(scope)(effect)))
-				const closed = yield* Effect.exit(Release.close(scope, body))
+				const closed = yield* Effect.exit(Finalization.close(scope, body))
 				if (Exit.isFailure(closed) && !Cause.hasInterruptsOnly(closed.cause))
 					yield* Ref.update(group.cleanupFailures, (cause) =>
 						Cause.combine(cause, closed.cause),
@@ -37,7 +37,7 @@ export const run = <A, E, R>(group: Group, effect: Effect.Effect<A, E, R>) =>
 					Exit.isFailure(body) && !Cause.hasInterruptsOnly(body.cause)
 						? body.cause
 						: Cause.empty,
-					// Release.close marks independent interruptions; an unmarked one is pending cancellation.
+					// Finalization.close marks independent interruptions; an unmarked one is pending cancellation.
 					Exit.isFailure(closed) && !Cause.hasInterruptsOnly(closed.cause)
 						? closed.cause
 						: Cause.empty,

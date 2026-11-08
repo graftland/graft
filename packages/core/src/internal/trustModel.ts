@@ -27,7 +27,7 @@ export type Publication = typeof Publication.Type
 export interface Publisher {
 	readonly update: (
 		values: ReadonlyArray<ProjectionValue>,
-	) => Effect.Effect<void, RegistrationError>
+	) => Effect.Effect<void, AdmissionRegistrationError>
 }
 export class ProjectionConflict extends Schema.TaggedError<
 	ProjectionConflict,
@@ -41,15 +41,15 @@ export class Unapproved extends Schema.TaggedError<
 	Unapproved,
 	{ readonly brand: unique symbol }
 >()("Unapproved", {
-	entry: Schema.String,
+	instance: Schema.String,
 	reason: Schema.String,
 }) {
 	override get message() {
-		return `Unapproved entry ${this.entry}: ${this.reason}`
+		return `Unapproved instance ${this.instance}: ${this.reason}`
 	}
 }
-export class RegistrationError extends Schema.TaggedError<
-	RegistrationError,
+export class AdmissionRegistrationError extends Schema.TaggedError<
+	AdmissionRegistrationError,
 	{ readonly brand: unique symbol }
 >()("AdmissionRegistrationError", {
 	message: Schema.String,
@@ -57,7 +57,7 @@ export class RegistrationError extends Schema.TaggedError<
 }) {}
 /** Immutable operator values, never a contract definition. */
 export interface Comparison {
-	/** Monotonic authorization version for this entry, including removal and recreation. */
+	/** Monotonic authorization version for this instance, including removal and recreation. */
 	readonly revision: number
 	readonly current: Schema.Json
 	readonly approved: Option.Option<Schema.Json>
@@ -66,10 +66,10 @@ export interface Comparison {
 /** Comparison runs in the admission transaction. Publication may persist an audit before updating transactional state. */
 export interface Authority {
 	readonly compare: (
-		entry: string,
-		candidate: string,
+		instance: string,
+		attempt: string,
 	) => Effect.Effect<Comparison, Unapproved>
 	readonly publish: (
 		publication: Publication,
-	) => Effect.Effect<void, RegistrationError>
+	) => Effect.Effect<void, AdmissionRegistrationError>
 }

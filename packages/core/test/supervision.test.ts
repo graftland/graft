@@ -184,3 +184,36 @@ it("starts no supervisor attempt during kernel shutdown (C8)", () => {
 	assert.equal(HashMap.size(exited.preparations), 0)
 	assert.equal(fact(exited).attempts.length, 0)
 })
+
+const revoke = (state: Core.State): Core.State =>
+	Core.reduce(state, {
+		_tag: "PolicyChanged",
+		instance: "a",
+		allowed: ["another-identity"],
+		values: {},
+		now: state.now,
+	}).state
+
+it("does not restart a member whose target the operator revoked (C7, C8)", () => {
+	const failed = signal(revoke(initial()), "MemberFailed")
+	const after = settle(failed.state)
+	assert.isFalse(Executions.healthy(after, "a"))
+	assert.equal(fact(after).attempts.length, 0)
+})
+
+it("does not redeploy a crashed unit with a revoked target (C7, C8)", () => {
+	const state = revoke(initial())
+	const unit = Option.getOrThrow(HashMap.get(state.units, "a@0"))
+	const crashed = Core.reduce(state, {
+		_tag: "Exited",
+		unit: unit.id,
+		incarnation: unit.incarnation,
+		observer: unit.spawn,
+		cleanup: { _tag: "Unknown" },
+		cause: Cause.fail("Native crash"),
+		now: state.now,
+	}).state
+	assert.equal(HashMap.size(crashed.preparations), 0)
+	assert.equal(fact(crashed).attempts.length, 0)
+	assert.isFalse(Executions.healthy(crashed, "a"))
+})

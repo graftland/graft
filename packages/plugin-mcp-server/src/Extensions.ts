@@ -7,8 +7,8 @@ import { Changed } from "./Catalog"
 export const Declared = Event.make<[], Record<string, unknown>>(
 	"@graftland/plugin-mcp-server/Extensions/Declared",
 )
-export class Conflict extends Schema.TaggedError<
-	Conflict,
+export class ExtensionConflict extends Schema.TaggedError<
+	ExtensionConflict,
 	{ readonly brand: unique symbol }
 >()("ExtensionConflict", { key: Schema.String }) {}
 export const declare = (record: Record<string, unknown>) =>

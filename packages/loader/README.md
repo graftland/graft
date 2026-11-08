@@ -54,9 +54,9 @@ How Loader handles failures:
   replies or stop later edits.
 - Accessing `external` is deferred inside its stream failure boundary. A defect
   stops notifications and is logged. API editing stays available.
-- Module candidate fallback needs exactly one failure that says the candidate is
-  missing. If cleanup failures, defects, or interruption come with it, there is
-  no fallback, and the full Cause is kept.
+- Specifier spelling fallback needs exactly one failure that says the spelling
+  is missing. If cleanup failures, defects, or interruption come with it, there
+  is no fallback, and the full Cause is kept.
 - Resolver and intercept callbacks run inside the entry activation. An
   unexpected synchronous throw fails that entry with its original cause.
 
@@ -389,13 +389,13 @@ Removal closes that scope and unloads its plugin children.
 `resolve(name, { observationScope })` can supply a separate scope for
 observation leases. The resolver passes it to the importer as the second
 argument. Group owns this scope per configuration entry and uses `ScopedRef` to
-replace it on retry. Failed candidates still release resources immediately.
+replace it on retry. Failed spellings still release resources immediately.
 Without this option, the caller's scope owns observations.
 
-Each candidate gets a child scope owned by that lifecycle. Failed attempts close
+Each spelling gets a child scope owned by that lifecycle. Failed attempts close
 their scope before fallback is considered. The result retains both the import
 failure and cleanup failure, with their original Cause reasons. Only a lone
-candidate-not-found failure permits fallback. Successful candidate scopes stay
+spelling-not-found failure permits fallback. Successful spelling scopes stay
 open until the entry lifecycle ends.
 
 - After resolution succeeds, ordinary config updates, pending injections, and
@@ -441,21 +441,21 @@ Part of [Graft](https://github.com/graftland/graft). Licensed under
 
 ### Resolution plans
 
-`ModuleResolver.make` caches normalized candidate plans, never importer results.
+`ModuleResolver.make` caches normalized spelling plans, never importer results.
 Without `resolution`, every call still tries the original name first and then
 the naming conventions. Custom importers keep their per-call behavior and
 scopes.
 
-An optional `resolution` environment can skip candidates known to be absent:
+An optional `resolution` environment can skip spellings known to be absent:
 
 - `revision` is an Effect returning the current resolution-environment version.
   Advance it after installation, removal or any resolution change. Changing the
   version discards prior plans, including negative decisions.
-- `exists(specifier)` checks a normalized candidate without importing it or
+- `exists(specifier)` checks a normalized spelling without importing it or
   acquiring resources. Candidate priority remains unchanged.
 - `observe(specifiers, { observationScope })` runs on every resolve, including
   cache hits and failed plans. Use it to retain observations of missing names or
-  paths. Its resources follow the existing candidate and observation scopes.
+  paths. Its resources follow the existing spelling and observation scopes.
 
 The successful importer still runs for every call. Applications opting into this
 protocol must supply invalidation and observation; without a reliable revision,

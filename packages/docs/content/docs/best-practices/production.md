@@ -215,7 +215,7 @@ After installing packages, rebuild application modules and restart:
 | ----------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
 | Disable or remove the entry before `graft remove`.                | `graft add <package>` and `graft remove` change only dependencies; an entry for a removed package fails to load.      |
 | Do not install while other tools edit the project.                | An install owns the package files until it finishes; see [Installation ownership](../../cli/#installation-ownership). |
-| Upgrade all `@graftland/*` packages to the same version.          | Graft releases every package with [one version](../../releases/#versions).                                            |
+| Upgrade all `@graftland/*` packages to the same version.          | Graft releases every package with [one version](../../publishing/#versions).                                          |
 | Keep a config change compatible, or ship it with the new version. | Config that no longer decodes fails that entry with `SchemaError`.                                                    |
 
 To swap plugin code without a restart, run `graft start` in

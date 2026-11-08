@@ -19,7 +19,7 @@ export const Artifact = Schema.Struct({
 		version: Schema.Literal(1),
 		algorithm: Schema.Literal("sha256"),
 		digest: Schema.String,
-		entry: Schema.String,
+		module: Schema.String,
 	}),
 })
 export const ConfigurationModule = Schema.Struct({
