@@ -76,11 +76,66 @@ describe("runner isolation and startup", () => {
 			),
 		).toBe("work failed;cleanup failed")
 	})
+	it("audits only processes carrying this run's ownership token", () => {
+		expect(
+			evaluate(`
+			const {spawn} = await import("node:child_process");
+			const {once} = await import("node:events");
+			const {randomUUID} = await import("node:crypto");
+			const {ownedProcesses} = await import("./runner.mjs");
+			const {withCleanup} = await import("./cleanup.mjs");
+			const assert = (await import("node:assert/strict")).default;
+			const token = randomUUID();
+			const start = (id) => spawn(process.execPath, ["-e", 'process.stdout.write("ready"); setInterval(() => {}, 1000)'], {
+				stdio: ["ignore", "pipe", "pipe"], env: {...process.env, GRAFT_BENCH_RUN_ID: id}
+			});
+			const owned = start(token);
+			const other = start(token + "-other");
+			await withCleanup(async () => {
+				await Promise.all([once(owned.stdout,"data"), once(other.stdout,"data")]);
+				assert.deepEqual(await ownedProcesses(token), [owned.pid]);
+				process.stdout.write("ownership verified");
+			}, async () => {
+				await Promise.all([owned,other].map(async child => {
+					const exited = once(child,"exit"); child.kill(); await exited;
+				}));
+			});
+		`),
+		).toContain("ownership verified")
+	})
 	it("resolves compressed sample files relative to nested result outputs", () => {
 		expect(
-			evaluate(
-				'const {run} = await import("./runner.mjs"); const {withCleanup} = await import("./cleanup.mjs"); const {readFile,rm} = await import("node:fs/promises"); const {resolve,dirname} = await import("node:path"); const {gunzipSync} = await import("node:zlib"); const assert = (await import("node:assert/strict")).default; const output = `.cache/path-check-${process.pid}/nested/result`; const data = await run(["--quick","--scenario","config-update","--implementation","effect","--output",output]); await withCleanup(async () => { const row = data.results[0]; assert.equal(row.status,"completed"); const samples = JSON.parse(gunzipSync(await readFile(resolve(dirname(resolve(`${output}.json`)),row.measurement.sampleFile))).toString()); assert.equal(samples.length,row.measurement.samplesCount); assert.ok(samples.every(Number.isFinite)); process.stdout.write("samples verified"); }, async () => { await rm(resolve(`.cache/path-check-${process.pid}`),{recursive:true}); await rm(resolve(".cache/samples",data.cleanupAudit.runToken),{recursive:true}); });',
-			),
+			evaluate(`
+			const {run} = await import("./runner.mjs");
+			const {withCleanup} = await import("./cleanup.mjs");
+			const {execFileSync} = await import("node:child_process");
+			const {readFile,mkdir,rm} = await import("node:fs/promises");
+			const {resolve,dirname} = await import("node:path");
+			const {gunzipSync} = await import("node:zlib");
+			const assert = (await import("node:assert/strict")).default;
+			const root = resolve(".cache/path-check-" + process.pid);
+			const checkout = resolve(root,"checkout");
+			await mkdir(checkout,{recursive:true});
+			let data;
+			await withCleanup(async () => {
+				// The test also runs in source copies whose host worktree metadata is unavailable.
+				execFileSync("git",["init","--quiet",checkout]);
+				execFileSync("git",["-C",checkout,"-c","user.name=Benchmark test","-c","user.email=benchmark@example.test","-c","commit.gpgsign=false","commit","--quiet","--allow-empty","-m","Benchmark fixture"],{env:{...process.env,GIT_CONFIG_GLOBAL:"/dev/null",GIT_CONFIG_SYSTEM:"/dev/null"}});
+				process.env.GIT_DIR = resolve(checkout,".git");
+				process.env.GIT_WORK_TREE = checkout;
+				const output = resolve(root,"nested/result");
+				data = await run(["--quick","--scenario","config-update","--implementation","effect","--output",output]);
+				const row = data.results[0];
+				assert.equal(row.status,"completed");
+				const samples = JSON.parse(gunzipSync(await readFile(resolve(dirname(output + ".json"),row.measurement.sampleFile))).toString());
+				assert.equal(samples.length,row.measurement.samplesCount);
+				assert.ok(samples.every(Number.isFinite));
+				process.stdout.write("samples verified");
+			}, async () => {
+				await rm(root,{recursive:true});
+				if(data) await rm(resolve(".cache/samples",data.cleanupAudit.runToken),{recursive:true});
+			});
+		`),
 		).toContain("samples verified")
 	})
 

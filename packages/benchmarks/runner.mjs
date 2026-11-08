@@ -136,6 +136,20 @@ const importMeasurement = async (implementation, options) => {
 export const ownedProcesses = async (token) => {
 	if (!token)
 		throw new Error("An ownership token is required for a process audit")
+	if (platform() === "darwin") {
+		// macOS has no procfs. ps includes each process's environment after its command.
+		const processes = execFileSync("ps", ["eww", "-axo", "pid=,command="], {
+			encoding: "utf8",
+			maxBuffer: 32 * 1024 * 1024,
+		})
+		return processes.split("\n").flatMap((line) => {
+			const match = /^\s*(\d+)\s+(.*)$/.exec(line)
+			if (!match || Number(match[1]) === process.pid) return []
+			return match[2].split(/\s+/).includes(`GRAFT_BENCH_RUN_ID=${token}`)
+				? [Number(match[1])]
+				: []
+		})
+	}
 	const found = []
 	for (const name of await readdir("/proc")) {
 		if (!/^\d+$/.test(name) || Number(name) === process.pid) continue
