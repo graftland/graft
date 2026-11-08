@@ -4,7 +4,8 @@ description: Run kernel instances behind a native execution boundary.
 ---
 
 A **unit** is a native execution boundary outside the kernel. Worker units
-provide a fault boundary. Use a sandboxed process deployment for untrusted work.
+provide a fault boundary. Sandbox a Process unit for untrusted work (see
+[Trust policy](../trust/#execution-boundaries)).
 
 ## Select captured code
 

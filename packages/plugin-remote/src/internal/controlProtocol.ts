@@ -376,6 +376,8 @@ const Policy = Schema.Struct({
 	instance: Schema.String,
 	/** Omitted: the operator's current allowed set is kept. */
 	allowed: Schema.optionalKey(Schema.Array(Schema.String)),
+	/** Omitted: the current sandbox requirement is kept. */
+	sandbox: Schema.optionalKey(Schema.Boolean),
 	values: Schema.Record(Schema.String, Schema.Json),
 })
 export type Policy = typeof Policy.Type

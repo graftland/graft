@@ -84,7 +84,8 @@
 		"./package.json": "./package.json",
 		"./kernel": "./dist/internal/kernelMain.js",
 		"./internal/unit": "./dist/internal/nativeUnitMain.js",
-		"./internal/publication": "./dist/internal/publicationMain.js"
+		"./internal/publication": "./dist/internal/publicationMain.js",
+		"./internal/sandbox-unit": "./dist/sandbox/unit.js"
 	},
 	"scripts": {
 		"build": "tsc -b && tsdown",
@@ -124,7 +125,8 @@
 			"./package.json": "./package.json",
 			"./kernel": "./dist/internal/kernelMain.js",
 			"./internal/unit": "./dist/internal/nativeUnitMain.js",
-			"./internal/publication": "./dist/internal/publicationMain.js"
+			"./internal/publication": "./dist/internal/publicationMain.js",
+			"./internal/sandbox-unit": "./dist/sandbox/unit.js"
 		}
 	},
 	"engines": {

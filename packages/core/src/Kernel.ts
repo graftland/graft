@@ -165,6 +165,8 @@ export class Kernel extends Context.Service<
 		readonly setPolicy: (policy: {
 			readonly instance: string
 			readonly allowed?: ReadonlyArray<string>
+			/** When given, whether this instance may only run sandboxed Process targets. */
+			readonly sandbox?: boolean
 			readonly values: Readonly<Record<string, Schema.Json>>
 		}) => Effect.Effect<void>
 		readonly shutdown: Effect.Effect<void>

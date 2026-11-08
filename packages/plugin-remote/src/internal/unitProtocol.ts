@@ -40,6 +40,7 @@ export const Deployment = Schema.Struct({
 	runner: Schema.optionalKey(
 		Schema.Struct({ socket: Schema.String, owner: Schema.String }),
 	),
+	confinement: Schema.optionalKey(Schema.Literal("Sandbox")),
 })
 export const Target = Schema.Struct({
 	identity: Schema.String,
@@ -295,6 +296,7 @@ export const Command = Schema.Struct({
 		Schema.Struct({
 			version: Schema.Int,
 			allowed: Schema.Option(Schema.HashSet(Schema.String)),
+			sandbox: Schema.Boolean,
 			values: Schema.Record(Schema.String, Schema.Json),
 		}),
 	),

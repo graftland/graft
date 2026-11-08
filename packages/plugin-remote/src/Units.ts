@@ -26,6 +26,8 @@ export interface TargetOptions {
 	readonly input: Schema.Json
 	readonly placement: Kernel.Placement
 	readonly runner?: { readonly socket: string; readonly owner: string }
+	/** `Sandbox` runs a Process unit under Linux bubblewrap; elsewhere the unit does not start. */
+	readonly confinement?: "Sandbox"
 }
 /** Selects captured bytes. Description and decoding take place inside an inspection unit. */
 export const target = (options: TargetOptions): Kernel.Target => {
@@ -50,6 +52,9 @@ export const target = (options: TargetOptions): Kernel.Target => {
 		...(options.contract === undefined ? {} : { contract: options.contract }),
 		input: options.input,
 		...(options.runner === undefined ? {} : { runner: options.runner }),
+		...(options.confinement === undefined
+			? {}
+			: { confinement: options.confinement }),
 	}
 	return {
 		identity: Kernel.deploymentIdentity(deployment),

@@ -33,6 +33,7 @@ export const policy = (s: State, instance: string): Policy =>
 	Option.getOrElse(HashMap.get(s.policies, instance), () => ({
 		version: 0,
 		allowed: Option.none(),
+		sandbox: false,
 		values: {},
 	}))
 export const authorized = (
@@ -40,6 +41,9 @@ export const authorized = (
 	instance: string,
 	target: Target,
 ): boolean =>
+	(!policy(s, instance).sandbox ||
+		(target.placement === "Process" &&
+			target.deployment?.confinement === "Sandbox")) &&
 	Option.match(policy(s, instance).allowed, {
 		onNone: () => true,
 		onSome: (allowed) => HashSet.has(allowed, target.identity),

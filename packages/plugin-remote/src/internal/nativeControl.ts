@@ -6,15 +6,19 @@ import { fileURLToPath } from "node:url"
 import { Worker } from "node:worker_threads"
 
 import {
+	Array,
 	Cause,
+	Context,
 	Deferred,
 	Effect,
 	Exit,
 	FiberSet,
+	FileSystem,
 	HashMap,
 	HashSet,
 	Layer,
 	Option,
+	Path,
 	Queue,
 	Ref,
 	Schema,
@@ -22,6 +26,7 @@ import {
 	Stream,
 } from "effect"
 import { Digest } from "effect/crypto"
+import { ChildProcessSpawner } from "effect/process"
 
 import {
 	UnitControl,
@@ -33,6 +38,7 @@ import {
 import * as CallFrames from "./callFrames"
 import * as EncodedLimit from "./encodedLimit"
 import * as RunnerClient from "./runnerClient"
+import * as Sandbox from "./sandbox"
 import * as Bridge from "./stdioBridge"
 import * as Wire from "./unitProtocol"
 import * as Resolution from "./unitResolution"
@@ -59,6 +65,14 @@ interface Runtime {
 	readonly callbacks: FiberSet.FiberSet<void, never>
 	readonly run: (effect: Effect.Effect<void>) => unknown
 	readonly stdio: Option.Option<Bridge.Bridge>
+	/** What the sandbox launcher needs, when the layer was built with platform services. */
+	readonly services: Option.Option<
+		Context.Context<
+			| FileSystem.FileSystem
+			| Path.Path
+			| ChildProcessSpawner.ChildProcessSpawner
+		>
+	>
 }
 const failed = (
 	cause: Cause.Cause<unknown>,
@@ -358,13 +372,24 @@ const worker = Effect.fnUntraced(function* (
 	)
 	return handle
 })
-const child = Effect.fnUntraced(function* (runtime: Runtime, command: Command) {
+const child = Effect.fnUntraced(function* (
+	runtime: Runtime,
+	command: Command,
+	confined: Option.Option<Sandbox.Launch>,
+) {
 	const state = yield* base(command)
 	const script = yield* launcher
 	const native: ChildProcess = yield* Effect.try({
 		try: () =>
-			spawn(process.execPath, [fileURLToPath(script)], {
-				stdio: ["ignore", "ignore", "pipe", "ipc"],
+			Option.match(confined, {
+				onNone: () =>
+					spawn(process.execPath, [fileURLToPath(script)], {
+						stdio: ["ignore", "ignore", "pipe", "ipc"],
+					}),
+				onSome: (launch) =>
+					spawn(launch.executable, launch.args, {
+						stdio: ["ignore", "ignore", "pipe", "ipc"],
+					}),
 			}),
 		catch: (cause) => NativeFailure.make({ cause: Cause.die(cause) }),
 	}).pipe(Effect.orDie)
@@ -456,6 +481,38 @@ const create = Effect.fnUntraced(function* (
 	const prevented = yield* Ref.get(runtime.prevented)
 	if (HashSet.has(prevented, command.token.incarnation))
 		return failed(Cause.fail("Spawn was prevented"), "NotStarted")
+	const deployment = command.target.deployment
+	const sandboxed = deployment.confinement === "Sandbox"
+	if (sandboxed && command.placement.kind !== "Process")
+		return failed(
+			Cause.fail("Only Process units can be sandboxed"),
+			"NotStarted",
+		)
+	const confined = sandboxed
+		? yield* Sandbox.prepare([
+				deployment.artifact.directory,
+				...(deployment.contractArtifact === undefined
+					? []
+					: [deployment.contractArtifact.directory]),
+				...Array.map(
+					deployment.environment ?? [],
+					(module) => module.artifact.directory,
+				),
+			]).pipe(
+				Effect.asSome,
+				(prepared) =>
+					Option.match(runtime.services, {
+						onNone: () =>
+							Sandbox.SandboxUnavailable.make({
+								message:
+									"The unit layer has no platform services; a sandbox cannot be prepared",
+							}),
+						onSome: (services) => Effect.provideContext(prepared, services),
+					}),
+				Effect.exit,
+			)
+		: Exit.succeed(Option.none<Sandbox.Launch>())
+	if (Exit.isFailure(confined)) return failed(confined.cause, "NotStarted")
 	const handle = yield* Effect.uninterruptible(
 		Effect.gen(function* () {
 			const known = yield* Ref.get(runtime.handles).pipe(
@@ -466,7 +523,7 @@ const create = Effect.fnUntraced(function* (
 			if (Option.isSome(known)) return known.value
 			const created = yield* command.placement.kind === "Worker"
 				? worker(runtime, command)
-				: child(runtime, command)
+				: child(runtime, command, confined.value)
 			yield* Ref.update(
 				runtime.handles,
 				HashMap.set(command.token.incarnation, created),
@@ -549,6 +606,23 @@ const placementLayer = (withRunner: boolean) =>
 				callbacks,
 				run,
 				stdio: yield* Bridge.StdioBridge,
+				services: yield* Effect.map(Effect.context<never>(), (context) =>
+					Option.all({
+						fs: Context.getOption(context, FileSystem.FileSystem),
+						path: Context.getOption(context, Path.Path),
+						spawner: Context.getOption(
+							context,
+							ChildProcessSpawner.ChildProcessSpawner,
+						),
+					}).pipe(
+						Option.map(({ fs, path, spawner }) =>
+							Context.make(FileSystem.FileSystem, fs).pipe(
+								Context.add(Path.Path, path),
+								Context.add(ChildProcessSpawner.ChildProcessSpawner, spawner),
+							),
+						),
+					),
+				),
 			}
 			yield* Effect.addFinalizer(() =>
 				Effect.gen(function* () {

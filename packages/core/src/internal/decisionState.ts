@@ -27,6 +27,8 @@ export interface DeploymentData {
 	readonly contract?: string
 	readonly input: Schema.Json
 	readonly runner?: { readonly socket: string; readonly owner: string }
+	/** `Sandbox`: the Process unit runs under operating-system confinement or not at all. */
+	readonly confinement?: "Sandbox"
 }
 export interface ResolvedInput {
 	readonly environmentModules?: ReadonlyArray<ConfigurationModule>
@@ -214,6 +216,8 @@ export interface Description {
 export interface Policy {
 	readonly version: number
 	readonly allowed: Option.Option<HashSet.HashSet<string>>
+	/** The operator requires sandboxed targets for this instance. */
+	readonly sandbox: boolean
 	readonly values: Readonly<Record<string, Schema.Json>>
 }
 export type PreparationResult =
@@ -932,6 +936,8 @@ export type Event =
 			readonly instance: string
 			/** Omitted: keep the current allowed set; only values change. */
 			readonly allowed?: ReadonlyArray<string>
+			/** Omitted: keep the current requirement. */
+			readonly sandbox?: boolean
 			readonly values: Readonly<Record<string, Schema.Json>>
 			readonly now: number
 	  }

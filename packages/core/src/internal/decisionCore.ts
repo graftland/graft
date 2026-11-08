@@ -1532,6 +1532,16 @@ const requestedBatch = (s: Working, input: Input): Working => {
 				!Preparation.authorized(s, operation.instance, operation.target)),
 	)
 	if (invalid) return reject(s, "Unauthorized")
+	if (
+		Arr.some(
+			input.operations,
+			(operation) =>
+				operation._tag === "Deploy" &&
+				operation.target.deployment?.confinement === "Sandbox" &&
+				operation.target.placement !== "Process",
+		)
+	)
+		return reject(s, "UnsupportedTarget")
 	const first = Arr.findFirst(
 		input.operations,
 		(operation) => operation._tag === "Deploy",
@@ -2774,6 +2784,7 @@ const policyChanged = (
 				event.allowed === undefined
 					? previous.allowed
 					: Option.some(HashSet.fromIterable(event.allowed)),
+			sandbox: event.sandbox ?? previous.sandbox,
 			values: InputSnapshot.values(event.values),
 		}),
 	}
@@ -2790,7 +2801,7 @@ const policyChanged = (
 							s,
 							c,
 							Cause.fail(
-								event.allowed === undefined
+								event.allowed === undefined && event.sandbox === undefined
 									? "Current reference values changed"
 									: "Current authorization premise changed",
 							),
