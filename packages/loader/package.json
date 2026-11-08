@@ -3,7 +3,7 @@
 	"engines": {
 		"node": ">=22.19.0"
 	},
-	"version": "0.5.0",
+	"version": "0.6.0",
 	"type": "module",
 	"description": "Loads plugins from a list of entries or a YAML config file",
 	"license": "Apache-2.0",

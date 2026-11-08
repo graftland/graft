@@ -1,6 +1,6 @@
 {
 	"name": "@graftland/plugin-remote",
-	"version": "0.5.0",
+	"version": "0.6.0",
 	"type": "module",
 	"description": "Native unit execution and encoded contracts for Graft",
 	"license": "Apache-2.0",

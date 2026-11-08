@@ -1,6 +1,6 @@
 {
 	"name": "@graftland/plugin-otlp",
-	"version": "0.5.0",
+	"version": "0.6.0",
 	"type": "module",
 	"description": "Exports the spans of Graft plugins to an OpenTelemetry collector over OTLP/HTTP",
 	"license": "Apache-2.0",

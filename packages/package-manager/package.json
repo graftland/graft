@@ -3,7 +3,7 @@
 	"engines": {
 		"node": ">=22.19.0"
 	},
-	"version": "0.5.0",
+	"version": "0.6.0",
 	"type": "module",
 	"description": "Installs dependencies with npm, pnpm or Yarn, and rolls back on failure",
 	"license": "Apache-2.0",

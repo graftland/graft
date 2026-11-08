@@ -1,6 +1,6 @@
 {
 	"name": "@graftland/plugin-release",
-	"version": "0.5.0",
+	"version": "0.6.0",
 	"type": "module",
 	"description": "Immutable releases for managed Graft integrations",
 	"license": "Apache-2.0",
