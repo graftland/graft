@@ -33,7 +33,8 @@ const tenants = Plugin.make({
   consumers in an empty realm fall back to them.
 
 In `graft.yml`: `isolate: { "<key string>": true }` for a private realm, or a
-label string for a shared one.
+label string for a shared one. Only an embedded loader accepts it; `graft start`
+rejects entries with `isolate` or `intercept` (`DeploymentUnsupported`).
 
 ## Intercepts
 
@@ -68,8 +69,8 @@ too, such as `References.CurrentLogAnnotations`.
 
 ### From `graft.yml`
 
-A config file can set only references the host registered. `graft start`
-registers two:
+An embedded loader's config file can set only references the host registered.
+The CLI registers two, for `graft schema` and embedded loaders:
 
 ```yaml
 - id: api

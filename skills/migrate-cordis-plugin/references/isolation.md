@@ -61,3 +61,7 @@ const crawlers = Plugin.make({
 
 Settings that select **which** instance a subtree uses (a different database, a
 tenant's handlers) are realms, not intercepts.
+
+`graft start` rejects entries with `isolate` or `intercept`
+(`DeploymentUnsupported`); the `graft.yml` forms above need a host that embeds
+the loader.

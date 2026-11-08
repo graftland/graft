@@ -46,8 +46,9 @@ export class Database extends Context.Service<
 | `class X extends Service` loaded with `ctx.plugin(X)`   | `Plugin.service(Key, build, { name })`                                       |
 | `ctx.provide('name', value)` / `ctx.set('name', value)` | `yield* Graft.provide(Key, value)` inside `apply`                            |
 | Several services from one plugin                        | Several `Graft.provide` calls, or `Plugin.layer(Layer, { provides: [...] })` |
+| Declaring what a plugin provides                        | `provides: [Key]` in `Plugin.make`; `graft start` resolves `inject` from it  |
 | An existing Effect `Layer`                              | `Plugin.layer(Layer, { name, inject, provides })`                            |
-| Overwriting a service someone else provides             | Not allowed: `ServiceConflict`. Use `Graft.replace` or a realm               |
+| Overwriting a service someone else provides             | Not allowed: `ServiceConflict`. Remove the other provider, or use a realm    |
 
 `[Service.init]` (sync, async or a generator yielding disposers) becomes the
 `build` effect, with its cleanup as finalizers:

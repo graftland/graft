@@ -83,7 +83,6 @@ const messages = Effect.gen(function* () {
 
 ## Config-file and loader tests
 
-Load `Loader.plugin` with entries and a
-`ModuleResolver.fromRecord({ name: plugin })` resolver to test entries without
-files; use `loader.ready` to wait for reconciliation. See
-[apps](apps.md#embed-graft).
+Load `Loader.plugin` with entries that name built module files, and a
+`ModuleResolver` connected to a live control endpoint; use `loader.ready` to
+wait for reconciliation. See [apps](apps.md#embed-graft).

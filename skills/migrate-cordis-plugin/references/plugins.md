@@ -94,8 +94,7 @@ apply: () =>
 ```
 
 Define the inline plugin once at module level when it does not close over values
-from `apply`; a new definition object per activation is a new plugin identity
-for `Graft.replace`.
+from `apply`, so it is not rebuilt on every activation.
 
 ## Child plugins
 
@@ -132,6 +131,8 @@ apply: (config) =>
 
 Graft keeps only the latest requested input; intermediate updates may be
 skipped. Code that counted delivered updates must instead read current state.
+Only embedded forks update in place: under `graft start`, a config change is a
+Change that starts a new generation.
 
 ## States and failures
 
@@ -162,12 +163,12 @@ user which behavior they want.
 
 ## Observing other plugins
 
-| cordis                                         | Graft                                               |
-| ---------------------------------------------- | --------------------------------------------------- |
-| `internal/plugin`, `internal/status` listeners | `Graft.forks` stream (whole tree)                   |
-| A fiber's own state                            | `fork.state` stream                                 |
-| `ctx.registry` iteration                       | `Graft.forks`                                       |
-| `registry.replace(old, next)`                  | `Graft.replace([[old, next]])`, atomic over a batch |
+| cordis                                         | Graft                             |
+| ---------------------------------------------- | --------------------------------- |
+| `internal/plugin`, `internal/status` listeners | `Graft.forks` stream (whole tree) |
+| A fiber's own state                            | `fork.state` stream               |
+| `ctx.registry` iteration                       | `Graft.forks`                     |
+| `registry.replace(old, next)`                  | A `Deploy` operation in a Change  |
 
-`Graft.replace` requires the same input type and an error type within the old
-plugin's bound.
+A Change runs the new code in a new generation. If it fails, the old plugins
+keep running. `graft start --watch` submits one Change per save.

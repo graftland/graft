@@ -34,9 +34,13 @@ const time = Plugin.make({
 - The service belongs to the fork until it stops or restarts. A fork may publish
   several.
 - One provider per key per [realm](realms.md). A second `Graft.provide` fails
-  with `ServiceConflict`; use `Graft.replace` or a realm instead.
+  with `ServiceConflict`; remove the other provider or isolate one of them in a
+  realm.
 - Build the value inside `apply`, so its resources belong to the fork, then
   provide it. `Plugin.service` and `Plugin.layer` do both in one step.
+- Declare published keys in the plugin's `provides` option; `graft start`
+  resolves other entries' `inject` from it. `Plugin.service` declares its key
+  for you.
 
 ## Consume
 

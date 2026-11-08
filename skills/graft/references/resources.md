@@ -84,7 +84,8 @@ with `TestClock`. Raw `setTimeout` and `setInterval` outlive the scope.
 - Log a failure's `Cause`, not its message:
   `Effect.logError("sync failed", cause)`.
 - The host chooses output. `graft start` prints readable lines; an embedding
-  host installs a `Logger` layer. `graft.yml` can set
-  `effect/References/MinimumLogLevel` per entry.
+  host installs a `Logger` layer. With an embedded loader, `graft.yml` can set
+  `effect/References/MinimumLogLevel` per entry; `graft start` rejects
+  `intercept`.
 - `Graft.logs` streams recent log entries (the last 1000, then live), for admin
   plugins and tests.

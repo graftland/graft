@@ -19,13 +19,14 @@ export default Plugin.make({
 })
 ```
 
-| Option   | What it does                                                                |
-| -------- | --------------------------------------------------------------------------- |
-| `name`   | Shown in logs and the fork tree.                                            |
-| `config` | A `Schema` that decodes the input before `apply`. Omit for no config.       |
-| `inject` | The services the plugin reads. See [Dependencies](#dependencies).           |
-| `apply`  | Starts the plugin, inside the fork's `Scope`. Startup ends when it returns. |
-| `retry`  | A `Schedule` for trying again after `apply` or a task fails.                |
+| Option     | What it does                                                                                                         |
+| ---------- | -------------------------------------------------------------------------------------------------------------------- |
+| `name`     | Shown in logs and the fork tree.                                                                                     |
+| `config`   | A `Schema` that decodes the input before `apply`. Omit for no config.                                                |
+| `inject`   | The services the plugin reads. See [Dependencies](#dependencies).                                                    |
+| `provides` | Declares the services the plugin publishes. `graft start` resolves `inject` from these declarations; list every one. |
+| `apply`    | Starts the plugin, inside the fork's `Scope`. Startup ends when it returns.                                          |
+| `retry`    | A `Schedule` for trying again after `apply` or a task fails.                                                         |
 
 `apply` returns `void` or an [update function](#update-in-place). When it would
 return something else, such as a fork handle, end it with `Effect.asVoid`.
@@ -116,6 +117,8 @@ const server = Plugin.make({
 - Only the latest requested input is applied; intermediate inputs may be
   skipped.
 - Resources it acquires belong to the activation scope.
+- Only embedded forks update in place. Under `graft start`, a config change is a
+  Change that starts a new generation.
 
 ## Failures and retries
 
@@ -157,10 +160,10 @@ down with the fork.
 
 ## Replace a plugin
 
-`Graft.replace([[v1, v2]])` restarts every fork of `v1` with `v2` in one
-transaction. The input type must match exactly and the errors must be a subset.
-A plugin's identity is its definition object: `{ ...plugin }` is a different
-plugin. Hot reload uses `replace`.
+Under `graft start`, new code arrives as a `Deploy` operation in a Change
+(`graft start --watch` submits one per save). The new generation must pass its
+trial; if it fails, the old one keeps running. In an embedded runtime, unload
+the old fork and load the new plugin.
 
 ## Publish a plugin package
 
@@ -168,7 +171,9 @@ plugin. Hot reload uses `replace`.
   `name: <name>` finds `graft-plugin-<name>`.
 - Make the plugin the package's default export (or `plugin`), and export the
   tokens consumers need from the same package or a separate entry point.
-- Ship ECMAScript modules; CommonJS and native dependencies block hot reload.
+- Publish built JavaScript: Node does not strip types inside `node_modules`. ES
+  modules and CommonJS both work; a native addon needs `Process` placement
+  unless it supports several instances per process.
 - List `@graftland/graft` and `effect` under `peerDependencies`, so the app
   keeps one copy of each.
 - Export the config's editor registration as `./schema` (an `entries()`

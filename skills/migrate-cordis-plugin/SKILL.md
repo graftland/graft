@@ -112,7 +112,7 @@ and no `cordis` import remains.
 | `ctx.intercept(name, config)`, `inject: { foo: config }`            | `Context.Reference` and `Graft.intercept`                   | [isolation](references/isolation.md) |
 | `FiberState`, `fiber.await()`, failed fibers                        | `Fork` states, `fork.await`, `retry: Schedule`              | [plugins](references/plugins.md)     |
 | `internal/plugin`, `internal/status`, `internal/service`            | `Graft.forks`, `fork.state`                                 | [plugins](references/plugins.md)     |
-| `registry.replace`                                                  | `Graft.replace`                                             | [plugins](references/plugins.md)     |
+| `registry.replace`                                                  | A `Deploy` operation in a Change                            | [plugins](references/plugins.md)     |
 
 ## Rules a port keeps
 

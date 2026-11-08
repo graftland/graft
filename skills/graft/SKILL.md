@@ -15,8 +15,8 @@ Graft runs an application as a tree of plugins on Effect 4. A **plugin** is a
 value; loading it makes a **fork** with its own config and `Scope`. Forks
 publish **services** (Effect `Context` keys), handle **events** (typed tokens)
 and load child forks. Graft adds only what Effect lacks: services that come and
-go at run time, the plugin tree, events, config files and hot reload. The rest
-is plain Effect.
+go at run time, the plugin tree, events, config files and Changes. The rest is
+plain Effect.
 
 The API is small; the skill is the **thinking**. Shape the program around
 lifetimes and owners first, and the code becomes short.
@@ -45,9 +45,10 @@ tell the user Graft needs Effect 4.
   Chosen by the operator: a config field. Fixed for the process: the
   environment.
 - **Where code runs is a deployment choice.** A plugin that must survive
-  another's crash, use its own thread or sit on another machine still provides
-  the same service; move its entry with [Remote](references/remote.md) and leave
-  its consumers alone.
+  another's crash, use its own thread or sit on another machine is still a
+  plugin that provides the same service. `graft start` runs each entry in its
+  own unit; [native units](references/remote.md) choose a Worker, Process or
+  Runner placement.
 
 ## Think in Effects
 
@@ -107,7 +108,10 @@ updating, the failures it handles) has a test.
 
 ### 5. Run
 
-Use captured native unit targets and public Kernel control when a plugin runs
+Run the app with `graft start`. In development, `graft start --watch` turns each
+save into a Change that redeploys only the affected entries; a failed Change
+leaves the running entries as they are ([apps](references/apps.md)). Use
+captured native unit targets and public Kernel control when a plugin runs
 outside its caller. Contracts and configuration decoding stay inside units; see
 [native units](references/remote.md).
 
@@ -122,10 +126,10 @@ outside its caller. Contracts and configuration decoding stay inside units; see
 | Handlers, dispatch, middleware                         | [events](references/events.md)                   |
 | Side-by-side instances and per-subtree settings        | [realms](references/realms.md)                   |
 | Tests with `@effect/vitest`                            | [testing](references/testing.md)                 |
-| `graft.yml`, the CLI, hot reload, embedding            | [apps](references/apps.md)                       |
+| `graft.yml`, the CLI, watch mode, embedding            | [apps](references/apps.md)                       |
 | A plugin in a child process, a worker or a runner      | [remote](references/remote.md)                   |
 | A fork `Pending` or `Failed`, an error name            | [troubleshooting](references/troubleshooting.md) |
 
 `https://graftland.github.io/graft/` is the source of truth for exact behavior.
 The repository's `samples/` folder holds runnable programs with tests, from
-`01-hello` to `06-remote` and multi-tenant apps.
+`01-hello` to `05-config-file` and multi-tenant apps.

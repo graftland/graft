@@ -33,15 +33,13 @@ keep it current. Commit it.
   config:
     port: 8080
 
-- id: tenants
+- id: jobs
   group: true
-  isolate:
-    "@acme/graft-plugin-postgres/Database": true
   config:
-    - id: tenant-db
-      name: "@acme/graft-plugin-postgres"
+    - id: cleanup
+      name: ./plugins/cleanup.mjs
       config:
-        url: !env TENANT_DATABASE_URL
+        every: 1 hour
 ```
 
 | Field       | What it does                                                                                                               |
@@ -51,32 +49,45 @@ keep it current. Commit it.
 | `config`    | The plugin's input; for a group, its child entries.                                                                        |
 | `disabled`  | `true` unloads the entry and keeps it in the file.                                                                         |
 | `group`     | `true` makes the entry a group.                                                                                            |
-| `inject`    | Extra service key strings to wait for before loading.                                                                      |
-| `isolate`   | Key strings: `true` for a private realm, a label for a shared one.                                                         |
-| `intercept` | Patches for registered references ([realms](realms.md#from-graftyml)).                                                     |
+| `inject`    | Extra service key strings to wait for before loading. Embedded loader only.                                                |
+| `isolate`   | Key strings: `true` for a private realm, a label for a shared one. Embedded loader only.                                   |
+| `intercept` | Patches for registered references ([realms](realms.md#from-graftyml)). Embedded loader only.                               |
 
-- `!env NAME` reads a variable at load time and stays a tag in the file, so
-  secrets never land in it. A missing variable fails only that entry.
-  `graft start --env-file .env` adds a file and `--env-dir /run/secrets` a
-  directory with one file per variable; the process environment wins.
+- `!env NAME` reads a variable when the entry is deployed and stays a tag in the
+  file, so secrets never land in it. A missing variable fails with
+  `ConfigError`. `graft start --env-file .env` adds a file and
+  `--env-dir /run/secrets` a directory with one file per variable; the process
+  environment wins. None of these are watched: restart after changing them.
 - Declare the tag for the YAML language server:
   `{ "yaml.customTags": ["!env scalar"] }` in `.vscode/settings.json`.
-- Groups with `isolate` are how a config file runs separate instances.
+- `graft start` runs each entry in its own unit and rejects entries that use
+  `inject`, `isolate` or `intercept` with `DeploymentUnsupported`. Those fields
+  work when you [embed](#embed-graft) the loader.
+- Each entry must name built JavaScript in a package with a `package.json`.
 
 ## Changes while running (`--watch`)
 
-| Change                                            | Result                                                     |
-| ------------------------------------------------- | ---------------------------------------------------------- |
-| `config` of an entry                              | `update`: in place if the plugin supports it, else restart |
-| `name`, `group`, `inject`, `isolate`, `intercept` | Unloaded and loaded again                                  |
-| Entry added / removed or disabled                 | Loaded / unloaded                                          |
-| A plugin module or its local imports              | Hot reload: affected plugins restart on the new code       |
-| Invalid YAML or a module that fails to import     | Logged; the last valid version keeps running               |
+`graft start --watch` turns each save into a Change. Without `--watch`, restart
+after changing configuration or code.
+
+| Change                                                         | Result                                                                  |
+| -------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| An entry's `config`, or code in its package                    | Redeployed in a new generation; other entries and sessions keep running |
+| Entry added / removed or disabled                              | Deployed / removed                                                      |
+| Saves within 100 ms, or made while a Change runs               | Coalesced; only the newest is applied next                              |
+| Invalid YAML, a failed import or a failed trial                | Logged; running entries stay as they are; the next save tries again     |
+| `--env-file`, `--env-dir`, installed packages (`node_modules`) | Not watched: restart                                                    |
+
+A module's artifact is its whole package, so an edit redeploys every entry from
+that package. Give plugins their own packages to redeploy them alone.
 
 Native deployments use fixed data and public Kernel control separately from
 Loader entries. See [native units](remote.md).
 
 ## Edit entries from a plugin
+
+When you embed the loader (`Loader.plugin` or `Include.Include`), plugins can
+inject its `Loader` service. `graft start` does not provide it.
 
 ```ts
 const admin = Plugin.make({
@@ -92,10 +103,11 @@ const admin = Plugin.make({
 })
 ```
 
-Edits are written to the file with comments and `!env` tags kept. An edit
-completes when saved; `loader.ready` waits until forks are reconciled. Call
-`ready` outside lifecycle callbacks, since it would wait for the callback
-itself. `loader.retry` retries failed entries and rereads `!env` values.
+With `Include.Include`, edits are written to the file with comments and `!env`
+tags kept. An edit completes when saved; `loader.ready` waits until forks are
+reconciled. Call `ready` outside lifecycle callbacks, since it would wait for
+the callback itself. Ordinary edits retry failed entries; to reread `!env`
+values across the whole tree, call `loader.root.update(entries)`, then `ready`.
 
 ## Embed Graft
 
@@ -124,13 +136,39 @@ program.pipe(
 | Plugins from code      | `Graft.plugin` in a scope                                           |
 | Entries kept in memory | `Graft.plugin(Loader.plugin, entries)` with a `ModuleResolver`      |
 | A YAML file            | `Graft.plugin(Include.Include, { path: "graft.yml", watch: true })` |
-| Hot reload             | `@graftland/hmr`                                                    |
 
-Resolvers: `ModuleResolver.fromRecord({ greeter })` for bundled apps and tests;
-`ModuleResolver.layer({ base: process.cwd(), importer: (specifier) => import(specifier) })`
-for plugin files, which needs `Path`. Provide the resolver, platform services
-(`NodeServices.layer`), a `Logger` layer and any `Intercept.layer` registrations
-in the environment of `Graft.layer`.
+Embedded forks have cooperative lifecycle only: no Changes, outcomes or units.
+Restart the process after code changes.
+
+The loader resolves built module files and inspects them in disposable units, so
+its `ModuleResolver` needs a live control endpoint:
+
+```ts
+import { Effect, Layer } from "effect"
+import { NodeServices } from "@effect/platform-node"
+
+import { Kernel } from "@graftland/graft"
+import { ModuleResolver } from "@graftland/loader"
+import * as Control from "@graftland/plugin-remote/Control"
+import * as Units from "@graftland/plugin-remote/Units"
+
+const resolver = Layer.effect(
+	ModuleResolver.ModuleResolver,
+	Effect.flatMap(Control.serve(), (control) =>
+		ModuleResolver.make({ base: process.cwd(), control }),
+	),
+).pipe(
+	Layer.provide(
+		Kernel.layer({ authority: "app", maxUnits: 16, instances: [] }).pipe(
+			Layer.provide(Units.layer),
+			Layer.provideMerge(NodeServices.layer),
+		),
+	),
+)
+```
+
+Provide the resolver, platform services (`NodeServices.layer`), a `Logger` layer
+and any `Intercept.layer` registrations in the environment of `Graft.layer`.
 
 Everything in that environment is visible to every plugin and lives as long as
 the app: the place for infrastructure the host owns.

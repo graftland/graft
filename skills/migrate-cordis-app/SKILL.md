@@ -57,8 +57,9 @@ class and every **third-party** row has the user's decision.
 
 Rename `cordis.yml` to `graft.yml` and translate each entry with
 [references/config-file.md](references/config-file.md). Done when no `!!js` tag
-and no cordis service name remains, and every `inject`, `isolate` and
-`intercept` key is a Graft key string.
+and no cordis service name remains, and no entry uses `inject`, `isolate` or
+`intercept` unless the host embeds the loader (then every key is a Graft key
+string).
 
 ### 4. Replace the host
 
@@ -68,10 +69,11 @@ and no cordis service name remains, and every `inject`, `isolate` and
   `.env` file.
 - **Embedded apps:** replace `new Context()` + `ctx.plugin(Loader)` with a
   `Graft.layer` runtime that loads `Include.Include`; see
-  [references/config-file.md](references/config-file.md#embedding).
+  [references/config-file.md](references/config-file.md#embedding). Embedded
+  apps have no Changes: restart the process after code changes.
 - Update `package.json`: remove cordis dependencies, add `@graftland/cli` (or
-  `@graftland/graft` + `@graftland/loader` when embedded) and `effect`;
-  `graft add` / `graft remove` do this and install.
+  `@graftland/graft`, `@graftland/loader` and `@graftland/plugin-remote` when
+  embedded) and `effect`; `graft add` / `graft remove` do this and install.
 
 ### 5. Verify
 
@@ -86,23 +88,27 @@ work.
 
 ## Host replacements
 
-| cordis                                               | Graft                                                                                                                              |
-| ---------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| `cordis` bin / `@cordisjs/plugin-loader` + `include` | `graft start [graft.yml]`                                                                                                          |
-| `@cordisjs/plugin-hmr` entry                         | `graft start --watch` (development only)                                                                                           |
-| `@cordisjs/plugin-logger-console`                    | Built into `graft start` (pretty console logger). Log level per entry via `intercept: { effect/References/MinimumLogLevel: Warn }` |
-| `@cordisjs/plugin-fs-node` (`ctx.fs`)                | Effect `FileSystem` / `Path`, provided by `graft start`                                                                            |
-| `@cordisjs/plugin-timer` (`ctx.timer`)               | Effect `Clock`, `Schedule`, `Effect.sleep`; nothing to load                                                                        |
-| `@cordisjs/plugin-package-manager`                   | `graft add <pkg>` / `graft remove <pkg>`                                                                                           |
-| `@cordisjs/create`                                   | `npm create @graftland` or `graft create [dir]` (useful as a reference layout)                                                     |
-| `ctx.loader.create / update / remove`                | The `Loader` service from `@graftland/loader`: `create`, `update`, `remove`, `ready`, `retry`                                      |
+| cordis                                               | Graft                                                                                                                 |
+| ---------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| `cordis` bin / `@cordisjs/plugin-loader` + `include` | `graft start [graft.yml]`                                                                                             |
+| `@cordisjs/plugin-hmr` entry                         | `graft start --watch` (development only)                                                                              |
+| `@cordisjs/plugin-logger-console`                    | Built into `graft start` (pretty console logger). An embedded loader can set the log level per entry with `intercept` |
+| `@cordisjs/plugin-fs-node` (`ctx.fs`)                | Effect `FileSystem` / `Path`, provided by `graft start`                                                               |
+| `@cordisjs/plugin-timer` (`ctx.timer`)               | Effect `Clock`, `Schedule`, `Effect.sleep`; nothing to load                                                           |
+| `@cordisjs/plugin-package-manager`                   | `graft add <pkg>` / `graft remove <pkg>`                                                                              |
+| `@cordisjs/create`                                   | `npm create @graftland` or `graft create [dir]` (useful as a reference layout)                                        |
+| `ctx.loader.create / update / remove`                | The embedded `Loader` service from `@graftland/loader`: `create`, `update`, `remove`, `ready`                         |
 
 ## Behavior differences to tell the user
 
 - **Config files never run code.** `!!js` is gone; `!env NAME` is the only tag.
 - **Unknown fields are kept** as metadata, and Graft writes generated `id`s back
   into the file.
-- **A broken plugin does not stop the app.** It appears as a `Failed` fork and
-  retries when its entry changes or new code arrives.
-- **Hot reload is all-or-nothing per save**: if any affected module fails to
-  import, the old plugins keep running.
+- **A broken plugin does not stop the others.** Each entry runs in its own unit;
+  the supervisor restarts a failed entry within its restart intensity, and a
+  Change for the entry retries it.
+- **Each save under `--watch` is one Change**: it redeploys only the entries
+  whose config or package changed. If it fails, the running entries stay as they
+  are.
+- **`graft start` rejects `inject`, `isolate` and `intercept` entries**
+  (`DeploymentUnsupported`). Keep them only with an embedded loader.

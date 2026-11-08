@@ -12,11 +12,17 @@ carry over line by line. The work is in names, keys and `!!js` tags.
 | `config`    | Plugin config                   | Plugin input, decoded by the plugin's Effect `Schema`. Adapt to the Graft plugin's schema.                                                                                                            |
 | `disabled`  | Boolean or `!!js` expression    | Boolean only.                                                                                                                                                                                         |
 | `group`     | Group of entries                | Same; children go in `config`.                                                                                                                                                                        |
-| `inject`    | Service names to wait for       | Service **key strings** to wait for.                                                                                                                                                                  |
-| `isolate`   | `{ name: true \| label }`       | `{ "<key string>": true \| label }`.                                                                                                                                                                  |
-| `intercept` | `{ name: config }`, any service | Only references the host registered. `graft start` registers `effect/References/CurrentLogAnnotations` and `effect/References/MinimumLogLevel`.                                                       |
+| `inject`    | Service names to wait for       | Service **key strings** to wait for. Embedded loader only.                                                                                                                                            |
+| `isolate`   | `{ name: true \| label }`       | `{ "<key string>": true \| label }`. Embedded loader only.                                                                                                                                            |
+| `intercept` | `{ name: config }`, any service | Only references the host registered; the CLI registers `effect/References/CurrentLogAnnotations` and `effect/References/MinimumLogLevel`. Embedded loader only.                                       |
 
 Fields Graft does not know (such as `note`) are kept as metadata.
+
+`graft start` runs each entry in its own unit and rejects entries that use
+`inject`, `isolate` or `intercept` with `DeploymentUnsupported`. Drop an
+`inject` field when the plugin's own `inject` already lists the key. For
+`isolate` and `intercept`, ask the user: drop the field, or embed the loader
+([Embedding](#embedding)).
 
 ## Keys
 
@@ -46,9 +52,9 @@ never run code. Translate by what the expression computes:
 | A value derived from a service on `ctx`   | Move the logic into the plugin: inject the service and compute it in `apply`.                              |
 | Arbitrary code                            | No equivalent. Ask the user.                                                                               |
 
-`!env` reads the variable when the entry loads; a missing variable fails only
-that entry. `graft start --env-file .env` adds a `.env` file; the process
-environment wins.
+`!env` reads the variable when the entry is deployed; a missing variable fails
+with `ConfigError`. `graft start --env-file .env` adds a `.env` file; the
+process environment wins. Restart after changing either.
 
 ## Nested config files
 
@@ -96,10 +102,9 @@ For VS Code, declare the tag: `{ "yaml.customTags": ["!env scalar"] }`.
     url: !env DATABASE_URL
 - id: api
   name: ./plugins/api.mjs
-  inject: ["@acme/graft-plugin-db/Database"]
-  isolate:
-    "@acme/graft-plugin-db/Database": staging
 # hmr: removed; run `graft start --watch` in development
+# api.inject: dropped; the plugin's own `inject` lists the database
+# api.isolate: needs the user's decision (see Entry fields)
 # api.disabled: needs the user's decision (see `!!js` expressions)
 ```
 
@@ -112,14 +117,25 @@ program:
 import { Effect, Layer } from "effect"
 import { NodeRuntime, NodeServices } from "@effect/platform-node"
 
-import { Graft } from "@graftland/graft"
+import { Graft, Kernel } from "@graftland/graft"
 import { Include, ModuleResolver } from "@graftland/loader"
+import * as Control from "@graftland/plugin-remote/Control"
+import * as Units from "@graftland/plugin-remote/Units"
 
-// Written in the application, so package names resolve from its dependencies.
-const resolver = ModuleResolver.layer({
-	base: process.cwd(),
-	importer: (specifier) => import(specifier),
-}).pipe(Layer.provide(NodeServices.layer))
+// The resolver inspects built modules in disposable units through control.
+const resolver = Layer.effect(
+	ModuleResolver.ModuleResolver,
+	Effect.flatMap(Control.serve(), (control) =>
+		ModuleResolver.make({ base: process.cwd(), control }),
+	),
+).pipe(
+	Layer.provide(
+		Kernel.layer({ authority: "app", maxUnits: 16, instances: [] }).pipe(
+			Layer.provide(Units.layer),
+			Layer.provideMerge(NodeServices.layer),
+		),
+	),
+)
 
 Effect.gen(function* () {
 	yield* Graft.plugin(Include.Include, { path: "graft.yml", watch: true })
