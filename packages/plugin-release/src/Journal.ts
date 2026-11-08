@@ -134,6 +134,8 @@ export interface Options {
 export interface ChangeRecord {
 	readonly run: string
 	readonly change: string
+	/** The original request key, retained even when recovery writes a keyless conclusion. */
+	readonly key: Option.Option<string>
 	readonly stages: ReadonlyArray<Line["stage"]>
 	readonly members: ReadonlyArray<string>
 	readonly targets: ReadonlyArray<string>
@@ -591,6 +593,7 @@ export const summarize = (
 		return {
 			run: first.run,
 			change: first.change,
+			key: Option.fromNullOr(first.key),
 			stages: Array.map(own, (line) => line.stage),
 			members: first.members,
 			targets: first.targets,
