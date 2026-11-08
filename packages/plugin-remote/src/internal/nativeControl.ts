@@ -99,10 +99,11 @@ const message = Effect.fnUntraced(
 					stage: frame.stage,
 				})
 				return
+			case "Diagnostic":
 			case "Failure": {
 				const cause = yield* Schema.decodeEffect(Wire.Cause)(frame.cause)
 				yield* Queue.offer(runtime.events, {
-					_tag: "UnitFailed",
+					_tag: frame._tag === "Diagnostic" ? "UnitDiagnostic" : "UnitFailed",
 					...unitEvent(handle.command),
 					cause,
 				})

@@ -3,7 +3,7 @@ title: Remote 契約
 description: 定義有版本的操作，並將協定與實作分開。
 ---
 
-**契約**描述宿主與實作共用的協定，不包含實作位置。實作位置由[宿主項目](../hosts/)指定。
+**契約**描述單元之間共用的協定。在[單元目標](../../units/)中選擇已擷取程式碼，用[繫結](../../bindings/)連接服務。
 
 ## 定義契約
 
@@ -66,13 +66,13 @@ export const contract = Contract.make({
 `RpcClientError`，讓連線中斷以呼叫端本來就會處理的錯誤出現。`Contract.make`
 再把這些描述彙整成契約：
 
-| 欄位       | 意義                                             |
-| ---------- | ------------------------------------------------ |
-| `name`     | 外掛名稱。                                       |
-| `config`   | 設定 schema，必須能編碼為 JSON。                 |
-| `error`    | 外掛宣告的失敗的 schema，預設為 `Schema.Never`。 |
-| `inject`   | 實作使用的宿主服務。                             |
-| `provides` | 實作發布給宿主的服務。                           |
+| 欄位 | 意義 | |
+---------- 建構函式只收集純宣告。Describe 在准入前驗證服務鍵、操作識別和一元呼叫形式。
+
+- | ------------------------------------------------ | | `name` | 外掛名稱。 | |
+  `config` | 設定 schema，必須能編碼為 JSON。 | | `error`
+  | 外掛宣告的失敗的 schema，預設為 `Schema.Never`。 | | `inject`
+  | 實作使用的宿主服務。 | | `provides` | 實作發布給宿主的服務。 |
 
 - 契約中的 schema 都不能需要服務才能編碼或解碼。
 - 服務鍵在同一份契約內必須唯一；RPC 名稱可以在不同服務間重複。
@@ -112,7 +112,7 @@ Contract.compareOperations(required, []) // => ({ _tag: "Incompatible", missing:
 
 在 `Plugin.make({ provides })` 中宣告服務描述，再在 `apply` 中用 `Graft.provide`
 發布服務值。`overlap: true` 宣告服務可以安全地與另一次服務嘗試並行執行，預設為
-`false`。這些宣告不會啟用重疊轉換，也不改變重新啟動行為。
+`false`。核心 Overlap 要求此宣告；嵌入式重啟仍採用協作式生命週期。
 
 ```ts title="src/greeter.ts"
 import { Effect } from "effect"

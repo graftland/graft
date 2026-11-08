@@ -6,8 +6,10 @@ import {
 	HashSet,
 	Number as Num,
 	Option,
+	Result,
 } from "effect"
 
+import * as Bindings from "./bindingCore"
 import * as InputSnapshot from "./decisionInput"
 import type {
 	Budget,
@@ -18,6 +20,7 @@ import type {
 	CommandKind,
 	Conclusion,
 	Event,
+	FixedBinding,
 	Input,
 	Instance,
 	MemberFact,
@@ -168,6 +171,7 @@ export const get = (s: State, id: string): Option.Option<Status> =>
 export const make = (options: {
 	readonly authority: string
 	readonly maxUnits: number
+	readonly bindings?: ReadonlyArray<FixedBinding>
 	readonly instances: ReadonlyArray<{
 		readonly id: string
 		readonly target: Target
@@ -176,6 +180,8 @@ export const make = (options: {
 	Arr.reduce(
 		options.instances,
 		{
+			...Bindings.index(options.bindings ?? []),
+			routes: HashMap.empty(),
 			authority: options.authority,
 			open: true,
 			now: 0,
@@ -206,6 +212,8 @@ export const make = (options: {
 			const id = `${entry.id}@0`
 			const unit: Unit = {
 				kind: "Execution",
+				description: Option.none(),
+				endpoint: Option.none(),
 				id,
 				incarnation: `${options.authority}/${id}`,
 				instance: entry.id,
@@ -245,6 +253,17 @@ export const make = (options: {
 		},
 	)
 
+const participantView = (
+	s: State,
+	c: Change,
+	unit: Option.Option<Unit>,
+	active: boolean,
+) => ({
+	routes: Arr.filter(
+		(active ? Bindings.activeView(s, c) : Bindings.view(s, c)).routes,
+		(r) => Option.exists(unit, (u) => r.consumer === u.instance),
+	),
+})
 const emit = (
 	s: Working,
 	c: Change,
@@ -262,7 +281,15 @@ const emit = (
 		unit,
 		participant,
 		timer,
-		target: c.recovering ? c.previous : c.request.target,
+		target: Option.getOrElse(
+			Option.map(u, (u) => u.target),
+			() => (c.recovering ? c.previous : c.request.target),
+		),
+		...(kind === "Activate"
+			? { view: participantView(s, c, u, true) }
+			: kind === "Install" || kind === "Serve"
+				? { view: participantView(s, c, u, false) }
+				: {}),
 		policy: Preparation.policy(s, c.request.instance),
 		...(Option.isSome(c.resolved) ? { resolution: c.resolved.value } : {}),
 		...(Option.isSome(c.description)
@@ -423,8 +450,8 @@ const evict = (s: Working, id: string): Working =>
 				? HashMap.remove(units, unit)
 				: units,
 		),
-		observers: HashMap.modify(s.observers, c.request.instance, (ids) =>
-			HashSet.remove(ids, id),
+		observers: HashSet.reduce(keys(c.request), s.observers, (observers, key) =>
+			HashMap.modify(observers, key, (ids) => HashSet.remove(ids, id)),
 		),
 		changed: HashSet.remove(s.changed, id),
 	}))
@@ -634,16 +661,18 @@ const fail = (s: Working, c: Change, cause: Cause.Cause<unknown>): Working => {
 		cause: Cause.combine(c.cause, cause),
 		recoveryFailed: c.recoveryFailed || c.recovering,
 	}
-	const stopped = terminate(
-		save(
-			c.failure
-				? s
-				: disarm(s, c, HashSet.make("Operation", "Trial", "Evidence")),
-			failed,
-		),
+	const saved = save(
+		c.failure
+			? s
+			: disarm(s, c, HashSet.make("Operation", "Trial", "Evidence")),
 		failed,
-		required,
 	)
+	const discarded = c.failure
+		? saved
+		: HashSet.reduce(c.requiredParticipants, saved, (s, participant) =>
+				issue(s, c.id, "Discard", participant, participant),
+			)
+	const stopped = terminate(discarded, failed, required)
 	const wasFailing = c.failure
 	return withChange(stopped, c.id, (s, c) =>
 		settled(s, required)
@@ -711,6 +740,8 @@ const spawn = (s: Working, c: Change): Working => {
 	const id = `${c.request.instance}@${term}`
 	const unit: Unit = {
 		kind: "Execution",
+		description: c.description,
+		endpoint: Option.none(),
 		id,
 		incarnation: `${s.authority}/${id}`,
 		instance: c.request.instance,
@@ -754,7 +785,7 @@ const install = (s: Working, c: Change, unit: string): Working => {
 	}
 	const saved = save(disarm(s, c, HashSet.make("Operation")), staged)
 	const installed = HashSet.reduce(required, saved, (s, participant) =>
-		issue(s, c.id, "Install", unit, participant),
+		issue(s, c.id, "Install", participant, participant),
 	)
 	return arm(
 		installed,
@@ -781,7 +812,33 @@ const forgetEndedCurrent = (s: Working, instance: string): Working =>
 					: s,
 		},
 	)
+const bindingPremise = (s: State, c: Change): Option.Option<string> => {
+	const planned = Bindings.plan(s, {
+		...c.request,
+		...(Option.isSome(c.description)
+			? { description: c.description.value }
+			: {}),
+	})
+	if (Result.isFailure(planned))
+		return Option.some(
+			`Binding ${planned.failure.service}: ${planned.failure.reason}`,
+		)
+	return HashSet.isSubset(planned.success.writes, c.request.writes) &&
+		HashMap.every(planned.success.reads, (_, key) =>
+			HashMap.has(c.premises, key),
+		)
+		? Option.none()
+		: Option.some("Fresh description expands the reserved binding footprint")
+}
+const verifiedSpawn = (s: Working, c: Change): Working =>
+	Option.match(bindingPremise(s, c), {
+		onNone: () => spawn(save(s, c), c),
+		onSome: (reason) => fail(s, c, Cause.fail(reason)),
+	})
 const commit = (s: Working, c: Change): Working => {
+	const invalidBinding = bindingPremise(s, c)
+	if (Option.isSome(invalidBinding))
+		return fail(s, c, Cause.fail(invalidBinding.value))
 	if (!owned(s, c))
 		return fail(s, c, Cause.fail("Commit lost a version or reservation"))
 	if (Option.isNone(c.candidate) || !live(s, c.candidate.value))
@@ -813,6 +870,7 @@ const commit = (s: Working, c: Change): Working => {
 	const next = save(
 		{
 			...applied,
+			routes: Bindings.commit(s, c),
 			instances: HashMap.modify(applied.instances, c.request.instance, (i) => ({
 				...i,
 				desired: c.request.target,
@@ -823,11 +881,10 @@ const commit = (s: Working, c: Change): Working => {
 		committed,
 	)
 	return arm(
-		issue(
+		HashSet.reduce(
+			c.requiredParticipants,
 			disarm(next, c, HashSet.make("Operation")),
-			c.id,
-			"Activate",
-			candidate,
+			(s, participant) => issue(s, c.id, "Activate", participant, participant),
 		),
 		c.id,
 		"Trial",
@@ -922,6 +979,7 @@ const requested = (s: Working, input: Input, inspect = false): Working => {
 export const empty = (options: {
 	readonly authority: string
 	readonly maxUnits: number
+	readonly bindings?: ReadonlyArray<FixedBinding>
 	readonly instances: ReadonlyArray<{
 		readonly id: string
 		readonly target: Target
@@ -977,6 +1035,21 @@ const submit = (s: Working, r: Request): Working => {
 		)
 			? { ...s, reply: { _tag: "Admitted", change: prior.value.change } }
 			: reject(s, "KeyConflict")
+	const planned = Bindings.plan(s, r)
+	return Result.match(planned, {
+		onFailure: (fault) => ({
+			...s,
+			reply: {
+				_tag: "Rejected",
+				reason: "IncompatibleBinding",
+				conflicts: HashSet.empty(),
+				cause: Cause.fail(fault),
+			},
+		}),
+		onSuccess: (r) => admit(s, r),
+	})
+}
+const admit = (s: Working, r: Request): Working => {
 	if (!s.open) return reject(s, "Closing")
 	const instance = HashMap.get(s.instances, r.instance)
 	if (Option.isNone(instance)) return reject(s, "UnsupportedTarget")
@@ -1108,14 +1181,16 @@ const submit = (s: Working, r: Request): Working => {
 					HashMap.modify(s.units, unit, (u) => ({ ...u, owner: id })),
 			}),
 			active: HashSet.add(s.active, id),
-			observers: HashMap.set(
-				s.observers,
-				r.instance,
-				HashSet.add(
-					Option.getOrElse(HashMap.get(s.observers, r.instance), () =>
-						HashSet.empty(),
+			observers: HashSet.reduce(keys(r), s.observers, (observers, key) =>
+				HashMap.set(
+					observers,
+					key,
+					HashSet.add(
+						Option.getOrElse(HashMap.get(observers, key), () =>
+							HashSet.empty<string>(),
+						),
+						id,
 					),
-					id,
 				),
 			),
 			nextChange: s.nextChange + 1,
@@ -1174,7 +1249,7 @@ const descriptionReady = (
 			description: Option.some(ready.result.description),
 			resolved: ready.resolution,
 		}
-		return spawn(save(s, verified), verified)
+		return verifiedSpawn(s, verified)
 	})
 const reportSuccess = (s: Working, c: Change, command: Command): Working => {
 	if (Option.isSome(c.conclusion) || c.failure) return s
@@ -1207,7 +1282,7 @@ const reportSuccess = (s: Working, c: Change, command: Command): Working => {
 						...resolved,
 						description: Option.some(known.value.description),
 					}
-					return spawn(save(s, verified), verified)
+					return verifiedSpawn(s, verified)
 				}
 				return inspectAttempt(
 					save(s, resolved),
@@ -1240,6 +1315,7 @@ const reportSuccess = (s: Working, c: Change, command: Command): Working => {
 						evidence,
 						(r) =>
 							r._tag === "Started" &&
+							(r.value.provides.length === 0 || r.endpoint !== undefined) &&
 							Equal.equals(r.value, c.description.pipe(Option.getOrUndefined)),
 					)
 				)
@@ -1251,7 +1327,17 @@ const reportSuccess = (s: Working, c: Change, command: Command): Working => {
 			}
 			return c.phase === "Starting"
 				? operation(
-						s,
+						withUnit(s, command.unit, (s, u) => ({
+							...s,
+							units: HashMap.set(s.units, u.id, {
+								...u,
+								endpoint: Option.flatMap(command.report, (r) =>
+									r._tag === "Started"
+										? Option.fromNullishOr(r.endpoint)
+										: Option.none(),
+								),
+							}),
+						})),
 						c,
 						"Serve",
 						"Serving",
@@ -1305,6 +1391,7 @@ const reportSuccess = (s: Working, c: Change, command: Command): Working => {
 		case "Stop":
 		case "Terminate":
 		case "ArmTimer":
+		case "Discard":
 		case "Describe":
 		case "PublishPreparation":
 		case "Publish":
@@ -1349,32 +1436,44 @@ const endUnit = (
 			Option.contains(i.current, u.id) ? { ...i, healthy: false } : i,
 		),
 	}
-	return withChange(next, u.owner, (s, c) => {
-		const observed = {
-			...c,
-			cause: Cause.combine(
-				c.cause,
-				cleanup._tag === "Failed" ? Cause.combine(cause, cleanup.cause) : cause,
+	return HashSet.reduce(
+		HashSet.add(
+			Option.getOrElse(HashMap.get(s.observers, u.instance), () =>
+				HashSet.empty<string>(),
 			),
-		}
-		const saved = save(s, observed)
-		if (Option.isSome(c.conclusion)) return release(saved, observed)
-		if (cleanup._tag === "Failed" && !c.failure)
-			return fail(saved, observed, Cause.empty)
-		if (Option.contains(c.candidate, u.id) && !c.failure)
-			return fail(saved, observed, Cause.fail("Candidate execution exited"))
-		if (
-			Option.contains(c.old, u.id) &&
-			!HashSet.has(c.requiredExits, u.id) &&
-			!c.failure
-		)
-			return fail(
-				saved,
-				observed,
-				Cause.fail("Previous execution exited unexpectedly"),
-			)
-		return progressSettlement(saved, observed)
-	})
+			u.owner,
+		),
+		next,
+		(s, id) =>
+			withChange(s, id, (s, c) => {
+				const observed = {
+					...c,
+					cause: Cause.combine(
+						c.cause,
+						cleanup._tag === "Failed"
+							? Cause.combine(cause, cleanup.cause)
+							: cause,
+					),
+				}
+				const saved = save(s, observed)
+				if (Option.isSome(c.conclusion)) return release(saved, observed)
+				if (cleanup._tag === "Failed" && !c.failure)
+					return fail(saved, observed, Cause.empty)
+				if (Option.contains(c.candidate, u.id) && !c.failure)
+					return fail(saved, observed, Cause.fail("Candidate execution exited"))
+				if (
+					Option.contains(c.old, u.id) &&
+					!HashSet.has(c.requiredExits, u.id) &&
+					!c.failure
+				)
+					return fail(
+						saved,
+						observed,
+						Cause.fail("Previous execution exited unexpectedly"),
+					)
+				return progressSettlement(saved, observed)
+			}),
+	)
 }
 const currentReport = (c: Change, command: Command): boolean =>
 	command.token.view === c.view &&
@@ -1383,6 +1482,10 @@ const currentReport = (c: Change, command: Command): boolean =>
 		command.kind === "Terminate" ||
 		command.kind === "ArmTimer" ||
 		command.kind === "Publish" ||
+		((command.kind === "Install" ||
+			command.kind === "Activate" ||
+			command.kind === "Discard") &&
+			HashSet.has(c.requiredParticipants, command.unit)) ||
 		Option.contains(c.candidate, command.unit))
 const reported = (
 	s: Working,
@@ -1450,6 +1553,27 @@ const reported = (
 			})
 		},
 	})
+const expiredInstallation = (s: Working, c: Change): Working => {
+	const missing = HashSet.filter(
+		c.requiredParticipants,
+		(id) => !HashSet.has(c.installed, id) && live(s, id),
+	)
+	const required = {
+		...c,
+		units: HashSet.union(c.units, missing),
+		requiredExits: HashSet.union(c.requiredExits, missing),
+	}
+	const unavailable = HashSet.reduce(missing, s, (s, id) =>
+		withUnit(s, id, (s, u) => ({
+			...s,
+			instances: HashMap.modify(s.instances, u.instance, (i) => ({
+				...i,
+				healthy: false,
+			})),
+		})),
+	)
+	return fail(unavailable, required, Cause.fail("Installing deadline expired"))
+}
 const timerFired = (
 	s: Working,
 	event: Extract<Event, { readonly _tag: "TimerFired" }>,
@@ -1484,6 +1608,7 @@ const timerFired = (
 							: stopOld(save(s, passed), passed)
 					}
 					case "Operation": {
+						if (c.phase === "Installing") return expiredInstallation(s, c)
 						if (c.phase === "Retiring" && c.trialPassed && !c.failure) {
 							const forced = {
 								...c,

@@ -8,6 +8,7 @@ import type * as Artifact from "./Artifact"
 export { layer } from "./internal/nativeControl"
 export interface TargetOptions {
 	readonly artifact: Artifact.Artifact
+	readonly contractArtifact?: Artifact.Artifact
 	readonly contract: string
 	readonly input: Schema.Json
 	readonly placement: Kernel.Placement
@@ -15,11 +16,14 @@ export interface TargetOptions {
 }
 /** Selects captured bytes. Description and decoding take place inside an inspection unit. */
 export const target = (options: TargetOptions): Kernel.Target => ({
-	identity: `sha256-v1:${options.artifact.identity.digest}:${options.artifact.identity.entry.length}:${options.artifact.identity.entry}:${options.contract.length}:${options.contract}`,
+	identity: `sha256-v1:${options.artifact.identity.digest}:${options.contractArtifact?.identity.digest ?? options.artifact.identity.digest}:${options.artifact.identity.entry.length}:${options.artifact.identity.entry}:${options.contract.length}:${options.contract}`,
 	placement: options.placement,
 	overlap: false,
 	deployment: {
 		artifact: options.artifact,
+		...(options.contractArtifact === undefined
+			? {}
+			: { contractArtifact: options.contractArtifact }),
 		contract: options.contract,
 		input: options.input,
 		...(options.runner === undefined ? {} : { runner: options.runner }),

@@ -23,6 +23,16 @@ export const target = (value: Target): Target =>
 			: {
 					deployment: Object.freeze({
 						...value.deployment,
+						...(value.deployment.contractArtifact === undefined
+							? {}
+							: {
+									contractArtifact: Object.freeze({
+										...value.deployment.contractArtifact,
+										identity: Object.freeze({
+											...value.deployment.contractArtifact.identity,
+										}),
+									}),
+								}),
 						artifact: Object.freeze({
 							...value.deployment.artifact,
 							identity: Object.freeze({
@@ -66,6 +76,13 @@ export const report = (value: Report): Report => {
 				}),
 			}
 		case "Started":
+			return {
+				...value,
+				value: description(value.value),
+				...(value.endpoint === undefined
+					? {}
+					: { endpoint: Object.freeze({ ...value.endpoint }) }),
+			}
 		case "Described":
 			return { ...value, value: description(value.value) }
 		default:

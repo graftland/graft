@@ -4,9 +4,9 @@ description:
   Define versioned operations and keep their implementations separate.
 ---
 
-A **contract** describes the protocol shared by a host and an implementation. It
-contains no implementation location. Select that location in the
-[host entry](../hosts/).
+A **contract** describes the protocol shared by units. Select captured code in a
+[unit target](../../units/) and connect services with
+[bindings](../../bindings/).
 
 ## Define a contract
 
@@ -74,12 +74,13 @@ descriptions into the contract:
 | `name`     | The plugin's name.                                                    |
 | `config`   | Config schema. Must encode to JSON.                                   |
 | `error`    | Schema of the plugin's declared failures. Defaults to `Schema.Never`. |
-| `inject`   | Host services the implementation uses.                                |
-| `provides` | Services the implementation publishes to the host.                    |
+| `inject`   | Services the implementation uses.                                     |
+| `provides` | Services the implementation publishes.                                |
 
 - No schema in a contract may need services to encode or decode.
-- Service keys are unique within a contract. RPC names may repeat across
-  services.
+- Constructors collect pure declarations. Describe validates service keys,
+  operation identities and unary call shape before admission. Service keys are
+  unique within a contract. RPC names may repeat across services.
 - Export the contract as `contract` or as the default export.
 - Both sides import the same built contract, so keys and RPC schemas match.
 
@@ -119,8 +120,8 @@ Contract.compareOperations(required, []) // => ({ _tag: "Incompatible", missing:
 
 Declare the service descriptors in `Plugin.make({ provides })`, then publish
 their values with `Graft.provide` inside `apply`. `overlap: true` declares that
-serving is safe alongside another attempt; its default is `false`. These
-declarations do not enable overlap transitions or change restart behavior.
+serving is safe alongside another attempt; its default is `false`. Kernel
+Overlap requires this declaration. Embedded restart remains cooperative.
 
 ```ts title="src/greeter.ts"
 import { Effect } from "effect"

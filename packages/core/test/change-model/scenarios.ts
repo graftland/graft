@@ -49,7 +49,13 @@ export const pending = (
 		Arr.findFirst(
 			HashMap.values(s.commands),
 			(c) =>
-				c.change === change && c.kind === kind && c.disposition === "Pending",
+				c.change === change &&
+				c.kind === kind &&
+				c.disposition === "Pending" &&
+				Option.exists(
+					HashMap.get(s.changes, change),
+					(owner) => owner.view === c.token.view,
+				),
 		),
 	)
 export const report = (

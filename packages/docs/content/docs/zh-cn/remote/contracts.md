@@ -3,7 +3,7 @@ title: Remote 契约
 description: 定义带版本的操作，并将协议与实现分开。
 ---
 
-**契约**描述宿主与实现共享的协议，不包含实现的位置。实现位置由[宿主条目](../hosts/)指定。
+**契约**描述单元之间共享的协议。在[单元目标](../../units/)中选择已捕获代码，用[绑定](../../bindings/)连接服务。
 
 ## 定义契约
 
@@ -66,13 +66,13 @@ export const contract = Contract.make({
 `RpcClientError`，连接断开时调用方看到的就是他们本来就会处理的错误。`Contract.make`
 再把这些描述汇总成契约：
 
-| 字段       | 含义                                           |
-| ---------- | ---------------------------------------------- |
-| `name`     | 插件名。                                       |
-| `config`   | 配置 schema，必须能编码为 JSON。               |
-| `error`    | 插件声明的失败的 schema，默认 `Schema.Never`。 |
-| `inject`   | 实现要使用的宿主服务。                         |
-| `provides` | 实现发布给宿主的服务。                         |
+| 字段 | 含义 | |
+---------- 构造函数只收集纯声明。Describe 在准入前校验服务键、操作标识和一元调用形态。
+
+- | ---------------------------------------------- | | `name` | 插件名。 | |
+  `config` | 配置 schema，必须能编码为 JSON。 | | `error`
+  | 插件声明的失败的 schema，默认 `Schema.Never`。 | | `inject`
+  | 实现要使用的宿主服务。 | | `provides` | 实现发布给宿主的服务。 |
 
 - 契约中的任何 schema 都不能依赖服务来编码或解码。
 - 服务键在一个契约内唯一；RPC 名称可以在不同服务之间重复。
@@ -112,7 +112,7 @@ Contract.compareOperations(required, []) // => ({ _tag: "Incompatible", missing:
 
 在 `Plugin.make({ provides })` 中声明服务描述，再在 `apply` 中用 `Graft.provide`
 发布服务值。`overlap: true` 声明服务可以安全地与另一次服务尝试并行运行，默认值为
-`false`。这些声明不会启用重叠转换，也不改变重启行为。
+`false`。内核 Overlap 要求此声明；嵌入式重启仍采用协作式生命周期。
 
 ```ts title="src/greeter.ts"
 import { Effect } from "effect"

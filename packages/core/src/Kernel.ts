@@ -41,6 +41,11 @@ export type {
 	ResolvedInput,
 	Description,
 	BindingDeclaration,
+	FixedBinding,
+	Endpoint,
+	BindingRoute,
+	BindingFault,
+	RouteView,
 	PreparationPhase,
 	PreparationStatus,
 	PreparationResult,
@@ -64,6 +69,7 @@ export interface Handle {
 	readonly cancel: Effect.Effect<void>
 }
 export interface Deployment {
+	readonly bindings?: ReadonlyArray<Core.FixedBinding>
 	readonly authority: string
 	readonly maxUnits: number
 	readonly instances: ReadonlyArray<{

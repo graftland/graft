@@ -441,7 +441,12 @@ export const admitResult = (s: Working, id: string): Working =>
 					reply: { ...s.reply, preparation: id },
 				}
 			case "Rejected":
-				return reject(s, p, s.reply.reason, s.reply.conflicts)
+				return reject(
+					s,
+					{ ...p, cause: Cause.combine(p.cause, s.reply.cause ?? Cause.empty) },
+					s.reply.reason,
+					s.reply.conflicts,
+				)
 			default:
 				return s
 		}
@@ -529,6 +534,8 @@ export const start = (
 	const unit: Unit = {
 		id: unitId,
 		kind: "Inspection",
+		description: Option.none(),
+		endpoint: Option.none(),
 		incarnation: `${s.authority}/${unitId}`,
 		instance: request.instance,
 		term: 0,

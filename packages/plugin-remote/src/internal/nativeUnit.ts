@@ -6,6 +6,7 @@ import { parentPort } from "node:worker_threads"
 import {
 	Array,
 	Cause,
+	Context,
 	Deferred,
 	Effect,
 	Exit,
@@ -22,7 +23,8 @@ import {
 	Scope,
 	Stream,
 } from "effect"
-import { Digest } from "effect/crypto"
+import { Digest, SecureRandom } from "effect/crypto"
+import type { Socket } from "effect/socket"
 import { NodeRuntime, NodeServices } from "@effect/platform-node"
 
 import { Fork, Graft, Plugin, Transition, type Kernel } from "@graftland/graft"
@@ -30,8 +32,10 @@ import { Fork, Graft, Plugin, Transition, type Kernel } from "@graftland/graft"
 import * as Artifact from "../Artifact"
 import * as Contract from "../Contract"
 import * as Operations from "./operations"
+import * as Network from "./unitNetwork"
 import * as Wire from "./unitProtocol"
 import * as Resolution from "./unitResolution"
+import * as Routing from "./unitRouter"
 
 class UnitFault extends Schema.TaggedError<
 	UnitFault,
@@ -50,9 +54,11 @@ interface UnitRuntime {
 	readonly initial: Ref.Ref<Option.Option<Wire.Command>>
 	readonly metadata: Ref.Ref<Option.Option<Metadata>>
 	readonly member: Ref.Ref<Option.Option<Fork.Fork>>
+	readonly support: Ref.Ref<HashMap.HashMap<string, Fork.Fork>>
+	readonly provider: Ref.Ref<Option.Option<Network.Provider>>
+	readonly router: Ref.Ref<Option.Option<Routing.Router>>
 	readonly scope: Scope.Closeable
-	readonly views: Ref.Ref<HashMap.HashMap<number, Wire.Token>>
-	readonly active: Ref.Ref<Option.Option<Wire.Token>>
+	readonly views: Ref.Ref<HashMap.HashMap<string, Wire.Token>>
 	readonly stopped: Deferred.Deferred<void>
 	readonly commands: FiberMap.FiberMap<string, void, never>
 	readonly replies: Ref.Ref<HashMap.HashMap<string, Wire.Report>>
@@ -109,6 +115,7 @@ const serviceDescription = (
 	provenance: string,
 ): Kernel.BindingDeclaration => ({
 	key: service.key.key,
+	unary: service.unary,
 	operations: Array.flatMap(
 		Array.fromIterable(service.group.requests.values()),
 		(rpc) =>
@@ -141,9 +148,11 @@ const load = Effect.fnUntraced(function* (
 				"Unit resolution or validation environment differs from its grant",
 		})
 	yield* Artifact.verify(deployment.artifact)
+	const contractArtifact = deployment.contractArtifact ?? deployment.artifact
+	yield* Artifact.verify(contractArtifact)
 	const path = yield* Path.Path
 	const contractPath = path.resolveWithin(
-		deployment.artifact.directory,
+		contractArtifact.directory,
 		deployment.contract,
 	)
 	if (Option.isNone(contractPath))
@@ -158,6 +167,13 @@ const load = Effect.fnUntraced(function* (
 		Contract.fromModule(contractModule),
 		() => UnitFault.make({ detail: "Expected a unit contract export" }),
 	)
+	const invalid = Contract.check(contract)
+	if (Option.isSome(invalid))
+		return yield* UnitFault.make({
+			detail: "Unit contract declarations are invalid",
+			cause: Cause.fail(invalid.value),
+		})
+
 	yield* runtime.emit({ _tag: "Progress", stage: "DescribeDecode" })
 	yield* Schema.decodeEffect(contract.config)(resolution.input)
 	const implementation = yield* Artifact.implementation(deployment.artifact)
@@ -173,10 +189,10 @@ const load = Effect.fnUntraced(function* (
 		overlap: plugin.overlap,
 		members: 1,
 		requires: Array.map(contract.inject, (s) =>
-			serviceDescription(s, deployment.artifact.identity.digest),
+			serviceDescription(s, contractArtifact.identity.digest),
 		),
 		provides: Array.map(contract.provides, (s) =>
-			serviceDescription(s, deployment.artifact.identity.digest),
+			serviceDescription(s, contractArtifact.identity.digest),
 		),
 		probes: [],
 	}
@@ -190,6 +206,70 @@ const metadata = Effect.fnUntraced(function* (
 	const loaded = yield* load(runtime, command)
 	yield* Ref.set(runtime.metadata, Option.some(loaded))
 	return loaded
+})
+const diagnostic = Effect.fnUntraced(function* (
+	runtime: UnitRuntime,
+	cause: Cause.Cause<unknown>,
+) {
+	const encoded = yield* Schema.encodeEffect(Wire.Cause)(cause)
+	yield* runtime.emit({ _tag: "Diagnostic", cause: encoded })
+}, Effect.orDie)
+const startNetwork = Effect.fnUntraced(function* (
+	runtime: UnitRuntime,
+	loaded: Metadata,
+) {
+	const router = yield* Routing.make(loaded.contract.inject).pipe(
+		Scope.provide(runtime.scope),
+	)
+	yield* Ref.set(runtime.router, Option.some(router))
+	if (loaded.contract.provides.length === 0) return Option.none<Wire.Endpoint>()
+	const server = yield* Network.provider(loaded.contract.provides, (cause) =>
+		diagnostic(runtime, cause),
+	).pipe(Scope.provide(runtime.scope))
+	yield* Ref.set(runtime.provider, Option.some(server))
+	return Option.some(server.endpoint)
+})
+const imports = (loaded: Metadata, router: Routing.Router) =>
+	Plugin.make({
+		name: loaded.contract.name + "/imports",
+		apply: () =>
+			Effect.forEach(
+				loaded.contract.inject,
+				(service) => service.publish(router),
+				{ discard: true },
+			),
+	})
+const dependencyKey = (value: Plugin.Dependency): string =>
+	value instanceof Plugin.Optional ? value.key.key : value.key
+const exports = (loaded: Metadata, provider: Network.Provider) =>
+	Plugin.make({
+		name: loaded.contract.name + "/exports",
+		inject: Array.dedupeWith<Plugin.Dependency>(
+			[
+				...loaded.plugin.inject,
+				...Array.map(loaded.plugin.provides, (p) =>
+					"operations" in p ? p.key : p,
+				),
+				...Array.map(loaded.contract.provides, (s) => s.key),
+			],
+			(a, b) => dependencyKey(a) === dependencyKey(b),
+		),
+		apply: () => Plugin.fork(provider.serve).pipe(Effect.asVoid),
+	})
+const support = Effect.fnUntraced(function* (
+	runtime: UnitRuntime,
+	services: Context.Context<Graft.Graft>,
+	plugin: Plugin.Plugin,
+) {
+	const member = yield* Graft.plugin(plugin, undefined).pipe(
+		Effect.provideContext(services),
+		Scope.provide(runtime.scope),
+	)
+	yield* Ref.update(
+		runtime.support,
+		HashMap.set(plugin.name ?? "transport", member),
+	)
+	return member
 })
 const serve = Effect.fnUntraced(function* (
 	runtime: UnitRuntime,
@@ -208,10 +288,23 @@ const serve = Effect.fnUntraced(function* (
 		),
 	)
 	const services = yield* Layer.buildWithScope(platform, runtime.scope)
+	const router = yield* Ref.get(runtime.router).pipe(
+		Effect.flatMap(Effect.fromOption),
+	)
+	yield* router.install(command.token, command.view ?? { routes: [] })
+	yield* router.activate(command.token)
+	if (loaded.contract.inject.length > 0) {
+		const importer = yield* support(runtime, services, imports(loaded, router))
+		yield* active(importer)
+	}
 	const member = yield* Graft.plugin(loaded.plugin, loaded.input).pipe(
 		Effect.provideContext(services),
 		Scope.provide(runtime.scope),
 	)
+	const provider = yield* Ref.get(runtime.provider)
+	if (Option.isSome(provider))
+		yield* support(runtime, services, exports(loaded, provider.value))
+
 	yield* Ref.set(runtime.member, Option.some(member))
 	yield* Stream.runForEach(member.state, (state) =>
 		state._tag === "Failed"
@@ -221,22 +314,31 @@ const serve = Effect.fnUntraced(function* (
 			: Effect.void,
 	).pipe(Effect.forkIn(runtime.scope))
 })
-const ready = Effect.fnUntraced(function* (runtime: UnitRuntime) {
-	const member = yield* Ref.get(runtime.member).pipe(
-		Effect.flatMap(Effect.fromOption),
-	)
-	yield* Stream.runHead(
+const active = Effect.fnUntraced(function* (member: Fork.Fork) {
+	const state = yield* Stream.runHead(
 		member.state.pipe(
 			Stream.filter(
 				(state) => state._tag === "Active" || state._tag === "Failed",
 			),
-			Stream.mapEffect((state) =>
-				state._tag === "Failed"
-					? UnitFault.make({ detail: "Unit member failed", cause: state.cause })
-					: Effect.void,
-			),
 		),
 	)
+	if (Option.isNone(state))
+		return yield* UnitFault.make({
+			detail: "Unit member ended before readiness",
+		})
+	if (state.value._tag === "Failed")
+		return yield* UnitFault.make({
+			detail: "Unit member failed",
+			cause: state.value.cause,
+		})
+})
+const ready = Effect.fnUntraced(function* (runtime: UnitRuntime) {
+	const member = yield* Ref.get(runtime.member).pipe(
+		Effect.flatMap(Effect.fromOption),
+	)
+	yield* active(member)
+	const components = yield* Ref.get(runtime.support)
+	yield* Effect.forEach(HashMap.values(components), active, { discard: true })
 })
 const stop = Effect.fnUntraced(function* (runtime: UnitRuntime) {
 	yield* runtime.emit({ _tag: "Progress", stage: "StopScope" })
@@ -257,8 +359,9 @@ const perform = Effect.fnUntraced(function* (
 	| Schema.SchemaError
 	| Artifact.ArtifactError
 	| Cause.NoSuchElementError
-	| Fork.ProbeError,
-	FileSystem.FileSystem | Path.Path | Digest.Digest
+	| Fork.ProbeError
+	| Socket.SocketError,
+	FileSystem.FileSystem | Path.Path | Digest.Digest | SecureRandom.SecureRandom
 > {
 	if (
 		command.token.term === 0 &&
@@ -273,11 +376,15 @@ const perform = Effect.fnUntraced(function* (
 				_tag: "Described",
 				value: (yield* metadata(runtime, command)).description,
 			}
-		case "Start":
+		case "Start": {
+			const loaded = yield* metadata(runtime, command)
+			const endpoint = yield* startNetwork(runtime, loaded)
 			return {
 				_tag: "Started",
-				value: (yield* metadata(runtime, command)).description,
+				value: loaded.description,
+				...(Option.isSome(endpoint) ? { endpoint: endpoint.value } : {}),
 			}
+		}
 		case "Serve":
 			yield* serve(runtime, command)
 			return { _tag: "Succeeded" }
@@ -297,16 +404,35 @@ const perform = Effect.fnUntraced(function* (
 		}
 		case "Install":
 			yield* ready(runtime)
+			const router = yield* Ref.get(runtime.router).pipe(
+				Effect.flatMap(Effect.fromOption),
+			)
+			yield* router.install(command.token, command.view ?? { routes: [] })
 			yield* Ref.update(
 				runtime.views,
-				HashMap.set(command.token.view, command.token),
+				HashMap.set(
+					`${command.token.change}/${command.token.view}`,
+					command.token,
+				),
 			)
 			return { _tag: "Succeeded" }
 		case "Activate": {
 			const installed = yield* Ref.get(runtime.views)
-			if (!HashMap.has(installed, command.token.view))
+			if (
+				!HashMap.has(installed, `${command.token.change}/${command.token.view}`)
+			)
 				return yield* UnitFault.make({ detail: "View was not installed" })
-			yield* Ref.set(runtime.active, Option.some(command.token))
+			const router = yield* Ref.get(runtime.router).pipe(
+				Effect.flatMap(Effect.fromOption),
+			)
+			yield* router.activate(command.token)
+			return { _tag: "Succeeded" }
+		}
+		case "Discard": {
+			const router = yield* Ref.get(runtime.router).pipe(
+				Effect.flatMap(Effect.fromOption),
+			)
+			yield* router.discard(command.token)
 			return { _tag: "Succeeded" }
 		}
 		case "Stop":
@@ -384,9 +510,11 @@ const main = Effect.gen(function* () {
 		initial: yield* Ref.make(Option.none<Wire.Command>()),
 		metadata: yield* Ref.make(Option.none<Metadata>()),
 		member: yield* Ref.make(Option.none<Fork.Fork>()),
+		support: yield* Ref.make(HashMap.empty<string, Fork.Fork>()),
+		provider: yield* Ref.make(Option.none<Network.Provider>()),
+		router: yield* Ref.make(Option.none<Routing.Router>()),
 		scope: yield* Scope.fork(owner),
-		views: yield* Ref.make(HashMap.empty<number, Wire.Token>()),
-		active: yield* Ref.make(Option.none<Wire.Token>()),
+		views: yield* Ref.make(HashMap.empty<string, Wire.Token>()),
 		stopped: yield* Deferred.make<void>(),
 		commands: yield* FiberMap.make<string, void, never>(),
 		replies: yield* Ref.make(HashMap.empty<string, Wire.Report>()),
@@ -404,6 +532,10 @@ const main = Effect.gen(function* () {
 export const run = () =>
 	NodeRuntime.runMain(
 		main.pipe(
-			Effect.provide(Layer.merge(NodeServices.layer, Digest.layerWebCrypto)),
+			Effect.provide([
+				NodeServices.layer,
+				Digest.layerWebCrypto,
+				SecureRandom.layerWebCrypto,
+			]),
 		),
 	)

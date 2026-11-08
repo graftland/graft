@@ -25,35 +25,56 @@ export const operation = <
 	rpc: Rpc.Rpc<Tag, Payload, Success, Error, Middleware, Requires>,
 ): Rpc.Rpc<Tag, Payload, Success, Error, Middleware, Requires> => {
 	if (Option.isSome(Context.getOption(rpc.annotations, Identity)))
-		throw new Error("An RPC operation already has an identity")
-	return rpc.annotate(
-		Identity,
-		Plugin.OperationIdentity.make({ name, version }),
-	)
+		return rpc.annotate(Invalid, "AlreadyDeclared")
+	return rpc.annotate(Identity, Object.freeze({ name, version }))
 }
 
 const key = (identity: Plugin.OperationIdentity) =>
 	`${identity.name}@${identity.version}`
 
-/** Extracts declared identities; every operation in a service must have one. */
+export interface OperationProblem {
+	readonly reason:
+		| "MissingIdentity"
+		| "AlreadyDeclared"
+		| "InvalidIdentity"
+		| "DuplicateIdentity"
+	readonly tag: string
+}
+class Invalid extends Context.Service<Invalid, "AlreadyDeclared">()(
+	"@graftland/plugin-remote/internal/operations/Invalid",
+) {}
+export const problem = (rpc: Rpc.Any): Option.Option<OperationProblem> => {
+	if (Option.isSome(Context.getOption(rpc.annotations, Invalid)))
+		return Option.some({ tag: rpc._tag, reason: "AlreadyDeclared" })
+	const value = identity(rpc)
+	if (Option.isNone(value))
+		return Option.some({ tag: rpc._tag, reason: "MissingIdentity" })
+	const id = value.value
+	return /^\S+$/.test(id.name) &&
+		Number.isSafeInteger(id.version) &&
+		id.version > 0
+		? Option.none()
+		: Option.some({ tag: rpc._tag, reason: "InvalidIdentity" })
+}
+/** Reads declared metadata; the unit's declaration check reports missing or invalid identities. */
 export const identities = (
 	group: Pick<RpcGroup.RpcGroup<Rpc.Any>, "requests">,
-): ReadonlyArray<Plugin.OperationIdentity> => {
-	const operations = Array.map(
-		Array.fromIterable(group.requests.values()),
-		(rpc) => {
-			const identity = Context.getOption(rpc.annotations, Identity)
-			if (Option.isNone(identity))
-				throw new Error(
-					`RPC "${rpc._tag}" is missing a contract operation identity`,
-				)
-			return identity.value
-		},
+): ReadonlyArray<Plugin.OperationIdentity> =>
+	Array.flatMap(Array.fromIterable(group.requests.values()), (rpc) =>
+		Option.toArray(identity(rpc)),
 	)
-	if (
-		HashSet.size(HashSet.fromIterable(Array.map(operations, key))) !==
-		operations.length
+export const check = (
+	group: Pick<RpcGroup.RpcGroup<Rpc.Any>, "requests">,
+): Option.Option<OperationProblem> => {
+	const invalid = Array.findFirst(
+		Array.flatMap(Array.fromIterable(group.requests.values()), (rpc) =>
+			Option.toArray(problem(rpc)),
+		),
+		() => true,
 	)
-		throw new Error("Operation identities must be unique within a service")
-	return operations
+	if (Option.isSome(invalid)) return invalid
+	const ids = identities(group)
+	return HashSet.size(HashSet.fromIterable(Array.map(ids, key))) === ids.length
+		? Option.none()
+		: Option.some({ tag: "", reason: "DuplicateIdentity" })
 }

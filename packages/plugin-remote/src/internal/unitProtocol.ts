@@ -21,6 +21,7 @@ export const Artifact = Schema.Struct({
 })
 export const Deployment = Schema.Struct({
 	artifact: Artifact,
+	contractArtifact: Schema.optionalKey(Artifact),
 	contract: Schema.String,
 	input: Schema.Json,
 	runner: Schema.optionalKey(
@@ -39,6 +40,7 @@ export const Resolved = Schema.Struct({
 	environment: Schema.String,
 })
 export const Binding = Schema.Struct({
+	unary: Schema.Boolean,
 	key: Schema.String,
 	operations: Schema.Array(
 		Schema.Struct({
@@ -59,6 +61,25 @@ export const Description = Schema.Struct({
 	provides: Schema.Array(Binding),
 	probes: Schema.Array(Schema.String),
 })
+export const Endpoint = Schema.Struct({
+	host: Schema.String,
+	port: Schema.Int,
+	credential: Schema.String,
+})
+export type Endpoint = typeof Endpoint.Type
+export const BindingRoute = Schema.Struct({
+	id: Schema.String,
+	consumer: Schema.String,
+	provider: Schema.String,
+	service: Schema.String,
+	unit: Schema.String,
+	incarnation: Schema.String,
+	term: Schema.Int,
+	endpoint: Endpoint,
+	version: Schema.Int,
+})
+export const RouteView = Schema.Struct({ routes: Schema.Array(BindingRoute) })
+export type RouteView = typeof RouteView.Type
 export const Command = Schema.Struct({
 	id: Schema.String,
 	kind: Schema.Literals([
@@ -71,6 +92,7 @@ export const Command = Schema.Struct({
 		"Probe",
 		"Install",
 		"Activate",
+		"Discard",
 		"Stop",
 		"Terminate",
 		"ArmTimer",
@@ -82,6 +104,7 @@ export const Command = Schema.Struct({
 	target: Target,
 	resolution: Schema.optionalKey(Resolved),
 	description: Schema.optionalKey(Description),
+	view: Schema.optionalKey(RouteView),
 	probes: Schema.optionalKey(Schema.Array(Schema.String)),
 })
 export type Command = typeof Command.Type
@@ -95,7 +118,10 @@ export const Report = Schema.Union([
 	Schema.TaggedStruct("Succeeded", {}),
 	Schema.TaggedStruct("Resolved", { value: Resolved }),
 	Schema.TaggedStruct("Described", { value: Description }),
-	Schema.TaggedStruct("Started", { value: Description }),
+	Schema.TaggedStruct("Started", {
+		value: Description,
+		endpoint: Schema.optionalKey(Endpoint),
+	}),
 	Schema.TaggedStruct("Failed", {
 		cause: Schema.Json,
 		creation: Schema.Literals(["Unknown", "NotStarted"]),
@@ -113,6 +139,7 @@ export const Outgoing = Schema.Union([
 	Schema.TaggedStruct("Initialized", {}),
 	Schema.TaggedStruct("Result", { command: Schema.String, result: Report }),
 	Schema.TaggedStruct("Failure", { cause: Schema.Json }),
+	Schema.TaggedStruct("Diagnostic", { cause: Schema.Json }),
 	Schema.TaggedStruct("Cleanup", { cause: Schema.optionalKey(Schema.Json) }),
 	Schema.TaggedStruct("Progress", { stage: Schema.String }),
 ])

@@ -1,5 +1,6 @@
 import {
 	Array,
+	Option,
 	Predicate,
 	Schema,
 	type Context,
@@ -10,10 +11,15 @@ import type { Rpc, RpcClient, RpcGroup, RpcServer } from "effect/rpc"
 
 import type { Graft, Plugin } from "@graftland/graft"
 
-import * as Control from "./internal/control"
+import * as Operations from "./internal/operations"
 
 export { service } from "./internal/services"
-export { operation, identity } from "./internal/operations"
+export {
+	operation,
+	identity,
+	problem as checkOperation,
+	type OperationProblem,
+} from "./internal/operations"
 export { compareOperations } from "@graftland/graft/Plugin"
 export type { OperationComparison } from "@graftland/graft/Plugin"
 
@@ -28,7 +34,7 @@ export interface Service<R = never, ClientR = never>
 	readonly serve: (port: {
 		readonly serverProtocol: (endpoint: string) => RpcServer.Protocol["Service"]
 	}) => Effect.Effect<never, never, R>
-	/** Private clients and a fork-owned facade for unary transitions. */
+	/** Whether every declared operation is unary. */
 	readonly unary: boolean
 	readonly clients: (port: {
 		readonly clientProtocol: (endpoint: string) => RpcClient.Protocol["Service"]
@@ -81,7 +87,7 @@ export class UndeclaredFailure extends Schema.TaggedError<
 	{ readonly brand: unique symbol }
 >()("UndeclaredFailure", { original: Schema.Defect({ includeStack: true }) }) {}
 
-/** Pure metadata shared by the host and the executable runner bootstrap. */
+/** Pure declarations. The unit validates them before activation. */
 export function make<S extends ConfigSchema, E extends ErrorSchema>(
 	options: Options<S, E> & { readonly error: E },
 ): Contract<S, E>
@@ -91,28 +97,48 @@ export function make<S extends ConfigSchema>(
 export function make<S extends ConfigSchema, E extends ErrorSchema>(
 	options: Options<S, E>,
 ): Contract<S, E | typeof Schema.Never> {
-	// Keys are runtime strings; tuple types cannot distinguish independently created keys.
-	const keys = Array.map(
-		[...(options.inject ?? []), ...(options.provides ?? [])],
-		(service) => service.key.key,
-	)
-	if (
-		Array.dedupe(keys).length !== keys.length ||
-		keys.includes(Control.endpoint)
-	)
-		throw new Error(
-			"Service keys must be unique within a remote contract and must not use the control endpoint",
-		)
-
 	return {
 		...options,
 		error: options.error ?? Schema.Never,
-		inject: options.inject ?? [],
-		provides: options.provides ?? [],
+		inject: Array.copy(options.inject ?? []),
+		provides: Array.copy(options.provides ?? []),
 		[TypeId]: TypeId,
 	}
 }
 
+export interface ContractProblem {
+	readonly reason:
+		| Operations.OperationProblem["reason"]
+		| "DuplicateService"
+		| "UnsupportedCallShape"
+	readonly service: string
+	readonly tag?: string
+}
+/** Fixed metadata validation, performed by Describe before activation. It executes no schema transforms. */
+export const check = (
+	contract: RunnerContract,
+): Option.Option<ContractProblem> => {
+	const services = [...contract.inject, ...contract.provides]
+	const keys = Array.map(services, (s) => s.key.key)
+	if (Array.dedupe(keys).length !== keys.length)
+		return Option.some({ reason: "DuplicateService", service: "" })
+	return Array.reduce(
+		services,
+		Option.none<ContractProblem>(),
+		(found, service) => {
+			if (Option.isSome(found)) return found
+			if (!service.unary)
+				return Option.some({
+					reason: "UnsupportedCallShape",
+					service: service.key.key,
+				})
+			return Option.map(Operations.check(service.group), (problem) => ({
+				...problem,
+				service: service.key.key,
+			}))
+		},
+	)
+}
 /** A contract whose schemas are discovered through a dynamic import. */
 export type RunnerContract = Contract<
 	Schema.Codec<unknown, Schema.Json>,

@@ -12,6 +12,7 @@ export interface ArtifactData {
 	}
 }
 export interface DeploymentData {
+	readonly contractArtifact?: ArtifactData
 	readonly artifact: ArtifactData
 	readonly contract: string
 	readonly input: Schema.Json
@@ -23,12 +24,45 @@ export interface ResolvedInput {
 	readonly environment: string
 }
 export interface BindingDeclaration {
+	readonly unary: boolean
 	readonly key: string
 	readonly operations: ReadonlyArray<{
 		readonly identity: string
 		readonly tag: string
 		readonly provenance: string
 	}>
+}
+export interface FixedBinding {
+	readonly consumer: string
+	readonly provider: string
+	readonly service: string
+}
+export interface Endpoint {
+	readonly host: string
+	readonly port: number
+	readonly credential: string
+}
+export interface BindingRoute extends FixedBinding {
+	readonly id: string
+	readonly unit: string
+	readonly incarnation: string
+	readonly term: number
+	readonly endpoint: Endpoint
+	readonly version: number
+}
+export interface BindingFault {
+	readonly service: string
+	readonly reason:
+		| "MissingBinding"
+		| "MissingOperation"
+		| "ProvenanceMismatch"
+		| "WireTagMismatch"
+		| "DuplicateOperation"
+		| "UnsupportedCallShape"
+		| "MultipleProviders"
+}
+export interface RouteView {
+	readonly routes: ReadonlyArray<BindingRoute>
 }
 export interface Description {
 	readonly artifact: string
@@ -196,6 +230,8 @@ export type Cleanup =
 	| { readonly _tag: "Completed" }
 	| { readonly _tag: "Failed"; readonly cause: Cause.Cause<unknown> }
 export interface Unit {
+	readonly description: Option.Option<Description>
+	readonly endpoint: Option.Option<Endpoint>
 	readonly progress?: string
 	readonly kind: "Inspection" | "Execution"
 	readonly id: string
@@ -299,6 +335,7 @@ export type CommandKind =
 	| "Probe"
 	| "Install"
 	| "Activate"
+	| "Discard"
 	| "Stop"
 	| "Terminate"
 	| "ArmTimer"
@@ -316,7 +353,11 @@ export type Report =
 	| { readonly _tag: "Succeeded" }
 	| { readonly _tag: "Resolved"; readonly value: ResolvedInput }
 	| { readonly _tag: "Described"; readonly value: Description }
-	| { readonly _tag: "Started"; readonly value: Description }
+	| {
+			readonly _tag: "Started"
+			readonly value: Description
+			readonly endpoint?: Endpoint
+	  }
 	| {
 			readonly _tag: "Failed"
 			readonly cause: Cause.Cause<unknown>
@@ -324,6 +365,7 @@ export type Report =
 			readonly delivery?: "Unavailable"
 	  }
 export interface Command {
+	readonly view?: RouteView
 	readonly dispatched: boolean
 	readonly resolution?: ResolvedInput
 	readonly policy?: Policy
@@ -368,6 +410,11 @@ export interface Status {
 	readonly conclusion: Option.Option<Conclusion>
 }
 export interface State {
+	readonly bindings: HashMap.HashMap<string, FixedBinding>
+	readonly bindingConflicts: HashSet.HashSet<string>
+	readonly providerBindings: HashMap.HashMap<string, HashSet.HashSet<string>>
+	readonly consumerBindings: HashMap.HashMap<string, HashSet.HashSet<string>>
+	readonly routes: HashMap.HashMap<string, BindingRoute>
 	readonly authority: string
 	readonly open: boolean
 	readonly now: number
@@ -506,6 +553,7 @@ export type Event =
 	  }
 	| { readonly _tag: "Shutdown"; readonly now: number }
 export type Rejection =
+	| "IncompatibleBinding"
 	| "DescriptionFailed"
 	| "Unauthorized"
 	| "Closing"

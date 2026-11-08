@@ -394,3 +394,69 @@ Final logs are `.cache/phase2-step3-typecheck-final5.log`,
 `phase2-step3-docs-final2.log`. The preceding full run passed 2,280 cases with
 only the same two allowed failures. No check was deliberately interrupted and no
 packed script was invoked directly. Steps 4–7 remain required.
+
+## Step 4: encoded binding and staged installation
+
+The production binding validator and indexes now determine exact operation
+subsets, shared captured-contract provenance, unary shape and wire tags.
+Installation commands target each actual participant incarnation and placement.
+Commit rechecks both cell ownership and binding availability. A failed partial
+installation discards its view once and requires exact native exit from a
+participant whose installation failed to acknowledge; late evidence cannot
+rewrite Stuck.
+
+Interpretations: phase-2.md lines 232–250 requires shared contract provenance
+independently of implementation code; `contractArtifact` captures that shared
+declaration artifact. A unit's fixed import/export bootstrap components belong
+to its single logical plugin member (lines 31–33), and preserve the provider's
+declared local services. A fresh recovery description can validate within the
+original conflict footprint; it cannot expand it (lines 164–165 and 227–230). A
+missing Install acknowledgement retains the responsible participant as an exit
+obligation (fault table, partial-installation row).
+
+Evidence: `binding-core.test.ts` has 13 cases covering I2–I5, I8, I10 and I12,
+including provenance/tag/subset counterexamples, partial and stale
+acknowledgements, install timeout, Stuck and late exit, and revalidation before
+commit. `unit-bindings.test.ts` has 5 native cases: codec transforms, typed
+error prototypes, provider Context/Scope/term, caller-header filtering,
+Worker/Process/runner placement, invalid declaration rejection before execution,
+and an unrelated second binding preserved by a local patch. `contract.test.ts`
+replaces throwing-constructor assertions with 14 pure declaration-validation
+cases. Existing core suite: 78 files / 825 cases before the final
+missing-endpoint case passed.
+
+Red checks exposed double route-version advancement, Discard retry recursion, a
+stale forward-view test helper in recovery, missing participant exit ownership,
+missing provider-local bootstrap services, arbitrary caller headers crossing the
+direct channel, and unavailable participant activation. All are fixed. Typecheck
+also rejected native array helpers, inferred any conditions in a fixture, and
+stale public declarations; these are corrected before final verification. Two
+commands accidentally filtered the nonexistent package `@graftland/core` and
+performed no checks; the correct package `@graftland/graft` was subsequently
+checked. No check has been deliberately interrupted.
+
+A participant receives only routes whose consumer is its own instance. The red
+local-patch assertion caught a provider receiving consumers’ patches; the
+emitted view now filters the already indexed affected routes.
+
+The final Start-envelope red test rejects a serving-provider description without
+its endpoint before Serve; inspection declarations alone cannot create a usable
+route. Full checks are repeated after this change.
+
+### Step 4 final verification
+
+| Check                  | Result                                                                                |
+| ---------------------- | ------------------------------------------------------------------------------------- |
+| Binding acceptance     | 13 reducer cases; 5 native channel cases; 14 contract declaration cases passed        |
+| Existing native faults | 11 passed                                                                             |
+| Typecheck and build    | Passed; 92 entries and 2,599 documentation pages                                      |
+| Root tests             | 312 files / 2,299 cases passed; 45 skipped; only the two permitted benchmark failures |
+| Independent docs       | 25 Node checks and 41 Vitest cases in 21 files passed                                 |
+| Formatting             | 1,205 files, zero changes; staged diff checks passed                                  |
+
+Final logs: `phase2-step4-typecheck-final4.log`,
+`phase2-step4-build-final3.log`, `phase2-step4-test-final3.log`,
+`phase2-step4-docs-final3.log`, `phase2-step4-format-final3.log` under
+`.cache/`. Two preceding full runs passed 2,298 cases with only the same
+permitted failures, before the final endpoint case. No check was interrupted.
+Steps 5–7 remain required.

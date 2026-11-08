@@ -30,24 +30,24 @@ const options = {
 	config: Schema.Struct({}),
 }
 describe("contract endpoint validation", () => {
-	it("rejects duplicate injected service keys at definition time", () => {
-		assert.throws(
-			() =>
-				Contract.make({
-					...options,
-					inject: [service(First, "Shared"), service(First, "Different")],
-				}),
-			"Service keys must be unique",
+	it("rejects duplicate injected service keys during unit declaration checks", () => {
+		const contract = Contract.make({
+			...options,
+			inject: [service(First, "Shared"), service(First, "Different")],
+		})
+		assert.equal(
+			Option.getOrThrow(Contract.check(contract)).reason,
+			"DuplicateService",
 		)
 	})
-	it("rejects duplicate exported service keys at definition time", () => {
-		assert.throws(
-			() =>
-				Contract.make({
-					...options,
-					provides: [service(First, "Shared"), service(First, "Different")],
-				}),
-			"Service keys must be unique",
+	it("rejects duplicate exported service keys during unit declaration checks", () => {
+		const contract = Contract.make({
+			...options,
+			provides: [service(First, "Shared"), service(First, "Different")],
+		})
+		assert.equal(
+			Option.getOrThrow(Contract.check(contract)).reason,
+			"DuplicateService",
 		)
 	})
 	it("allows matching RPC and control tags on separate service endpoints", () => {
@@ -64,27 +64,31 @@ describe("contract endpoint validation", () => {
 				...options,
 				provides: [service(First, tag), service(Second, tag)],
 			})
-			assert.lengthOf(contract.provides, 2)
+			assert.isTrue(Option.isNone(Contract.check(contract)))
 		}
 	})
-	it("rejects a service key repeated across directions", () => {
-		assert.throws(
-			() =>
-				Contract.make({
-					...options,
-					inject: [service(First, "One")],
-					provides: [service(First, "Two")],
-				}),
-			"Service keys must be unique",
+	it("rejects a service key repeated across directions during unit declaration checks", () => {
+		const contract = Contract.make({
+			...options,
+			inject: [service(First, "One")],
+			provides: [service(First, "Two")],
+		})
+		assert.equal(
+			Option.getOrThrow(Contract.check(contract)).reason,
+			"DuplicateService",
 		)
 	})
 	it("allows matching tags in opposite directions", () => {
-		assert.doesNotThrow(() =>
-			Contract.make({
-				...options,
-				inject: [service(First, "Shared")],
-				provides: [service(Second, "Shared")],
-			}),
+		assert.isTrue(
+			Option.isNone(
+				Contract.check(
+					Contract.make({
+						...options,
+						inject: [service(First, "Shared")],
+						provides: [service(Second, "Shared")],
+					}),
+				),
+			),
 		)
 	})
 })
@@ -131,25 +135,40 @@ describe("operation identities", () => {
 		assert.deepEqual(descriptor.operations, [
 			{ name: "@acme/items/read", version: 1 },
 		])
-		assert.throws(
-			() =>
-				Contract.service(First, RpcGroup.make(original), {
-					toHandlers: () => ({ Read: () => Effect.succeed(1) }),
-					fromClient: () => ({}),
-				}),
-			"missing a contract operation identity",
+		const missing = Contract.service(First, RpcGroup.make(original), {
+			toHandlers: () => ({ Read: () => Effect.succeed(1) }),
+			fromClient: () => ({}),
+		})
+		assert.equal(
+			Option.getOrThrow(
+				Contract.check(Contract.make({ ...options, provides: [missing] })),
+			).reason,
+			"MissingIdentity",
 		)
-		assert.throws(
-			() => Contract.operation("@acme/items/other", 2, named),
-			"already has an identity",
+		const repeated = Contract.operation("@acme/items/other", 2, named)
+		assert.equal(
+			Option.getOrThrow(Contract.checkOperation(repeated)).reason,
+			"AlreadyDeclared",
 		)
 	})
-	it("rejects malformed operation names and versions", () => {
+	it("rejects malformed operation names and versions during unit declaration checks", () => {
 		for (const name of ["", "contains whitespace", " padded "])
-			assert.throws(() => Contract.operation(name, 1, Rpc.make("Read")))
+			assert.equal(
+				Option.getOrThrow(
+					Contract.checkOperation(
+						Contract.operation(name, 1, Rpc.make("Read")),
+					),
+				).reason,
+				"InvalidIdentity",
+			)
 		for (const version of [0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY])
-			assert.throws(() =>
-				Contract.operation("@acme/items/read", version, Rpc.make("Read")),
+			assert.equal(
+				Option.getOrThrow(
+					Contract.checkOperation(
+						Contract.operation("@acme/items/read", version, Rpc.make("Read")),
+					),
+				).reason,
+				"InvalidIdentity",
 			)
 	})
 	it("rejects duplicate identities even when wire tags differ", () => {
@@ -157,16 +176,18 @@ describe("operation identities", () => {
 			Contract.operation("@acme/items/read", 1, Rpc.make("First")),
 			Contract.operation("@acme/items/read", 1, Rpc.make("Second")),
 		)
-		assert.throws(
-			() =>
-				Contract.service(First, group, {
-					toHandlers: () => ({
-						First: () => Effect.void,
-						Second: () => Effect.void,
-					}),
-					fromClient: () => ({}),
-				}),
-			"Operation identities must be unique",
+		const descriptor = Contract.service(First, group, {
+			toHandlers: () => ({
+				First: () => Effect.void,
+				Second: () => Effect.void,
+			}),
+			fromClient: () => ({}),
+		})
+		assert.equal(
+			Option.getOrThrow(
+				Contract.check(Contract.make({ ...options, provides: [descriptor] })),
+			).reason,
+			"DuplicateIdentity",
 		)
 	})
 	it("accepts multiple versions of one operation under distinct wire tags", () => {
