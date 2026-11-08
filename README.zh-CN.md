@@ -47,14 +47,16 @@ const hello = Plugin.make({
 ## 为什么选择 Graft
 
 - **热替换。** 不砍树，只换品种。`graft start --watch`
-  把每次保存变成一个变更，只重新部署受影响的配置项。变更失败时，正在运行的配置项保持不变。
+  把每次保存变成一个变更，只重新部署受影响的配置项。变更失败时，内核恢复之前的版本；恢复不了就报告
+  `RecoveryFailed`。
 - **干净卸载。** 每个插件都在自己的 `Scope`
   中运行，它启动的每个 fiber 都有归属。插件消失时，依赖它的插件先停止，然后执行它的 finalizer。失败（包括清理时的失败）也保留完整的
   `Cause`。
 - **在线升级。**
-  替换运行在 Worker 或子进程中的插件，使用它的插件继续运行。候选从不可变制品启动，必须通过探针；新调用进入候选，旧调用排空后终止旧单元。每次升级以
+  替换运行在 Worker 或子进程中的插件，使用它的插件继续运行。候选从不可变制品启动，必须通过变更指定的探针；使用
+  `Overlap` 时，新调用进入候选，旧调用排空后终止旧单元。升级以
   `Accepted`、`Aborted`、`Recovered`、`RecoveryFailed` 或 `Stuck`
-  结束，见[转换](https://graftland.github.io/graft/zh-cn/transitions/)。
+  结束；需要发布记录器记录的升级会等待确认，确认之前显示为记录受阻，见[变更](https://graftland.github.io/graft/zh-cn/transitions/)。
 - **依赖受检查。** 服务是 Effect 的 `Context` 键，由 `Layer`
   或其他插件提供。插件在 `inject` 中声明依赖，由编译器检查。
 
@@ -114,7 +116,7 @@ Graft 的插件模型借鉴自
 
 ## 方向
 
-在线升级目前支持运行在 Worker 和子进程中的插件；runner 放置、状态交接和发布管理是下一步。设计是公开的：[价值定义](design/value.md)与[目标架构](design/upgrades.md)。本 README 只描述已经实现的能力。
+在线升级目前支持运行在 Worker、子进程和 runner 中的插件（runner 只能重启，不能重叠）；状态交接与会话续连是下一步。设计是公开的：[价值定义](design/value.md)与[架构](design/architecture.md)。本 README 只描述已经实现的能力。
 
 ## 参与贡献
 

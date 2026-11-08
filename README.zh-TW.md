@@ -47,14 +47,16 @@ const hello = Plugin.make({
 ## 為什麼選擇 Graft
 
 - **熱替換。** 不砍樹，只換品種。`graft start --watch`
-  把每次儲存變成一個變更，只重新部署受影響的項目。變更失敗時，執行中的項目維持不變。
+  把每次儲存變成一個變更，只重新部署受影響的項目。變更失敗時，核心復原先前的版本；無法復原就回報
+  `RecoveryFailed`。
 - **乾淨卸載。** 每個外掛都在自己的 `Scope`
   中執行，它啟動的每個 fiber 都有歸屬。外掛消失時，相依於它的外掛先停止，然後執行它的 finalizer。失敗（包括清理時的失敗）也保留完整的
   `Cause`。
 - **線上升級。**
-  取代執行在 Worker 或子行程中的外掛，使用它的外掛繼續執行。候選從不可變製品啟動，必須通過探針；新呼叫進入候選，舊呼叫排空後終止舊單元。每次升級以
+  取代執行在 Worker 或子行程中的外掛，使用它的外掛繼續執行。候選從不可變製品啟動，必須通過變更指定的探針；使用
+  `Overlap` 時，新呼叫進入候選，舊呼叫排空後終止舊單元。升級以
   `Accepted`、`Aborted`、`Recovered`、`RecoveryFailed` 或 `Stuck`
-  結束，見[轉換](https://graftland.github.io/graft/zh-tw/transitions/)。
+  結束；需要發布記錄器記錄的升級會等待確認，確認之前顯示為記錄受阻，見[變更](https://graftland.github.io/graft/zh-tw/transitions/)。
 - **相依受檢查。** 服務是 Effect 的 `Context` 鍵，由 `Layer`
   或其他外掛提供。外掛在 `inject` 中宣告相依，由編譯器檢查。
 
@@ -114,7 +116,7 @@ Graft 的外掛模型借鑑自
 
 ## 方向
 
-線上升級目前支援執行在 Worker 與子行程中的外掛；runner 放置、狀態交接與發布管理是下一步。設計是公開的：[價值定義](design/value.md)與[目標架構](design/upgrades.md)。本 README 只描述已經實作的能力。
+線上升級目前支援執行在 Worker、子行程與 runner 中的外掛（runner 只能重新啟動，不能重疊）；狀態交接與工作階段續連是下一步。設計是公開的：[價值定義](design/value.md)與[架構](design/architecture.md)。本 README 只描述已經實作的能力。
 
 ## 參與貢獻
 

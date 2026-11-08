@@ -70,13 +70,13 @@ keep it current. Commit it.
 `graft start --watch` turns each save into a Change. Without `--watch`, restart
 after changing configuration or code.
 
-| Change                                                         | Result                                                                  |
-| -------------------------------------------------------------- | ----------------------------------------------------------------------- |
-| An entry's `config`, or code in its package                    | Redeployed in a new generation; other entries and sessions keep running |
-| Entry added / removed or disabled                              | Deployed / removed                                                      |
-| Saves within 100 ms, or made while a Change runs               | Coalesced; only the newest is applied next                              |
-| Invalid YAML, a failed import or a failed trial                | Logged; running entries stay as they are; the next save tries again     |
-| `--env-file`, `--env-dir`, installed packages (`node_modules`) | Not watched: restart                                                    |
+| Change                                                         | Result                                                                                    |
+| -------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| An entry's `config`, or code in its package                    | Redeployed in a new generation; other entries and sessions keep running                   |
+| Entry added / removed or disabled                              | Deployed / removed                                                                        |
+| Saves within 100 ms, or made while a Change runs               | Coalesced; only the newest is applied next                                                |
+| Invalid YAML, a failed import or a failed trial                | Logged; the previous version is restored (or `RecoveryFailed`); the next save tries again |
+| `--env-file`, `--env-dir`, installed packages (`node_modules`) | Not watched: restart                                                                      |
 
 A module's artifact is its whole package, so an edit redeploys every entry from
 that package. Give plugins their own packages to redeploy them alone.

@@ -55,7 +55,7 @@ import { Steps } from "@astrojs/starlight/components"
 
 4. 在应用运行期间修改代码。把 `src/ticker.ts` 中的 `"3 seconds"` 改为
    `"1 second"` 并保存。`tsc` 重新构建
-   `dist`，Graft 把新代码作为一个变更部署。三个示例插件在同一个包里，所以三个都会重启；想让某个插件单独重载，就给它独立的包。如果新代码启动失败，正在运行的配置项保持不变，Graft 会把错误记录到日志中。
+   `dist`，Graft 把新代码作为一个变更部署。三个示例插件在同一个包里，所以三个都会重启；想让某个插件单独重载，就给它独立的包。如果新代码启动失败，Graft 会把错误记录到日志中，并恢复之前的代码。
 
 5. 拿走一个依赖。给 `greeter` 配置项加上 `disabled: true` 并保存。`ticker`
    仍然需要

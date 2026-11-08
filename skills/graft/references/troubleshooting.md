@@ -28,7 +28,7 @@ accepted.
 | Handler never called                            | The dispatcher is in another realm, a filter excludes it, or its plugin stopped                   |
 | Handler sees the wrong service or setting       | Handlers use their own plugin's context, not the dispatcher's; pass data as event arguments       |
 | Entry rejected with `DeploymentUnsupported`     | It uses `inject`, `isolate` or `intercept`, which `graft start` rejects; embed the loader instead |
-| A save under `--watch` changes nothing          | The Change failed: read the logged cause. Running entries stay as they were                       |
+| A save under `--watch` changes nothing          | The Change failed: read the logged cause; the previous version was restored or `RecoveryFailed`   |
 | Edits to a module have no effect                | The built JavaScript was not rebuilt, the edit is in `node_modules`, or `--watch` is off          |
 | Editing one plugin redeploys others             | They share its package: a module's artifact is its whole package                                  |
 | Shutdown warns about a 10-second drain          | Two plugins wait for each other; look for a cycle through services or events                      |
@@ -37,20 +37,20 @@ accepted.
 
 ## Errors
 
-| Error                                                  | Raised when                                           | Fix                                                              |
-| ------------------------------------------------------ | ----------------------------------------------------- | ---------------------------------------------------------------- |
-| `SchemaError`                                          | The input does not decode                             | Fix the input; the fork stays `Failed` until it changes          |
-| `ServiceConflict`                                      | Another fork publishes the key in the realm           | Unload the other provider, or isolate one of them                |
-| `ServiceConflict` `SelfDependency` / `DependencyCycle` | Publishing would restart the publisher                | Publish under a separate key from the one injected               |
-| `Fork.CleanupError`                                    | Cleanup failed on `dispose` or scope close            | Read `cause`: the original failures are kept                     |
-| `UnregisteredReference`                                | A `graft.yml` intercept key is not registered         | Register it with `Intercept.make` in the host                    |
-| `InvalidIntercept`                                     | An intercept value fails its schema                   | Fix the value                                                    |
-| `CyclicConfig` / `InvalidOperation`                    | A cycle in a config value / in the entry tree         | Remove the cycle                                                 |
-| `StoreError`                                           | Saving a loader edit failed; the file is unchanged    | Read the cause; the file may have changed concurrently           |
-| `ModuleNotFound` / `ModuleInvalid`                     | An entry's `name` did not resolve / exports no plugin | Fix the name or the module's default (or `plugin`) export        |
-| `DeploymentUnsupported`                                | `graft start` met `inject`, `isolate` or `intercept`  | Drop the field, or embed the loader                              |
-| `DeploymentFailed`                                     | A Change from `graft start` did not conclude Accepted | Read `outcome` and `cause`; running entries stay as they were    |
-| `Contract.UndeclaredFailure`                           | A remote plugin failed with an undeclared error       | Declare it in the contract's `error`, or handle it in the plugin |
+| Error                                                  | Raised when                                           | Fix                                                                  |
+| ------------------------------------------------------ | ----------------------------------------------------- | -------------------------------------------------------------------- |
+| `SchemaError`                                          | The input does not decode                             | Fix the input; the fork stays `Failed` until it changes              |
+| `ServiceConflict`                                      | Another fork publishes the key in the realm           | Unload the other provider, or isolate one of them                    |
+| `ServiceConflict` `SelfDependency` / `DependencyCycle` | Publishing would restart the publisher                | Publish under a separate key from the one injected                   |
+| `Fork.CleanupError`                                    | Cleanup failed on `dispose` or scope close            | Read `cause`: the original failures are kept                         |
+| `UnregisteredReference`                                | A `graft.yml` intercept key is not registered         | Register it with `Intercept.make` in the host                        |
+| `InvalidIntercept`                                     | An intercept value fails its schema                   | Fix the value                                                        |
+| `CyclicConfig` / `InvalidOperation`                    | A cycle in a config value / in the entry tree         | Remove the cycle                                                     |
+| `StoreError`                                           | Saving a loader edit failed; the file is unchanged    | Read the cause; the file may have changed concurrently               |
+| `ModuleNotFound` / `ModuleInvalid`                     | An entry's `name` did not resolve / exports no plugin | Fix the name or the module's default (or `plugin`) export            |
+| `DeploymentUnsupported`                                | `graft start` met `inject`, `isolate` or `intercept`  | Drop the field, or embed the loader                                  |
+| `DeploymentFailed`                                     | A Change from `graft start` did not conclude Accepted | Read `outcome` and `cause`: `Recovered` brought the old version back |
+| `Contract.UndeclaredFailure`                           | A remote plugin failed with an undeclared error       | Declare it in the contract's `error`, or handle it in the plugin     |
 
 The full list is on the docs errors page:
 `https://graftland.github.io/graft/errors/`.
