@@ -86,6 +86,10 @@ exists, rather than treating A:605–612 as a fresh code audit.
 
 ## Open decisions for the owner
 
+**Status (2026-11-08):** O1–O6 are accepted as recommended. The O1 child
+co-location restriction and the O6 temporary `start` boundary are recorded as
+deliberate Phase 3 narrowings, to be lifted or confirmed in Phase 4.
+
 Architecture rules determine the invariants below but do not specify these
 mechanisms or resolve these phase boundaries. Approve or replace each
 recommendation before its dependent step. A replacement must update the affected
