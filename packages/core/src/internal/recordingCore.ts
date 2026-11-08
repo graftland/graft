@@ -20,11 +20,14 @@ import type {
 	RecordingSignal,
 	RecordingStatus,
 	RecordStage,
+	RecoveredRecords,
 	Rejection,
+	RequestIdentity,
 	State,
 	Unit,
 	Working,
 } from "./decisionState"
+import * as Executions from "./executionState"
 
 /** Record deliveries are kernel-owned commands that belong to no Change. */
 export const commands = "$recording"
@@ -42,6 +45,36 @@ export const policy = (options: RecordingDeclaration): RecordingPolicy => ({
 	scope: HashSet.fromIterable(options.scope),
 	maxRecords: Math.max(stages.length, options.maxRecords ?? 64),
 })
+const same = (a: RecordingPolicy, b: RecordingPolicy): boolean =>
+	a.recorder === b.recorder &&
+	a.instance === b.instance &&
+	a.maxRecords === b.maxRecords &&
+	HashSet.size(a.scope) === HashSet.size(b.scope) &&
+	HashSet.isSubset(a.scope, b.scope)
+/**
+ * Sets the recording role when the deployment had none. Declaring the same role again
+ * is accepted; a different one is refused, since records already owed would lose their owner.
+ */
+export const declare = (
+	s: Working,
+	declaration: RecordingDeclaration,
+): Working => {
+	const next = policy(declaration)
+	return Option.match(s.recording, {
+		onNone: () => ({ ...s, recording: Option.some(next) }),
+		onSome: (current) =>
+			same(current, next)
+				? s
+				: {
+						...s,
+						reply: {
+							_tag: "Rejected",
+							reason: "RecordingConflict",
+							conflicts: HashSet.make(current.instance),
+						},
+					},
+	})
+}
 export const dutyId = (change: string, stage: RecordStage): string =>
 	`${change}/${stage}`
 /** A Change needs recording when its full closure contains an instance in the policy scope. */
@@ -141,6 +174,8 @@ const content = (duty: Omit<RecordDuty, "content">): string =>
 				),
 				duty.payload.phase,
 				duty.payload.diagnostic,
+				Option.getOrElse(duty.payload.key, () => ""),
+				duty.payload.request,
 			],
 			part,
 		),
@@ -183,6 +218,73 @@ const deliver = (s: Working, duty: RecordDuty): Working => {
 		emitted: Arr.append(s.emitted, command),
 	}
 }
+/** Canonical text of a normalized request; equal requests give equal text in every run. */
+export const requestText = (identity: RequestIdentity): string =>
+	Arr.join(
+		Arr.map(
+			[
+				identity.mode,
+				identity.strategy,
+				identity.completion,
+				Arr.join(
+					Arr.map(Arr.sort(Arr.copy(identity.probes), stringOrder), part),
+					"",
+				),
+				`${identity.trial}`,
+				Arr.join(
+					Arr.map(
+						[
+							identity.budget.total,
+							identity.budget.startup,
+							identity.budget.probe,
+							identity.budget.drain,
+							identity.budget.stop,
+							identity.budget.terminate,
+						],
+						(n) => part(`${n}`),
+					),
+					"",
+				),
+				Arr.join(
+					Arr.map(identity.operations, (operation) =>
+						part(
+							operation._tag === "Remove"
+								? Arr.join(
+										Arr.map(
+											[
+												"Remove",
+												operation.instance,
+												`${operation.expected ?? ""}`,
+											],
+											part,
+										),
+										"",
+									)
+								: Arr.join(
+										Arr.map(
+											[
+												"Deploy",
+												operation.instance,
+												operation.target.identity,
+												operation.realm ?? "root",
+												Arr.join(Arr.map(operation.colocate ?? [], part), ""),
+												operation.placement?.kind ?? "",
+												operation.placement?.destination ?? "",
+												`${operation.expected ?? ""}`,
+											],
+											part,
+										),
+										"",
+									),
+						),
+					),
+					"",
+				),
+			],
+			part,
+		),
+		"",
+	)
 /** Creates the stage duty once, bound to the current grant; a missing grant leaves it blocked. */
 export const request = (
 	s: Working,
@@ -223,6 +325,9 @@ export const request = (
 			),
 			outcome,
 			facts,
+			key: Option.fromUndefinedOr(c.request.key),
+			request:
+				c.request.identity === undefined ? "" : requestText(c.request.identity),
 			phase: Option.match(c.conclusion, {
 				onNone: () => c.phase,
 				onSome: (conclusion) => conclusion.phase,
@@ -292,11 +397,86 @@ export const register = (
 			incarnation: signal.incarnation,
 		}),
 	}
-	return HashMap.reduce(outstanding(granted), granted, (next, duty) =>
-		duty.unit === signal.unit && duty.incarnation === signal.incarnation
-			? deliver(next, { ...duty, deliveries: duty.deliveries + 1 })
-			: next,
+	const replayed = HashMap.reduce(
+		outstanding(granted),
+		granted,
+		(next, duty) =>
+			duty.unit === signal.unit && duty.incarnation === signal.incarnation
+				? deliver(next, { ...duty, deliveries: duty.deliveries + 1 })
+				: next,
 	)
+	return signal.recovered === undefined || s.recovered
+		? replayed
+		: recover(replayed, signal.recovered)
+}
+/**
+ * Takes over what a durable recorder found from earlier runs: their request keys are
+ * answered from the record, and every Change they left unconcluded gets a concluding
+ * record with the members' facts now and no outcome, since the kernel cannot know it.
+ */
+const recover = (s: Working, recovered: RecoveredRecords): Working => {
+	const earlier = <A extends { readonly run: string }>(
+		items: ReadonlyArray<A>,
+	): ReadonlyArray<A> => Arr.filter(items, (item) => item.run !== s.run)
+	const keyed: Working = {
+		...s,
+		recovered: true,
+		priorKeys: Arr.reduce(earlier(recovered.keys), s.priorKeys, (keys, prior) =>
+			HashMap.set(keys, prior.key, prior),
+		),
+	}
+	return Arr.reduce(earlier(recovered.unfinished), keyed, (next, prior) => {
+		const id = `prior/${prior.run}/${prior.change}/Conclusion`
+		if (HashMap.has(next.records, id)) return next
+		const members = Arr.sort(Arr.copy(prior.members), stringOrder)
+		const draft: Omit<RecordDuty, "content"> = {
+			id,
+			recorder: Option.match(next.recorder, {
+				onNone: () => "",
+				onSome: (g) => g.recorder,
+			}),
+			unit: Option.match(next.recorder, {
+				onNone: () => "",
+				onSome: (g) => g.unit,
+			}),
+			incarnation: Option.match(next.recorder, {
+				onNone: () => "",
+				onSome: (g) => g.incarnation,
+			}),
+			payload: {
+				run: prior.run,
+				change: prior.change,
+				stage: "Conclusion",
+				members,
+				targets: [],
+				outcome: Option.none(),
+				facts: Arr.map(members, (instance) => ({
+					instance,
+					desired: Option.map(
+						HashMap.get(next.graph.declarations, instance),
+						(m) => m.target.identity,
+					),
+					actual: Option.map(
+						Executions.current(next, instance),
+						({ member }) => member.target.identity,
+					),
+					healthy: Executions.healthy(next, instance),
+					attempt: "NotStarted" as const,
+				})),
+				key: Option.none(),
+				request: "",
+				phase: "Interrupted",
+				diagnostic: "The kernel restarted before this Change concluded",
+			},
+			deliveries: 0,
+			acknowledged: false,
+		}
+		const duty: RecordDuty = { ...draft, content: content(draft) }
+		return deliver(
+			{ ...next, recordsOutstanding: next.recordsOutstanding + 1 },
+			duty,
+		)
+	})
 }
 export type Acknowledgement =
 	| { readonly _tag: "Rejected" }

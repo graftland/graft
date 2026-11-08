@@ -51,6 +51,7 @@ Remote 執行單元透過控制通道接受探針請求。描述實作不會執�
 `apply`；就緒檢查等待外掛及其匯出的服務就緒。探針成功、服務就緒和行程確認退出是不同的事實。
 
 `fork.probe`
-存取嵌入式執行環境中該 fork 自己的註冊。Change 會在新代開始服務前、以及對復原的代，執行
-`requirements.probes`
+存取嵌入式執行環境中該 fork 自己的註冊。Change 會在新代開始服務前、以及對復原的代，執行各外掛在
+`deployment` 匯出中宣告的探針（在外掛旁寫
+`export const deployment = { probes: ["health"] }`），以及 `requirements.probes`
 中列出的探針。探針失敗時 Change 中止或復原，並在結局中保留其 cause。參閱[變更](../transitions/#請求欄位)。

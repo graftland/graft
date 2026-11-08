@@ -53,7 +53,8 @@ ordinary `apply`; readiness waits for the plugin and its exported services. A
 successful probe is separate from readiness and from confirmed process exit.
 
 `fork.probe` addresses the fork's own registrations in the embedded runtime. A
-Change runs the probes named in `requirements.probes` on the new generation
-before it serves, and on a recovered generation. A failed probe aborts or
-recovers the Change and keeps its cause in the outcome. See
-[Changes](../transitions/#request-fields).
+Change runs, on the new generation before it serves and on a recovered
+generation, the probes each plugin declares in its `deployment` export
+(`export const deployment = { probes: ["health"] }` beside the plugin) and any
+named in `requirements.probes`. A failed probe aborts or recovers the Change and
+keeps its cause in the outcome. See [Changes](../transitions/#request-fields).

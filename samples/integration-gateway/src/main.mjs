@@ -250,7 +250,7 @@ const upgrade = Effect.fnUntraced(function* (f, client, strategy) {
 		operations: [{ _tag: "Deploy", instance: "integration", target: f.next }],
 		strategy,
 		budget,
-		requirements: { trial: 5000, probes: ["health"] },
+		requirements: { trial: 5000 },
 	})
 	if (strategy === "Restart") {
 		yield* phase(client, handle.id, "Draining")
@@ -378,7 +378,7 @@ export const prove = Effect.fnUntraced(function* (
 		operations: [{ _tag: "Deploy", instance: "integration", target: f.broken }],
 		strategy,
 		budget,
-		requirements: { trial: 5000, probes: ["health"] },
+		requirements: { trial: 5000 },
 	})
 	const failed = yield* failing.await
 	const still = yield* f.u.call("still")

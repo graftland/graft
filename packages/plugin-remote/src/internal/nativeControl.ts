@@ -205,6 +205,9 @@ const message = Effect.fnUntraced(
 					unit: handle.command.unit,
 					incarnation: handle.command.token.incarnation,
 					recorder: frame.recorder,
+					...(frame.recovered === undefined
+						? {}
+						: { recovered: frame.recovered }),
 				})
 				return
 			case "RecordAck":

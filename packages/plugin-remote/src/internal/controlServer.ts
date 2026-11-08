@@ -84,6 +84,9 @@ const execute = Effect.fnUntraced(function* (
 		case "SetPolicy":
 			yield* kernel.setPolicy(request.policy)
 			return { _tag: "Ack" }
+		case "DeclareRecording":
+			yield* kernel.declareRecording(request.declaration)
+			return { _tag: "Ack" }
 		case "Shutdown":
 			yield* kernel.shutdown
 			return { _tag: "Ack" }
