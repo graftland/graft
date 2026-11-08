@@ -49,6 +49,10 @@
 			"source": "./src/Errors.ts",
 			"default": "./dist/Errors.js"
 		},
+		"./Notifications": {
+			"source": "./src/Notifications.ts",
+			"default": "./dist/Notifications.js"
+		},
 		"./Policy": {
 			"source": "./src/Policy.ts",
 			"default": "./dist/Policy.js"
@@ -109,6 +113,7 @@
 			"./Contract": "./dist/Contract.js",
 			"./Control": "./dist/Control.js",
 			"./Errors": "./dist/Errors.js",
+			"./Notifications": "./dist/Notifications.js",
 			"./Policy": "./dist/Policy.js",
 			"./ProcessStdio": "./dist/ProcessStdio.js",
 			"./Publication": "./dist/Publication.js",

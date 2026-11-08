@@ -133,6 +133,42 @@ export default Plugin.make({
 })
 ```
 
+## 通知
+
+通知是事實，沒有業務結果。`Notifications`
+用同一個契約服務裡的兩個一般一元操作傳遞通知，因此綁定、預算與呼叫證據都與其他呼叫相同。
+
+```ts
+import { Context, Schema } from "effect"
+
+import { Notifications } from "@graftland/plugin-remote"
+
+export class OrderPlaced extends Context.Service<
+	OrderPlaced,
+	Notifications.Channel<string>
+>()("app/OrderPlaced") {}
+
+export const orderPlaced = Notifications.service(
+	OrderPlaced,
+	"@app/orders/placed",
+	Schema.String,
+)
+```
+
+發出方提供 `Notifications.emitter()` 回傳的通道並呼叫
+`publish`。訂閱方注入通道，把 `Notifications.subscribe(channel, handle)`
+fork 到自己的 scope 中。
+
+| 規則     | 含義                                                                                        |
+| -------- | ------------------------------------------------------------------------------------------- |
+| 確認     | 訂閱方逐條拉取通知；`handle` 完成後，下一次拉取才確認上一條。                               |
+| 順序     | 只在同一發出方與同一訂閱方的存活會話內保證。會話從下一條發布的通知開始。                    |
+| 結果未知 | 沒有確認的投遞以 `Lost` 回傳，不再重送。之後的通知等它結算後才投遞。                        |
+| 有界佇列 | 每個會話最多保留 `capacity` 條（預設 256）；溢出時丟棄最早的通知，並以 `Dropped` 回報數量。 |
+| 閒置會話 | 超過 12 個等待時長沒有拉取的會話會被丟棄。                                                  |
+
+投遞語義為至多一次，並明確回報結果。跨重啟的重播與去重由領域協定負責。
+
 ## 投影契約操作
 
 [MCP 投影](../../mcp-server/projection/)透過注入的服務公開明確註解的操作。`Contract.identity(rpc)`

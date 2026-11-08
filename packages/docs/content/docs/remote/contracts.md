@@ -142,6 +142,44 @@ export default Plugin.make({
 })
 ```
 
+## Notifications
+
+A notification is a fact without a business result. `Notifications` carries it
+over two ordinary unary operations of one contract service, so it uses the same
+bindings, budgets and call evidence as any other call.
+
+```ts
+import { Context, Schema } from "effect"
+
+import { Notifications } from "@graftland/plugin-remote"
+
+export class OrderPlaced extends Context.Service<
+	OrderPlaced,
+	Notifications.Channel<string>
+>()("app/OrderPlaced") {}
+
+export const orderPlaced = Notifications.service(
+	OrderPlaced,
+	"@app/orders/placed",
+	Schema.String,
+)
+```
+
+The emitter provides the channel from `Notifications.emitter()` and calls
+`publish`. The subscriber injects it and forks
+`Notifications.subscribe(channel, handle)` into its scope.
+
+| Rule            | Meaning                                                                                                                            |
+| --------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| Acknowledgement | The subscriber pulls each notification; its next pull acknowledges the previous one only after `handle` finished.                  |
+| Order           | Kept per emitter and subscriber within one live session. A session starts with the next published notification.                    |
+| Unknown result  | A delivery that was not acknowledged comes back as `Lost` and is never sent again. Later notifications wait until it settles.      |
+| Bounded queue   | Each session keeps at most `capacity` notifications (default 256); overflow drops the oldest and reports `Dropped` with the count. |
+| Idle sessions   | A session not pulled for 12 waits is discarded.                                                                                    |
+
+Delivery is at most once with explicit results. Replay and deduplication across
+restarts belong to the domain protocol.
+
 ## Project contract operations
 
 The [MCP projection](../../mcp-server/projection/) exposes explicitly annotated
