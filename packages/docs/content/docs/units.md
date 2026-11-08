@@ -88,6 +88,17 @@ ownership.
 A clean control connection close is a debug event. Invalid or truncated frames
 remain errors. Neither connection closure nor a frame error proves unit exit.
 
+### Module formats
+
+| Module                                                     | `Worker`                                                 | `Process`                                                      |
+| ---------------------------------------------------------- | -------------------------------------------------------- | -------------------------------------------------------------- |
+| ES module                                                  | Supported                                                | Supported                                                      |
+| CommonJS (`.cjs`, or a package without `"type": "module"`) | Supported                                                | Supported                                                      |
+| Native addon (`.node`)                                     | Only if the addon supports several instances per process | Supported; each unit loads its own copy. Not covered by tests. |
+
+Each reload starts a new unit, so a module's code, cache and addons are loaded
+fresh; nothing from the previous generation stays in memory.
+
 ## Supervision
 
 A failure that no Change owns belongs to the **supervisor**. It restarts within

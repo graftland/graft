@@ -147,10 +147,12 @@ const operation = Effect.fnUntraced(function* (
 		control: options.control,
 	})
 	const key = yield* appliedKey(planned)
+	const directories = artifactDirectories(planned)
 	if (Option.contains(HashMap.get(applied, entry.id), key))
 		return {
 			instance: entry.id,
 			identity: key,
+			directories,
 			operation: Option.none(),
 		}
 	if (names.length > 0) {
@@ -167,6 +169,7 @@ const operation = Effect.fnUntraced(function* (
 	return {
 		instance: entry.id,
 		identity: yield* appliedKey(prepared.target),
+		directories,
 		operation: Option.some<Kernel.DeploymentOperation>({
 			_tag: "Deploy",
 			instance: entry.id,
@@ -176,6 +179,49 @@ const operation = Effect.fnUntraced(function* (
 })
 
 const isBusy = (error: Control.ControlError) => error.reason === "Busy"
+/** Captured directories a target runs from: its module and its environment modules. */
+const artifactDirectories = (target: Kernel.Target): ReadonlyArray<string> => [
+	...Option.toArray(
+		Option.fromUndefinedOr(target.deployment?.artifact.directory),
+	),
+	...Array.map(
+		target.deployment?.environment ?? [],
+		(m) => m.artifact.directory,
+	),
+]
+/**
+ * Removes captured artifacts that no running entry uses once a revision is
+ * accepted, so long editing sessions do not accumulate one copy per save.
+ */
+const prune = Effect.fnUntraced(function* (
+	options: Options,
+	keep: HashSet.HashSet<string>,
+) {
+	const fs = yield* FileSystem.FileSystem
+	const path = yield* Path.Path
+	const store = path.join(path.dirname(options.config), ".graft", "artifacts")
+	const names = yield* fs
+		.readDirectory(store)
+		.pipe(Effect.orElseSucceed(() => []))
+	const kept = HashSet.map(keep, (directory) => path.resolve(directory))
+	yield* Effect.forEach(
+		Array.filter(
+			names,
+			(name) =>
+				String.startsWith("sha256-")(name) &&
+				!HashSet.has(kept, path.resolve(store, name)),
+		),
+		(name) =>
+			fs
+				.remove(path.join(store, name), { recursive: true })
+				.pipe(
+					Effect.catchCause((cause) =>
+						Effect.logWarning("Removing an unused artifact failed", cause),
+					),
+				),
+		{ discard: true },
+	)
+})
 /** Reads the file, prepares changed entries and submits one Change; returns what is now applied. */
 const revise = Effect.fnUntraced(function* (tools: Tools, applied: Applied) {
 	const read = yield* revision(tools.options.config)
@@ -198,6 +244,9 @@ const revise = Effect.fnUntraced(function* (tools: Tools, applied: Applied) {
 	const next: Applied = HashMap.fromIterable(
 		Array.map(planned, (p) => [p.instance, p.identity] as const),
 	)
+	const keep = HashSet.fromIterable(
+		Array.flatMap(planned, (p) => p.directories),
+	)
 	if (operations.length === 0) return next
 	/** A conflicting owner rejects with Busy; the newest revision is kept and submitted again. */
 	const handle = yield* tools.control
@@ -218,6 +267,7 @@ const revise = Effect.fnUntraced(function* (tools: Tools, applied: Applied) {
 	yield* Effect.logInfo(
 		`Deployed ${operations.length} ${operations.length === 1 ? "change" : "changes"}`,
 	)
+	yield* prune(tools.options, keep)
 	return next
 })
 
