@@ -320,9 +320,11 @@ const cleanupBarrier = Effect.fnUntraced(function* () {
 	const run = yield* FiberSet.runtime(callbacks)()
 	const server = yield* Effect.acquireRelease(
 		Effect.sync(() =>
-			createServer((socket) =>
-				socket.once("data", () => run(Deferred.succeed(closing, socket))),
-			),
+			createServer((socket) => {
+				// The unit on the other end may be killed mid-test; its reset is expected.
+				socket.on("error", () => undefined)
+				socket.once("data", () => run(Deferred.succeed(closing, socket)))
+			}),
 		),
 		(server) =>
 			Effect.sync(() => {
