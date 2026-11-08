@@ -169,6 +169,14 @@ const Plan = Schema.Struct({
 })
 const Member = Schema.Struct({
 	instance: Schema.String,
+	startingHealthy: Schema.Boolean,
+	attempt: Schema.Literals([
+		"NotStarted",
+		"Started",
+		"Ready",
+		"Failed",
+		"Stopped",
+	]),
 	reasons: Schema.HashSet(Reason),
 	starting: Schema.Option(Unit.Target),
 	startingVersion: Schema.Int,

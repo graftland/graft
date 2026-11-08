@@ -36,6 +36,7 @@ import type {
 	PendingRestart,
 	Phase,
 	RealmDeclaration,
+	RecordFact,
 	RecordingDeclaration,
 	RecordStage,
 	Rejection,
@@ -151,8 +152,44 @@ const member = (s: State, c: Change, id: string): MemberFact => {
 		HashMap.get(c.plan.desired, id),
 		(member) => member.target,
 	)
+	const attempted = Arr.findFirst(Arr.fromIterable(Attempt.units(c)), (unit) =>
+		Option.isSome(
+			Option.flatMap(HashMap.get(s.units, unit), (u) =>
+				Option.orElse(HashMap.get(u.members, id), () =>
+					HashMap.get(u.memberHistory, id),
+				),
+			),
+		),
+	)
+	const phase = Option.flatMap(attempted, (unit) =>
+		Option.flatMap(HashMap.get(s.units, unit), (u) =>
+			Option.map(
+				Option.orElse(HashMap.get(u.members, id), () =>
+					HashMap.get(u.memberHistory, id),
+				),
+				(m) => m.phase,
+			),
+		),
+	)
 	return {
 		instance: id,
+		startingHealthy: Option.getOrElse(
+			HashMap.get(c.startingHealth, id),
+			() => false,
+		),
+		attempt: Option.match(phase, {
+			onNone: () => "NotStarted" as const,
+			onSome: (p) =>
+				p === "Ready"
+					? "Ready"
+					: p === "Failed"
+						? "Failed"
+						: p === "Stopping" || p === "Stopped"
+							? "Stopped"
+							: p === "NotStarted"
+								? "NotStarted"
+								: "Started",
+		}),
 		reasons: Option.getOrElse(
 			HashMap.get(c.plan.reasons, id),
 			HashSet.empty<SelectionReason>,
@@ -189,6 +226,26 @@ const member = (s: State, c: Change, id: string): MemberFact => {
 const members = (s: State, c: Change): HashMap.HashMap<string, MemberFact> =>
 	HashMap.fromIterable(
 		Arr.map(Arr.fromIterable(c.plan.members), (id) => [id, member(s, c, id)]),
+	)
+/** Member facts in instance order, as a durable record keeps them. */
+const recordFacts = (
+	facts: HashMap.HashMap<string, MemberFact>,
+): ReadonlyArray<RecordFact> =>
+	Arr.map(
+		Arr.sort(
+			Arr.fromIterable(HashMap.keys(facts)),
+			(a: string, b: string): -1 | 0 | 1 => (a < b ? -1 : a > b ? 1 : 0),
+		),
+		(id) => {
+			const fact = Option.getOrThrow(HashMap.get(facts, id))
+			return {
+				instance: fact.instance,
+				desired: Option.map(fact.desired, (t) => t.identity),
+				actual: Option.map(fact.actual, (t) => t.identity),
+				healthy: fact.healthy,
+				attempt: fact.attempt,
+			}
+		},
 	)
 
 export const get = (s: State, id: string): Option.Option<Status> =>
@@ -829,7 +886,13 @@ const conclude = (s: Working, c: Change, outcome: Outcome): Working => {
 	)
 	const recorded =
 		c.recorded && outcome !== "Accepted"
-			? Recording.request(saved, next, "Conclusion", Option.some(outcome))
+			? Recording.request(
+					saved,
+					next,
+					"Conclusion",
+					Option.some(outcome),
+					recordFacts(conclusion.members),
+				)
 			: saved
 	const supervised =
 		outcome === "Accepted"
@@ -1823,6 +1886,12 @@ const reserve = (
 				cell(s, member).version,
 			]),
 		),
+		startingHealth: HashMap.fromIterable(
+			Arr.map(Arr.fromIterable(plan.members), (member) => [
+				member,
+				Executions.healthy(s, member),
+			]),
+		),
 		phase: "Resolving",
 		interrupted: Option.none(),
 		oldUnits,
@@ -1924,7 +1993,13 @@ const gate = (
 	outcome: Option.Option<Outcome>,
 ): Working => {
 	const held: Change = { ...c, recordingGate: Option.some(stage) }
-	return Recording.request(save(s, held), held, stage, outcome)
+	return Recording.request(
+		save(s, held),
+		held,
+		stage,
+		outcome,
+		recordFacts(Option.getOrElse(c.executed, () => members(s, c))),
+	)
 }
 const refuseRecording = (s: Working, plan: GroupPlan): Working =>
 	Option.match(Recording.admission(s, plan), {

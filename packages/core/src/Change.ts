@@ -16,6 +16,7 @@ export type {
 	Status,
 	Conclusion,
 	Outcome,
+	MemberAttempt,
 	MemberFact,
 	Budget,
 	Requirements,

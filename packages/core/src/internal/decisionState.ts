@@ -333,6 +333,14 @@ export interface RecorderGrant {
 	readonly incarnation: string
 }
 /** The immutable payload a recorder stores before acknowledging. */
+/** One member's facts as a durable record keeps them. */
+export interface RecordFact {
+	readonly instance: string
+	readonly desired: Option.Option<string>
+	readonly actual: Option.Option<string>
+	readonly healthy: boolean
+	readonly attempt: MemberAttempt
+}
 export interface RecordPayload {
 	/** The kernel run: Change ids restart at change-1 in every run. */
 	readonly run: string
@@ -341,6 +349,11 @@ export interface RecordPayload {
 	readonly members: ReadonlyArray<string>
 	readonly targets: ReadonlyArray<string>
 	readonly outcome: Option.Option<Outcome>
+	readonly facts: ReadonlyArray<RecordFact>
+	/** A `Phase` name; plain text so records stay readable as the phase list evolves. */
+	readonly phase: string
+	/** The Change's cause, rendered; the full cause stays queryable by Change id while the kernel runs. */
+	readonly diagnostic: string
 }
 /** One outstanding or discharged duty, bound to the owner incarnation that received it. */
 export interface RecordDuty {
@@ -557,8 +570,15 @@ export type Outcome =
 	"Accepted" | "Aborted" | "Recovered" | "RecoveryFailed" | "Stuck"
 export type Settlement =
 	"Unresolved" | "Failed" | "UnknownCleanup" | "Satisfied"
+/** What the Change's attempt did with one member: never started, started, ready, failed or stopped. */
+export type MemberAttempt =
+	"NotStarted" | "Started" | "Ready" | "Failed" | "Stopped"
 export interface MemberFact {
 	readonly instance: string
+	/** Health when the Change was admitted. */
+	readonly startingHealthy: boolean
+	/** The member in this Change's own units. */
+	readonly attempt: MemberAttempt
 	readonly reasons: HashSet.HashSet<SelectionReason>
 	readonly starting: Option.Option<Target>
 	readonly startingVersion: number
@@ -591,6 +611,7 @@ export interface Change {
 	readonly id: string
 	readonly request: Request
 	readonly startingVersions: HashMap.HashMap<string, number>
+	readonly startingHealth: HashMap.HashMap<string, boolean>
 	readonly phase: Phase
 	readonly interrupted: Option.Option<Phase>
 	readonly oldUnits: HashSet.HashSet<string>

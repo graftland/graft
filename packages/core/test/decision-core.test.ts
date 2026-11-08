@@ -315,6 +315,10 @@ describe("production decision core", () => {
 		})
 		assert.strictEqual(conclusion(ended).outcome, "Aborted")
 		assert.strictEqual(conclusion(ended).cause.reasons.length, 3)
+		// Spawn creation was unknown and the unit then exited: the attempt reports a stopped member.
+		const member = oneMember(conclusion(ended))
+		assert.strictEqual(member.attempt, "Stopped")
+		assert.isTrue(member.startingHealthy)
 		assert.isTrue(
 			Equal.equals(
 				Option.getOrThrow(HashMap.get(ended.commands, c.id)).report,

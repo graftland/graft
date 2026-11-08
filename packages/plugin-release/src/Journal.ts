@@ -40,6 +40,19 @@ export const Line = Schema.Struct({
 	members: Schema.Array(Schema.String),
 	targets: Schema.Array(Schema.String),
 	outcome: Schema.NullOr(Schema.String),
+	/** Each member's desired and actual target identity, health and what the attempt did with it. */
+	facts: Schema.Array(
+		Schema.Struct({
+			instance: Schema.String,
+			desired: Schema.NullOr(Schema.String),
+			actual: Schema.NullOr(Schema.String),
+			healthy: Schema.Boolean,
+			attempt: Schema.String,
+		}),
+	),
+	/** The phase the Change was in, and its rendered cause; empty when it has none. */
+	phase: Schema.String,
+	diagnostic: Schema.String,
 })
 export type Line = typeof Line.Type
 const encodeLine = Schema.encodeEffect(Schema.fromJsonString(Line))
@@ -54,6 +67,15 @@ export const fromDuty = (duty: RecordDuty): Line => ({
 	members: duty.payload.members,
 	targets: duty.payload.targets,
 	outcome: Option.getOrNull(duty.payload.outcome),
+	facts: Array.map(duty.payload.facts, (fact) => ({
+		instance: fact.instance,
+		desired: Option.getOrNull(fact.desired),
+		actual: Option.getOrNull(fact.actual),
+		healthy: fact.healthy,
+		attempt: fact.attempt,
+	})),
+	phase: duty.payload.phase,
+	diagnostic: duty.payload.diagnostic,
 })
 
 export interface Recovered {
@@ -81,6 +103,10 @@ export interface Summary {
 	readonly targets: ReadonlyArray<string>
 	readonly outcome: Option.Option<string>
 	readonly concluded: boolean
+	/** Member facts and diagnostic of the latest record: after a crash, which members ran, recovered or stayed down. */
+	readonly facts: Line["facts"]
+	readonly phase: string
+	readonly diagnostic: string
 }
 
 const storage = (detail: string) => (cause: PlatformError.PlatformError) =>
@@ -268,6 +294,7 @@ export const summarize = (
 			(line) => line.stage === "Conclusion",
 		)
 		const first = Array.headNonEmpty(own as [Line, ...Array<Line>])
+		const last = Array.lastNonEmpty(own as [Line, ...Array<Line>])
 		return {
 			run: first.run,
 			change: first.change,
@@ -278,6 +305,9 @@ export const summarize = (
 				Option.fromNullOr(line.outcome),
 			),
 			concluded: Option.isSome(conclusion),
+			facts: last.facts,
+			phase: last.phase,
+			diagnostic: last.diagnostic,
 		}
 	})
 }

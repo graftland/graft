@@ -27,6 +27,17 @@ const line = (
 	members: ["a"],
 	targets: ["a=next"],
 	outcome,
+	facts: [
+		{
+			instance: "a",
+			desired: "next",
+			actual: stage === "Intent" ? "old" : "next",
+			healthy: true,
+			attempt: stage === "Intent" ? "NotStarted" : "Ready",
+		},
+	],
+	phase: stage === "Conclusion" ? "Concluded" : "Resolving",
+	diagnostic: "",
 })
 const scratch = Effect.gen(function* () {
 	const fs = yield* FileSystem.FileSystem
@@ -63,6 +74,11 @@ it.effect(
 				],
 			)
 			assert.isTrue(Option.contains(history[0]!.outcome, "Accepted"))
+			assert.deepStrictEqual(
+				Array.map(history[0]!.facts, (f) => [f.instance, f.actual, f.attempt]),
+				[["a", "next", "Ready"]],
+			)
+			assert.equal(history[1]!.facts[0]!.attempt, "NotStarted")
 			const reopened = yield* Effect.scoped(
 				Effect.flatMap(Journal.open(directory), (journal) => journal.lines),
 			)

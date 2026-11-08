@@ -430,3 +430,24 @@ it("lets the kernel finish shutting down while a concluding record can no longer
 	assert.isTrue(Option.isNone(current.conclusion))
 	assert.isTrue(current.recording.blocked)
 })
+
+it("records each member's facts with the concluding record and reports its starting health (I8, C4)", () => {
+	const gated = atConclusionGate()
+	const fact = Option.getOrThrow(HashMap.get(status(gated).members, "a"))
+	assert.isTrue(fact.startingHealthy)
+	assert.equal(fact.attempt, "Ready")
+	const concluding = duty(gated, "change-1", "Conclusion")
+	assert.deepStrictEqual(
+		Array.map(concluding.payload.facts, (f) => [
+			f.instance,
+			Option.getOrNull(f.desired),
+			Option.getOrNull(f.actual),
+			f.healthy,
+			f.attempt,
+		]),
+		[["a", "a-next", "a-next", true, "Ready"]],
+	)
+	assert.equal(concluding.payload.diagnostic, "")
+	const intent = duty(gated, "change-1", "Intent")
+	assert.equal(intent.payload.facts[0]?.attempt, "NotStarted")
+})

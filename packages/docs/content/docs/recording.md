@@ -84,14 +84,18 @@ export default Plugin.make({
 The journal is append-only segments, one line per record; concurrent Changes
 interleave and nothing is rewritten. `Journal.history(directory)` from
 `@graftland/plugin-release` reads it without a running kernel and returns one
-summary per Change id: stages, members, targets, outcome and `concluded`.
+summary per kernel run and Change id: stages, members, targets, outcome,
+`concluded`, and from the latest record each member's desired and actual target,
+health and what the attempt did (`NotStarted`, `Started`, `Ready`, `Failed`,
+`Stopped`), the phase and the rendered cause.
 
-| Situation                      | Result                                                                                                 |
-| ------------------------------ | ------------------------------------------------------------------------------------------------------ |
-| A record is delivered again    | Acknowledged without a second line. The same id with other content is refused.                         |
-| Writing or syncing fails       | Not acknowledged; the append is retried every second while the unit runs, so the Change stays blocked. |
-| The process stopped mid-write  | A torn final line is removed when the recorder opens the journal; an earlier bad line refuses to open. |
-| The process stopped mid-Change | The Change shows an intent without a conclusion: `concluded` is `false`.                               |
+| Situation                      | Result                                                                                                                                            |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A record is delivered again    | Acknowledged without a second line. The same id with other content is refused.                                                                    |
+| Writing or syncing fails       | Not acknowledged; the next append first cuts back any partial line, and is retried every second while the unit runs, so the Change stays blocked. |
+| The process stopped mid-write  | A torn final line is removed when the recorder opens the journal; an earlier bad line refuses to open.                                            |
+| The process stopped mid-Change | The Change shows an intent without a conclusion: `concluded` is `false`; its member facts show what had run.                                      |
+| The kernel restarted           | Change ids start again at `change-1`; the run id keeps the two apart.                                                                             |
 
 ## When recording is missing
 

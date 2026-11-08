@@ -1,5 +1,12 @@
 /** Recording duties: admission checks, gates and acknowledgements as plain data. No runtime handles enter this module. */
-import { Array as Arr, HashMap, HashSet, Option } from "effect"
+import {
+	Array as Arr,
+	Cause,
+	HashMap,
+	HashSet,
+	Option,
+	String as Str,
+} from "effect"
 
 import type {
 	Change,
@@ -7,6 +14,7 @@ import type {
 	GroupPlan,
 	Outcome,
 	RecordDuty,
+	RecordFact,
 	RecordingDeclaration,
 	RecordingPolicy,
 	RecordingSignal,
@@ -20,6 +28,8 @@ import type {
 
 /** Record deliveries are kernel-owned commands that belong to no Change. */
 export const commands = "$recording"
+/** Records keep at most this much of a rendered cause. */
+const diagnosticLimit = 4096
 export const stages: ReadonlyArray<RecordStage> = [
 	"Intent",
 	"Commit",
@@ -111,6 +121,26 @@ const content = (duty: Omit<RecordDuty, "content">): string =>
 				Arr.join(Arr.map(duty.payload.members, part), ""),
 				Arr.join(Arr.map(duty.payload.targets, part), ""),
 				Option.getOrElse(duty.payload.outcome, () => ""),
+				Arr.join(
+					Arr.map(duty.payload.facts, (fact) =>
+						Arr.join(
+							Arr.map(
+								[
+									fact.instance,
+									Option.getOrElse(fact.desired, () => ""),
+									Option.getOrElse(fact.actual, () => ""),
+									fact.healthy ? "healthy" : "unhealthy",
+									fact.attempt,
+								],
+								part,
+							),
+							"",
+						),
+					),
+					"",
+				),
+				duty.payload.phase,
+				duty.payload.diagnostic,
 			],
 			part,
 		),
@@ -159,6 +189,7 @@ export const request = (
 	c: Change,
 	stage: RecordStage,
 	outcome: Option.Option<Outcome>,
+	facts: ReadonlyArray<RecordFact>,
 ): Working => {
 	const id = dutyId(c.id, stage)
 	if (HashMap.has(s.records, id)) return s
@@ -191,6 +222,17 @@ export const request = (
 				stringOrder,
 			),
 			outcome,
+			facts,
+			phase: Option.match(c.conclusion, {
+				onNone: () => c.phase,
+				onSome: (conclusion) => conclusion.phase,
+			}),
+			diagnostic:
+				Cause.hasFails(c.cause) ||
+				Cause.hasDies(c.cause) ||
+				Cause.hasInterrupts(c.cause)
+					? Str.slice(0, diagnosticLimit)(Cause.pretty(c.cause))
+					: "",
 		},
 		deliveries: 0,
 		acknowledged: false,

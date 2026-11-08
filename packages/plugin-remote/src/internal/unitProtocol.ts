@@ -281,6 +281,23 @@ export const RecordDuty = Schema.Struct({
 				"Stuck",
 			]),
 		),
+		facts: Schema.Array(
+			Schema.Struct({
+				instance: Schema.String,
+				desired: Schema.Option(Schema.String),
+				actual: Schema.Option(Schema.String),
+				healthy: Schema.Boolean,
+				attempt: Schema.Literals([
+					"NotStarted",
+					"Started",
+					"Ready",
+					"Failed",
+					"Stopped",
+				]),
+			}),
+		),
+		phase: Schema.String,
+		diagnostic: Schema.String,
 	}),
 	deliveries: Schema.Int,
 	acknowledged: Schema.Boolean,
