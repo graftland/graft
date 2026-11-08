@@ -6,6 +6,10 @@ description: 從另一個程序提交並觀察單元 Change。
 **公開控制介面**透過本機 TCP 端點提供固定中繼資料。在核心作用域中啟動
 `Control.serve()`，把傳回的位址交給客戶端。位址包含連線能力憑證。
 
+若要使用獨立行程，解析 `@graftland/plugin-remote/kernel`
+的檔案路徑，以部署 JSON 路徑和就緒位址 JSON 路徑作為兩個參數執行。部署資料遵循
+`Control.Deployment`；就緒檔案包含 `Control.Address`。匯入執行模組不會啟動工作。
+
 ## 提交 Change
 
 ```ts

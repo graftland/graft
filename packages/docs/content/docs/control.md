@@ -7,6 +7,11 @@ description: Submit and observe unit Changes from another process.
 `Control.serve()` in the kernel scope and pass its returned address to the
 client. The address includes the connection capability.
 
+For a separate process, resolve `@graftland/plugin-remote/kernel` and run that
+file with the deployment JSON path and ready-address JSON path as its two
+arguments. The deployment is data described by `Control.Deployment`; the ready
+file contains `Control.Address`. Importing the executable starts no work.
+
 ## Submit a Change
 
 ```ts

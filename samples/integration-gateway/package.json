@@ -2,13 +2,13 @@
 	"name": "@graftland/sample-integration-gateway",
 	"private": true,
 	"type": "module",
+	"scripts": {
+		"start": "node src/main.mjs"
+	},
 	"dependencies": {
 		"@graftland/graft": "workspace:*",
-		"@graftland/loader": "workspace:*",
-		"@graftland/cli": "workspace:*",
 		"@graftland/plugin-remote": "workspace:*",
-		"@graftland/plugin-release": "workspace:*",
-		"@graftland/plugin-mcp-server": "workspace:*",
-		"@graftland/plugin-http": "workspace:*"
+		"effect": "4.1.2",
+		"@effect/platform-node": "4.1.2"
 	}
 }

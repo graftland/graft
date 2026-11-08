@@ -1,116 +1,171 @@
 # Phase 2 proof
 
-Status: steps 1–3 implementation. Phase 2 is not complete. The production
-reducer drives the Effect interpreter, inspection and native placement control.
-Direct channels, calls and the gateway remain required. Native evidence below is
-distinguished from finite reducer exploration.
+Status: steps 1–7 implemented in order. The checks below distinguish native
+execution evidence, finite reducer exploration, and owner-run packed
+verification. No architecture contradiction or new Effect public-API blocker was
+identified. The owner explicitly reserves packed execution; the packed fixture
+is implemented but its execution is **not certified by this report**.
 
 ## 1. Production reducer exploration
 
-`packages/core/src/internal/decisionCore.ts` owns the new decision transitions;
-`decisionState.ts` contains data-only records. The test directory contains no
-second implementation. Exploration supplies external command reports, exit
-reports and timer events; there are no Commit, Recover, Finish or synthetic
-NotStarted actions.
+Production `core/src/internal/decisionCore.ts` and its preparation, binding and
+call reducers own decisions. Exploration imports this implementation. State is
+immutable data: records, HashMap, HashSet and Option; no Effect, callback,
+Deferred, Scope, Fiber or native handle. External reports and timers drive every
+transition; the harness has no Commit, Finish or Recover shortcut.
 
-| Exploration test in `core/test/change-model.test.ts`                                    | Bound                                                   | Schedules                  | State visits / distinct states | Transitions |
-| --------------------------------------------------------------------------------------- | ------------------------------------------------------- | -------------------------- | ------------------------------ | ----------- |
-| explores every causal shuffle of independent Changes using production commands          | Two ordered actors, nine reports each                   | 48,620                     | 184,755 visits                 | 184,754     |
-| explores conflicting admission and shutdown in every causal order                       | Three one-event actors                                  | 6                          | 16 visits                      | 15          |
-| explores exclusive recovery alongside an unrelated commit without overwriting it        | Recovery actor of eight reports; unrelated actor of two | 45                         | 219 visits                     | 218         |
-| explores repeated exit, timer, failure, cancellation and shutdown reports to depth four | Six-event alphabet; depth 4; state deduplication        | Not a causal-shuffle count | 238 distinct states            | 648         |
+| Test                                                                                                                                           | Bound                                         | Schedules | State visits / distinct states | Transitions |
+| ---------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------- | --------: | ------------------------------ | ----------: |
+| change-model: explores every causal shuffle of independent Changes using production commands                                                   | Two ordered nine-report actors                |    48,620 | 184,755 visits                 |     184,754 |
+| change-model: explores conflicting admission and shutdown in every causal order                                                                | Three one-event actors                        |         6 | 16 visits                      |          15 |
+| change-model: explores exclusive recovery alongside an unrelated commit without overwriting it                                                 | Eight-report recovery and two-report B        |        45 | 219 visits                     |         218 |
+| change-model: explores repeated exit, timer, failure, cancellation and shutdown reports to depth four                                          | Six-event alphabet, depth 4, deduplicated     |         — | 238 distinct                   |         648 |
+| preparation-exploration.test.ts: explores every preparation, duplicate and current-policy shuffle through the production reducer               | Fixed inspection/independent admission actors |        42 | 160 visits                     |         159 |
+| call-exploration.test.ts: enumerates causal result, cancellation, duplicate completion and native exit shuffles through the production reducer | Fixed call, drain and completion actors       |        60 | 189 visits                     |         188 |
+| call-exploration.test.ts: explores repeated call evidence to depth three without a second model                                                | Five-event alphabet, depth 3, deduplicated    |         — | 93 distinct                    |         135 |
 
-`change-model/assertions.ts` checks claim conservation, complete reservation
-ownership, monotonic versions, ended-unit lease release and immutable
-conclusions after every explored transition. Failures retain stimulus names as a
-causal trace. This finite exploration does not prove unbounded executions or
-arbitrary topologies.
+The scenario assertions check conservation, complete reservation ownership,
+monotonic versions, exact exit release and immutable conclusions after every
+transition. Failure reports preserve the causal trace. These finite bounds do
+not prove arbitrary topologies or unbounded executions.
 
-## 2. Interpreter and native execution conformance
+## 2. Interpreter and native conformance
 
-`kernel-interpreter.test.ts` uses the production command queue. Its seven tests
-cover intent before dispatch, exact reducer-produced notification snapshots,
-complete executor causes, caller cancellation, stale/duplicate evidence, owner
-shutdown and immutable handle completion after bounded history eviction.
-`embedded-boundary.test.ts` has four tests: no implicit kernel installation,
-deleted closure APIs, the public submission requirement and captured unit
-membership guards. The interpreter has no strategy or settlement decisions.
-Command and timer fibers are keyed in scoped FiberMaps; one scoped dispatcher
-atomically hands transactional outbox entries to their command owner. Completion
-mailboxes retain the core's immutable conclusion, never a writable status.
+`kernel-interpreter.test.ts` replays production commands and compares published
+snapshots with reducer projections. Its seven cases cover intent before
+dispatch, full executor causes, cancelled waiters, stale/duplicate reports,
+closing owner, evicted handle completion and failed timer execution. Scoped
+FiberMaps own command and timer fibers; the interpreter retains handles and
+reports evidence, without choosing outcomes or changing a counter.
+`kernel-deadline.test.ts` adds two regressions: an early fractional sleep is
+rechecked before TimerFired, and a sleep-executor failure retains its complete
+Cause. Both lifecycle and call waiter timers use this clock boundary.
 
-Real Worker/process exit and runner uncertainty still require step 3. The
-protocol test service supplies external reports; it cannot edit core state,
-claims, routes or outcomes.
+Native evidence is separate: `native-units.test.ts` kills actual blocked Worker
+and process import/decode/finalizer execution, verifies Describe does not apply,
+checks granted terms and full-capacity verified Restart, and distinguishes
+runner disconnect from exit. `gateway-faults.test.ts` proves actual synchronous
+infinite handlers and never-finishing finalizers cannot block the kernel. The
+independent runner owner observes native processes; losing its transport retains
+Missing execution rather than asserting death. Unit-only business imports are
+outside the kernel process. Effect-only RPC request-scope tests remain evidence
+of the upstream limitation, not a general drain guarantee.
 
 ## 3. Invariants, counterexamples and fault cells
 
-Step 1 has 42 acceptance tests across `decision-core.test.ts`,
-`change-model.test.ts` and `change-model-settlement.test.ts`. Test names
-identify the applicable invariant ids.
+Names below are test-title fragments; each file contains the invariant ids in
+its full titles. All expected results are accompanied by member health/actual
+facts, exact claims or credits, and exit/cleanup or missing-evidence assertions.
+The JSON disposition inventory gives additional per-regression names.
 
-| Requirement | Step 1 evidence                                                                                                                                                                                                                                         | Remaining acceptance                                                  |
-| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------- |
-| I1, I2      | Intent before dispatch; owned claims; duplicate/reordered reports; full command/cleanup causes; idempotent exit/cancel; capacity conservation                                                                                                           | Interpreter conformance, call-credit ownership                        |
-| I3          | All independent shuffles; both commit orders; atomic conflict footprint; absence ABA; shared-read writer fence; lost-owned-version recovery rejection                                                                                                   | Verified declaration footprint and binding identity                   |
-| I4          | State/event/command records contain no plugin callbacks or handles                                                                                                                                                                                      | Import audit and real blocking-contract fixture                       |
-| I5, I6      | Spawn timeout and terminate acknowledgement preserve Missing evidence; confirmed prevention; native-exit event releases only its unit; cleanup remains separate; forced retirement and known cleanup failure paths; delayed report/exit deadline guards | Actual native exit and disconnected runner evidence                   |
-| I7          | Old-changed before Stop; exclusive recovery; failed current authorization; refreshed read premises; shutdown never Aborted after old stops                                                                                                              | Real policy/resolver unit protocol and reauthorization                |
-| I8          | Required participant set; partial/stale view rejection; late old-attempt reports cannot advance/fail recovery                                                                                                                                           | Unit-local contract injection and direct encoded transport            |
-| I9          | Not implemented                                                                                                                                                                                                                                         | Step 5 single-hop result/cancel/completion and bounded calls          |
-| I10         | Immutable Stuck/Accepted conclusions, exact late release, indexed current incarnation, fixed serving transfer, bounded history without predecessor commands                                                                                             | Public observer reconciliation and collection/native runtime evidence |
-| I11         | One absolute deadline retained through forward/recovery/trial; terminate failure cannot renew its evidence timer; two-trial admission reserve                                                                                                           | Inspection and preparation retirement charged before admission        |
-| I12         | Group/local-service and Runner Overlap requests rejected before commands                                                                                                                                                                                | Complete unsupported unary topology checks                            |
+| Invariant and counterexample                                               | Production acceptance evidence                                                                                                                                                                                |
+| -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| I1: interpreter-chosen success or writable stale status                    | decision-core: full original command/cleanup causes; kernel-interpreter: intent and projected notifications; public-control: repeated handle/get reconciliation                                               |
+| I2: duplicate exit release, old owner clears new owner                     | decision-core: keeps Stuck local and exact late claims; call-core: completion dedupe and only exited provider credits; decision-fault-matrix: every candidate/recovery exit                                   |
+| I3: snapshot commit erases B, absence ABA, global Stuck barrier            | decision-core: both commit orders and complete atomic conflicts; change-model: 48,620 shuffles; decision-access: actual accesses with 2,000 active B Changes; gateway-faults: B completes beside runner Stuck |
+| I4: contract refinement blocks kernel                                      | native-units and gateway-faults: blocked import/decode; phase2-boundary: fixed kernel import graph has no business/contract/plugin modules                                                                    |
+| I5: timeout/ack/disconnect fabricates exit                                 | decision-core: never manufactures NotStarted and confirmed prevention; preparation-core: uncertain inspection/creation; native-units: runner disconnect; kernel-deadline: fractional early wake               |
+| I6: dead unit holds lease, forced kill certifies finalizers                | decision-core: only exited unit leases with separate cleanup; change-model-settlement: forced retirement Unknown vs known failure; gateway-faults: native blocked handler/finalizer exit                      |
+| I7: Aborted after Stop, stale authorization or forward Overlap in recovery | decision-core: old-changed before Stop and independent exclusive recovery; gateway: failed trial fresh Recovered; gateway-faults: denied current recovery policy                                              |
+| I8: stale installation activates, queued call prematurely binds            | binding-core: exact required participant/incarnation and missing ack; unit-bindings: installed direct encoding; gateway: pinned old call, new code, Restart public waiter without provider                    |
+| I9: result/cancel frees blocked cleanup                                    | call-core: retains credit after result/cancel, consumer exit and disconnect; owned-completion: actual independently owned scope and retained completion; Effect-only scope evidence states the limit          |
+| I10: late exit rewrites Stuck or transfers future work back                | decision-core: immutable conclusion after recreation; change-model-settlement: fixed serving transfer; call-core: instance-owned later failures; public-control: disconnected observer reconciles             |
+| I11: total resets after preparation/recovery or one trial reserve          | preparation-core: original total and inspection termination reserve; change-model-settlement: absolute deadline and fresh term; decision-fault-matrix: recovery stalls and expired recovery trial             |
+| I12: unsupported topology silently falls back                              | decision-core: group/local-service/Runner Overlap rejection; binding-core: duplicate/stream/provenance checks; call-core: nested dispatch and saturation rejection                                            |
 
-Reducer fault cells covered include pre-admission conflict/staleness/capacity,
-forward spawn prevention/uncertainty, startup timeout, exclusive recovery
-denial, forced retirement, cleanup defect, missing/late/duplicate exit, wrong
-view and shutdown. Describe, transport, call and public gateway cells remain
-required in the steps that implement them. No aggregate passing test count
-certifies those missing cells.
+| Spec fault cell (phase-2.md:370–388)                       | Named test evidence                                                                                                                                                                                                                                    | Outcome and residual assertion                                                                                                              |
+| ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| Pre-admission Busy/stale/budget/topology/capacity          | decision-core: reserves every conflict object atomically; decision-fault-matrix: rejects invalid and insufficient two-trial budgets; preparation-core: rejects uncached inspection at full capacity; binding-core: rejects incompatible fixed bindings | Rejected without Change; old usable, inspection separately owned, conflict facts retained                                                   |
+| Describe import/decode/check fails or stalls               | gateway-faults: exposes placement stalled fault rejection; native-units: terminates real placement blocked in fault                                                                                                                                    | Rejected with preparation correlation, native inspection Exited; B Accepted while A pending; missing exit retains claim in preparation-core |
+| Candidate fails before old changed                         | gateway: settles failed startup as Aborted and failed trial as fresh Recovered; decision-fault-matrix: stalled forward operation before old change                                                                                                     | Aborted only after candidate exit; old healthy and serving, no candidate claims                                                             |
+| Candidate fails after old stop                             | decision-fault-matrix: restores service after stalled forward operation following old stop with full recovery trial                                                                                                                                    | Recovered only after fresh Serving and full trial; old/candidate ended, recovery instance-owned                                             |
+| Overlap trial fails, Restart-only previous target          | change-model-settlement: retains absolute deadline and fresh term across Overlap failure and Restart-only recovery                                                                                                                                     | Recovered exclusively, no forward Overlap requirement or renewed total                                                                      |
+| Revoked recovery, lost owned version, failed recovery      | decision-core: does not reuse revoked recovery authorization or overwrite lost owned version; gateway-faults: reauthorizes fresh recovery after denial                                                                                                 | RecoveryFailed after required exits, unhealthy/stopped actual; unrelated facts intact                                                       |
+| Candidate Start/Serve/Ready/Probe stalls before old change | decision-fault-matrix: settles stalled forward operation before old change (four cases)                                                                                                                                                                | Terminate requested, Aborted after exit, old target healthy                                                                                 |
+| Candidate Start/Serve/Ready/Probe stalls after old stop    | decision-fault-matrix: restores service after stalled forward operation (four cases)                                                                                                                                                                   | Recovered after complete fresh trial; exact failed claims released                                                                          |
+| Old drain/stop stalls during Restart                       | gateway-faults: terminates integration with stalled handler/finalizer                                                                                                                                                                                  | Forced native old exit, Recovered rather than Aborted, call credit settled, same gateway session                                            |
+| Overlap old retirement stalls after successful trial       | change-model-settlement: accepts forced Overlap retirement with unknown cleanup only after native exit; native-units: embedded finalizer cannot finish                                                                                                 | Accepted after exact exit, old claims released, cleanup remains Unknown; known cleanup failure follows recovery case                        |
+| Recovery Start/Serve/Ready/Probe/trial stalls              | decision-fault-matrix: stalled recovery operation (four cases) and expired recovery trial                                                                                                                                                              | RecoveryFailed only after own exit, no healthy serving generation, no residual Change leases/units                                          |
+| Admitted spawn/termination uncertain                       | decision-core: never manufactures NotStarted; binding-core: exact missing participant exit as Stuck; gateway-faults: runner disconnect with B                                                                                                          | Stuck, exact unconfirmed claims/conflicts retained; independent B Accepted                                                                  |
+| Late/duplicate exit and recreation                         | decision-core: keeps Stuck local and does not rewrite conclusion after recreation                                                                                                                                                                      | Original conclusion unchanged, release once, new incarnation unaffected                                                                     |
+| Defective/unattributed cleanup                             | change-model-settlement: known retirement cleanup failure as failed success evidence; call-core: complete defect and unknown cleanup separate                                                                                                          | Failed required success enters recovery; exact execution released, original Cause retained; Scope attribution reproductions retained        |
+| Unary result then blocked cleanup/cancel                   | call-core: retains execution credit after result and cancellation; owned-completion: independently owned finalizer barriers                                                                                                                            | Result received with credit outstanding; cancel alone cannot discharge drain                                                                |
+| Lost completion or runner disconnect/lease without exit    | call-core: lost completion until provider exit and immutable Stuck; native-units: runner disconnect is not native exit                                                                                                                                 | Unknown pending result, no retry, unit/call claims retained until evidence                                                                  |
+| Wrong/partial installation                                 | binding-core: stale participant/view, discards partial staged views, missing participant exit as Stuck                                                                                                                                                 | No activation; settle all required participants before Aborted/recovery, retain exact missing obligation                                    |
+| Queue overflow/expiry/cancel before dispatch               | call-core: rejects nested dispatch and saturation; expires/cancels Restart waiters; cancellation overtakes admission                                                                                                                                   | NotAdmitted or removed waiter once, zero credit before dispatch                                                                             |
+| Shutdown races admitted work                               | kernel-interpreter: closing owner; change-model-settlement: retains old exit obligations after cancellation; decision-core: closes admission                                                                                                           | RecoveryFailed when service stopped, Stuck when evidence missing; no new registration/Aborted fiction                                       |
 
-## 4. Gateway and locality
+## 4. Gateway, boundary and locality
 
-No gateway slice yet. The object-access test checks the reducer admission and
-commit footprint with 0, 20 and 200 unrelated instances; each uses only the
-target object. Timer cancellation uses each Change timer index, and status
-revision uses indexed affected Changes rather than scanning all Changes. This is
-internal logical-cell access accounting; the external gateway object-access
-instrumentation required by proof item 4 remains unimplemented. These checks do
-not promise constant latency under saturation.
+`gateway.test.ts` (five cases) and `gateway-faults.test.ts` (eight cases) use
+public Control submission/queries with actual units. The runnable
+`samples/integration-gateway/src/main.mjs` goes further: a separate fixed kernel
+process coordinates unchanged gateway execution, actual v1/v2 JavaScript
+entries, a held old call and new unary dispatch.
+`scripts/gateway-sample.test.mjs` runs Worker Overlap, process Restart and
+runner Restart. It verifies version 1 then 2, one upstream session, one gateway
+unit, old native Exited, selected target health, ExplicitTarget reason, zero
+Change leases/unconfirmed units/credits, remaining budget and causes. Control
+reconnects by id during the trial. `public-control` also proves interrupted
+await/disconnect do not cancel admitted work.
 
-## 5. Deletion and documentation
+`phase2-boundary.test.mjs` follows runtime source imports from fixed kernelMain,
+rejects contract/embedded/plugin modules, samples and dynamic import calls, and
+imports all three fixed executables in a child process to verify import inertia.
+The blocked-contract fixture independently demonstrates the execution boundary.
+`decision-access.test.ts` wraps actual Effect collection operations while
+executing the production reducer, propagates identity labels through immutable
+writes, and detects enumeration even after a write. Twenty-two admission,
+commit, failed candidate, exclusive recovery, late report, duplicate exit and
+get operations have identical visited-key counts with zero and 2,000 unrelated
+active Changes. Neither run enumerates a global index or reads an unrelated key.
+The probe self-test deliberately enumerates a changed instances map and reads B
+to prove detection. The probe metadata is outside core state. This establishes
+the measured footprint, not constant latency under saturation.
 
-The [deletion manifest](phase-2-deletion-manifest.md) maps the old model cases,
-adapter removal and the baseline test-file inventory. The duplicate model and
-in-process model adapter are deleted. Step 2 deletes the imperative engine, host
-cleanup, managed registration and their writable status records. Public Change
-operations now require Kernel; three-language guides describe that separation
-and remove deleted driver, release-command and sample paths.
+## 5. Deletion, docs and public types
 
-| Phase 1 review regression class                                                                                                      | Disposition through step 2                                                                                           | Remaining work                                                                 |
-| ------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
-| Round 1 F1, F2: call-credit handoff and stable binding conflicts                                                                     | Driver assumptions deleted; new call/binding cells remain due                                                        | Steps 4–5                                                                      |
-| Round 1 F3; round 3 F1; round 4 F2: fresh independent recovery authorization and exclusive recovery                                  | Reducer cases replaced; native current-policy integration remains due                                                | Step 3 current-policy integration                                              |
-| Round 1 F4–F5; round 2 F1–F4; round 3 F2 and executor self-check: host waits, preparation, closing ownership and late causes         | Host mechanisms and tests deleted; scoped interpreter conformance added                                              | Steps 2–3 remove host execution; native unit tests replace waits               |
-| Round 1 F6; round 2 F5; round 3 F3: live facts and recreated instances                                                               | Reducer projections, immutable conclusions and old-incarnation late exit cases                                       | Steps 2 and 6 public projection integration                                    |
-| Round 2 F6: public export/reference completeness                                                                                     | Existing documentation tests retained                                                                                | Step 7                                                                         |
-| Round 4 F1/F4 and serving-transfer self-check: one settlement classifier, complete obligations, known failure vs unresolved evidence | Reducer obligations/classifier; old exit/candidate/recovery evidence, immutable serving transfer and cleanup defects | Steps 2–3 remove old classifier and native-evidence conformance                |
-| Round 4 F3: absolute preparation/cleanup budget                                                                                      | Absolute execution/recovery budget retained                                                                          | Step 3 inspection and cleanup                                                  |
-| Round 4 F5: withdrawn generation dependency-cycle test                                                                               | Retained embedded test                                                                                               | Group/local captured-resource closure deferred to Phase 3                      |
-| Round 5 F1: idle unit exit leaves host cleanup                                                                                       | Host cleanup and its watcher mechanism deleted                                                                       | Step 3 native exit settles execution with cleanup quality separate             |
-| Round 5 F2: registration races closed runtime                                                                                        | Closed reducer admission fence and scoped command handoff                                                            | Step 3 initial-unit lifecycle                                                  |
-| Round 5 F3: settled-history predecessor retention                                                                                    | Bounded reducer history evicts command/timer graphs, with data-only live unit ownership                              | Handle completion survives history eviction; native ownership remains due      |
-| Round 5 F4: Traditional Chinese release parity                                                                                       | Existing docs retained                                                                                               | Step 6 removes obsolete host release integration; step 7 three-language parity |
+The [deletion manifest](phase-2-deletion-manifest.md) and
+[per-case JSON inventory](phase-2-test-disposition.json) map all original 147
+core/Remote/release test modules, 742 literal entries plus full parameterized
+patterns, and 61 review regression rows. Duplicate title occurrences share one
+JSON entry with an occurrence count. Embedded provenance/release tests remain
+embedded evidence. Captured local closure is explicitly Phase 3; kernel release
+batch/compensation is Phase 5. Every removed host API has no adapter, legacy
+switch or executable stub. The old integration-gateway fixture packages are
+replaced by the runnable public sample. Old benchmark results remain data.
+
+Three-language unit, binding, call, control and Remote docs describe only the
+final supported slice. The sample READMEs have identical structure and commands.
+TypeDoc plus public declaration signature traversal checks exported types.
+`Release.ts` and attribution reproductions remain; forced exit does not solve
+Effect's interruption provenance or general RpcServer scope completion.
+
+## 6. Verification scope
+
+Every implementation step ran typecheck, build, root test, independent docs test
+and no-cache formatting before commit. Exact historical counts and failures
+follow. The only allowed residual root failure after Step 6 is benchmark
+`runner.test.ts` /proc lookup on macOS; the obsolete Remote benchmark executable
+and its test were deleted with the old host path.
+
+`scripts/packed-gateway.mjs` packs release copies, installs tarballs inside
+`.cache/packed-consumers`, and runs the same public sample with Worker Overlap,
+process Overlap and runner Restart. It does not import workspace source or
+expose an internal protocol to the sample. It has **not been run**, following
+the owner's explicit prohibition on invoking packed scripts. Packed runtime
+proof item 6 therefore remains owner verification, not a claimed pass. No
+independent review was started; the owner requested one review after all
+implementation steps.
 
 ## Interpretations
 
-| Decision                                                                                                                             | Source                                                                        | Scope                                                                                                                      |
-| ------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| A completed unknown cleanup fact after confirmed native exit can satisfy retirement execution; known cleanup failure enters recovery | `phase-2.md:180–218`, especially fault cell at 379; `architecture.md:218–220` | The conclusion preserves the forced-retirement cause and Unknown cleanup fact. It never certifies finalizer success.       |
-| A failed terminate command preserves the original evidence deadline                                                                  | `phase-2.md:125–126,180–196`; I5/I11 at 350,356                               | No repeated command failure creates another termination budget.                                                            |
-| Recovery refreshes read-only premises but cannot overwrite an owned write version                                                    | `phase-2.md:226–230`; `architecture.md:460–468`                               | Resolve success is still simulated evidence until step 3 implements the fixed resolver/policy protocol.                    |
-| The old model adapter is deleted with the duplicate model in step 1                                                                  | `phase-2.md:302–313,334–335`                                                  | Real interpreter conformance remains explicitly pending in step 2. No replacement adapter or compatibility layer is added. |
+| Decision                                                                                                                             | Source                                                                        | Scope                                                                                                                |
+| ------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| A completed unknown cleanup fact after confirmed native exit can satisfy retirement execution; known cleanup failure enters recovery | `phase-2.md:180–218`, especially fault cell at 379; `architecture.md:218–220` | The conclusion preserves the forced-retirement cause and Unknown cleanup fact. It never certifies finalizer success. |
+| A failed terminate command preserves the original evidence deadline                                                                  | `phase-2.md:125–126,180–196`; I5/I11 at 350,356                               | No repeated command failure creates another termination budget.                                                      |
+| Recovery refreshes read-only premises but cannot overwrite an owned write version                                                    | `phase-2.md:226–230`; `architecture.md:460–468`                               | Resolve is a fixed data protocol; native preparation and current-policy integration were added in steps 3–6.         |
+| The old model adapter is deleted with the duplicate model in step 1                                                                  | `phase-2.md:302–313,334–335`                                                  | Step 2 supplies real interpreter conformance. No driver compatibility adapter is retained.                           |
 
 No architecture contradiction or Effect public-API gap has been identified in
 steps 1–2. Existing RPC completion and Scope attribution upstream requirements
@@ -684,3 +739,76 @@ omitted the describing fixture variable and was immediately corrected; the
 subsequent typecheck and complete checks passed.
 
 No spec contradiction or Effect public-API blocker was identified in step 6.
+
+## Step 7: public slice, access audit and final manifest
+
+The public executable is `@graftland/plugin-remote/kernel`; its old
+`./internal/kernel` export is removed rather than aliased. It accepts fixed
+Deployment data and writes the ready Address. Imports remain inert. The sample
+uses only public SDK entries and ordinary application-owned socket code, never
+kernel/private framing. Its captured artifacts live under the sample's cache so
+Node resolves declared package dependencies through the installed package
+ancestry; no workspace node_modules is symlinked or copied to another workspace.
+The packed fixture stages installed release copies inside this worktree.
+
+| Interpretation                                                                                                                  | Controlling source                                                           | Consequence                                                                                                                                                   |
+| ------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| The fixed gateway may have a client/driver outside the kernel and must not install business control-plane plugins in the kernel | phase-2.md:33–37, 262–289; architecture.md section 1.3                       | Fixed executable plus data-only deployment, business gateway and integration in units, public capability control                                              |
+| A timer reports observed time at or after its absolute deadline; an early platform wake is not deadline evidence                | phase-2.md:125–126, 159–160; I11 at 356                                      | Recheck the clock before lifecycle/call TimerFired/CallExpired; the reducer still decides its meaning. This is interpreter correctness, not an Effect API gap |
+| Stopped/unavailable actual membership may retain the known target identity while health is false                                | phase-2.md:205–209, fault table at 375/380; architecture.md sections 5.5–5.6 | RecoveryFailed matrix asserts unhealthy actual plus exact native/claim settlement; it does not invent None as an extra specification requirement              |
+| Packed execution is reserved for the owner despite the general proof checklist                                                  | Owner's explicit instruction; phase-2.md:413–419                             | Implement and statically check the fixture, run the ordinary public sample, report packed runtime execution as unverified                                     |
+
+### Step 7 failures and interruptions
+
+Logs are `.cache/phase2-step7-*.log`; none is committed. Expected red tests and
+development failures are recorded separately from final verification.
+
+| Attempt                             | Failure and resolution                                                                                                                                                                                                                                                                                                                                                           |
+| ----------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| boundary-red                        | Runnable sample and per-case inventory absent: two failures; import boundary and inert entry imports passed. Added the sample, packed fixture, complete inventory and public executable export                                                                                                                                                                                   |
+| boundary-red2                       | CLI project filter `scripts` matched no Vitest project; corrected to `@graftland/workspace`                                                                                                                                                                                                                                                                                      |
+| access-red, access1–3, typecheck1–3 | Missing helper, Effect 4 sort/iterator assumptions, async mock factory diagnostic and missing test fields; implemented real collection instrumentation and corrected public APIs. An arbitrary 250-operation bound was removed: the acceptance property is equality/no unrelated reads, not an invented numeric limit. Final two access tests pass                               |
+| sample-red                          | Three sample processes could not resolve newly declared platform dependency before installation; frozen offline installation passed after updating only the sample importer                                                                                                                                                                                                      |
+| sample1                             | Artifact store at repository root could not resolve the sample's declared Remote dependency. Moved the store under the sample cache; no node_modules symlink workaround                                                                                                                                                                                                          |
+| sample2                             | Report used nonexistent plural Status.members rather than member; corrected the report. Process and runner then completed real Restart                                                                                                                                                                                                                                           |
+| sample3, boundary-sample1           | Real Worker Overlap hung because the native clock woke just before a fractional trial deadline; the early event was correctly rejected by the reducer, but the interpreter never rearmed. The ordinary sample was explicitly stopped with SIGTERM (owned PID 31383); Vitest's 45-second child guard timed out the other attempt. Both are failures, not exit proofs              |
+| deadline-red                        | Missing clock-boundary implementation, as expected. Added a deterministic early-wake and complete-failure test before implementation                                                                                                                                                                                                                                             |
+| deadline1–2, typecheck5             | Test used nonexistent Effect.flipCause and yielded in assert argument; changed to Exit observation and explicit values. First repeated-effect implementation inserted a zero-duration schedule sleep, so the exact sleep-count assertion failed. Replaced it with a small named recursive effect, no schedule side effect. Eleven focused interpreter/deadline/access tests pass |
+| typecheck4                          | Ran while workspace public-test setup rebuilt declarations; missing declaration cascade. Repeated sequentially after builds; passed. This attempt is not a typecheck pass                                                                                                                                                                                                        |
+| fault-matrix1                       | Eight cases passed; five asserted None for an unhealthy stopped member's known actual identity. The spec allows stopped/unavailable facts; corrected assertions to health=false plus exit/claim settlement. All 13 startup/recovery matrix cases pass; one additional budget case covers five invalid/reserve counterexamples                                                    |
+| boundary-sample1 inventory          | One repeated original file/title entry caused 818 rows versus 817 unique keys. JSON now groups duplicate occurrences explicitly; Markdown follows the same inventory                                                                                                                                                                                                             |
+| test1                               | 2,102 passed, 45 skipped, two failures: allowed /proc benchmark plus public declaration traversal. The custom executable export accidentally included a source condition in publishConfig; use a published JavaScript entry as for the other inert executables. Public signature traversal then returned no missing types                                                        |
+| Final checks                        | Recorded below after sequential completion; no packed script was executed                                                                                                                                                                                                                                                                                                        |
+
+The sample guards are bounded test deadlines, never timing sleeps used to infer
+an exit or ordering. Public phase events, held-call barriers, queued waiter
+facts, owned completion and native exit provide the evidence. Runner teardown
+can log its full disconnected-control Cause after successful shutdown; this is
+retained diagnostic evidence, not an assertion of missing native evidence for
+the settled Change.
+
+### Step 7 final verification
+
+| Check                    | Result                                                                                                                                                                                                      |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Frozen lockfile, offline | Passed; sample importer uses existing Effect 4.1.2 resolutions                                                                                                                                              |
+| Final typecheck          | Passed (`phase2-step7-typecheck-final3.log`)                                                                                                                                                                |
+| Final build              | Passed (`phase2-step7-build-final3.log`); all 72 public entries and 2,299 HTML pages validated                                                                                                              |
+| Final root tests         | 288 passing files / 2,118 passing cases; 45 skipped; one failing benchmark file/case, solely the permitted macOS /proc exception (`phase2-step7-test-final3.log`)                                           |
+| Added acceptance         | 26 cases: 14 fault-matrix (including five invalid/reserve inputs in one case), two real-access probes, two clock-boundary cases, five boundary/deletion/inventory checks and three public sample placements |
+| Independent docs tests   | See final docs log; 25 Node/reference and 39 Vitest examples in 19 files                                                                                                                                    |
+| No-cache formatting      | Verified before commit; no formatting diff                                                                                                                                                                  |
+| Packed runtime execution | Not run: explicitly reserved for the owner; runnable fixture committed                                                                                                                                      |
+
+The preceding final1/final2 root repetitions each passed 2,117 cases with the
+same permitted benchmark failure. The last run adds the budget acceptance case.
+The last audit replaces sample partial Option extraction with effectful absence
+handling, explicitly asserts current target health/selection, removes temporary
+access-count console output, and uses assertions in the owner-run packed
+harness. No additional production behavior was introduced after the final
+checks.
+
+No implementation step is left pending. The outstanding verification is the
+owner's packed runtime proof and the single independent review requested by the
+spec. Explicit Phase 3–5 and upstream non-guarantees above remain outside this
+slice; none is represented by an executable compatibility stub.

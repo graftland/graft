@@ -12,7 +12,7 @@ export default defineConfig({
 					([name]) => !name.startsWith("./internal/"),
 				),
 			),
-			"./internal/kernel": "./dist/internal/kernelMain.js",
+			"./kernel": "./dist/internal/kernelMain.js",
 			"./internal/unit": "./dist/internal/nativeUnitMain.js",
 			"./internal/publication": "./dist/internal/publicationMain.js",
 		}),

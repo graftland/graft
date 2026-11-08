@@ -7,7 +7,6 @@ import {
 	rmSync,
 	writeFileSync,
 } from "node:fs"
-import { tmpdir } from "node:os"
 import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 
@@ -36,7 +35,9 @@ ${cause.stderr?.toString() ?? ""}`,
 
 /** Packs copies of release files; never rewrites workspace manifests. */
 export function prepare() {
-	const directory = mkdtempSync(join(tmpdir(), "graft-consumer-"))
+	const cache = join(root, ".cache/packed-consumers")
+	mkdirSync(cache, { recursive: true })
+	const directory = mkdtempSync(join(cache, "consumer-"))
 	try {
 		const tarballs = join(directory, "tarballs")
 		mkdirSync(tarballs)

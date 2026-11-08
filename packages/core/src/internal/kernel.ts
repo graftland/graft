@@ -17,6 +17,7 @@ import {
 } from "effect"
 
 import * as Core from "./decisionCore"
+import { waitUntil } from "./kernelDeadline"
 import { UnknownChange } from "./observation"
 import { UnitControl } from "./unitControl"
 
@@ -220,9 +221,7 @@ const publishPreparation = Effect.fnUntraced(function* (
 	yield* TxPubSub.publish(runtime.preparations, status)
 })
 const fire = Effect.fnUntraced(function* (runtime: Runtime, timer: Core.Timer) {
-	const now = yield* time(runtime)
-	yield* Effect.sleep(Math.max(0, timer.deadline - now))
-	const observed = yield* time(runtime)
+	const observed = yield* waitUntil(time(runtime), timer.deadline)
 	yield* consume(runtime, {
 		_tag: "TimerFired",
 		timer: timer.id,
@@ -278,9 +277,7 @@ const execute = Effect.fnUntraced(function* (
 					runtime.timers,
 					`call:${call.key}`,
 					Effect.gen(function* () {
-						const now = yield* time(runtime)
-						yield* Effect.sleep(Math.max(0, (call.deadline ?? now) - now))
-						const observed = yield* time(runtime)
+						const observed = yield* waitUntil(time(runtime), call.deadline ?? 0)
 						yield* consume(runtime, {
 							_tag: "CallExpired",
 							key: call.key,

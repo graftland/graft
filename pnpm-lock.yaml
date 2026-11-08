@@ -593,27 +593,18 @@ importers:
 
   samples/integration-gateway:
     dependencies:
-      "@graftland/cli":
-        specifier: workspace:*
-        version: link:../../packages/cli
+      "@effect/platform-node":
+        specifier: 4.1.2
+        version: 4.1.2(effect@4.1.2)(redis@6.3.1)
       "@graftland/graft":
         specifier: workspace:*
         version: link:../../packages/core
-      "@graftland/loader":
-        specifier: workspace:*
-        version: link:../../packages/loader
-      "@graftland/plugin-http":
-        specifier: workspace:*
-        version: link:../../packages/plugin-http
-      "@graftland/plugin-mcp-server":
-        specifier: workspace:*
-        version: link:../../packages/plugin-mcp-server
-      "@graftland/plugin-release":
-        specifier: workspace:*
-        version: link:../../packages/plugin-release
       "@graftland/plugin-remote":
         specifier: workspace:*
         version: link:../../packages/plugin-remote
+      effect:
+        specifier: 4.1.2
+        version: 4.1.2
 
   samples/market-feed:
     dependencies:

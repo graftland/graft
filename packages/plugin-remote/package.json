@@ -66,7 +66,7 @@
 			"default": "./dist/Units.js"
 		},
 		"./package.json": "./package.json",
-		"./internal/kernel": "./dist/internal/kernelMain.js",
+		"./kernel": "./dist/internal/kernelMain.js",
 		"./internal/unit": "./dist/internal/nativeUnitMain.js",
 		"./internal/publication": "./dist/internal/publicationMain.js"
 	},
@@ -102,7 +102,7 @@
 			"./Transport": "./dist/Transport.js",
 			"./Units": "./dist/Units.js",
 			"./package.json": "./package.json",
-			"./internal/kernel": "./dist/internal/kernelMain.js",
+			"./kernel": "./dist/internal/kernelMain.js",
 			"./internal/unit": "./dist/internal/nativeUnitMain.js",
 			"./internal/publication": "./dist/internal/publicationMain.js"
 		}

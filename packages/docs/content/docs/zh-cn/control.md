@@ -6,6 +6,11 @@ description: 从另一个进程提交并观察单元 Change。
 **公开控制接口**通过本机 TCP 端点提供固定元数据。在内核作用域中启动
 `Control.serve()`，把返回的地址交给客户端。地址包含连接能力凭据。
 
+要使用独立进程，解析 `@graftland/plugin-remote/kernel`
+的文件路径，以部署 JSON 路径和就绪地址 JSON 路径作为两个参数执行。部署数据遵循
+`Control.Deployment`；就绪文件包含
+`Control.Address`。导入可执行模块不会启动工作。
+
 ## 提交 Change
 
 ```ts
