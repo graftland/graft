@@ -543,3 +543,36 @@ it("answers a key journaled in an earlier run from its record and concludes that
 		"KeyConflict",
 	)
 })
+
+it("tells requests apart by their target configuration, not only by target identity (K6)", () => {
+	const deploy = (input: number): Core.Input => ({
+		operations: [
+			{
+				_tag: "Deploy",
+				instance: "a",
+				target: {
+					identity: "same-code",
+					placement: "Worker",
+					overlap: true,
+					deployment: {
+						artifact: {
+							directory: "/artifacts/a",
+							identity: {
+								version: 1,
+								algorithm: "sha256",
+								digest: "a",
+								module: "plugin.js",
+							},
+						},
+						input: { version: input },
+					},
+				},
+			},
+		],
+		key: "deploy-a",
+	})
+	const text = (input: number) =>
+		Recording.requestText(Core.normalizedIdentity(deploy(input)))
+	assert.equal(text(1), text(1))
+	assert.notEqual(text(1), text(2))
+})

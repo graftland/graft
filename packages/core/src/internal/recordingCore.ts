@@ -5,6 +5,8 @@ import {
 	HashMap,
 	HashSet,
 	Option,
+	Predicate,
+	Record as Rec,
 	String as Str,
 } from "effect"
 
@@ -218,6 +220,25 @@ const deliver = (s: Working, duty: RecordDuty): Working => {
 		emitted: Arr.append(s.emitted, command),
 	}
 }
+/** Unambiguous text for JSON-like data, with object keys sorted, so equal data gives equal text. */
+const canonical = (value: unknown): string =>
+	Arr.isArray(value)
+		? `[${Arr.join(Arr.map(value, canonical), ",")}]`
+		: Predicate.isString(value)
+			? part(value)
+			: Predicate.isObject(value) && !Predicate.isFunction(value)
+				? `{${Arr.join(
+						Arr.map(
+							Arr.sort(
+								Rec.keys(value as Rec.ReadonlyRecord<string, unknown>),
+								stringOrder,
+							),
+							(key) =>
+								`${part(key)}:${canonical((value as Rec.ReadonlyRecord<string, unknown>)[key])}`,
+						),
+						",",
+					)}}`
+				: `${value}`
 /** Canonical text of a normalized request; equal requests give equal text in every run. */
 export const requestText = (identity: RequestIdentity): string =>
 	Arr.join(
@@ -265,7 +286,8 @@ export const requestText = (identity: RequestIdentity): string =>
 											[
 												"Deploy",
 												operation.instance,
-												operation.target.identity,
+												// The whole target: its identity leaves out the configuration.
+												canonical(operation.target),
 												operation.realm ?? "root",
 												Arr.join(Arr.map(operation.colocate ?? [], part), ""),
 												operation.placement?.kind ?? "",

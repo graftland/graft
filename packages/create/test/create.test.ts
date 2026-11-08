@@ -40,12 +40,15 @@ const readJson = (file: string) =>
 		Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown)),
 	)
 /** Generated apps pin Graft packages to this package's own release version. */
-const release = Effect.map(
-	readText(new URL("../package.json", import.meta.url).pathname),
-	(text) =>
-		Schema.decodeUnknownSync(
+const release = readText(
+	new URL("../package.json", import.meta.url).pathname,
+).pipe(
+	Effect.flatMap(
+		Schema.decodeEffect(
 			Schema.fromJsonString(Schema.Struct({ version: Schema.String })),
-		)(text).version,
+		),
+	),
+	Effect.map((manifest) => manifest.version),
 )
 const readConfig = (file: string) =>
 	Effect.flatMap(readText(file), (yaml) =>
@@ -236,7 +239,6 @@ describe("create", () => {
 			)
 			assert.strictEqual(yaml, `${schemaComment}\n[]\n`)
 			assert.deepStrictEqual(entries, [])
-			const version = yield* release
 			const manifest = yield* readJson(path.join(directory, "package.json"))
 			assert.deepInclude(manifest, {
 				scripts: { start: "graft start" },
