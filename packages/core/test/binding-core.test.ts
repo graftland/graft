@@ -115,16 +115,26 @@ const topology = (provided = service("forecast@1", "alerts@1")): Core.State => {
 	const s = Core.make({
 		authority: "bindings",
 		maxUnits: 4,
-		declarations: declaredMembers([
-			{
-				id: "provider",
-				target: { identity: "old", placement: "Worker", overlap: true },
-			},
-			{
-				id: "consumer",
-				target: { identity: "consumer", placement: "Process", overlap: true },
-			},
-		]),
+		declarations: Array.map(
+			declaredMembers([
+				{
+					id: "provider",
+					target: { identity: "old", placement: "Worker", overlap: true },
+				},
+				{
+					id: "consumer",
+					target: { identity: "consumer", placement: "Process", overlap: true },
+				},
+			]),
+			(member) => ({
+				...member,
+				provides: member.instance === "provider" ? [provided] : [],
+				requires:
+					member.instance === "consumer"
+						? [{ ...service("forecast@1"), optional: false }]
+						: [],
+			}),
+		),
 		realms: rootRealms,
 		bindings: [
 			{ consumer: "consumer", provider: "provider", service: "weather" },
@@ -135,25 +145,40 @@ const topology = (provided = service("forecast@1", "alerts@1")): Core.State => {
 		units: HashMap.map(s.units, (u) => ({
 			...u,
 			description: Option.some(
-				u.instance === "provider"
+				HashMap.has(u.members, "provider")
 					? descriptor([provided])
 					: descriptor([], [service("forecast@1")]),
 			),
-			endpoint: Option.some({
-				host: "127.0.0.1",
-				port: 12345,
-				credential: u.id,
-			}),
+			members: HashMap.map(u.members, (member) => ({
+				...member,
+				endpoint:
+					member.instance === "provider"
+						? Option.some({
+								host: "127.0.0.1",
+								port: 12345,
+								credential: u.id,
+							})
+						: Option.none(),
+			})),
 		})),
 	}
 }
 const replacing = (s = topology(), provided = service("forecast@1")) =>
 	Core.reduce(s, {
 		_tag: "Submit",
-		request: { ...request(s, "provider"), description: descriptor([provided]) },
+		request: {
+			...request(s, "provider"),
+			description: descriptor([provided]),
+			proposal: {
+				members: descriptor([provided]).members,
+				explicit: HashSet.make("provider"),
+				removed: HashSet.empty(),
+				realms: [],
+			},
+		},
 		now: s.now,
 	})
-it("rejects incompatible fixed bindings before reserving or executing a Change (I3, I8, I12)", () => {
+it("rejects incompatible resolved contracts before reserving or executing a Change (I3, I8, I12)", () => {
 	const s = topology()
 	const rejected = replacing(s, service("forecast@2"))
 	assert.equal(rejected.reply._tag, "Rejected")
@@ -183,11 +208,20 @@ it("reserves every affected binding and stages the consumer's actual incarnation
 				? report(s, pending(s, c.id, k), {
 						_tag: "Started",
 						value: descriptor([service("forecast@1")]),
-						endpoint: {
-							host: "127.0.0.1",
-							port: 23456,
-							credential: "candidate",
-						},
+						endpoints: HashMap.fromIterable(
+							Array.map(
+								descriptor([service("forecast@1")]).members,
+								(member) =>
+									[
+										member.instance,
+										{
+											host: "127.0.0.1",
+											port: 23456,
+											credential: "candidate",
+										},
+									] satisfies readonly [string, Core.Endpoint],
+							),
+						),
 					})
 				: succeed(s, c.id, k),
 	)
@@ -255,11 +289,20 @@ const installing = () => {
 				? report(s, pending(s, "change-1", kind), {
 						_tag: "Started",
 						value: descriptor([service("forecast@1")]),
-						endpoint: {
-							host: "127.0.0.1",
-							port: 23456,
-							credential: "candidate",
-						},
+						endpoints: HashMap.fromIterable(
+							Array.map(
+								descriptor([service("forecast@1")]).members,
+								(member) =>
+									[
+										member.instance,
+										{
+											host: "127.0.0.1",
+											port: 23456,
+											credential: "candidate",
+										},
+									] satisfies readonly [string, Core.Endpoint],
+							),
+						),
 					})
 				: succeed(s, "change-1", kind),
 	)
@@ -373,20 +416,38 @@ it("retains an exact missing participant exit as Stuck after an install deadline
 	assert.equal(HashSet.size(after.unconfirmedUnits), 0)
 	assert.isTrue(Option.isNone(Core.cell(late, "provider").writer))
 })
+const failMember = (s: Core.State, id: string): Core.State => {
+	const instance = Option.getOrThrow(HashMap.get(s.instances, id))
+	const unit = Option.getOrThrow(
+		Option.flatMap(instance.current, (unit) => HashMap.get(s.units, unit)),
+	)
+	const member = Option.getOrThrow(HashMap.get(unit.members, id))
+	return Core.reduce(s, {
+		_tag: "MemberFailed",
+		unit: unit.id,
+		incarnation: unit.incarnation,
+		observer: unit.spawn,
+		member: id,
+		term: member.term,
+		generation: member.generation,
+		cause: Cause.fail("Participant failed"),
+		now: s.now,
+	}).state
+}
 it("rejects an unavailable selected provider before granting a new consumer execution (I3, I8, I12)", () => {
 	const s = topology()
-	const unavailable = {
-		...s,
-		instances: HashMap.modify(s.instances, "provider", (i) => ({
-			...i,
-			healthy: false,
-		})),
-	}
+	const unavailable = failMember(s, "provider")
 	const rejected = Core.reduce(unavailable, {
 		_tag: "Submit",
 		request: {
 			...request(unavailable, "consumer"),
 			description: descriptor([], [service("forecast@1")]),
+			proposal: {
+				members: descriptor([], [service("forecast@1")]).members,
+				explicit: HashSet.make("consumer"),
+				removed: HashSet.empty(),
+				realms: [],
+			},
 		},
 		now: 0,
 	})
@@ -396,13 +457,7 @@ it("rejects an unavailable selected provider before granting a new consumer exec
 
 it("rechecks provider availability before committing an installed consumer view (I3, I8)", () => {
 	const s = installing()
-	const lost = {
-		...s,
-		instances: HashMap.modify(s.instances, "consumer", (i) => ({
-			...i,
-			healthy: false,
-		})),
-	}
+	const lost = failMember(s, "consumer")
 	const installed = Array.reduce(
 		Array.filter(
 			Array.fromIterable(HashMap.values(lost.commands)),
@@ -427,6 +482,7 @@ it("refuses a provider Start report without an encoded endpoint before Serve (I4
 	const resolved = succeed(first.state, "change-1", "Resolve")
 	const spawned = succeed(resolved, "change-1", "Spawn")
 	const started = report(spawned, pending(spawned, "change-1", "Start"), {
+		endpoints: HashMap.empty(),
 		_tag: "Started",
 		value: descriptor([service("forecast@1")]),
 	})

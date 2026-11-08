@@ -32,13 +32,21 @@ export type {
 	GroupPlan,
 	SelectionReason,
 	UnitMember,
+	MemberExecution,
+	MemberIdentity,
+	MemberGeneration,
+	MemberSignal,
+	MemberOperation,
 	CallMessage,
+	CallMemberIdentity,
 	CallEvidence,
 	CallFact,
 	CallControl,
 	CallLimits,
 	CallWaiter,
 	Input as Request,
+	InspectionInput,
+	DeploymentOperation,
 	Target,
 	Budget,
 	Requirements,
@@ -118,7 +126,7 @@ export class Kernel extends Context.Service<
 		readonly get: (id: string) => Effect.Effect<Option.Option<Core.Status>>
 		readonly changes: Stream.Stream<Core.Status>
 		readonly inspect: (
-			request: Core.Input,
+			request: Core.InspectionInput,
 		) => Effect.Effect<Core.PreparationStatus, ChangeRejected>
 		readonly getPreparation: (
 			id: string,
@@ -207,7 +215,7 @@ export const layer = (
 						),
 						Effect.asVoid,
 					),
-				inspect: Effect.fnUntraced(function* (request: Core.Input) {
+				inspect: Effect.fnUntraced(function* (request: Core.InspectionInput) {
 					const result = yield* controller.inspect(request)
 					if (result.reply._tag === "Rejected")
 						return yield* ChangeRejected.make({

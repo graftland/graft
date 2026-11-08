@@ -109,7 +109,7 @@ export const resolve = Effect.fnUntraced(function* (
 		input,
 		identity: yield* fingerprint(input),
 		environment: yield* validationEnvironment(
-			command.target.placement,
+			command.placement.kind,
 			environmentModules,
 		),
 	}

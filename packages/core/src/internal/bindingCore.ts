@@ -1,17 +1,18 @@
-import { Array, HashMap, HashSet, Option, Result } from "effect"
+import { Array, HashMap, HashSet, Option } from "effect"
 
 import type {
 	BindingDeclaration,
 	BindingFault,
 	BindingRoute,
 	Change,
-	Description,
 	FixedBinding,
-	Request,
+	MemberOperation,
 	RouteView,
 	State,
 	Unit,
 } from "./decisionState"
+import * as Executions from "./executionState"
+import * as Attempt from "./groupAttempt"
 
 export const key = (consumer: string, service: string): string =>
 	`binding:${consumer.length}:${consumer}:${service}`
@@ -101,9 +102,8 @@ export const outgoing = (s: State, instance: string): HashSet.HashSet<string> =>
 
 const current = (s: State, instance: string): Option.Option<Unit> =>
 	Option.flatMap(
-		Option.filter(
-			HashMap.get(s.instances, instance),
-			(i) => i.healthy && i.authorized,
+		Option.filter(HashMap.get(s.instances, instance), () =>
+			Executions.healthy(s, instance),
 		),
 		(i) =>
 			Option.flatMap(i.current, (id) =>
@@ -113,173 +113,192 @@ const current = (s: State, instance: string): Option.Option<Unit> =>
 				),
 			),
 	)
-const declaration = (
-	d: Description,
-	key: string,
-	side: "requires" | "provides",
-	instance: string,
-): Option.Option<BindingDeclaration> =>
-	Option.flatMap(
-		Array.findFirst(d.members, (m) => m.instance === instance),
-		(m) => Array.findFirst(m[side], (d) => d.key === key),
+const planned = (c: Change): HashMap.HashMap<string, FixedBinding> =>
+	HashMap.reduce(
+		c.recovering ? c.plan.previousDependencies : c.plan.dependencies,
+		HashMap.empty<string, FixedBinding>(),
+		(bindings, dependencies, consumer) =>
+			Array.reduce(dependencies, bindings, (bindings, dependency) =>
+				dependency.kind === "Contract"
+					? Option.match(dependency.provider, {
+							onNone: () => bindings,
+							onSome: (provider) =>
+								HashMap.set(bindings, key(consumer, dependency.service), {
+									consumer,
+									provider,
+									service: dependency.service,
+								}),
+						})
+					: bindings,
+			),
 	)
-const between = (
-	required: Option.Option<BindingDeclaration>,
-	provided: Option.Option<BindingDeclaration>,
-	service: string,
-): Option.Option<BindingFault> =>
-	Option.isSome(required) && Option.isSome(provided)
-		? validate(required.value, provided.value)
-		: fault(service, "MissingBinding")
-const checkBinding = (
-	s: State,
-	r: Request,
-	b: FixedBinding,
-): Option.Option<BindingFault> => {
-	if (HashSet.has(s.bindingConflicts, key(b.consumer, b.service)))
-		return fault(b.service, "MultipleProviders")
-	if (r.description === undefined) return Option.none()
-	const consumer =
-		b.consumer === r.instance
-			? Option.some(r.description)
-			: Option.flatMap(current(s, b.consumer), (u) => u.description)
-	const provider =
-		b.provider === r.instance
-			? Option.some(r.description)
-			: Option.flatMap(current(s, b.provider), (u) => u.description)
-	return Option.isNone(consumer) &&
-		b.consumer !== r.instance &&
-		!Option.exists(HashMap.get(s.instances, b.consumer), (i) =>
-			Option.isSome(i.current),
-		)
-		? Option.none()
-		: between(
-				Option.flatMap(consumer, (d) =>
-					declaration(d, b.service, "requires", b.consumer),
+const affectedKeys = (c: Change): HashSet.HashSet<string> =>
+	HashSet.union(
+		HashMap.reduce(
+			c.plan.previousDependencies,
+			HashSet.empty<string>(),
+			(ids, dependencies, consumer) =>
+				Array.reduce(dependencies, ids, (ids, dependency) =>
+					dependency.kind === "Contract"
+						? HashSet.add(ids, key(consumer, dependency.service))
+						: ids,
 				),
-				Option.flatMap(provider, (d) =>
-					declaration(d, b.service, "provides", b.provider),
-				),
-				b.service,
-			)
-}
-const checkedBinding = (
-	s: State,
-	r: Request,
-	id: string,
-): Option.Option<BindingFault> =>
-	Option.match(HashMap.get(s.bindings, id), {
-		onNone: () => fault(id, "MissingBinding"),
-		onSome: (b) => checkBinding(s, r, b),
-	})
-const read = (s: State, r: Request, key: string): Request => ({
-	...r,
-	reads: HashMap.set(
-		r.reads,
-		key,
-		Option.getOrElse(
-			Option.map(HashMap.get(s.cells, key), (c) => c.version),
-			() => 0,
 		),
-	),
-})
-const planEdge = (s: State, r: Request, id: string): Request =>
-	Option.match(HashMap.get(s.bindings, id), {
-		onNone: () => r,
-		onSome: (b) => {
-			const observed = read(
-				s,
-				read(s, r, id),
-				b.provider === r.instance ? b.consumer : b.provider,
-			)
-			return b.provider === r.instance
-				? {
-						...observed,
-						writes: HashSet.add(observed.writes, id),
-						participants: Option.match(current(s, b.consumer), {
-							onNone: () => r.participants,
-							onSome: (u) =>
-								u.evidence === "Missing"
-									? HashSet.add(r.participants, u.id)
-									: r.participants,
-						}),
-					}
-				: observed
-		},
-	})
-export const plan = (
+		HashMap.reduce(
+			c.plan.dependencies,
+			HashSet.empty<string>(),
+			(ids, dependencies, consumer) =>
+				Array.reduce(dependencies, ids, (ids, dependency) =>
+					dependency.kind === "Contract"
+						? HashSet.add(ids, key(consumer, dependency.service))
+						: ids,
+				),
+		),
+	)
+const route = (
 	s: State,
-	r: Request,
-): Result.Result<Request, BindingFault> => {
-	if (r.description === undefined) return Result.succeed(r)
-	const required = Array.findFirst(
-		Array.flatMap(r.description.members, (m) => m.requires),
-		(d) => !HashMap.has(s.bindings, key(r.instance, d.key)),
-	)
-	if (Option.isSome(required))
-		return Result.fail({
-			service: required.value.key,
-			reason: "MissingBinding",
-		})
-	const affected = HashSet.union(
-		incoming(s, r.instance),
-		outgoing(s, r.instance),
-	)
-	const invalid = HashSet.reduce(
-		affected,
-		Option.none<BindingFault>(),
-		(found, id) => (Option.isSome(found) ? found : checkedBinding(s, r, id)),
-	)
-	return Option.isSome(invalid)
-		? Result.fail(invalid.value)
-		: Result.succeed(HashSet.reduce(affected, r, (r, id) => planEdge(s, r, id)))
-}
-const route = (s: State, c: Change, id: string): Option.Option<BindingRoute> =>
-	Option.flatMap(HashMap.get(s.bindings, id), (b) => {
-		const provider =
-			b.provider === c.request.instance
-				? Option.flatMap(c.candidate, (id) => HashMap.get(s.units, id))
-				: current(s, b.provider)
-		return Option.flatMap(provider, (u) =>
-			Option.map(u.endpoint, (endpoint) => ({
+	c: Change,
+	id: string,
+	b: FixedBinding,
+): Option.Option<BindingRoute> => {
+	const provider = HashSet.has(c.plan.members, b.provider)
+		? Attempt.unitFor(s, c, b.provider)
+		: current(s, b.provider)
+	return Option.flatMap(provider, (unit) =>
+		Option.flatMap(HashMap.get(unit.members, b.provider), (member) =>
+			Option.map(member.endpoint, (endpoint) => ({
 				...b,
 				id,
-				unit: u.id,
-				incarnation: u.incarnation,
-				term: u.term,
+				unit: unit.id,
+				incarnation: unit.incarnation,
+				term: member.term,
+				generation: member.generation,
 				endpoint,
 				version:
 					Option.getOrElse(
-						Option.map(HashMap.get(s.cells, id), (v) => v.version),
+						Option.map(HashMap.get(s.cells, id), (cell) => cell.version),
 						() => 0,
 					) + (HashSet.has(c.request.writes, id) ? 1 : 0),
 			})),
-		)
-	})
-export const view = (s: State, c: Change): RouteView => ({
-	routes: Array.flatMap(
-		Array.fromIterable(
-			HashSet.union(
-				incoming(s, c.request.instance),
-				outgoing(s, c.request.instance),
-			),
 		),
-		(id) => Option.toArray(route(s, c, id)),
+	)
+}
+export const view = (s: State, c: Change): RouteView => ({
+	routes: Array.flatMap(Array.fromIterable(planned(c)), ([id, binding]) =>
+		Option.toArray(route(s, c, id, binding)),
 	),
 })
 export const commit = (s: State, c: Change): State["routes"] =>
-	Array.reduce(view(s, c).routes, s.routes, (routes, r) =>
-		HashMap.set(routes, r.id, r),
+	Array.reduce(
+		view(s, c).routes,
+		HashSet.reduce(affectedKeys(c), s.routes, (routes, id) =>
+			HashMap.remove(routes, id),
+		),
+		(routes, route) => HashMap.set(routes, route.id, route),
 	)
-
 export const activeView = (s: State, c: Change): RouteView => ({
-	routes: Array.flatMap(
-		Array.fromIterable(
-			HashSet.union(
-				incoming(s, c.request.instance),
-				outgoing(s, c.request.instance),
+	routes: Array.flatMap(Array.fromIterable(affectedKeys(c)), (id) =>
+		Option.toArray(HashMap.get(s.routes, id)),
+	),
+})
+export const adopt = (
+	s: State,
+	c: Change,
+): Pick<State, "bindings" | "providerBindings" | "consumerBindings"> => {
+	const removed = HashSet.reduce(
+		affectedKeys(c),
+		{
+			bindings: s.bindings,
+			providerBindings: s.providerBindings,
+			consumerBindings: s.consumerBindings,
+		},
+		(out, id) =>
+			Option.match(HashMap.get(out.bindings, id), {
+				onNone: () => out,
+				onSome: (binding) => ({
+					bindings: HashMap.remove(out.bindings, id),
+					providerBindings: HashMap.modify(
+						out.providerBindings,
+						binding.provider,
+						HashSet.remove(id),
+					),
+					consumerBindings: HashMap.modify(
+						out.consumerBindings,
+						binding.consumer,
+						HashSet.remove(id),
+					),
+				}),
+			}),
+	)
+	return HashMap.reduce(planned(c), removed, (out, binding, id) => ({
+		bindings: HashMap.set(out.bindings, id, binding),
+		providerBindings: HashMap.set(
+			out.providerBindings,
+			binding.provider,
+			HashSet.add(
+				Option.getOrElse(
+					HashMap.get(out.providerBindings, binding.provider),
+					HashSet.empty<string>,
+				),
+				id,
 			),
 		),
-		(id) => Option.toArray(HashMap.get(s.routes, id)),
+		consumerBindings: HashMap.set(
+			out.consumerBindings,
+			binding.consumer,
+			HashSet.add(
+				Option.getOrElse(
+					HashMap.get(out.consumerBindings, binding.consumer),
+					HashSet.empty<string>,
+				),
+				id,
+			),
+		),
+	}))
+}
+
+export const memberBindings = (
+	s: State,
+	members: HashSet.HashSet<string>,
+): HashSet.HashSet<string> =>
+	HashSet.reduce(members, HashSet.empty<string>(), (ids, member) =>
+		HashSet.union(ids, HashSet.union(incoming(s, member), outgoing(s, member))),
+	)
+export const memberView = (
+	s: State,
+	operation: MemberOperation,
+): RouteView => ({
+	routes: Array.flatMap(
+		Array.fromIterable(memberBindings(s, operation.members)),
+		(id) =>
+			Option.toArray(
+				Option.flatMap(HashMap.get(s.bindings, id), (binding) =>
+					Option.flatMap(
+						Executions.current(s, binding.provider),
+						({ unit, member }) =>
+							Option.map(member.endpoint, (endpoint) => ({
+								...binding,
+								id,
+								unit: unit.id,
+								incarnation: unit.incarnation,
+								term: member.term,
+								generation: member.generation,
+								endpoint,
+								version:
+									Option.getOrElse(
+										Option.map(
+											HashMap.get(s.cells, id),
+											(cell) => cell.version,
+										),
+										() => 0,
+									) +
+									(operation.phase === "Activating" ||
+									operation.phase === "Completed"
+										? 0
+										: 1),
+							})),
+					),
+				),
+			),
 	),
 })

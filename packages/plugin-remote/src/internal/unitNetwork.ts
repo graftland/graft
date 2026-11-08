@@ -46,7 +46,7 @@ const connection = Effect.fnUntraced(function* (
 	socket: NativeSocket,
 	credential: string,
 	services: ReadonlyArray<Contract.Service>,
-	owner: Owner,
+	owner: Contract.RequestOwner,
 ): Effect.fn.Return<never, Socket.SocketError, Scope.Scope> {
 	const adapted = yield* NodeSocket.fromDuplex(Effect.succeed(socket))
 	const bytes = yield* channel(adapted)
@@ -66,6 +66,7 @@ export const provider = Effect.fnUntraced(function* (
 	services: ReadonlyArray<Contract.Service>,
 	diagnostic: (cause: Cause.Cause<unknown>) => Effect.Effect<void>,
 	owner: Owner,
+	member: Kernel.CallMemberIdentity,
 ): Effect.fn.Return<Provider, never, Scope.Scope | SecureRandom.SecureRandom> {
 	const random = yield* SecureRandom.SecureRandom
 	const credential = yield* random.uuidV4()
@@ -89,7 +90,7 @@ export const provider = Effect.fnUntraced(function* (
 		return yield* Effect.die("Unit endpoint did not bind a TCP address")
 	const serve: Effect.Effect<never> = Queue.take(accepted).pipe(
 		Effect.flatMap((socket) =>
-			connection(socket, credential, services, owner).pipe(
+			connection(socket, credential, services, owner.forMember(member)).pipe(
 				Effect.scoped,
 				Effect.catchCause(diagnostic),
 				Effect.forkScoped,

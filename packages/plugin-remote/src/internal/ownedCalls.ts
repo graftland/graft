@@ -5,10 +5,12 @@ import {
 	Context,
 	Deferred,
 	Effect,
+	Equal,
 	Exit,
 	Fiber,
 	FiberMap,
 	HashMap,
+	HashSet,
 	Option,
 	Queue,
 	Ref,
@@ -16,6 +18,9 @@ import {
 	Stream,
 } from "effect"
 
+import type { Kernel } from "@graftland/graft"
+
+import type { RequestOwner } from "../Contract"
 import * as Frames from "./callFrames"
 import type * as Wire from "./unitProtocol"
 
@@ -30,6 +35,7 @@ interface Registered {
 	readonly completion: Option.Option<Wire.CallMessage>
 }
 interface Runtime {
+	readonly cancelled: Ref.Ref<HashSet.HashSet<string>>
 	readonly errors: Queue.Queue<Cause.Cause<unknown>>
 	readonly scope: Scope.Scope
 	readonly records: Ref.Ref<HashMap.HashMap<string, Registered>>
@@ -43,11 +49,7 @@ export interface Owner {
 	readonly ack: (key: string) => Effect.Effect<void>
 	readonly reconcile: Effect.Effect<void>
 	readonly pending: Effect.Effect<number>
-	readonly run: <A, E, R>(
-		effect: Effect.Effect<A, E, R>,
-		ticket: string,
-		tag: string,
-	) => Effect.Effect<A, E, R>
+	readonly forMember: (identity: Kernel.CallMemberIdentity) => RequestOwner
 }
 const retain = Effect.fnUntraced(function* (
 	runtime: Runtime,
@@ -55,8 +57,20 @@ const retain = Effect.fnUntraced(function* (
 	cause: Cause.Cause<unknown>,
 	cleanup: Exit.Exit<void, never>,
 ) {
+	const record = yield* Ref.get(runtime.records).pipe(
+		Effect.map((records) => HashMap.get(records, key)),
+	)
+	if (Option.isNone(record))
+		return yield* Queue.offer(
+			runtime.errors,
+			Cause.combine(
+				cause,
+				Cause.die("Owned completion lost its registered member identity"),
+			),
+		).pipe(Effect.asVoid)
 	const message = yield* Frames.encode({
 		_tag: "Complete",
+		...record.value.grant.member,
 		key,
 		cause,
 		cleanup: Exit.isSuccess(cleanup)
@@ -121,6 +135,7 @@ const run = <A, E, R>(
 	effect: Effect.Effect<A, E, R>,
 	ticket: string,
 	tag: string,
+	member: Kernel.CallMemberIdentity,
 ): Effect.Effect<A, E, R> =>
 	Effect.uninterruptibleMask((restore) =>
 		Effect.gen(function* () {
@@ -130,6 +145,7 @@ const run = <A, E, R>(
 					Option.isNone(known) ||
 					known.value.started ||
 					known.value.cancelled ||
+					!Equal.equals(known.value.grant.member, member) ||
 					!Array.contains(known.value.grant.tags ?? [], tag)
 				)
 					return [false, records]
@@ -158,20 +174,13 @@ const run = <A, E, R>(
 		}),
 	)
 const cancel = Effect.fnUntraced(function* (runtime: Runtime, key: string) {
+	yield* Ref.update(runtime.cancelled, HashSet.add(key))
 	const known = yield* Ref.modify(runtime.records, (records) => [
 		HashMap.get(records, key),
-		HashMap.set(records, key, {
-			...Option.getOrElse(HashMap.get(records, key), () => ({
-				grant: { key, session: "", request: "", service: "" },
-				started: false,
-				cancelled: true,
-				completion: Option.none<Wire.CallMessage>(),
-			})),
-			cancelled: true,
-		}),
+		HashMap.modify(records, key, (record) => ({ ...record, cancelled: true })),
 	])
-	if (Option.isNone(known))
-		return yield* retain(runtime, key, Cause.empty, Exit.void)
+	if (Option.isNone(known)) return
+
 	if (!known.value.started && Option.isNone(known.value.completion))
 		return yield* retain(runtime, key, Cause.empty, Exit.void)
 	const fiber = yield* FiberMap.get(runtime.fibers, key)
@@ -182,6 +191,7 @@ export const make = Effect.fnUntraced(function* (
 	emit: (message: Wire.CallMessage) => Effect.Effect<void>,
 ): Effect.fn.Return<Owner, never, Scope.Scope> {
 	const runtime: Runtime = {
+		cancelled: yield* Ref.make(HashSet.empty<string>()),
 		errors: yield* Queue.bounded<Cause.Cause<unknown>>(256),
 		scope: yield* Effect.scope,
 		emit,
@@ -190,8 +200,8 @@ export const make = Effect.fnUntraced(function* (
 	}
 	return {
 		failures: Stream.fromQueue(runtime.errors),
-		register: (grant) =>
-			Ref.update(runtime.records, (records) =>
+		register: Effect.fnUntraced(function* (grant) {
+			yield* Ref.update(runtime.records, (records) =>
 				HashMap.has(records, grant.key)
 					? records
 					: HashMap.set(records, grant.key, {
@@ -200,7 +210,11 @@ export const make = Effect.fnUntraced(function* (
 							cancelled: false,
 							completion: Option.none(),
 						}),
-			),
+			)
+			const cancelled = yield* Ref.get(runtime.cancelled)
+			if (HashSet.has(cancelled, grant.key)) yield* cancel(runtime, grant.key)
+		}),
+
 		cancel: (key) => cancel(runtime, key),
 		ack: (key) =>
 			Ref.update(runtime.records, (records) =>
@@ -227,6 +241,8 @@ export const make = Effect.fnUntraced(function* (
 			),
 		),
 		pending: Ref.get(runtime.records).pipe(Effect.map(HashMap.size)),
-		run: (effect, ticket, tag) => run(runtime, effect, ticket, tag),
+		forMember: (member) => ({
+			run: (effect, ticket, tag) => run(runtime, effect, ticket, tag, member),
+		}),
 	}
 })

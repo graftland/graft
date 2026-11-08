@@ -41,8 +41,9 @@ import {
 
 import { ForkState } from "../Fork"
 import { Graft, ServiceConflict } from "../Graft"
-import { isOptional, type Update } from "../Plugin"
+import { isOptional, UnitTerm, type Update } from "../Plugin"
 import * as Release from "../Release"
+import * as Transition from "../Transition"
 import { publicationCycle, resolutionChanged } from "./dependencies"
 import { setState } from "./forkState"
 import * as Generations from "./generations"
@@ -296,9 +297,16 @@ export const supervise = Effect.fnUntraced(function* (
 	const cleanup =
 		completion ?? (yield* Ref.make<Exit.Exit<void, unknown>>(Exit.void))
 	const realms = yield* Realms
+	const lifecycle = yield* Transition.Lifecycle
+	const permit = yield* Ref.make(Option.none<number>())
+	const environment = yield* Transition.Environment
 	/** What the fork inherits from where it was loaded: references and ambient services. */
 	const inherited = yield* Effect.context<never>()
-	const references = Context.merge(runtime.ambient, inherited)
+	/** Unit-built infrastructure (environment modules) refines inherited references for this activation. */
+	const references = Context.merge(
+		Context.merge(runtime.ambient, inherited),
+		environment,
+	)
 
 	// A supervisor retains its handles through Pending, running, teardown, and failed retry.
 	const held = yield* TxRef.make<Prepared | undefined>(undefined)
@@ -323,7 +331,9 @@ export const supervise = Effect.fnUntraced(function* (
 					slot,
 					ambient: () =>
 						Context.getOption(
-							Context.isReference(key) ? references : runtime.ambient,
+							Context.isReference(key)
+								? references
+								: Context.merge(runtime.ambient, environment),
 							key,
 						),
 				}
@@ -372,6 +382,9 @@ export const supervise = Effect.fnUntraced(function* (
 		)
 		const { resolution, generation } = acquired
 		if (generation === undefined) return Acquired.Missing({ resolution })
+		const grantedTerm = yield* Ref.get(permit)
+		const inheritedTerm = yield* UnitTerm
+		const term = Option.orElse(grantedTerm, () => inheritedTerm)
 		const scope = yield* Scope.make()
 		const tasks = yield* TaskGroup.make
 		const published = yield* TxRef.make(
@@ -392,6 +405,7 @@ export const supervise = Effect.fnUntraced(function* (
 		const context = Context.makeUnsafe<unknown>(
 			new Map<string, unknown>([
 				...inherited.mapUnsafe,
+				...environment.mapUnsafe,
 				...resolution.ambient,
 				...Array.map(
 					resolution.provisions,
@@ -399,9 +413,11 @@ export const supervise = Effect.fnUntraced(function* (
 				),
 				[Scope.Scope.key, scope],
 				[Graft.key, { runtime, activation }],
+				[UnitTerm.key, term],
 			]),
 		)
 		const spec = resolution.spec
+		if (Option.isSome(lifecycle)) yield* lifecycle.value.expose(context)
 		yield* setState(runtime, id, status, ForkState.Loading(), spec)
 		const fiber = yield* Effect.suspend(() =>
 			// @effect-diagnostics-next-line anyUnknownInErrorContext:off -- the activation discharges plugin requirements and teardown observes its complete Exit
@@ -555,7 +571,7 @@ export const supervise = Effect.fnUntraced(function* (
 					Generations.settle(runtime, node, running.activation.generation),
 				),
 			)
-			const tasks = yield* Ref.get(running.tasks.failures)
+			const tasks = yield* Ref.get(running.tasks.cleanupFailures)
 			const updates = yield* Ref.get(running.updateCleanup)
 			// Only the closer's cancellation of apply is expected here.
 			const stoppedCause =
@@ -707,10 +723,16 @@ export const supervise = Effect.fnUntraced(function* (
 	// Mask acquisition, teardown, and result handoff together. Only plugin execution is interruptible.
 	const cycle = Effect.uninterruptibleMask((restore) =>
 		Effect.gen(function* () {
+			const heldPermit = yield* Ref.get(permit)
+			if (Option.isSome(lifecycle) && Option.isNone(heldPermit)) {
+				const term = yield* restore(lifecycle.value.acquire)
+				yield* Ref.set(permit, Option.some(term))
+			}
 			const acquired = yield* acquire
 			if (acquired._tag === "Missing")
 				return yield* restore(pending(acquired.resolution))
 			const running = acquired.running
+			yield* Ref.set(permit, Option.none())
 			const used = yield* Effect.exit(
 				restore(
 					Effect.raceFirst(
@@ -731,6 +753,12 @@ export const supervise = Effect.fnUntraced(function* (
 					),
 				),
 			)
+			if (Option.isSome(lifecycle) && Exit.isSuccess(used))
+				yield* lifecycle.value.failed(
+					used.value._tag === "Failed"
+						? used.value.cause
+						: Cause.fail("A captured local dependency changed"),
+				)
 			const cleaned = yield* teardown(
 				running,
 				Exit.isSuccess(used) && used.value._tag === "Failed"
@@ -746,15 +774,40 @@ export const supervise = Effect.fnUntraced(function* (
 					? Exit.failCause(Cause.combine(used.value.cause, cleaned.cause))
 					: cleaned
 			yield* Ref.set(cleanup, closed)
-			if (Exit.isFailure(used)) return yield* Effect.failCause(used.cause)
+			const tasks = yield* Ref.get(running.tasks.failures)
+			if (Option.isSome(lifecycle)) {
+				if (tasks.reasons.length > 0) yield* lifecycle.value.failed(tasks)
+				yield* lifecycle.value.stopped(closed)
+			}
+			if (Exit.isFailure(used)) {
+				if (tasks.reasons.length > 0)
+					yield* Ref.set(
+						cleanup,
+						Exit.failCause(
+							Cause.combine(
+								tasks,
+								Exit.isFailure(closed) ? closed.cause : Cause.empty,
+							),
+						),
+					)
+				return yield* Effect.failCause(used.cause)
+			}
 			if (Exit.isFailure(closed)) {
 				const spec = yield* TxRef.get(processing)
 				return Outcome.Failed({
 					resolution: { ...running.resolution, spec },
-					cause: closed.cause,
+					cause: Cause.combine(
+						Cause.combine(closed.cause, tasks),
+						used.value._tag === "Failed" ? used.value.cause : Cause.empty,
+					),
 				})
 			}
-			return used.value
+			return used.value._tag === "Failed"
+				? Outcome.Failed({
+						...used.value,
+						cause: Cause.combine(used.value.cause, tasks),
+					})
+				: used.value
 		}),
 	)
 

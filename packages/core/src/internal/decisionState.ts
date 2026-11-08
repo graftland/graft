@@ -17,6 +17,7 @@ export interface ConfigurationModule {
 	readonly options: Schema.Json
 }
 export interface DeploymentData {
+	readonly module?: string
 	readonly environment?: ReadonlyArray<ConfigurationModule>
 	readonly moduleSuffix?: string
 	readonly inspection?: "Module"
@@ -136,7 +137,7 @@ export interface GroupPlan {
 	>
 	readonly members: HashSet.HashSet<string>
 	readonly reasons: HashMap.HashMap<string, HashSet.HashSet<SelectionReason>>
-	readonly oldGroups: HashMap.HashMap<string, DeploymentGroup>
+	readonly recoveryGroups: HashMap.HashMap<string, DeploymentGroup>
 	readonly newGroups: HashMap.HashMap<string, DeploymentGroup>
 	readonly previous: HashMap.HashMap<string, MemberDeclaration>
 	readonly desired: HashMap.HashMap<string, MemberDeclaration>
@@ -179,6 +180,7 @@ export interface Endpoint {
 	readonly credential: string
 }
 export interface BindingRoute extends FixedBinding {
+	readonly generation: number
 	readonly id: string
 	readonly unit: string
 	readonly incarnation: string
@@ -230,6 +232,9 @@ export type PreparationPhase =
 	| "Terminating"
 	| "Concluded"
 export interface Preparation {
+	readonly inspectedResolutions: HashMap.HashMap<string, ResolvedInput>
+	readonly inspected: HashMap.HashMap<string, Description>
+	readonly inspectionUnits: HashSet.HashSet<string>
 	readonly interrupted: Option.Option<PreparationPhase>
 	readonly parent?: string
 	readonly claim: string
@@ -267,6 +272,7 @@ export interface PreparationStatus {
 	readonly result: Option.Option<PreparationResult>
 }
 export interface DescriptionKey {
+	readonly boundary: PlacementRequirement
 	readonly target: Target
 	readonly instance: string
 	readonly realm: string
@@ -313,7 +319,7 @@ export interface Requirements {
 	readonly probes: ReadonlyArray<string>
 	readonly trial: number
 }
-export interface Input {
+export interface InspectionInput {
 	readonly realm?: string
 	readonly realms?: ReadonlyArray<RealmDeclaration>
 	readonly colocate?: ReadonlyArray<string>
@@ -326,20 +332,44 @@ export interface Input {
 	readonly budget?: Partial<Budget> | undefined
 	readonly requirements?: Partial<Requirements> | undefined
 }
+export type DeploymentOperation =
+	| {
+			readonly _tag: "Deploy"
+			readonly instance: string
+			readonly target: Target
+			readonly realm?: string
+			readonly colocate?: ReadonlyArray<string>
+			readonly placement?: PlacementRequirement
+			readonly expected?: number
+	  }
+	| {
+			readonly _tag: "Remove"
+			readonly instance: string
+			readonly expected?: number
+	  }
+
+export interface Input {
+	readonly operations: ReadonlyArray<DeploymentOperation>
+	readonly realms?: ReadonlyArray<RealmDeclaration>
+	readonly key?: string
+	readonly strategy?: Strategy
+	readonly budget?: Partial<Budget>
+	readonly requirements?: Partial<Requirements>
+}
 export interface RequestIdentity {
-	readonly realm: string
+	readonly mode: "Inspect" | "Deploy"
+	readonly operations: ReadonlyArray<DeploymentOperation>
 	readonly realms: ReadonlyArray<RealmDeclaration>
-	readonly colocate: ReadonlyArray<string>
-	readonly placement: Option.Option<PlacementRequirement>
-	readonly instance: string
-	readonly target: Target
 	readonly strategy: Strategy
-	readonly expected: Option.Option<number>
 	readonly budget: Budget
 	readonly probes: ReadonlyArray<string>
 	readonly trial: number
 }
+
 export interface Request {
+	readonly boundary?: PlacementRequirement
+	readonly member?: MemberDeclaration
+	readonly operations?: ReadonlyArray<DeploymentOperation>
 	readonly realm?: string
 	readonly realms?: ReadonlyArray<RealmDeclaration>
 	readonly colocate?: ReadonlyArray<string>
@@ -365,24 +395,22 @@ export interface Request {
 }
 export interface Cell {
 	readonly version: number
-	readonly value: Option.Option<string>
 	readonly writer: Option.Option<string>
 	readonly readers: HashSet.HashSet<string>
 }
 export interface Instance {
 	readonly established: boolean
 	readonly id: string
-	readonly desired: Target
 	readonly current: Option.Option<string>
 	readonly term: number
-	readonly healthy: boolean
-	readonly authorized: boolean
 }
+
 export type Cleanup =
 	| { readonly _tag: "Unknown" }
 	| { readonly _tag: "Completed" }
 	| { readonly _tag: "Failed"; readonly cause: Cause.Cause<unknown> }
 export interface UnitMember {
+	readonly dependencies: ReadonlyArray<ResolvedDependency>
 	readonly declaration: string
 	readonly parent: Option.Option<string>
 	readonly realm: string
@@ -393,18 +421,33 @@ export interface UnitMember {
 	readonly term: number
 	readonly generation: number
 }
-export interface Unit {
-	readonly group: string
-	readonly members: HashMap.HashMap<string, UnitMember>
-	readonly description: Option.Option<Description>
+export interface MemberExecution extends UnitMember {
 	readonly endpoint: Option.Option<Endpoint>
+	readonly phase:
+		| "Declared"
+		| "Preparing"
+		| "Starting"
+		| "Ready"
+		| "Stopping"
+		| "Stopped"
+		| "NotStarted"
+		| "Failed"
+	readonly cleanup: Cleanup
+	readonly cause: Cause.Cause<unknown>
+}
+export interface Unit {
+	readonly placement: PlacementRequirement
+	readonly memberBudget: Budget
+	readonly memberHistory: HashMap.HashMap<string, MemberExecution>
+	readonly localConsumers: HashMap.HashMap<string, HashSet.HashSet<string>>
+	readonly children: HashMap.HashMap<string, HashSet.HashSet<string>>
+	readonly group: string
+	readonly members: HashMap.HashMap<string, MemberExecution>
+	readonly description: Option.Option<Description>
 	readonly progress?: string
 	readonly kind: "Inspection" | "Execution"
 	readonly id: string
 	readonly incarnation: string
-	readonly instance: string
-	readonly term: number
-	readonly target: Target
 	readonly owner: string
 	readonly claim: string
 	readonly spawn: string
@@ -457,20 +500,24 @@ export interface Conclusion {
 	readonly units: HashSet.HashSet<string>
 }
 export interface Change {
+	readonly currentGroup: Option.Option<string>
+	readonly currentMember: Option.Option<string>
+	readonly loadedGroups: HashSet.HashSet<string>
+	readonly resolvedMembers: HashSet.HashSet<string>
+	readonly serveWave: number
+	readonly pendingUnits: HashSet.HashSet<string>
+	readonly resolutions: HashMap.HashMap<string, ResolvedInput>
+	readonly descriptions: HashMap.HashMap<string, Description>
 	readonly plan: GroupPlan
 	readonly hadServing: boolean
-	readonly resolved: Option.Option<ResolvedInput>
-	readonly description: Option.Option<Description>
 	readonly policyVersion: number
 	readonly id: string
 	readonly request: Request
-	readonly previous: Target
-	readonly startingVersion: number
 	readonly startingVersions: HashMap.HashMap<string, number>
 	readonly phase: Phase
 	readonly interrupted: Option.Option<Phase>
-	readonly old: Option.Option<string>
-	readonly candidate: Option.Option<string>
+	readonly oldUnits: HashSet.HashSet<string>
+	readonly candidates: HashMap.HashMap<string, string>
 	readonly units: HashSet.HashSet<string>
 	readonly requiredExits: HashSet.HashSet<string>
 	readonly claims: HashSet.HashSet<string>
@@ -481,7 +528,7 @@ export interface Change {
 	readonly failure: boolean
 	readonly shuttingDown: boolean
 	readonly cancelRequested: boolean
-	readonly authorized: boolean
+	readonly invalidated: HashSet.HashSet<string>
 	readonly trialPassed: boolean
 	readonly view: number
 	readonly installed: HashSet.HashSet<string>
@@ -493,10 +540,14 @@ export interface Change {
 	readonly deadline: number
 	readonly cause: Cause.Cause<unknown>
 	readonly conclusion: Option.Option<Conclusion>
-	readonly transferred: Option.Option<string>
+	readonly transferred: HashSet.HashSet<string>
 	readonly released: boolean
 }
 export type CommandKind =
+	| "ServeMembers"
+	| "StopMembers"
+	| "RestartMembers"
+	| "ReadyMembers"
 	| "RetireRoute"
 	| "CallRegister"
 	| "CallGrant"
@@ -526,8 +577,12 @@ export interface Token {
 	readonly change: string
 	readonly unit: string
 	readonly incarnation: string
-	readonly term: number
+	readonly members: HashMap.HashMap<string, MemberGeneration>
 	readonly view: number
+}
+export interface MemberGeneration {
+	readonly term: number
+	readonly generation: number
 }
 export type Report =
 	| { readonly _tag: "Succeeded" }
@@ -536,7 +591,7 @@ export type Report =
 	| {
 			readonly _tag: "Started"
 			readonly value: Description
-			readonly endpoint?: Endpoint
+			readonly endpoints: HashMap.HashMap<string, Endpoint>
 	  }
 	| {
 			readonly _tag: "Failed"
@@ -546,6 +601,11 @@ export type Report =
 			readonly delivery?: "Unavailable"
 	  }
 export interface Command {
+	readonly subjects: HashSet.HashSet<string>
+	readonly placement: PlacementRequirement
+	readonly resolutions: HashMap.HashMap<string, ResolvedInput>
+	readonly descriptions: HashMap.HashMap<string, Description>
+	readonly policies: HashMap.HashMap<string, Policy>
 	readonly members: HashMap.HashMap<string, UnitMember>
 	readonly call?: CallControl
 	readonly callStatus?: CallFact
@@ -601,6 +661,12 @@ export interface GraphIssue {
 	readonly cause: Cause.Cause<unknown>
 }
 export interface State {
+	readonly nextMemberOperation: number
+	readonly memberOperations: HashMap.HashMap<string, MemberOperation>
+	readonly memberOperationsByUnit: HashMap.HashMap<
+		string,
+		HashSet.HashSet<string>
+	>
 	readonly graphIssue: Option.Option<GraphIssue>
 	readonly graph: GraphTopology
 	readonly activeCalls: HashSet.HashSet<string>
@@ -647,7 +713,59 @@ export interface State {
 		{ readonly request: Request; readonly change: string }
 	>
 }
+export interface MemberIdentity {
+	readonly unit: string
+	readonly incarnation: string
+	readonly observer: string
+	readonly member: string
+	readonly term: number
+	readonly generation: number
+}
+export type MemberSignal =
+	| (MemberIdentity & { readonly _tag: "MemberReady" })
+	| (MemberIdentity & {
+			readonly _tag: "MemberFailed"
+			readonly cause: Cause.Cause<unknown>
+	  })
+	| (MemberIdentity & {
+			readonly _tag: "MemberStopped"
+			readonly cleanup: Cleanup
+			readonly cause: Cause.Cause<unknown>
+	  })
+export interface MemberOperation {
+	readonly activated: HashSet.HashSet<string>
+	readonly serveWave: number
+	readonly stoppedAck: boolean
+	readonly id: string
+	readonly unit: string
+	readonly incarnation: string
+	readonly members: HashSet.HashSet<string>
+	readonly phase:
+		| "Stopping"
+		| "Resolving"
+		| "Starting"
+		| "Serving"
+		| "Installing"
+		| "Activating"
+		| "Completed"
+		| "Failed"
+		| "Unconfirmed"
+	readonly retry: boolean
+	readonly currentMember: Option.Option<string>
+	readonly resolutions: HashMap.HashMap<string, ResolvedInput>
+	readonly resolved: HashSet.HashSet<string>
+	readonly reads: HashMap.HashMap<string, number>
+	readonly writes: HashSet.HashSet<string>
+	readonly participants: HashSet.HashSet<string>
+	readonly installed: HashSet.HashSet<string>
+	readonly deadline: number
+	readonly cause: Cause.Cause<unknown>
+	readonly nextCommand: number
+	readonly commandIds: HashSet.HashSet<string>
+	readonly timerIds: HashSet.HashSet<string>
+}
 export type Event =
+	| (MemberSignal & { readonly now: number })
 	| (CallEvidence & { readonly now: number })
 	| { readonly _tag: "CallExpired"; readonly key: string; readonly now: number }
 	| {
@@ -693,7 +811,7 @@ export type Event =
 	  }
 	| {
 			readonly _tag: "InspectRequested"
-			readonly request: Input
+			readonly request: InspectionInput
 			readonly now: number
 	  }
 	| {
@@ -803,34 +921,47 @@ export interface CallLimits {
 	readonly waiters: number
 	readonly wait: number
 }
-export type CallMessage =
-	| {
-			readonly _tag: "Lost"
-			readonly session: string
-			readonly request: string
-			readonly cause: Cause.Cause<unknown>
-	  }
-	| {
-			readonly _tag: "Request"
-			readonly session: string
-			readonly request: string
-			readonly service: string
-			readonly lifecycle: boolean
-			readonly nested: boolean
-			readonly wait: number
-	  }
-	| {
-			readonly _tag: "Cancel" | "Result"
-			readonly session: string
-			readonly request: string
-	  }
-	| {
-			readonly _tag: "Complete"
-			readonly key: string
-			readonly cleanup: Cleanup
-			readonly cause: Cause.Cause<unknown>
-	  }
+export interface CallMemberIdentity {
+	readonly member: string
+	readonly term: number
+	readonly generation: number
+}
+export type CallMessage = CallMemberIdentity &
+	(
+		| {
+				readonly _tag: "Lost"
+				readonly session: string
+				readonly request: string
+				readonly cause: Cause.Cause<unknown>
+		  }
+		| {
+				readonly _tag: "Request"
+				readonly session: string
+				readonly request: string
+				readonly service: string
+				readonly lifecycle: boolean
+				readonly nested: boolean
+				readonly wait: number
+		  }
+		| {
+				readonly _tag: "Cancel" | "Result"
+				readonly session: string
+				readonly request: string
+		  }
+		| {
+				readonly _tag: "Complete"
+				readonly key: string
+				readonly cleanup: Cleanup
+				readonly cause: Cause.Cause<unknown>
+		  }
+	)
 export interface CallFact {
+	readonly consumerMember: string
+	readonly consumerTerm: number
+	readonly consumerGeneration: number
+	readonly providerMember: string
+	readonly providerTerm: number
+	readonly providerGeneration: number
 	readonly key: string
 	readonly consumer: string
 	readonly consumerIncarnation: string
@@ -856,6 +987,7 @@ export interface CallWaiter {
 	readonly deadline: number
 }
 export interface CallControl {
+	readonly member: CallMemberIdentity
 	readonly key: string
 	readonly session: string
 	readonly request: string

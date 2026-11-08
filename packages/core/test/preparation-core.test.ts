@@ -3,6 +3,7 @@ import { assert, it } from "@effect/vitest"
 
 import * as Core from "../src/internal/decisionCore.ts"
 import { deploymentIdentity } from "../src/internal/deploymentIdentity"
+import * as Executions from "../src/internal/executionState"
 import { declaredMembers, rootRealms } from "./member-fact"
 import {
 	command,
@@ -13,6 +14,8 @@ import {
 	id,
 	initial,
 	input,
+	inspect,
+	inspectionInput,
 	prepare,
 	report,
 	resolved,
@@ -21,8 +24,8 @@ import {
 } from "./preparation-fixture.ts"
 
 it("inspects an unregistered Loader module without creating an instance or a Change (F2)", () => {
-	const request = { ...input(), instance: "not-yet-admitted" }
-	const first = prepare(initial(), request, true)
+	const request = { ...inspectionInput(), instance: "not-yet-admitted" }
+	const first = inspect(initial(), request)
 	assert.equal(first.reply._tag, "Preparing")
 	assert.isFalse(HashMap.has(first.state.instances, request.instance))
 	assert.equal(HashMap.size(first.state.changes), 0)
@@ -36,10 +39,16 @@ it("refuses serving authority for a module-only inspection descriptor (I1, F2)",
 		return assert.fail("Expected fixture deployment")
 	const request: Core.Input = {
 		...input(),
-		target: {
-			...original,
-			deployment: { ...deployment, inspection: "Module" },
-		},
+		operations: [
+			{
+				_tag: "Deploy",
+				instance: "a",
+				target: {
+					...original,
+					deployment: { ...deployment, inspection: "Module" },
+				},
+			},
+		],
 	}
 	const denied = prepare(initial(), request)
 	assert.equal(denied.reply._tag, "Rejected")
@@ -66,7 +75,9 @@ it("deduplicates pending inspection before capacity and rejects a different norm
 	assert.lengthOf(repeated.commands, 0)
 	const conflict = prepare(first.state, {
 		...input("deployment"),
-		target: target("different"),
+		operations: [
+			{ _tag: "Deploy", instance: "a", target: target("different") },
+		],
 	})
 	assert.equal(conflict.reply._tag, "Rejected")
 	if (conflict.reply._tag === "Rejected")
@@ -160,7 +171,10 @@ it("rejects uncached inspection at full capacity before stopping an old unit (I2
 	const base = Core.make({
 		authority: "full",
 		maxUnits: 1,
-		declarations: declaredMembers([{ id: "a", target: target("old") }]),
+		declarations: Array.map(
+			declaredMembers([{ id: "a", target: target("old") }]),
+			(member) => ({ ...member, overlap: true }),
+		),
 		realms: rootRealms,
 	})
 	const denied = prepare(base)
@@ -174,25 +188,29 @@ it("rejects uncached inspection at full capacity before stopping an old unit (I2
 			(c) => c.kind === "Stop" || c.kind === "Terminate",
 		),
 	)
-	assert.isTrue(
-		Option.getOrThrow(HashMap.get(denied.state.instances, "a")).healthy,
-	)
+	assert.isTrue(Executions.healthy(denied.state, "a"))
 })
 it("caches only matching immutable artifact, encoded configuration and validation environment (I4, I11)", () => {
-	const first = prepare(initial(), input(), true)
+	const first = inspect(initial(), inspectionInput())
 	const p = id(first)
 	const completed = exit(described(first.state, p), p).state
 	const same = prepare(completed)
 	assert.equal(same.reply._tag, "Admitted")
 	const changed = prepare(completed, {
 		...input(),
-		target: {
-			...target(),
-			deployment: {
-				...Option.getOrThrow(Option.fromNullishOr(target().deployment)),
-				input: { value: 2 },
+		operations: [
+			{
+				_tag: "Deploy",
+				instance: "a",
+				target: {
+					...target(),
+					deployment: {
+						...Option.getOrThrow(Option.fromNullishOr(target().deployment)),
+						input: { value: 2 },
+					},
+				},
 			},
-		},
+		],
 	})
 	assert.equal(changed.reply._tag, "Preparing")
 })
@@ -200,7 +218,13 @@ it("rejects Runner Overlap before creating inspection or execution (I12)", () =>
 	const denied = prepare(initial(), {
 		...input(),
 		strategy: "Overlap",
-		target: { ...target(), placement: "Runner" },
+		operations: [
+			{
+				_tag: "Deploy",
+				instance: "a",
+				target: { ...target(), placement: "Runner" },
+			},
+		],
 	})
 	assert.equal(denied.reply._tag, "Rejected")
 	assert.equal(HashMap.size(denied.state.units), 0)
@@ -242,6 +266,7 @@ it("validates execution declarations before Serve and retains its native exit ob
 		{ _tag: "Succeeded" },
 	)
 	const failed = report(running, command(running, change, "Start"), {
+		endpoints: HashMap.empty(),
 		_tag: "Started",
 		value: {
 			...description(),
@@ -274,7 +299,7 @@ it("consumes an execution term before uncertain native spawn and keeps that unit
 		{ _tag: "Resolved", value: resolved },
 	)
 	const spawn = command(resolving, change, "Spawn")
-	assert.equal(spawn.token.term, 1)
+	assert.equal(Option.getOrThrow(HashMap.get(spawn.token.members, "a")).term, 1)
 	const failed = report(resolving, spawn, {
 		_tag: "Failed",
 		cause: Cause.fail("Creation uncertainty"),
@@ -312,10 +337,10 @@ it("bounds settled preparation history while retaining unresolved inspection evi
 		p,
 		"Evidence",
 	)
-	const second = prepare(missing, input(), true)
+	const second = inspect(missing, inspectionInput())
 	const q = id(second)
 	const ended = exit(described(second.state, q), q).state
-	const third = prepare(ended, input(), true)
+	const third = inspect(ended, inspectionInput())
 	const r = id(third)
 	const completed = exit(described(third.state, r), r).state
 	assert.isTrue(Option.isNone(Core.getPreparation(completed, q)))
@@ -327,7 +352,10 @@ it("uses the reserved recovery claim for a fresh Describe of a previously servin
 	const known = Core.make({
 		authority: "preparation-test",
 		maxUnits: 3,
-		declarations: declaredMembers([{ id: "a", target: target("old") }]),
+		declarations: Array.map(
+			declaredMembers([{ id: "a", target: target("old") }]),
+			(member) => ({ ...member, overlap: true }),
+		),
 		realms: rootRealms,
 	})
 	const old = HashMap.get(known.units, "a@0").pipe(Option.getOrThrow)
@@ -393,7 +421,10 @@ it("uses the reserved recovery claim for a fresh Describe of a previously servin
 	const execution = command(ended, change, "Spawn")
 	assert.equal(execution.target.identity, target("old").identity)
 	assert.equal(execution.description?.configuration, "config-2")
-	assert.equal(execution.token.term, 2)
+	assert.equal(
+		Option.getOrThrow(HashMap.get(execution.token.members, "a")).term,
+		2,
+	)
 })
 
 it("reserves inspection termination inside the absolute total budget (I5, I11)", () => {
@@ -516,17 +547,13 @@ it("rejects forged native code identity before resolving or spawning an inspecti
 	const deployment = Option.getOrThrow(
 		Option.fromNullishOr(target().deployment),
 	)
-	const forged = prepare(
-		initial(),
-		{
-			...input(),
-			target: {
-				...target(),
-				deployment: { ...deployment, moduleSuffix: "?unapproved" },
-			},
+	const forged = inspect(initial(), {
+		...inspectionInput(),
+		target: {
+			...target(),
+			deployment: { ...deployment, moduleSuffix: "?unapproved" },
 		},
-		true,
-	)
+	})
 	assert.equal(forged.reply._tag, "Rejected")
 	assert.lengthOf(forged.commands, 0)
 	assert.equal(HashMap.size(forged.state.preparations), 0)
@@ -548,14 +575,14 @@ it("snapshots native environment recipes and resolved module options before reta
 	)
 	const desired = { ...deployment, environment: [recipe] }
 	const request = {
-		...input(),
+		...inspectionInput(),
 		target: {
 			...target(),
 			identity: deploymentIdentity(desired),
 			deployment: desired,
 		},
 	}
-	const first = prepare(initial(), request, true)
+	const first = inspect(initial(), request)
 	options.value = "after"
 	artifact.identity.digest = "changed"
 	const p = Option.getOrThrow(HashMap.get(first.state.preparations, id(first)))
@@ -595,9 +622,12 @@ it("never reuses an identified description for another instance with the same ar
 			{ id: "b", target: target() },
 		],
 	})
-	const first = prepare(before, input(), true)
+	const first = inspect(before, inspectionInput())
 	const cached = exit(described(first.state, id(first)), id(first)).state
-	const next = prepare(cached, { ...input(), instance: "b" })
+	const next = prepare(cached, {
+		...input(),
+		operations: [{ _tag: "Deploy", instance: "b", target: target() }],
+	})
 	assert.equal(next.reply._tag, "Preparing")
 	assert.equal(HashMap.size(next.state.changes), 0)
 })

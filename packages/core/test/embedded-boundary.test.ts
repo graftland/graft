@@ -28,8 +28,13 @@ it("deletes closure registration and Context-returning driver APIs (I4, I12)", (
 })
 
 const request: Change.Request = {
-	instance: "integration",
-	target: { identity: "next", placement: "Worker", overlap: true },
+	operations: [
+		{
+			_tag: "Deploy",
+			instance: "integration",
+			target: { identity: "next", placement: "Worker", overlap: true },
+		},
+	],
 	budget: {
 		total: 1000,
 		startup: 50,

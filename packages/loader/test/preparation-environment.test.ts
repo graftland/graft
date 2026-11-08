@@ -232,8 +232,7 @@ it.live(
 					values: { COLOR: "red" },
 				})
 				const initial = yield* Change.run({
-					instance: "a",
-					target,
+					operations: [{ _tag: "Deploy", instance: "a", target }],
 					strategy: "Restart",
 					budget,
 				})
@@ -246,8 +245,7 @@ it.live(
 					values: { COLOR: "green" },
 				})
 				const recovered = yield* Change.run({
-					instance: "a",
-					target: failed,
+					operations: [{ _tag: "Deploy", instance: "a", target: failed }],
 					strategy: "Restart",
 					budget,
 				})

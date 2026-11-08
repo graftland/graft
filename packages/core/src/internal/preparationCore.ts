@@ -23,6 +23,7 @@ import type {
 	UnitMember,
 	Working,
 } from "./decisionState"
+import * as Executions from "./executionState"
 import * as Grants from "./memberGrant"
 
 const timerPurposes = (
@@ -44,6 +45,8 @@ export const authorized = (
 		onSome: (allowed) => HashSet.has(allowed, target.identity),
 	})
 const descriptionKey = (request: Request): DescriptionKey => ({
+	boundary: request.boundary ??
+		request.placement ?? { kind: request.target.placement },
 	target: { ...request.target, overlap: false },
 	instance: request.instance,
 	realm: request.realm ?? "root",
@@ -83,10 +86,21 @@ export const proposal = (
 	return {
 		members: d.members,
 		removed: HashSet.difference(
-			descendants(HashSet.make(r.instance)),
+			descendants(
+				r.operations === undefined
+					? HashSet.make(r.instance)
+					: HashSet.fromIterable(
+							Array.map(r.operations, (operation) => operation.instance),
+						),
+			),
 			retained,
 		),
-		explicit: HashSet.make(r.instance),
+		explicit:
+			r.operations === undefined
+				? HashSet.make(r.instance)
+				: HashSet.fromIterable(
+						Array.map(r.operations, (operation) => operation.instance),
+					),
 		realms: r.realms ?? [],
 	}
 }
@@ -141,8 +155,20 @@ const emit = (
 	const unit = HashMap.get(s.units, p.unit)
 	const id = fixedId ?? `${p.id}/${p.nextCommand}`
 	const command: Command = {
+		subjects: Option.match(unit, {
+			onNone: HashSet.empty<string>,
+			onSome: (unit) => HashSet.fromIterable(HashMap.keys(unit.members)),
+		}),
+		placement: p.request.boundary ??
+			p.request.placement ?? { kind: p.request.target.placement },
+		resolutions: Option.match(p.resolution, {
+			onNone: HashMap.empty<string, ResolvedInput>,
+			onSome: (resolution) => HashMap.make([p.request.instance, resolution]),
+		}),
+		descriptions: HashMap.empty(),
+		policies: HashMap.make([p.request.instance, policy(s, p.request.instance)]),
 		members: Option.getOrElse(
-			Option.map(unit, (u) => u.members),
+			Option.map(unit, (u) => Executions.grants(u.members)),
 			HashMap.empty<string, UnitMember>,
 		),
 		id,
@@ -164,7 +190,10 @@ const emit = (
 				Option.map(unit, (u) => u.incarnation),
 				() => `${s.authority}/${p.unit}`,
 			),
-			term: 0,
+			members: Option.match(unit, {
+				onNone: HashMap.empty,
+				onSome: (unit) => Executions.tokens(unit.members),
+			}),
 			view: 0,
 		},
 		policy: policy(s, p.request.instance),
@@ -272,7 +301,9 @@ const evict = (s: Working, id: string): Working =>
 		timers: HashSet.reduce(p.timerIds, s.timers, (m, id) =>
 			HashMap.remove(m, id),
 		),
-		units: HashMap.remove(s.units, p.unit),
+		units: HashSet.reduce(p.inspectionUnits, s.units, (units, id) =>
+			HashMap.remove(units, id),
+		),
 		preparationsChanged: HashSet.remove(s.preparationsChanged, id),
 	}))
 const release = (s: Working, p: Preparation): Working => {
@@ -478,21 +509,61 @@ const finish = (s: Working, p: Preparation): Working => {
 			},
 		),
 	}
+	const inspected = HashMap.set(
+		p.inspected,
+		p.request.instance,
+		p.description.value,
+	)
+	const inspectedResolutions = HashMap.set(
+		p.inspectedResolutions,
+		p.request.instance,
+		p.resolution.value,
+	)
+	const nextRoot = Array.findFirst(
+		p.request.operations ?? [],
+		(operation) =>
+			operation._tag === "Deploy" &&
+			!HashMap.has(inspected, operation.instance),
+	)
+	if (Option.isSome(nextRoot) && nextRoot.value._tag === "Deploy")
+		return continueInspection(
+			cachedState,
+			{ ...p, inspected, inspectedResolutions },
+			{ ...p.request, ...nextRoot.value },
+		)
 	if (p.inspect || p.parent !== undefined)
 		return result(cachedState, p, {
 			_tag: "Described",
 			description: p.description.value,
 		})
+	const first = Array.findFirst(
+		p.request.operations ?? [],
+		(operation) => operation._tag === "Deploy",
+	)
+	const focused =
+		Option.isSome(first) && first.value._tag === "Deploy"
+			? { ...p.request, ...first.value }
+			: p.request
+	const lastDescription = p.description.value
+	const descriptions = Array.fromIterable(HashMap.values(inspected))
+	const description = {
+		...Option.getOrElse(Array.head(descriptions), () => lastDescription),
+		members: Array.flatMap(descriptions, (description) => description.members),
+	}
 	const request: Request = {
-		...p.request,
+		...focused,
+		...Option.match(HashMap.get(inspectedResolutions, focused.instance), {
+			onNone: () => ({}),
+			onSome: (resolution) => ({ resolution }),
+		}),
 		submitted: p.submitted,
 		preparation: p.id,
-		policyVersion: p.policyVersion,
-		resolution: p.resolution.value,
-		description: p.description.value,
-		proposal: proposal(s, p.request, p.description.value),
+		policyVersion: policy(s, focused.instance).version,
+		description,
+		proposal: proposal(s, focused, description),
 		strategy: p.request.strategy,
 	}
+
 	return {
 		...release(cachedState, p),
 		admissions: Array.append(s.admissions, { preparation: p.id, request }),
@@ -517,6 +588,72 @@ export const admitResult = (s: Working, id: string): Working =>
 				return s
 		}
 	})
+const inspectionUnit = (
+	p: Preparation,
+	request: Request,
+	unitId: string,
+	authority: string,
+): Unit => ({
+	memberBudget: request.budget,
+	placement: request.boundary ??
+		request.placement ?? { kind: request.target.placement },
+	group: unitId,
+	members: Executions.members(
+		HashMap.make([request.instance, Grants.requested(request, 0, 0)]),
+		"Declared",
+	),
+	memberHistory: HashMap.empty(),
+	localConsumers: HashMap.empty(),
+	children: HashMap.empty(),
+	id: unitId,
+	kind: "Inspection",
+	description: Option.none(),
+	incarnation: `${authority}/${unitId}`,
+	owner: p.id,
+	claim: p.claim,
+	spawn: `${p.id}/spawn/${p.nextCommand}`,
+	phase: "PendingSpawn",
+	evidence: "Missing",
+	cleanup: { _tag: "Unknown" },
+	cause: Cause.empty,
+	leases: HashSet.empty(),
+})
+
+const continueInspection = (
+	s: Working,
+	previous: Preparation,
+	request: Request,
+): Working => {
+	const unitId = `${previous.id}@inspection/${previous.nextCommand}`
+	const p: Preparation = {
+		...previous,
+		request,
+		unit: unitId,
+		inspectionUnits: HashSet.add(previous.inspectionUnits, unitId),
+		phase: "Resolving",
+		resolution: Option.none(),
+		description: Option.none(),
+		policyVersion: policy(s, request.instance).version,
+	}
+	const unit = inspectionUnit(p, request, unitId, s.authority)
+	const allocated = save(
+		{
+			...disarm(s, previous, timerPurposes("Operation", "Evidence")),
+			units: HashMap.set(s.units, unitId, unit),
+			claims: HashMap.set(s.claims, p.claim, {
+				id: p.claim,
+				owner: p.id,
+				unit: Option.some(unitId),
+			}),
+		},
+		p,
+	)
+	const intended = emit(allocated, p, "Spawn", false, unit.spawn)
+	return update(intended, p.id, (s, p) =>
+		operation(s, p, "Resolve", "Resolving", request.budget.startup),
+	)
+}
+
 export const start = (
 	s: Working,
 	request: Request,
@@ -575,6 +712,9 @@ export const start = (
 	const id = `preparation-${s.nextPreparation}`
 	const unitId = `${id}@inspection`
 	const p: Preparation = {
+		inspected: HashMap.empty(),
+		inspectedResolutions: HashMap.empty(),
+		inspectionUnits: HashSet.make(unitId),
 		interrupted: Option.none(),
 		claim: recovery?.claim ?? `${id}/capacity`,
 		...(recovery === undefined ? {} : { parent: recovery.parent }),
@@ -597,26 +737,7 @@ export const start = (
 		commandIds: HashSet.empty(),
 		timerIds: HashSet.empty(),
 	}
-	const unit: Unit = {
-		group: unitId,
-		members: HashMap.make([request.instance, Grants.requested(request, 0, 0)]),
-		id: unitId,
-		kind: "Inspection",
-		description: Option.none(),
-		endpoint: Option.none(),
-		incarnation: `${s.authority}/${unitId}`,
-		instance: request.instance,
-		term: 0,
-		target: request.target,
-		owner: id,
-		claim: p.claim,
-		spawn: `${id}/spawn`,
-		phase: "PendingSpawn",
-		evidence: "Missing",
-		cleanup: { _tag: "Unknown" },
-		cause: Cause.empty,
-		leases: HashSet.empty(),
-	}
+	const unit = inspectionUnit(p, request, unitId, s.authority)
 	const allocated = save(
 		{
 			...s,
@@ -829,7 +950,9 @@ export const nativeFailure = (
 					}),
 				}
 				return event._tag === "UnitDisconnected" &&
-					(p.phase === "Stopping" ||
+					(u.evidence !== "Missing" ||
+						u.id !== p.unit ||
+						p.phase === "Stopping" ||
 						p.phase === "Terminating" ||
 						Option.isSome(p.result))
 					? save(recorded, { ...p, cause })

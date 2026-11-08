@@ -5,8 +5,10 @@ import {
 	Cause,
 	Effect,
 	FileSystem,
+	HashMap,
 	Layer,
 	Logger,
+	Option,
 	Queue,
 	References,
 } from "effect"
@@ -92,15 +94,13 @@ it.live(
 				yield* Effect.gen(function* () {
 					const kernel = yield* Kernel.Kernel
 					const first = yield* Change.run({
-						instance: "a",
-						target,
+						operations: [{ _tag: "Deploy", instance: "a", target }],
 						strategy: "Restart",
 						budget,
 					})
 					assert.equal(first.outcome, "Accepted", Cause.pretty(first.cause))
 					const second = yield* Change.run({
-						instance: "a",
-						target,
+						operations: [{ _tag: "Deploy", instance: "a", target }],
 						strategy: "Restart",
 						budget,
 					})
@@ -111,7 +111,10 @@ it.live(
 							retired,
 							(unit) =>
 								unit.kind === "Execution" &&
-								unit.term === 1 &&
+								Option.exists(
+									HashMap.get(unit.members, "a"),
+									(member) => member.term === 1,
+								) &&
 								unit.evidence === "Exited",
 						),
 					)

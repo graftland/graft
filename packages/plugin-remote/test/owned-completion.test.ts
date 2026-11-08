@@ -15,6 +15,7 @@ import * as Owned from "../src/internal/ownedCalls"
 import * as Wire from "../src/internal/unitProtocol"
 
 const grant = {
+	member: { member: "provider", term: 1, generation: 1 },
 	key: "ticket",
 	session: "session",
 	request: "1",
@@ -32,7 +33,7 @@ it.effect(
 			yield* owner.register(grant)
 			const closing = yield* Deferred.make<void>()
 			const release = yield* Deferred.make<void>()
-			const result = yield* owner.run(
+			const result = yield* owner.forMember(grant.member).run(
 				Effect.gen(function* () {
 					yield* Effect.addFinalizer(() =>
 						Deferred.succeed(closing, undefined).pipe(
@@ -71,6 +72,7 @@ it.effect(
 			const closing = yield* Deferred.make<void>()
 			const release = yield* Deferred.make<void>()
 			const running = yield* owner
+				.forMember(grant.member)
 				.run(
 					Effect.gen(function* () {
 						yield* Effect.addFinalizer(() =>
@@ -108,13 +110,15 @@ it.effect(
 				Queue.offer(reports, m).pipe(Effect.asVoid),
 			)
 			yield* owner.register(grant)
-			yield* owner.run(
-				Effect.addFinalizer(() => Effect.die("Finalizer defect")).pipe(
-					Effect.as(1),
-				),
-				"ticket",
-				"Forecast",
-			)
+			yield* owner
+				.forMember(grant.member)
+				.run(
+					Effect.addFinalizer(() => Effect.die("Finalizer defect")).pipe(
+						Effect.as(1),
+					),
+					"ticket",
+					"Forecast",
+				)
 			const first = yield* Queue.take(reports)
 			yield* owner.reconcile
 			const duplicate = yield* Queue.take(reports)
@@ -139,7 +143,9 @@ it.effect(
 			const prevented = yield* Queue.take(reports)
 			assert.equal(prevented._tag, "Complete")
 			const attempted = yield* Effect.exit(
-				owner.run(Effect.die("Handler must not start"), "ticket", "Forecast"),
+				owner
+					.forMember(grant.member)
+					.run(Effect.die("Handler must not start"), "ticket", "Forecast"),
 			)
 			assert.isTrue(Exit.isFailure(attempted))
 		}).pipe(Effect.scoped),
@@ -156,7 +162,9 @@ it.effect(
 			yield* owner.cancel("ticket")
 			yield* owner.register(grant)
 			const attempt = yield* Effect.exit(
-				owner.run(Effect.succeed(1), "ticket", "Forecast"),
+				owner
+					.forMember(grant.member)
+					.run(Effect.succeed(1), "ticket", "Forecast"),
 			)
 			assert.isTrue(Exit.isFailure(attempt))
 			const evidence = yield* Queue.take(reports)
@@ -175,7 +183,9 @@ it.effect(
 			yield* owner.register(grant)
 			const deferred = yield* Deferred.make<number>()
 			const result = yield* Effect.exit(
-				owner.run(Effect.succeed(deferred), "ticket", "Forecast"),
+				owner
+					.forMember(grant.member)
+					.run(Effect.succeed(deferred), "ticket", "Forecast"),
 			)
 			assert.isTrue(Exit.isFailure(result))
 			const report = yield* Queue.take(reports)
@@ -202,7 +212,9 @@ it.effect(
 				),
 			)
 			yield* owner.register(grant)
-			yield* owner.run(Effect.succeed(1), "ticket", "Forecast")
+			yield* owner
+				.forMember(grant.member)
+				.run(Effect.succeed(1), "ticket", "Forecast")
 			const failure = yield* Stream.runHead(owner.failures).pipe(
 				Effect.flatMap(Effect.fromOption),
 			)

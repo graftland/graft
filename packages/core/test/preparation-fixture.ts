@@ -33,6 +33,25 @@ export const initial = (maxUnits = 3) =>
 		instances: [{ id: "a", target: target("old") }],
 	})
 export const input = (key?: string): Core.Input => ({
+	operations: [
+		{
+			_tag: "Deploy",
+			instance: "a",
+			target: target(),
+		},
+	],
+	...(key === undefined ? {} : { key }),
+	strategy: "Restart",
+	budget: {
+		total: 3000,
+		startup: 500,
+		probe: 100,
+		drain: 100,
+		stop: 100,
+		terminate: 100,
+	},
+})
+export const inspectionInput = (): Core.InspectionInput => ({
 	instance: "a",
 	target: target(),
 	strategy: "Restart",
@@ -44,18 +63,15 @@ export const input = (key?: string): Core.Input => ({
 		stop: 100,
 		terminate: 100,
 	},
-	...(key === undefined ? {} : { key }),
 })
-export const prepare = (
-	state = initial(),
-	request = input(),
-	inspect = false,
-) =>
+export const prepare = (state = initial(), request = input()) =>
 	Core.reduce(state, {
-		_tag: inspect ? "InspectRequested" : "Requested",
+		_tag: "Requested",
 		request,
 		now: state.now,
 	})
+export const inspect = (state = initial(), request = inspectionInput()) =>
+	Core.reduce(state, { _tag: "InspectRequested", request, now: state.now })
 export const id = (transition: Core.Transition): string => {
 	assert.equal(transition.reply._tag, "Preparing")
 	return transition.reply._tag === "Preparing"
@@ -66,16 +82,31 @@ export const command = (
 	s: Core.State,
 	preparation: string,
 	kind: Core.CommandKind,
-): Core.Command =>
-	Option.getOrThrow(
-		Array.findFirst(
-			HashMap.values(s.commands),
-			(c) =>
-				c.change === preparation &&
-				c.kind === kind &&
-				c.disposition === "Pending",
-		),
+): Core.Command => {
+	const found = Array.findFirst(
+		HashMap.values(s.commands),
+		(c) =>
+			c.change === preparation &&
+			c.kind === kind &&
+			c.disposition === "Pending",
 	)
+	assert.isTrue(
+		Option.isSome(found),
+		`Expected ${kind} for ${preparation}; pending ${Array.join(
+			Array.map(
+				Array.fromIterable(HashMap.values(s.commands)),
+				(command) => `${command.change}:${command.kind}:${command.disposition}`,
+			),
+			", ",
+		)}; ${Option.getOrElse(
+			Option.map(Core.get(s, preparation), (status) =>
+				Cause.pretty(status.cause),
+			),
+			() => "No Change",
+		)}`,
+	)
+	return Option.getOrThrow(found)
+}
 export const report = (
 	s: Core.State,
 	c: Core.Command,

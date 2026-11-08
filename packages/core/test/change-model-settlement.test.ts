@@ -1,4 +1,12 @@
-import { Array as Arr, Cause, Equal, HashMap, HashSet, Option } from "effect"
+import {
+	Array as Arr,
+	Array,
+	Cause,
+	Equal,
+	HashMap,
+	HashSet,
+	Option,
+} from "effect"
 import { assert, it } from "@effect/vitest"
 
 import * as Core from "../src/internal/decisionCore.ts"
@@ -101,9 +109,13 @@ it("treats known retirement cleanup failure as failed success evidence and recov
 		_tag: "Failed",
 		cause: Cause.die("Finalizer failed"),
 	})
-	const candidate = Option.getOrThrow(
-		HashMap.get(failed.changes, "change-1"),
-	).candidate
+	const candidate = Array.head(
+		Array.fromIterable(
+			HashMap.values(
+				Option.getOrThrow(HashMap.get(failed.changes, "change-1")).candidates,
+			),
+		),
+	)
 	const settled = exit(failed, Option.getOrThrow(candidate))
 	const recovered = fire(installed(settled, "change-1"), "change-1", "Trial")
 	assert.strictEqual(conclusion(recovered).outcome, "Recovered")
@@ -348,10 +360,15 @@ it("transfers a serving target once at Stuck conclusion independently of late re
 		"Evidence",
 	)
 	assert.strictEqual(conclusion(stuck).outcome, "Stuck")
-	const serving = Option.getOrThrow(Core.cell(stuck, "instance-0").value)
+	const serving = Option.getOrThrow(
+		Option.flatMap(
+			HashMap.get(stuck.instances, "instance-0"),
+			(instance) => instance.current,
+		),
+	)
 	assert.strictEqual(
 		Option.getOrThrow(HashMap.get(stuck.units, serving)).owner,
-		"instance:instance-0",
+		`group:${Option.getOrThrow(HashMap.get(stuck.units, serving)).group}`,
 	)
 	assert.strictEqual(HashSet.size(status(stuck).leaseHolders), 0)
 	const dead = exit(stuck, serving)
@@ -454,7 +471,12 @@ it("keeps instance and Change ownership identities disjoint for arbitrary instan
 		realms: rootRealms,
 	})
 	const accepted = accept(submit(base, request(base, "change-1")), "change-1")
-	const serving = Option.getOrThrow(Core.cell(accepted, "change-1").value)
+	const serving = Option.getOrThrow(
+		Option.flatMap(
+			HashMap.get(accepted.instances, "change-1"),
+			(instance) => instance.current,
+		),
+	)
 	const u = Option.getOrThrow(HashMap.get(accepted.units, serving))
 	assert.notStrictEqual(u.owner, "change-1")
 	assert.strictEqual(conclusion(exit(accepted, serving)), conclusion(accepted))
@@ -534,7 +556,12 @@ it("evicts settled serving-unit records after idle exit and recreation (I2, I10)
 			const accepted = accept(submit(s), id)
 			return exit(
 				accepted,
-				Option.getOrThrow(Core.cell(accepted, "instance-0").value),
+				Option.getOrThrow(
+					Option.flatMap(
+						HashMap.get(accepted.instances, "instance-0"),
+						(instance) => instance.current,
+					),
+				),
 			)
 		},
 	)
@@ -546,7 +573,15 @@ it("evicts settled serving-unit records after idle exit and recreation (I2, I10)
 it("reclaims an orphaned ended current unit when unrelated history already evicted its Change (I2, I10)", () => {
 	const base = { ...initial(), historyLimit: 1 }
 	const a = accept(submit(base), "change-1")
-	const dead = exit(a, Option.getOrThrow(Core.cell(a, "instance-0").value))
+	const dead = exit(
+		a,
+		Option.getOrThrow(
+			Option.flatMap(
+				HashMap.get(a.instances, "instance-0"),
+				(instance) => instance.current,
+			),
+		),
+	)
 	const b = accept(submit(dead, request(dead, "instance-1")), "change-2")
 	assert.isTrue(Option.isNone(Core.get(b, "change-1")))
 	const replacement = accept(submit(b), "change-3")

@@ -1,8 +1,15 @@
 import { Context, type Cause, type Effect, type Stream } from "effect"
 
-import type { CallEvidence, Cleanup, Command, Report } from "./decisionState"
+import type {
+	CallEvidence,
+	Cleanup,
+	Command,
+	MemberSignal,
+	Report,
+} from "./decisionState"
 
 export type UnitEvent =
+	| MemberSignal
 	| CallEvidence
 	| {
 			readonly _tag: "Exited"

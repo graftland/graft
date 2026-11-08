@@ -48,7 +48,7 @@ const conservation = (s: Core.State) => {
 			assert.equal(
 				HashMap.get(
 					s.callRequests,
-					`${c.consumerIncarnation.length}:${c.consumerIncarnation}/${c.session.length}:${c.session}/${c.request}`,
+					`${c.consumerIncarnation.length}:${c.consumerIncarnation}/${c.consumerMember.length}:${c.consumerMember}/${c.consumerTerm}/${c.consumerGeneration}/${c.session.length}:${c.session}/${c.request}`,
 				).pipe(Option.getOrThrow),
 				c.key,
 			)
@@ -58,6 +58,9 @@ it("enumerates causal result, cancellation, duplicate completion and native exit
 	const initial = registered(requested())
 	const completion = message(
 		{
+			member: "provider",
+			term: 0,
+			generation: 0,
 			_tag: "Complete",
 			key: one(initial).key,
 			cleanup: { _tag: "Completed" },
@@ -69,8 +72,22 @@ it("enumerates causal result, cancellation, duplicate completion and native exit
 		initial,
 		[
 			[
-				message({ _tag: "Result", session: "session-a", request: "1" }),
-				message({ _tag: "Cancel", session: "session-a", request: "1" }),
+				message({
+					member: "consumer",
+					term: 0,
+					generation: 0,
+					_tag: "Result",
+					session: "session-a",
+					request: "1",
+				}),
+				message({
+					member: "consumer",
+					term: 0,
+					generation: 0,
+					_tag: "Cancel",
+					session: "session-a",
+					request: "1",
+				}),
 			],
 			[completion, completion, exited("provider@0")],
 			[exited("other@0")],
@@ -88,6 +105,9 @@ it("explores repeated call evidence to depth three without a second model (I2, I
 	const initial = registered(requested())
 	const completion = message(
 		{
+			member: "provider",
+			term: 0,
+			generation: 0,
 			_tag: "Complete",
 			key: one(initial).key,
 			cleanup: { _tag: "Completed" },
@@ -96,8 +116,22 @@ it("explores repeated call evidence to depth three without a second model (I2, I
 		"provider@0",
 	)
 	const alphabet = [
-		message({ _tag: "Result", session: "session-a", request: "1" }),
-		message({ _tag: "Cancel", session: "session-a", request: "1" }),
+		message({
+			member: "consumer",
+			term: 0,
+			generation: 0,
+			_tag: "Result",
+			session: "session-a",
+			request: "1",
+		}),
+		message({
+			member: "consumer",
+			term: 0,
+			generation: 0,
+			_tag: "Cancel",
+			session: "session-a",
+			request: "1",
+		}),
 		completion,
 		exited("provider@0"),
 		exited("consumer@0"),
@@ -112,6 +146,6 @@ it("explores repeated call evidence to depth three without a second model (I2, I
 			depth: stats.depth,
 			alphabet: alphabet.length,
 		},
-		{ states: 93, transitions: 135, depth: 3, alphabet: 5 },
+		{ states: 94, transitions: 135, depth: 3, alphabet: 5 },
 	)
 })

@@ -15,14 +15,14 @@ const boot = Effect.fnUntraced(function* (
 	mode: string = "normal",
 ) {
 	const provider = yield* client.submit({
-		instance: "integration",
-		target: f.target(1, mode),
+		operations: [
+			{ _tag: "Deploy", instance: "integration", target: f.target(1, mode) },
+		],
 		budget,
 	})
 	yield* consistent(client, provider.id, "Accepted")
 	const consumer = yield* client.submit({
-		instance: "gateway",
-		target: f.consumer,
+		operations: [{ _tag: "Deploy", instance: "gateway", target: f.consumer }],
 		budget,
 	})
 	yield* consistent(client, consumer.id, "Accepted")
@@ -48,8 +48,9 @@ for (const placement of ["Worker", "Process"] as const)
 						const session = yield* boot(f, client)
 						const stalled = yield* client
 							.submit({
-								instance: "integration",
-								target: blocked,
+								operations: [
+									{ _tag: "Deploy", instance: "integration", target: blocked },
+								],
 								budget: { ...budget, startup: 3000 },
 							})
 							.pipe(Effect.flip, Effect.forkScoped)
@@ -60,8 +61,14 @@ for (const placement of ["Worker", "Process"] as const)
 							}),
 						)
 						const unrelated = yield* client.submit({
-							instance: "unrelated",
-							realm: "other",
+							operations: [
+								{
+									_tag: "Deploy",
+									instance: "unrelated",
+									realm: "other",
+									target: f.target(3),
+								},
+							],
 							realms: [
 								{
 									id: "other",
@@ -69,7 +76,6 @@ for (const placement of ["Worker", "Process"] as const)
 									isolated: HashSet.empty(),
 								},
 							],
-							target: f.target(3),
 							strategy: "Overlap",
 							budget,
 						})
@@ -126,8 +132,13 @@ it.effect(
 				yield* Effect.addFinalizer(() => TestClock.adjust(100000))
 				yield* boot(f, client)
 				const trial = yield* client.submit({
-					instance: "integration",
-					target: f.target(2, "trial"),
+					operations: [
+						{
+							_tag: "Deploy",
+							instance: "integration",
+							target: f.target(2, "trial"),
+						},
+					],
 					strategy: "Overlap",
 					budget,
 					requirements: { trial: 1000 },
@@ -150,7 +161,8 @@ it.effect(
 					Array.every(
 						Array.filter(
 							units,
-							(u) => u.instance === "integration" && u.kind === "Execution",
+							(u) =>
+								HashMap.has(u.members, "integration") && u.kind === "Execution",
 						),
 						(u) => u.evidence === "Exited",
 					),
@@ -179,20 +191,26 @@ for (const fault of ["handler", "finalizer"] as const)
 						yield* f.release
 					}
 					const change = yield* client.submit({
-						instance: "integration",
-						target: f.target(2),
+						operations: [
+							{ _tag: "Deploy", instance: "integration", target: f.target(2) },
+						],
 						strategy: "Overlap",
 						budget,
 						requirements: { trial: 1000 },
 					})
 					yield* phase(client, change.id, "Trial")
 					const unrelated = yield* client.submit({
-						instance: "unrelated",
-						realm: "other",
+						operations: [
+							{
+								_tag: "Deploy",
+								instance: "unrelated",
+								realm: "other",
+								target: f.target(3),
+							},
+						],
 						realms: [
 							{ id: "other", parent: Option.none(), isolated: HashSet.empty() },
 						],
-						target: f.target(3),
 						strategy: "Overlap",
 						budget,
 					})
@@ -215,9 +233,12 @@ for (const fault of ["handler", "finalizer"] as const)
 						Array.findFirst(
 							units,
 							(u) =>
-								u.instance === "integration" &&
+								HashMap.has(u.members, "integration") &&
 								u.kind === "Execution" &&
-								u.term === 1,
+								Option.exists(
+									HashMap.get(u.members, "integration"),
+									(member) => member.term === 1,
+								),
 						),
 					)
 					assert.equal(old.evidence, "Exited")
@@ -241,8 +262,9 @@ it.effect(
 				yield* Effect.addFinalizer(() => TestClock.adjust(100000))
 				yield* boot(f, client)
 				const change = yield* client.submit({
-					instance: "integration",
-					target: f.target(2),
+					operations: [
+						{ _tag: "Deploy", instance: "integration", target: f.target(2) },
+					],
 					strategy: "Restart",
 					budget,
 					requirements: { trial: 1000 },
@@ -255,8 +277,11 @@ it.effect(
 							Array.some(
 								units,
 								(u) =>
-									u.instance === "integration" &&
-									u.term === 2 &&
+									HashMap.has(u.members, "integration") &&
+									Option.exists(
+										HashMap.get(u.members, "integration"),
+										(member) => member.term === 2,
+									) &&
 									u.cause.reasons.length > 0,
 							),
 					}),
@@ -271,8 +296,9 @@ it.effect(
 				assert.equal(HashSet.size(status.leaseHolders), 0)
 				const busy = yield* client
 					.submit({
-						instance: "integration",
-						target: f.target(2),
+						operations: [
+							{ _tag: "Deploy", instance: "integration", target: f.target(2) },
+						],
 						strategy: "Restart",
 						budget,
 					})
@@ -281,12 +307,17 @@ it.effect(
 				assert.isTrue(Array.contains(busy.conflicts ?? [], "integration"))
 				assert.deepEqual(Option.getOrThrow(status.conclusion), result)
 				const b = yield* client.submit({
-					instance: "unrelated",
-					realm: "other",
+					operations: [
+						{
+							_tag: "Deploy",
+							instance: "unrelated",
+							realm: "other",
+							target: f.unrelated,
+						},
+					],
 					realms: [
 						{ id: "other", parent: Option.none(), isolated: HashSet.empty() },
 					],
-					target: f.unrelated,
 					budget,
 				})
 				yield* consistent(client, b.id, "Accepted")
@@ -297,8 +328,11 @@ it.effect(
 					Array.findFirst(
 						units,
 						(u) =>
-							u.instance === "integration" &&
-							u.term === 2 &&
+							HashMap.has(u.members, "integration") &&
+							Option.exists(
+								HashMap.get(u.members, "integration"),
+								(member) => member.term === 2,
+							) &&
 							u.evidence === "Missing",
 					),
 				)
@@ -309,8 +343,11 @@ it.effect(
 					Array.some(
 						units,
 						(u) =>
-							u.instance === "integration" &&
-							u.term === 2 &&
+							HashMap.has(u.members, "integration") &&
+							Option.exists(
+								HashMap.get(u.members, "integration"),
+								(member) => member.term === 2,
+							) &&
 							u.evidence === "Missing",
 					),
 				)

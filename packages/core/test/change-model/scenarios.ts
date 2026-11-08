@@ -80,7 +80,7 @@ export const report = (
 		result:
 			result ??
 			(c.kind === "Start" && c.description !== undefined
-				? { _tag: "Started", value: c.description }
+				? { _tag: "Started", value: c.description, endpoints: HashMap.empty() }
 				: c.kind === "Resolve" && c.resolution !== undefined
 					? { _tag: "Resolved", value: c.resolution }
 					: { _tag: "Succeeded" }),

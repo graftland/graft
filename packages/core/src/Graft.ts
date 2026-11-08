@@ -255,6 +255,8 @@ export interface Isolatable {
 }
 
 export interface PluginOptions {
+	/** Matches a statically described child when this fork belongs to an execution unit. */
+	readonly declaration?: string
 	/**
 	 * Gives these services or events their own realm below this fork. A label
 	 * puts every fork using it into one shared realm instead.
@@ -372,6 +374,22 @@ export const plugin: <P extends Plugin>(
 		return yield* Effect.uninterruptible(
 			Effect.gen(function* () {
 				const { runtime, activation } = yield* RuntimeContext
+				const registry = yield* Transition.Registry
+				const parent = yield* Transition.Lifecycle
+				const lifecycle = yield* Option.isSome(registry)
+					? registry.value
+							.open(
+								plugin,
+								input,
+								Option.fromUndefinedOr(options?.declaration),
+								Option.map(parent, (lifecycle) => lifecycle.instance),
+							)
+							.pipe(Effect.asSome)
+					: Effect.succeed(Option.none<Transition.MemberLifecycle>())
+				if (Option.isSome(lifecycle) && options?.isolate !== undefined)
+					return yield* Effect.die(
+						"Managed members use their statically declared realm",
+					)
 				const scope = yield* Effect.scope
 				const termination = yield* Ref.make<Exit.Exit<void, unknown>>(Exit.void)
 				const owned = yield* ownedScope(
@@ -438,7 +456,12 @@ export const plugin: <P extends Plugin>(
 						),
 				).pipe(Scope.provide(forkScope))
 				const realms = HashMap.fromIterable(
-					Array.map(options?.isolate ?? [], isolation(id)),
+					Array.map(
+						Option.isSome(lifecycle)
+							? (lifecycle.value.isolate ?? [])
+							: (options?.isolate ?? []),
+						isolation(id),
+					),
 				)
 				const inherited = yield* Effect.context<never>()
 				const context = inheritContext(activation, inherited)
@@ -507,7 +530,21 @@ export const plugin: <P extends Plugin>(
 							),
 						)
 					}),
-				).pipe(Effect.updateContext<never, never>(() => context))
+				).pipe(
+					Effect.updateContext<never, never>(() =>
+						Context.add(
+							Option.isSome(lifecycle)
+								? Context.add(
+										context,
+										Transition.Environment,
+										lifecycle.value.environment,
+									)
+								: context,
+							Transition.Lifecycle,
+							lifecycle,
+						),
+					),
+				)
 				yield* Effect.acquireRelease(
 					Effect.forkIn(supervisor, forkScope),
 					(fiber) =>
@@ -541,13 +578,15 @@ export const plugin: <P extends Plugin>(
 								: Effect.void
 						}),
 				).pipe(Scope.provide(forkScope))
-				return makeFork<InputOf<P>, ErrorOf<P>>(
+				const fork = makeFork<InputOf<P>, ErrorOf<P>>(
 					runtime,
 					status,
 					id,
 					spec,
 					owned.close(Exit.void),
 				)
+				if (Option.isSome(lifecycle)) yield* lifecycle.value.attached(fork)
+				return fork
 			}),
 		)
 	})

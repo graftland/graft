@@ -4,6 +4,7 @@ import { assert, it } from "@effect/vitest"
 import * as Core from "../src/internal/decisionCore"
 import {
 	complete,
+	failedProvider,
 	observe,
 	one,
 	requested,
@@ -41,6 +42,9 @@ it("records the selected provider and credit before sending a grant (I1, I2, I8,
 it("retains execution credit after result and cancellation until owned completion (I2, I9)", () => {
 	const s = result(requested())
 	const cancelled = observe(s, {
+		member: "consumer",
+		term: 0,
+		generation: 0,
 		_tag: "Cancel",
 		session: "session-a",
 		request: "1",
@@ -93,6 +97,9 @@ it("retains credit on disconnect and rejects stale provider completion evidence 
 	const forged = observe(
 		s,
 		{
+			member: "provider",
+			term: 0,
+			generation: 0,
 			_tag: "Complete",
 			key: c.key,
 			cleanup: { _tag: "Completed" },
@@ -124,6 +131,9 @@ it("rejects nested business dispatch and saturation without losing existing cred
 		),
 	)
 	const nested = observe(setup(), {
+		member: "consumer",
+		term: 0,
+		generation: 0,
 		_tag: "Request",
 		session: "nested",
 		request: "1",
@@ -135,13 +145,7 @@ it("rejects nested business dispatch and saturation without losing existing cred
 	assert.equal(HashMap.size(nested.calls), 0)
 })
 it("expires or cancels Restart waiters before dispatch without creating execution credit (I8, I9, I11)", () => {
-	const paused = {
-		...setup(),
-		instances: HashMap.modify(setup().instances, "provider", (i) => ({
-			...i,
-			healthy: false,
-		})),
-	}
+	const paused = failedProvider(setup())
 	const queued = requested(paused)
 	assert.equal(HashMap.size(queued.calls), 0)
 	assert.equal(HashMap.size(queued.callWaiters), 1)
@@ -156,6 +160,9 @@ it("expires or cancels Restart waiters before dispatch without creating executio
 	assert.equal(HashMap.size(expired.callWaiters), 0)
 	assert.equal(HashMap.size(expired.calls), 0)
 	const cancelled = observe(queued, {
+		member: "consumer",
+		term: 0,
+		generation: 0,
 		_tag: "Cancel",
 		session: "session-a",
 		request: "1",
@@ -167,6 +174,9 @@ it("preserves a completion defect and unknown cleanup separately from business r
 	const done = observe(
 		s,
 		{
+			member: "provider",
+			term: 0,
+			generation: 0,
 			_tag: "Complete",
 			key: one(s).key,
 			cleanup: { _tag: "Failed", cause: Cause.die("Finalizer defect") },
@@ -256,6 +266,9 @@ it("does not erase known owned cleanup failure when the provider later exits (I6
 	const failed = observe(
 		s,
 		{
+			member: "provider",
+			term: 0,
+			generation: 0,
 			_tag: "Complete",
 			key: one(s).key,
 			cleanup: { _tag: "Failed", cause: Cause.die("Owned cleanup defect") },
@@ -372,6 +385,9 @@ it("does not invent a restoration generation for an instance that has never serv
 it("keeps data-channel loss Unknown and outstanding until owned completion (I5, I9)", () => {
 	const s = result(requested())
 	const lost = observe(s, {
+		member: "consumer",
+		term: 0,
+		generation: 0,
 		_tag: "Lost",
 		session: "session-a",
 		request: "1",
@@ -381,6 +397,9 @@ it("keeps data-channel loss Unknown and outstanding until owned completion (I5, 
 	assert.equal(one(lost).result, "Received")
 	assert.include(Cause.pretty(one(lost).cause), "Socket lost")
 	const withoutResult = observe(requested(), {
+		member: "consumer",
+		term: 0,
+		generation: 0,
 		_tag: "Lost",
 		session: "session-a",
 		request: "1",
@@ -441,6 +460,9 @@ it("projects recovery authorization from the actual generation under the current
 
 it("retains cancellation that overtakes admission on the reserved control channel (I2, I8, I9)", () => {
 	const cancelled = observe(setup(), {
+		member: "consumer",
+		term: 0,
+		generation: 0,
 		_tag: "Cancel",
 		session: "session-a",
 		request: "1",
@@ -458,13 +480,7 @@ it("retains cancellation that overtakes admission on the reserved control channe
 })
 it("removes queued callers once on consumer exit or runtime shutdown (I2, I9)", () => {
 	const s = setup()
-	const paused = {
-		...s,
-		instances: HashMap.modify(s.instances, "provider", (i) => ({
-			...i,
-			healthy: false,
-		})),
-	}
+	const paused = failedProvider(s)
 	const queued = requested(paused)
 	assert.equal(HashMap.size(exit(queued, "consumer@0").callWaiters), 0)
 	const shutdown = Core.reduce(queued, { _tag: "Shutdown", now: 0 }).state
@@ -474,6 +490,9 @@ it("removes queued callers once on consumer exit or runtime shutdown (I2, I9)", 
 
 it("settles only the exited provider's credits across concurrent independent bindings (I2, I6, I9)", () => {
 	const s = observe(requested(), {
+		member: "consumer",
+		term: 0,
+		generation: 0,
 		_tag: "Request",
 		session: "session-b",
 		request: "1",
@@ -526,6 +545,9 @@ it("does not attach later instance-owned call failures to a concluded Change tha
 	const done = observe(
 		active,
 		{
+			member: "provider",
+			term: 0,
+			generation: 0,
 			_tag: "Complete",
 			key: one(active).key,
 			cleanup: { _tag: "Completed" },

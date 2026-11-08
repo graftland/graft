@@ -3,9 +3,10 @@ title: Changes
 description: Submit, await and observe kernel changes.
 ---
 
-A **Change** replaces one fixed kernel instance. The kernel owns trial, recovery
-and settlement. Embedded `Graft.plugin` composition offers cooperative lifecycle
-and does not install the kernel service.
+A **Change** applies `Deploy` and `Remove` operations to kernel instances. The
+kernel plans their deployment groups and owns trial, recovery and settlement.
+Embedded `Graft.plugin` composition offers cooperative lifecycle and does not
+install the kernel service.
 
 ## Submit and await
 
@@ -22,8 +23,7 @@ declare const target: Change.Target
 export const upgrade = Effect.gen(function* () {
 	const handle = yield* Change.submit({
 		key: "forecasts-v2",
-		instance: "forecasts",
-		target,
+		operations: [{ _tag: "Deploy", instance: "forecasts", target }],
 	})
 	const conclusion = yield* handle.await
 	const current = yield* Change.get(handle.id)

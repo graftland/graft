@@ -88,6 +88,34 @@ const message = Effect.fnUntraced(
 		}
 		const frame = decoded.value
 		switch (frame._tag) {
+			case "MemberReady":
+				yield* Queue.offer(runtime.events, {
+					...unitEvent(handle.command),
+					...frame,
+				})
+				return
+			case "MemberFailed":
+				yield* Queue.offer(runtime.events, {
+					...unitEvent(handle.command),
+					...frame,
+					cause: yield* Schema.decodeEffect(Wire.Cause)(frame.cause),
+				})
+				return
+			case "MemberStopped": {
+				const cause = yield* Schema.decodeEffect(Wire.Cause)(frame.cause)
+				yield* Queue.offer(runtime.events, {
+					...unitEvent(handle.command),
+					...frame,
+					cause,
+					cleanup:
+						frame.cleanup === "Completed"
+							? { _tag: "Completed" }
+							: frame.cleanup === "Failed"
+								? { _tag: "Failed", cause }
+								: { _tag: "Unknown" },
+				})
+				return
+			}
 			case "Call":
 				yield* Queue.offer(
 					frame.message._tag === "Request" ? runtime.requests : runtime.events,
@@ -373,7 +401,7 @@ const create = Effect.fnUntraced(function* (
 				),
 			)
 			if (Option.isSome(known)) return known.value
-			const created = yield* command.target.placement === "Worker"
+			const created = yield* command.placement.kind === "Worker"
 				? worker(runtime, command)
 				: child(runtime, command)
 			yield* Ref.update(
@@ -493,7 +521,7 @@ const placementLayer = (withRunner: boolean) =>
 				),
 				send: (command) =>
 					(withRunner &&
-					command.target.placement === "Runner" &&
+					command.placement.kind === "Runner" &&
 					command.kind !== "Resolve"
 						? runner(command)
 						: send(runtime, command)

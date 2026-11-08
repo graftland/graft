@@ -36,6 +36,7 @@ export const setup = () => {
 		unit: "provider@0",
 		incarnation: "calls/provider@0",
 		term: 0,
+		generation: 0,
 		version: 1,
 		endpoint: { host: "127.0.0.1", port: 12345, credential: "secret" },
 	}
@@ -72,8 +73,26 @@ export const observe = (
 		now: s.now,
 	}).state
 }
+export const failedProvider = (s: Core.State): Core.State => {
+	const unit = Option.getOrThrow(HashMap.get(s.units, "provider@0"))
+	const member = Option.getOrThrow(HashMap.get(unit.members, "provider"))
+	return Core.reduce(s, {
+		_tag: "MemberFailed",
+		unit: unit.id,
+		incarnation: unit.incarnation,
+		observer: unit.spawn,
+		member: "provider",
+		term: member.term,
+		generation: member.generation,
+		cause: Cause.fail("Provider failed"),
+		now: s.now,
+	}).state
+}
 export const requested = (s = setup(), session = "session-a", request = "1") =>
 	observe(s, {
+		member: "consumer",
+		term: 0,
+		generation: 0,
 		_tag: "Request",
 		session,
 		request,
@@ -90,6 +109,9 @@ export const complete = (s: Core.State, key = one(s).key) =>
 	observe(
 		s,
 		{
+			member: "provider",
+			term: 0,
+			generation: 0,
 			_tag: "Complete",
 			key,
 			cleanup: { _tag: "Completed" },
@@ -112,6 +134,9 @@ export const registered = (s: Core.State): Core.State => {
 }
 export const result = (s: Core.State, session = "session-a") =>
 	observe(one(s).dispatched ? s : registered(s), {
+		member: "consumer",
+		term: 0,
+		generation: 0,
 		_tag: "Result",
 		session,
 		request: "1",

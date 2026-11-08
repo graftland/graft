@@ -2,6 +2,7 @@ import { Array, Cause, HashMap, HashSet, Option } from "effect"
 import { assert, it } from "@effect/vitest"
 
 import * as Core from "../src/internal/decisionCore"
+import * as Executions from "../src/internal/executionState"
 import { capacity } from "./change-model/assertions"
 import {
 	conclusion,
@@ -35,7 +36,13 @@ const advance = (state: Core.State, until: Core.CommandKind) =>
 	)
 const candidate = (state: Core.State) =>
 	Option.getOrThrow(
-		Option.getOrThrow(HashMap.get(state.changes, "change-1")).candidate,
+		Array.head(
+			Array.fromIterable(
+				HashMap.values(
+					Option.getOrThrow(HashMap.get(state.changes, "change-1")).candidates,
+				),
+			),
+		),
 	)
 const assertSettled = (state: Core.State, outcome: Core.Outcome) => {
 	assert.equal(
@@ -150,11 +157,7 @@ it("rejects invalid and insufficient two-trial budgets before inspection or Chan
 			Core.cell(denied.state, "instance-0"),
 			Core.cell(base, "instance-0"),
 		)
-		assert.equal(
-			Option.getOrThrow(HashMap.get(denied.state.instances, "instance-0"))
-				.healthy,
-			true,
-		)
+		assert.equal(Executions.healthy(denied.state, "instance-0"), true)
 		assert.lengthOf(denied.commands, 0)
 	}
 })

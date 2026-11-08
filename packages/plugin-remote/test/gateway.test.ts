@@ -18,14 +18,16 @@ for (const placement of ["Worker", "Process", "Runner"] as const)
 					const client = yield* Control.connect(address)
 					yield* Effect.addFinalizer(() => TestClock.adjust(100000))
 					const first = yield* client.submit({
-						instance: "integration",
-						target: f.target(1),
+						operations: [
+							{ _tag: "Deploy", instance: "integration", target: f.target(1) },
+						],
 						budget,
 					})
 					yield* consistent(client, first.id, "Accepted")
 					const gateway = yield* client.submit({
-						instance: "gateway",
-						target: f.consumer,
+						operations: [
+							{ _tag: "Deploy", instance: "gateway", target: f.consumer },
+						],
 						budget,
 					})
 					yield* consistent(client, gateway.id, "Accepted")
@@ -34,8 +36,9 @@ for (const placement of ["Worker", "Process", "Runner"] as const)
 					const held = yield* f.call("held").pipe(Effect.forkScoped)
 					yield* f.held
 					const upgrade = yield* client.submit({
-						instance: "integration",
-						target: f.target(2),
+						operations: [
+							{ _tag: "Deploy", instance: "integration", target: f.target(2) },
+						],
 						strategy: "Restart",
 						budget,
 						requirements: { trial: 1000 },
@@ -61,14 +64,17 @@ for (const placement of ["Worker", "Process", "Runner"] as const)
 					const old = Array.findFirst(
 						units,
 						(u) =>
-							u.instance === "integration" &&
+							HashMap.has(u.members, "integration") &&
 							u.kind === "Execution" &&
-							u.term === 1,
+							Option.exists(
+								HashMap.get(u.members, "integration"),
+								(member) => member.term === 1,
+							),
 					)
 					assert.equal(Option.getOrThrow(old).evidence, "Exited")
 					const gateways = Array.filter(
 						units,
-						(u) => u.instance === "gateway" && u.kind === "Execution",
+						(u) => HashMap.has(u.members, "gateway") && u.kind === "Execution",
 					)
 					assert.equal(gateways.length, 1)
 					assert.equal(gateways[0]?.evidence, "Missing")
@@ -86,14 +92,16 @@ it.effect(
 				const client = yield* Control.connect(address)
 				yield* Effect.addFinalizer(() => TestClock.adjust(100000))
 				const first = yield* client.submit({
-					instance: "integration",
-					target: f.target(1),
+					operations: [
+						{ _tag: "Deploy", instance: "integration", target: f.target(1) },
+					],
 					budget,
 				})
 				yield* consistent(client, first.id, "Accepted")
 				const consumer = yield* client.submit({
-					instance: "gateway",
-					target: f.consumer,
+					operations: [
+						{ _tag: "Deploy", instance: "gateway", target: f.consumer },
+					],
 					budget,
 				})
 				yield* consistent(client, consumer.id, "Accepted")
@@ -106,20 +114,26 @@ it.effect(
 					),
 				)
 				const upgrade = yield* client.submit({
-					instance: "integration",
-					target: f.target(2),
+					operations: [
+						{ _tag: "Deploy", instance: "integration", target: f.target(2) },
+					],
 					strategy: "Overlap",
 					requirements: { trial: 10000 },
 					budget: { ...budget, total: 60000 },
 				})
 				yield* phase(client, upgrade.id, "Trial")
 				const unrelated = yield* client.submit({
-					instance: "unrelated",
-					realm: "other",
+					operations: [
+						{
+							_tag: "Deploy",
+							instance: "unrelated",
+							realm: "other",
+							target: f.target(3),
+						},
+					],
 					realms: [
 						{ id: "other", parent: Option.none(), isolated: HashSet.empty() },
 					],
-					target: f.target(3),
 					strategy: "Overlap",
 					budget,
 				})
@@ -149,28 +163,40 @@ it.effect(
 				const client = yield* Control.connect(address)
 				yield* Effect.addFinalizer(() => TestClock.adjust(100000))
 				const first = yield* client.submit({
-					instance: "integration",
-					target: f.target(1),
+					operations: [
+						{ _tag: "Deploy", instance: "integration", target: f.target(1) },
+					],
 					budget,
 				})
 				yield* consistent(client, first.id, "Accepted")
 				const consumer = yield* client.submit({
-					instance: "gateway",
-					target: f.consumer,
+					operations: [
+						{ _tag: "Deploy", instance: "gateway", target: f.consumer },
+					],
 					budget,
 				})
 				yield* consistent(client, consumer.id, "Accepted")
 				const bad = yield* client.submit({
-					instance: "integration",
-					target: f.target(2, "startup"),
+					operations: [
+						{
+							_tag: "Deploy",
+							instance: "integration",
+							target: f.target(2, "startup"),
+						},
+					],
 					strategy: "Overlap",
 					budget,
 				})
 				yield* consistent(client, bad.id, "Aborted")
 				assert.equal((yield* f.call("still-old")).version, 1)
 				const trial = yield* client.submit({
-					instance: "integration",
-					target: f.target(2, "trial"),
+					operations: [
+						{
+							_tag: "Deploy",
+							instance: "integration",
+							target: f.target(2, "trial"),
+						},
+					],
 					strategy: "Overlap",
 					budget,
 					requirements: { trial: 1000 },

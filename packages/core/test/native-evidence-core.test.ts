@@ -2,6 +2,7 @@ import { Array, Cause, HashMap, Option } from "effect"
 import { assert, it } from "@effect/vitest"
 
 import * as Core from "../src/internal/decisionCore.ts"
+import * as Executions from "../src/internal/executionState"
 import {
 	accept,
 	fire,
@@ -26,10 +27,7 @@ it("records idle serving failure without releasing its native capacity before ex
 		cause,
 		now: 0,
 	})
-	assert.isFalse(
-		Option.getOrThrow(HashMap.get(failed.state.instances, "instance-0"))
-			.healthy,
-	)
+	assert.isFalse(Executions.healthy(failed.state, "instance-0"))
 	assert.equal(
 		Option.getOrThrow(HashMap.get(failed.state.units, unit.id)).cause.reasons
 			.length,
@@ -80,9 +78,7 @@ it("does not let stale execution failure change a recreated incarnation (I2, I10
 		cause: Cause.die("Stale"),
 		now: s.now,
 	}).state
-	assert.isTrue(
-		Option.getOrThrow(HashMap.get(ignored.instances, "instance-0")).healthy,
-	)
+	assert.isTrue(Executions.healthy(ignored, "instance-0"))
 })
 
 it("settles retirement of an instance-owned serving unit from native exit before its blocked Stop can report (I2, I6, I7)", () => {

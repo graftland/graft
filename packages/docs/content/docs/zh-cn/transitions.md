@@ -3,8 +3,9 @@ title: 变更
 description: 提交、等待和观察内核变更。
 ---
 
-**变更**替换一个固定的内核实例。内核负责试运行、恢复和收尾。嵌入式
-`Graft.plugin` 组合提供协作式生命周期，不安装内核服务。
+**变更**对内核实例执行 `Deploy` 与 `Remove`
+操作。内核规划它们的部署组，并负责试运行、恢复和收尾。嵌入式 `Graft.plugin`
+组合提供协作式生命周期，不安装内核服务。
 
 ## 提交与等待
 
@@ -20,8 +21,7 @@ declare const target: Change.Target
 export const upgrade = Effect.gen(function* () {
 	const handle = yield* Change.submit({
 		key: "forecasts-v2",
-		instance: "forecasts",
-		target,
+		operations: [{ _tag: "Deploy", instance: "forecasts", target }],
 	})
 	const conclusion = yield* handle.await
 	const current = yield* Change.get(handle.id)

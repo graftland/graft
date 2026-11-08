@@ -29,6 +29,7 @@ import type {
 	State,
 	Strategy,
 } from "./decisionState"
+import * as Executions from "./executionState"
 
 export interface Fault {
 	readonly reason: Rejection
@@ -563,12 +564,12 @@ export const commit = (
 	})
 	const removedGroups = HashMap.reduce(
 		plan.newGroups,
-		HashMap.reduce(plan.oldGroups, changed.groups, (out, _, key) =>
+		HashMap.reduce(plan.recoveryGroups, changed.groups, (out, _, key) =>
 			HashMap.remove(out, key),
 		),
 		(out, _, key) => HashMap.remove(out, key),
 	)
-	const groups = recovering ? plan.oldGroups : plan.newGroups
+	const groups = recovering ? plan.recoveryGroups : plan.newGroups
 	return {
 		...changed,
 		groups: HashMap.reduce(groups, removedGroups, (out, group, key) =>
@@ -632,14 +633,29 @@ const selectAll = (
 	HashSet.reduce(ids, out, (next, id) =>
 		id === from ? next : select(next, id, kind, from),
 	)
+/** Members that actually share a unit today; after recovery these can differ from the desired groups. */
+type CoResidents = (id: string) => HashSet.HashSet<string>
+const coResidents =
+	(state: State): CoResidents =>
+	(id) =>
+		Option.match(Executions.current(state, id), {
+			onNone: () => HashSet.empty<string>(),
+			onSome: ({ unit }) => HashSet.fromIterable(HashMap.keys(unit.members)),
+		})
 const closeMember = (
 	old: GraphTopology,
 	next: GraphTopology,
+	actual: CoResidents,
 	out: Closure,
 	id: string,
 ): Closure => {
 	const grouped = selectAll(
-		selectAll(out, oldMembers(old, id), "OldGroup", id),
+		selectAll(
+			out,
+			HashSet.union(oldMembers(old, id), actual(id)),
+			"OldGroup",
+			id,
+		),
 		oldMembers(next, id),
 		"NewGroup",
 		id,
@@ -684,14 +700,15 @@ const closeMember = (
 const closure = (
 	old: GraphTopology,
 	next: GraphTopology,
+	actual: CoResidents,
 	out: Closure,
 ): Closure => {
 	const expanded = HashSet.reduce(out.members, out, (out, id) =>
-		closeMember(old, next, out, id),
+		closeMember(old, next, actual, out, id),
 	)
 	return HashSet.size(expanded.members) === HashSet.size(out.members)
 		? expanded
-		: closure(old, next, expanded)
+		: closure(old, next, actual, expanded)
 }
 const selectedGroups = (
 	g: GraphTopology,
@@ -837,11 +854,11 @@ const reservationKeys = (
 	before: GraphTopology,
 	after: GraphTopology,
 	ids: HashSet.HashSet<string>,
-	oldGroups: HashMap.HashMap<string, DeploymentGroup>,
+	recoveryGroups: HashMap.HashMap<string, DeploymentGroup>,
 	newGroups: HashMap.HashMap<string, DeploymentGroup>,
 ) => {
 	const memberships = HashSet.fromIterable([
-		...Array.map(Array.fromIterable(HashMap.keys(oldGroups)), membership),
+		...Array.map(Array.fromIterable(HashMap.keys(recoveryGroups)), membership),
 		...Array.map(Array.fromIterable(HashMap.keys(newGroups)), membership),
 	])
 	return HashSet.reduce(
@@ -988,6 +1005,7 @@ const contractPatch = (
 const selection = (
 	before: GraphTopology,
 	after: GraphTopology,
+	actual: CoResidents,
 	proposal: GraphProposal,
 ): Closure => {
 	const explicit: Closure = HashSet.reduce(
@@ -1036,7 +1054,7 @@ const selection = (
 					: out
 		},
 	)
-	return closure(before, after, realmChanged)
+	return closure(before, after, actual, realmChanged)
 }
 const validateSelection = (
 	before: GraphTopology,
@@ -1103,6 +1121,17 @@ const validateSelection = (
 		)
 	return Option.none()
 }
+/** Units that currently host any selected member, which may differ from the desired groups after recovery. */
+const currentUnits = (
+	state: State,
+	ids: HashSet.HashSet<string>,
+): HashSet.HashSet<string> =>
+	HashSet.reduce(ids, HashSet.empty<string>(), (out, id) =>
+		Option.match(
+			Option.flatMap(HashMap.get(state.instances, id), (i) => i.current),
+			{ onNone: () => out, onSome: (unit) => HashSet.add(out, unit) },
+		),
+	)
 const assemblePlan = (
 	state: State,
 	after: GraphTopology,
@@ -1114,13 +1143,13 @@ const assemblePlan = (
 ): GroupPlan => {
 	const previous = selectedDeclarations(state.graph, selected.members)
 	const desired = selectedDeclarations(after, selected.members)
-	const oldGroups = selectedGroups(state.graph, selected.members)
+	const recoveryGroups = selectedGroups(state.graph, selected.members)
 	const newGroups = selectedGroups(after, selected.members)
 	const memberKeys = reservationKeys(
 		state.graph,
 		after,
 		selected.members,
-		oldGroups,
+		recoveryGroups,
 		newGroups,
 	)
 	const realmKeys = HashSet.fromIterable(
@@ -1152,6 +1181,7 @@ const assemblePlan = (
 			realmKeys,
 		),
 	}
+	const oldUnits = currentUnits(state, selected.members)
 	const participants = HashSet.reduce(
 		HashSet.difference(
 			HashSet.union(keys.participants, contracts.consumers),
@@ -1180,7 +1210,7 @@ const assemblePlan = (
 			Array.map(proposal.realms, (r) => [r.id, Option.some(r)]),
 		),
 		participants,
-		oldGroups,
+		recoveryGroups,
 		newGroups,
 		previous,
 		desired,
@@ -1205,9 +1235,9 @@ const assemblePlan = (
 		recoveryWaves,
 		peakUnits:
 			strategy === "Overlap"
-				? HashMap.size(oldGroups) + HashMap.size(newGroups)
-				: Num.max(HashMap.size(oldGroups), HashMap.size(newGroups)),
-		oldUnitCount: HashMap.size(oldGroups),
+				? HashSet.size(oldUnits) + HashMap.size(newGroups)
+				: Num.max(HashSet.size(oldUnits), HashMap.size(newGroups)),
+		oldUnitCount: HashSet.size(oldUnits),
 		newUnitCount: HashMap.size(newGroups),
 		nextGroup: after.nextGroup,
 		proposal,
@@ -1249,7 +1279,7 @@ export const plan = (
 					"Realm ancestry must name existing parents without cycles",
 				),
 			)
-		const selected = selection(state.graph, after, proposal)
+		const selected = selection(state.graph, after, coResidents(state), proposal)
 		const invalid = validateSelection(
 			state.graph,
 			after,

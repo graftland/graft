@@ -222,5 +222,12 @@ it("detects a lost owned version before recovery and retains the conflicting acc
 	const ended = checked(old, exitEvent(old, "instance-0@1")).state
 	assert.strictEqual(conclusion(ended).outcome, "RecoveryFailed")
 	assert.strictEqual(Core.cell(ended, "instance-0").version, 3)
-	assert.isTrue(Option.isNone(Core.cell(ended, "instance-0").value))
+	assert.isTrue(
+		Option.isNone(
+			Option.flatMap(
+				HashMap.get(ended.instances, "instance-0"),
+				(instance) => instance.current,
+			),
+		),
+	)
 })

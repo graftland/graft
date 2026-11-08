@@ -113,17 +113,15 @@ test("preserves core exports, re-exports, overloads, and local Schema fields", a
 				return declaration
 			}
 			const request = fields("Request", [
-				"instance",
-				"target",
+				"operations",
+				"realms",
 				"key",
-				"expected",
 				"strategy",
 				"budget",
 				"requirements",
 			])
 			assert.ok(
-				request.children.find((child) => child.name === "expected").flags
-					.isOptional,
+				request.children.find((child) => child.name === "key").flags.isOptional,
 			)
 			fields("Handle", ["id", "await", "cancel"])
 			fields("Status", [

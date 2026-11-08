@@ -24,18 +24,21 @@ import {
 	described,
 	exit,
 	id,
-	prepare,
+	inspect,
 	resolved,
 	target,
 } from "./preparation-fixture"
 
 const publicInput: Core.Input = {
-	instance: "instance-0",
-	target: target(),
+	operations: [{ _tag: "Deploy", instance: "instance-0", target: target() }],
 	strategy: "Overlap",
 }
 const withDescription = (s: Core.State): Core.State => {
-	const p = prepare(s, publicInput, true)
+	const p = inspect(s, {
+		instance: "instance-0",
+		target: target(),
+		strategy: "Overlap",
+	})
 	return exit(described(p.state, id(p)), id(p)).state
 }
 const control = (commands: Queue.Queue<Core.Command>) =>

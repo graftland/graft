@@ -6,7 +6,10 @@ export const Token = Schema.Struct({
 	change: Schema.String,
 	unit: Schema.String,
 	incarnation: Schema.String,
-	term: Schema.Int,
+	members: Schema.HashMap(
+		Schema.String,
+		Schema.Struct({ term: Schema.Int, generation: Schema.Int }),
+	),
 	view: Schema.Int,
 })
 export type Token = typeof Token.Type
@@ -25,6 +28,7 @@ export const ConfigurationModule = Schema.Struct({
 	options: Schema.Json,
 })
 export const Deployment = Schema.Struct({
+	module: Schema.optionalKey(Schema.String),
 	environment: Schema.optionalKey(Schema.Array(ConfigurationModule)),
 	moduleSuffix: Schema.optionalKey(Schema.String),
 	inspection: Schema.optionalKey(Schema.Literal("Module")),
@@ -49,6 +53,14 @@ export const Resolved = Schema.Struct({
 	identity: Schema.String,
 	environment: Schema.String,
 })
+export const Budget = Schema.Struct({
+	total: Schema.Finite,
+	startup: Schema.Finite,
+	probe: Schema.Finite,
+	drain: Schema.Finite,
+	stop: Schema.Finite,
+	terminate: Schema.Finite,
+})
 export const Binding = Schema.Struct({
 	unary: Schema.Boolean,
 	key: Schema.String,
@@ -66,6 +78,20 @@ export const PlacementRequirement = Schema.Struct({
 	security: Schema.optionalKey(Schema.String),
 })
 export const DeclarationOptions = Schema.Struct({
+	children: Schema.optionalKey(
+		Schema.Array(
+			Schema.Struct({
+				name: Schema.String.check(Schema.isPattern(/^[A-Za-z0-9_-]+$/)),
+				module: Schema.String,
+				input: Schema.Union([
+					Schema.TaggedStruct("Parent", {}),
+					Schema.TaggedStruct("Literal", { value: Schema.Json }),
+				]),
+				realm: Schema.optionalKey(Schema.String),
+				placement: Schema.optionalKey(PlacementRequirement),
+			}),
+		),
+	),
 	resources: Schema.optionalKey(
 		Schema.Array(
 			Schema.Struct({
@@ -105,6 +131,16 @@ export const MemberDeclaration = Schema.Struct({
 	probes: Schema.Array(Schema.String),
 })
 export const UnitMember = Schema.Struct({
+	dependencies: Schema.Array(
+		Schema.Struct({
+			ambiguous: Schema.Boolean,
+			kind: Schema.Literals(["Local", "Contract"]),
+			service: Schema.String,
+			provider: Schema.Option(Schema.String),
+			optional: Schema.Boolean,
+			slots: Schema.HashSet(Schema.String),
+		}),
+	),
 	declaration: Schema.String,
 	parent: Schema.Option(Schema.String),
 	realm: Schema.String,
@@ -131,6 +167,7 @@ export const Endpoint = Schema.Struct({
 })
 export type Endpoint = typeof Endpoint.Type
 export const BindingRoute = Schema.Struct({
+	generation: Schema.Int,
 	id: Schema.String,
 	consumer: Schema.String,
 	provider: Schema.String,
@@ -144,6 +181,11 @@ export const BindingRoute = Schema.Struct({
 export const RouteView = Schema.Struct({ routes: Schema.Array(BindingRoute) })
 export type RouteView = typeof RouteView.Type
 export const CallControl = Schema.Struct({
+	member: Schema.Struct({
+		member: Schema.String,
+		term: Schema.Int,
+		generation: Schema.Int,
+	}),
 	key: Schema.String,
 	session: Schema.String,
 	request: Schema.String,
@@ -154,7 +196,7 @@ export const CallControl = Schema.Struct({
 	tags: Schema.optionalKey(Schema.Array(Schema.String)),
 })
 export type CallControl = typeof CallControl.Type
-export const CallMessage = Schema.Union([
+export const CallBody = Schema.Union([
 	Schema.TaggedStruct("Lost", {
 		session: Schema.String,
 		request: Schema.String,
@@ -180,12 +222,64 @@ export const CallMessage = Schema.Union([
 		cleanupCause: Schema.optionalKey(Schema.Json),
 	}),
 ])
+export type CallBody = typeof CallBody.Type
+const CallIdentity = {
+	member: Schema.String,
+	term: Schema.Int,
+	generation: Schema.Int,
+}
+export const CallMessage = Schema.Union([
+	Schema.TaggedStruct("Lost", {
+		...CallIdentity,
+		session: Schema.String,
+		request: Schema.String,
+		cause: Schema.Json,
+	}),
+	Schema.TaggedStruct("Request", {
+		...CallIdentity,
+		session: Schema.String,
+		request: Schema.String,
+		service: Schema.String,
+		lifecycle: Schema.Boolean,
+		nested: Schema.Boolean,
+		wait: Schema.Finite,
+	}),
+	Schema.Struct({
+		...CallIdentity,
+		_tag: Schema.Literals(["Cancel", "Result"]),
+		session: Schema.String,
+		request: Schema.String,
+	}),
+	Schema.TaggedStruct("Complete", {
+		...CallIdentity,
+		key: Schema.String,
+		cleanup: Schema.Literals(["Completed", "Failed", "Unknown"]),
+		cause: Schema.Json,
+		cleanupCause: Schema.optionalKey(Schema.Json),
+	}),
+])
 export type CallMessage = typeof CallMessage.Type
 export const Command = Schema.Struct({
+	subjects: Schema.HashSet(Schema.String),
+	placement: PlacementRequirement,
+	resolutions: Schema.HashMap(Schema.String, Resolved),
+	descriptions: Schema.HashMap(Schema.String, Description),
+	policies: Schema.HashMap(
+		Schema.String,
+		Schema.Struct({
+			version: Schema.Int,
+			allowed: Schema.Option(Schema.HashSet(Schema.String)),
+			values: Schema.Record(Schema.String, Schema.Json),
+		}),
+	),
 	members: Schema.HashMap(Schema.String, UnitMember),
 	call: Schema.optionalKey(CallControl),
 	id: Schema.String,
 	kind: Schema.Literals([
+		"ServeMembers",
+		"StopMembers",
+		"RestartMembers",
+		"ReadyMembers",
 		"RetireRoute",
 		"CallRegister",
 		"CallGrant",
@@ -225,13 +319,34 @@ export const Cause = Schema.toCodecJson(
 		Schema.Defect({ includeStack: true }),
 	),
 )
+export const Cleanup = Schema.Union([
+	Schema.TaggedStruct("Unknown", {}),
+	Schema.TaggedStruct("Completed", {}),
+	Schema.TaggedStruct("Failed", { cause: Cause }),
+])
+export const MemberExecution = Schema.Struct({
+	...UnitMember.fields,
+	endpoint: Schema.Option(Endpoint),
+	phase: Schema.Literals([
+		"Declared",
+		"Preparing",
+		"Starting",
+		"Ready",
+		"Stopping",
+		"Stopped",
+		"NotStarted",
+		"Failed",
+	]),
+	cleanup: Cleanup,
+	cause: Cause,
+})
 export const Report = Schema.Union([
 	Schema.TaggedStruct("Succeeded", {}),
 	Schema.TaggedStruct("Resolved", { value: Resolved }),
 	Schema.TaggedStruct("Described", { value: Description }),
 	Schema.TaggedStruct("Started", {
 		value: Description,
-		endpoint: Schema.optionalKey(Endpoint),
+		endpoints: Schema.HashMap(Schema.String, Endpoint),
 	}),
 	Schema.TaggedStruct("Failed", {
 		reason: Schema.optionalKey(Schema.Literal("PluginExportMissing")),
@@ -247,6 +362,24 @@ export const Incoming = Schema.Union([
 ])
 export type Incoming = typeof Incoming.Type
 export const Outgoing = Schema.Union([
+	Schema.TaggedStruct("MemberReady", {
+		member: Schema.String,
+		term: Schema.Int,
+		generation: Schema.Int,
+	}),
+	Schema.TaggedStruct("MemberFailed", {
+		member: Schema.String,
+		term: Schema.Int,
+		generation: Schema.Int,
+		cause: Schema.Json,
+	}),
+	Schema.TaggedStruct("MemberStopped", {
+		member: Schema.String,
+		term: Schema.Int,
+		generation: Schema.Int,
+		cause: Schema.Json,
+		cleanup: Schema.Literals(["Unknown", "Completed", "Failed"]),
+	}),
 	Schema.TaggedStruct("Call", { message: CallMessage }),
 	Schema.TaggedStruct("Online", {}),
 	Schema.TaggedStruct("Initialized", {}),

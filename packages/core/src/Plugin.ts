@@ -150,7 +150,17 @@ export type Plugin<Config = any, Input = any, E = any> = 0 extends 1 & Input
 	: Definition<Config, Input, E | Schema.SchemaError>
 
 /** Static data exported as `deployment` beside a plugin's implementation. */
+export interface ChildDeclaration {
+	readonly name: string
+	readonly module: string
+	readonly input:
+		| { readonly _tag: "Parent" }
+		| { readonly _tag: "Literal"; readonly value: Schema.Json }
+	readonly realm?: string
+	readonly placement?: PlacementRequirement
+}
 export interface DeploymentMetadata {
+	readonly children?: ReadonlyArray<ChildDeclaration>
 	readonly resources?: ReadonlyArray<ResourceDeclaration>
 	readonly placement?: PlacementRequirement
 	readonly probes?: ReadonlyArray<string>

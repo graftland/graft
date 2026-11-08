@@ -25,7 +25,10 @@ describe("production decision core", () => {
 		const unit = Option.getOrThrow(HashMap.get(s.units, command.unit))
 		assert.strictEqual(unit.evidence, "Missing")
 		assert.strictEqual(unit.phase, "PendingSpawn")
-		assert.strictEqual(unit.term, 1)
+		assert.strictEqual(
+			Option.getOrThrow(HashMap.get(unit.members, "instance-0")).term,
+			1,
+		)
 		assert.isTrue(
 			Option.contains(
 				Option.getOrThrow(HashMap.get(s.claims, unit.claim)).unit,
@@ -87,7 +90,6 @@ describe("production decision core", () => {
 			now: 0,
 		}).state
 		assert.strictEqual(Core.cell(absent, key).version, 2)
-		assert.isTrue(Option.isNone(Core.cell(absent, key).value))
 		const stale = Core.reduce(absent, {
 			_tag: "Submit",
 			request: a,
@@ -108,7 +110,13 @@ describe("production decision core", () => {
 		const bad = Core.reduce(submitted, {
 			_tag: "Reported",
 			command: c.id,
-			token: { ...c.token, term: 99 },
+			token: {
+				...c.token,
+				members: HashMap.map(c.token.members, (member) => ({
+					...member,
+					term: 99,
+				})),
+			},
 			result: { _tag: "Succeeded" },
 			now: 0,
 		})
@@ -266,7 +274,12 @@ describe("production decision core", () => {
 	it("does not rewrite a conclusion or its transferred serving owner after idle exit and recreation (I10)", () => {
 		const accepted = accept(submit(initial()), "change-1")
 		const old = conclusion(accepted)
-		const serving = Option.getOrThrow(Core.cell(accepted, "instance-0").value)
+		const serving = Option.getOrThrow(
+			Option.flatMap(
+				HashMap.get(accepted.instances, "instance-0"),
+				(instance) => instance.current,
+			),
+		)
 		const dead = exit(accepted, serving)
 		assert.strictEqual(conclusion(dead), old)
 		assert.isFalse(oneMember(status(dead)).healthy)

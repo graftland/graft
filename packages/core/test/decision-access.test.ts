@@ -125,7 +125,12 @@ const run = (unrelated: number) => {
 	)
 	const change = Option.getOrThrow(HashMap.get(serving.state.changes, id))
 	const candidate = Option.getOrThrow(
-		HashMap.get(serving.state.units, Option.getOrThrow(change.candidate)),
+		HashMap.get(
+			serving.state.units,
+			Option.getOrThrow(
+				Array.head(Array.fromIterable(HashMap.values(change.candidates))),
+			),
+		),
 	)
 	const failed = step(serving, {
 		_tag: "UnitFailed",

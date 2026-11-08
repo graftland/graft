@@ -7,6 +7,7 @@ import type * as Artifact from "./Artifact"
 
 export { layer } from "./internal/nativeControl"
 export interface TargetOptions {
+	readonly module?: string
 	readonly environment?: ReadonlyArray<Kernel.ConfigurationModule>
 	readonly moduleSuffix?: string
 	readonly inspection?: "Module"
@@ -21,6 +22,7 @@ export interface TargetOptions {
 /** Selects captured bytes. Description and decoding take place inside an inspection unit. */
 export const target = (options: TargetOptions): Kernel.Target => {
 	const deployment: Kernel.DeploymentData = {
+		...(options.module === undefined ? {} : { module: options.module }),
 		...(options.moduleKind === undefined
 			? {}
 			: { moduleKind: options.moduleKind }),

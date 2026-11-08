@@ -4,8 +4,10 @@ import type {
 	ArtifactData,
 	BindingDeclaration,
 	ConfigurationModule,
+	DeploymentOperation,
 	Description,
 	GraphProposal,
+	Input,
 	MemberDeclaration,
 	RealmDeclaration,
 	Report,
@@ -75,6 +77,44 @@ export const values = (
 	value: Readonly<Record<string, Schema.Json>>,
 ): Readonly<Record<string, Schema.Json>> =>
 	Object.freeze(Record.map(value, json))
+const operation = (value: DeploymentOperation): DeploymentOperation =>
+	Object.freeze(
+		value._tag === "Remove"
+			? { ...value }
+			: {
+					...value,
+					target: target(value.target),
+					...(value.colocate === undefined
+						? {}
+						: { colocate: Object.freeze(Array.copy(value.colocate)) }),
+					...(value.placement === undefined
+						? {}
+						: { placement: Object.freeze({ ...value.placement }) }),
+				},
+	)
+export const input = (value: Input): Input =>
+	Object.freeze({
+		...value,
+		operations: Object.freeze(Array.map(value.operations, operation)),
+		...(value.realms === undefined
+			? {}
+			: { realms: Object.freeze(Array.map(value.realms, realm)) }),
+		...(value.budget === undefined
+			? {}
+			: { budget: Object.freeze({ ...value.budget }) }),
+		...(value.requirements === undefined
+			? {}
+			: {
+					requirements: Object.freeze({
+						...value.requirements,
+						...(value.requirements.probes === undefined
+							? {}
+							: {
+									probes: Object.freeze(Array.copy(value.requirements.probes)),
+								}),
+					}),
+				}),
+	})
 
 const binding = (value: BindingDeclaration): BindingDeclaration =>
 	Object.freeze({
@@ -128,6 +168,12 @@ export const resolution = (value: ResolvedInput): ResolvedInput =>
 export const request = (value: Request): Request =>
 	Object.freeze({
 		...value,
+		...(value.operations === undefined
+			? {}
+			: { operations: Object.freeze(Array.map(value.operations, operation)) }),
+		...(value.member === undefined
+			? {}
+			: { member: declaration(value.member) }),
 		target: target(value.target),
 		budget: Object.freeze({ ...value.budget }),
 		...(value.realms === undefined
@@ -160,12 +206,10 @@ export const request = (value: Request): Request =>
 			: {
 					identity: Object.freeze({
 						...value.identity,
-						target: target(value.identity.target),
-						realms: Object.freeze(Array.map(value.identity.realms, realm)),
-						colocate: Object.freeze(Array.copy(value.identity.colocate)),
-						placement: Option.map(value.identity.placement, (p) =>
-							Object.freeze({ ...p }),
+						operations: Object.freeze(
+							Array.map(value.identity.operations, operation),
 						),
+						realms: Object.freeze(Array.map(value.identity.realms, realm)),
 						budget: Object.freeze({ ...value.identity.budget }),
 						probes: Object.freeze(Array.copy(value.identity.probes)),
 					}),
@@ -200,9 +244,9 @@ export const report = (value: Report): Report => {
 			return {
 				...value,
 				value: description(value.value),
-				...(value.endpoint === undefined
-					? {}
-					: { endpoint: Object.freeze({ ...value.endpoint }) }),
+				endpoints: HashMap.map(value.endpoints, (endpoint) =>
+					Object.freeze({ ...endpoint }),
+				),
 			}
 		case "Described":
 			return { ...value, value: description(value.value) }

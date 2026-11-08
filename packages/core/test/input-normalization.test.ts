@@ -11,9 +11,10 @@ it("snapshots caller-owned probe arrays before retaining normalized identity (I1
 		_tag: "Requested",
 		now: 0,
 		request: {
-			instance: "instance-0",
+			operations: [
+				{ _tag: "Deploy", instance: "instance-0", target: target("next") },
+			],
 			key: "deployment",
-			target: target("next"),
 			requirements: { probes },
 		},
 	})
@@ -26,10 +27,11 @@ it("snapshots caller-owned probe arrays before retaining normalized identity (I1
 })
 it("finds normalized keyed identity before changed versions or closed admission (I2, I3)", () => {
 	const input: Core.Input = {
+		operations: [
+			{ _tag: "Deploy", instance: "instance-0", target: target("next") },
+		],
 		strategy: "Overlap",
-		instance: "instance-0",
 		key: "deployment",
-		target: target("next"),
 	}
 	const submitted = Core.reduce(initial(), {
 		_tag: "Requested",
@@ -60,7 +62,12 @@ it("finds normalized keyed identity before changed versions or closed admission 
 	const conflict = Core.reduce(closed, {
 		_tag: "Requested",
 		now: closed.now,
-		request: { ...input, target: target("another") },
+		request: {
+			...input,
+			operations: [
+				{ _tag: "Deploy", instance: "instance-0", target: target("another") },
+			],
+		},
 	})
 	assert.equal(conflict.reply._tag, "Rejected")
 	if (conflict.reply._tag === "Rejected")
@@ -70,7 +77,16 @@ it("rejects a stale expected version before producing public execution commands 
 	const result = Core.reduce(initial(), {
 		_tag: "Requested",
 		now: 0,
-		request: { instance: "instance-0", target: target("next"), expected: 0 },
+		request: {
+			operations: [
+				{
+					_tag: "Deploy",
+					instance: "instance-0",
+					target: target("next"),
+					expected: 0,
+				},
+			],
+		},
 	})
 	assert.equal(result.reply._tag, "Rejected")
 	if (result.reply._tag === "Rejected")

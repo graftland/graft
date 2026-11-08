@@ -89,8 +89,7 @@ for (const placement of ["Worker", "Process"] as const) {
 						[],
 					)
 					const accepted = yield* Change.run({
-						instance: "a",
-						target,
+						operations: [{ _tag: "Deploy", instance: "a", target }],
 						strategy: "Restart",
 						budget,
 					})
@@ -173,8 +172,7 @@ for (const placement of ["Worker", "Process"] as const) {
 					yield* Effect.gen(function* () {
 						const kernel = yield* Kernel.Kernel
 						const submission = yield* Change.submit({
-							instance: "a",
-							target,
+							operations: [{ _tag: "Deploy", instance: "a", target }],
 							budget: { ...budget, startup: 1500 },
 						}).pipe(Effect.exit, Effect.forkScoped)
 						const inspected = yield* Stream.runHead(kernel.preparations)
@@ -225,8 +223,7 @@ for (const placement of ["Worker", "Process"] as const) {
 					})
 					assert.equal(inspected.exitEvidence, "Exited")
 					const handle = yield* Change.submit({
-						instance: "a",
-						target,
+						operations: [{ _tag: "Deploy", instance: "a", target }],
 						strategy: "Restart",
 						budget,
 					})
@@ -239,7 +236,14 @@ for (const placement of ["Worker", "Process"] as const) {
 					)
 					const units = yield* kernel.units
 					assert.isTrue(
-						Array.some(units, (u) => u.term === 1 && u.evidence === "Missing"),
+						Array.some(
+							units,
+							(u) =>
+								Option.exists(
+									HashMap.get(u.members, "a"),
+									(member) => member.term === 1,
+								) && u.evidence === "Missing",
+						),
 					)
 				}).pipe(Effect.provide(runtime(target)))
 			}).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
@@ -265,15 +269,13 @@ for (const placement of ["Worker", "Process"] as const) {
 				})
 				yield* Effect.gen(function* () {
 					const initial = yield* Change.run({
-						instance: "a",
-						target: original,
+						operations: [{ _tag: "Deploy", instance: "a", target: original }],
 						strategy: "Restart",
 						budget,
 					})
 					assert.equal(initial.outcome, "Accepted", Cause.pretty(initial.cause))
 					const result = yield* Change.run({
-						instance: "a",
-						target,
+						operations: [{ _tag: "Deploy", instance: "a", target }],
 						strategy: "Overlap",
 						budget: { ...budget, stop: 100 },
 					})
@@ -284,7 +286,10 @@ for (const placement of ["Worker", "Process"] as const) {
 						Array.some(
 							units,
 							(u) =>
-								u.term === 1 &&
+								Option.exists(
+									HashMap.get(u.members, "a"),
+									(member) => member.term === 1,
+								) &&
 								u.evidence === "Exited" &&
 								u.cleanup._tag === "Unknown",
 						),
@@ -328,8 +333,7 @@ it.live(
 			yield* Effect.gen(function* () {
 				const kernel = yield* Kernel.Kernel
 				const accepted = yield* Change.run({
-					instance: "a",
-					target,
+					operations: [{ _tag: "Deploy", instance: "a", target }],
 					strategy: "Restart",
 					budget,
 				})
@@ -371,15 +375,13 @@ it.live(
 			})
 			yield* Effect.gen(function* () {
 				const first = yield* Change.run({
-					instance: "a",
-					target,
+					operations: [{ _tag: "Deploy", instance: "a", target }],
 					strategy: "Restart",
 					budget,
 				})
 				assert.equal(first.outcome, "Accepted", Cause.pretty(first.cause))
 				const second = yield* Change.run({
-					instance: "a",
-					target,
+					operations: [{ _tag: "Deploy", instance: "a", target }],
 					strategy: "Restart",
 					budget,
 				})

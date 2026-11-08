@@ -28,6 +28,26 @@ const Evidence = Schema.Struct({
 		Schema.Literals(["Unknown", "Completed", "Failed"]),
 	),
 })
+const MemberIdentity = {
+	unit: Schema.String,
+	incarnation: Schema.String,
+	observer: Schema.String,
+	member: Schema.String,
+	term: Schema.Int,
+	generation: Schema.Int,
+}
+const MemberEvidence = Schema.Union([
+	Schema.TaggedStruct("MemberReady", MemberIdentity),
+	Schema.TaggedStruct("MemberFailed", {
+		...MemberIdentity,
+		cause: Schema.Json,
+	}),
+	Schema.TaggedStruct("MemberStopped", {
+		...MemberIdentity,
+		cause: Schema.Json,
+		cleanup: Schema.Literals(["Unknown", "Completed", "Failed"]),
+	}),
+])
 export const Outgoing = Schema.Union([
 	Schema.TaggedStruct("CallEvidence", {
 		event: Schema.Struct({
@@ -41,7 +61,9 @@ export const Outgoing = Schema.Union([
 		command: Schema.String,
 		result: Wire.Report,
 	}),
-	Schema.TaggedStruct("Evidence", { event: Evidence }),
+	Schema.TaggedStruct("Evidence", {
+		event: Schema.Union([Evidence, MemberEvidence]),
+	}),
 ])
 export type Outgoing = typeof Outgoing.Type
 export const encodeReport = Effect.fnUntraced(function* (report: Report) {
@@ -58,6 +80,17 @@ export const encodeEvent = Effect.fnUntraced(function* (
 			event: { ...event, message: yield* Calls.encode(event.message) },
 		}
 	if (event._tag === "UnitProgress") return { _tag: "Evidence", event }
+	if (event._tag === "MemberReady") return { _tag: "Evidence", event }
+	if (event._tag === "MemberFailed" || event._tag === "MemberStopped") {
+		const cause = yield* Schema.encodeEffect(Wire.Cause)(event.cause)
+		return {
+			_tag: "Evidence",
+			event:
+				event._tag === "MemberStopped"
+					? { ...event, cause, cleanup: event.cleanup._tag }
+					: { ...event, cause },
+		}
+	}
 	return {
 		_tag: "Evidence",
 		event: {
@@ -82,6 +115,22 @@ export const decodeEvent = Effect.fnUntraced(function* (
 			message: yield* Calls.decode(frame.event.message),
 		}
 	const e = frame.event
+	if (e._tag === "MemberReady") return e
+	if (e._tag === "MemberFailed" || e._tag === "MemberStopped") {
+		const cause = yield* Schema.decodeEffect(Wire.Cause)(e.cause)
+		return e._tag === "MemberStopped"
+			? {
+					...e,
+					cause,
+					cleanup:
+						e.cleanup === "Completed"
+							? { _tag: "Completed" }
+							: e.cleanup === "Failed"
+								? { _tag: "Failed", cause }
+								: { _tag: "Unknown" },
+				}
+			: { ...e, cause }
+	}
 	const token = {
 		unit: e.unit,
 		incarnation: e.incarnation,

@@ -22,6 +22,91 @@ import * as Artifact from "../src/Artifact"
 import * as Units from "../src/Units"
 import { budget, fixture } from "./unit-binding-fixture"
 
+it.live(
+	"preserves encoded contracts and the provider activation Context between members sharing one native unit (I3, I6, I7)",
+	() =>
+		Effect.gen(function* () {
+			const f = yield* fixture()
+			const provider = Units.target({
+				artifact: f.provider,
+				contractArtifact: f.contractArtifact,
+				contract: "provider.js",
+				input: { mode: "test" },
+				placement: "Worker",
+			})
+			const consumer = Units.target({
+				artifact: f.consumer,
+				contractArtifact: f.contractArtifact,
+				contract: "consumer.js",
+				input: { mode: "test" },
+				placement: "Worker",
+			})
+			const layer = Kernel.layer({
+				authority: "co-resident-contract",
+				maxUnits: 4,
+				instances: [],
+				bindings: [
+					{
+						provider: "provider",
+						consumer: "consumer",
+						service: "fixture/Weather",
+					},
+				],
+			}).pipe(Layer.provide(Units.layer), Layer.provide(NodeServices.layer))
+			yield* Effect.gen(function* () {
+				const first = yield* Change.run({
+					operations: [
+						{ _tag: "Deploy", instance: "provider", target: provider },
+					],
+					budget,
+				})
+				assert.equal(first.outcome, "Accepted", Cause.pretty(first.cause))
+				const result = yield* Change.run({
+					operations: [
+						{
+							_tag: "Deploy",
+							instance: "provider",
+							target: provider,
+							colocate: ["shared-contract"],
+						},
+						{
+							_tag: "Deploy",
+							instance: "consumer",
+							target: consumer,
+							colocate: ["shared-contract"],
+						},
+					],
+					budget,
+				})
+				assert.equal(result.outcome, "Accepted", Cause.pretty(result.cause))
+				const kernel = yield* Kernel.Kernel
+				const units = yield* kernel.units
+				const serving = Array.filter(
+					units,
+					(unit) => unit.kind === "Execution" && unit.evidence === "Missing",
+				)
+				assert.equal(serving.length, 1)
+				assert.equal(
+					HashMap.size(Option.getOrThrow(Array.head(serving)).members),
+					2,
+				)
+				const calls = yield* kernel.calls
+				assert.isTrue(
+					Array.some(
+						calls,
+						(call) =>
+							call.consumerMember === "consumer" &&
+							call.providerMember === "provider" &&
+							call.consumer === call.provider &&
+							call.result === "Received" &&
+							Option.isSome(call.completion),
+					),
+				)
+			}).pipe(Effect.provide(layer))
+		}).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+	30000,
+)
+
 for (const placement of ["Worker", "Process", "Runner"] as const)
 	it.live(
 		`encoded ${placement} dependency calls preserve codecs, typed errors, provider Context and Scope during candidate startup (I4, I8, I12)`,
@@ -67,22 +152,25 @@ for (const placement of ["Worker", "Process", "Runner"] as const)
 				}).pipe(Layer.provide(Units.layer), Layer.provide(NodeServices.layer))
 				yield* Effect.gen(function* () {
 					const first = yield* Change.run({
-						instance: "provider",
-						target: provider,
+						operations: [
+							{ _tag: "Deploy", instance: "provider", target: provider },
+						],
 						strategy: "Restart",
 						budget,
 					})
 					assert.equal(first.outcome, "Accepted", Cause.pretty(first.cause))
 					const next = yield* Change.run({
-						instance: "provider",
-						target: provider,
+						operations: [
+							{ _tag: "Deploy", instance: "provider", target: provider },
+						],
 						strategy: "Restart",
 						budget,
 					})
 					assert.equal(next.outcome, "Accepted", Cause.pretty(next.cause))
 					const started = yield* Change.run({
-						instance: "consumer",
-						target: consumer,
+						operations: [
+							{ _tag: "Deploy", instance: "consumer", target: consumer },
+						],
 						strategy: "Restart",
 						budget,
 					})
@@ -114,8 +202,7 @@ it.live(
 			}).pipe(Layer.provide(Units.layer), Layer.provide(NodeServices.layer))
 			yield* Effect.gen(function* () {
 				const rejected = yield* Change.submit({
-					instance: "provider",
-					target,
+					operations: [{ _tag: "Deploy", instance: "provider", target }],
 					budget,
 				}).pipe(Effect.flip)
 				assert.equal(rejected.reason, "DescriptionFailed")
@@ -183,8 +270,7 @@ it.live(
 					["c", c],
 				] satisfies ReadonlyArray<readonly [string, Kernel.Target]>) {
 					const result = yield* Change.run({
-						instance,
-						target,
+						operations: [{ _tag: "Deploy", instance, target }],
 						strategy: "Restart",
 						budget,
 					})
@@ -198,8 +284,7 @@ it.live(
 					placement: "Worker",
 				})
 				const result = yield* Change.run({
-					instance: "a",
-					target: next,
+					operations: [{ _tag: "Deploy", instance: "a", target: next }],
 					strategy: "Overlap",
 					budget,
 				})
@@ -210,7 +295,7 @@ it.live(
 					Array.some(
 						units,
 						(u) =>
-							u.instance === "c" &&
+							HashMap.has(u.members, "c") &&
 							u.kind === "Execution" &&
 							u.evidence === "Missing",
 					),
@@ -219,7 +304,7 @@ it.live(
 					Array.some(
 						units,
 						(u) =>
-							u.instance === "b" &&
+							HashMap.has(u.members, "b") &&
 							u.kind === "Execution" &&
 							u.evidence === "Missing",
 					),
@@ -300,8 +385,13 @@ it.live(
 			yield* Effect.gen(function* () {
 				for (const instance of ["provider", "provider", "consumer"]) {
 					const outcome = yield* Change.run({
-						instance,
-						target: instance === "consumer" ? consumer : provider,
+						operations: [
+							{
+								_tag: "Deploy",
+								instance,
+								target: instance === "consumer" ? consumer : provider,
+							},
+						],
 						strategy: "Restart",
 						budget,
 					})
@@ -327,8 +417,7 @@ it.live(
 					placement: "Worker",
 				})
 				const change = yield* Change.submit({
-					instance: "provider",
-					target,
+					operations: [{ _tag: "Deploy", instance: "provider", target }],
 					strategy: "Overlap",
 					budget: { ...budget, total: 60000, drain: 10000 },
 				})
@@ -397,16 +486,16 @@ it.live(
 					["a", a],
 				] satisfies ReadonlyArray<readonly [string, Kernel.Target]>) {
 					const outcome = yield* Change.run({
-						instance,
-						target,
+						operations: [{ _tag: "Deploy", instance, target }],
 						strategy: "Restart",
 						budget,
 					})
 					assert.equal(outcome.outcome, "Accepted", Cause.pretty(outcome.cause))
 				}
 				const outcome = yield* Change.run({
-					instance: "consumer",
-					target: consumer,
+					operations: [
+						{ _tag: "Deploy", instance: "consumer", target: consumer },
+					],
 					strategy: "Restart",
 					budget,
 				})
@@ -465,8 +554,13 @@ it.live(
 			yield* Effect.gen(function* () {
 				for (const instance of ["provider", "provider", "consumer"]) {
 					const outcome = yield* Change.run({
-						instance,
-						target: instance === "consumer" ? consumer : provider,
+						operations: [
+							{
+								_tag: "Deploy",
+								instance,
+								target: instance === "consumer" ? consumer : provider,
+							},
+						],
 						strategy: "Restart",
 						budget,
 					})
@@ -480,8 +574,9 @@ it.live(
 					Effect.forkScoped,
 				)
 				const change = yield* Change.submit({
-					instance: "provider",
-					target: provider,
+					operations: [
+						{ _tag: "Deploy", instance: "provider", target: provider },
+					],
 					strategy: "Restart",
 					budget: { ...budget, drain: 300, stop: 300, terminate: 300 },
 				})

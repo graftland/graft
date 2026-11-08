@@ -42,7 +42,7 @@ export interface Client {
 	>
 	readonly callChanges: Stream.Stream<Kernel.CallFact, Wire.ControlError>
 	readonly inspect: (
-		input: Kernel.Request,
+		input: Kernel.InspectionInput,
 	) => Effect.Effect<Kernel.PreparationStatus, Wire.ControlError>
 	readonly getPreparation: (
 		id: string,

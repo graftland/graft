@@ -7,6 +7,7 @@ import type {
 	CallControl,
 	CallEvidence,
 	CallFact,
+	CallMemberIdentity,
 	CallMessage,
 	CallWaiter,
 	Command,
@@ -15,6 +16,8 @@ import type {
 	Unit,
 	Working,
 } from "./decisionState"
+import * as Executions from "./executionState"
+import * as Attempt from "./groupAttempt"
 import * as Preparation from "./preparationCore"
 
 export const initial = () => ({
@@ -30,8 +33,13 @@ export const initial = () => ({
 	callLimits: { concurrency: 64, waiters: 64, wait: 5000 },
 	nextCallCommand: 1,
 })
-const id = (u: Unit, session: string, request: string): string =>
-	`${u.incarnation.length}:${u.incarnation}/${session.length}:${session}/${request}`
+const id = (
+	u: Unit,
+	identity: CallMemberIdentity,
+	session: string,
+	request: string,
+): string =>
+	`${u.incarnation.length}:${u.incarnation}/${identity.member.length}:${identity.member}/${identity.term}/${identity.generation}/${session.length}:${session}/${request}`
 const ids = (s: State, unit: string): HashSet.HashSet<string> =>
 	Option.getOrElse(HashMap.get(s.callsByUnit, unit), () => HashSet.empty())
 const issue = (
@@ -44,23 +52,43 @@ const issue = (
 	Option.match(HashMap.get(s.units, unit), {
 		onNone: () => s,
 		onSome: (u) => {
+			const first = Array.head(Array.fromIterable(HashMap.values(u.members)))
+			if (Option.isNone(first)) return s
+			const recipient =
+				call.route !== undefined &&
+				Array.contains(["CallRegister", "CallCancel", "CallCompleteAck"], kind)
+					? {
+							member: call.route.provider,
+							term: call.route.term,
+							generation: call.route.generation,
+						}
+					: call.member
+			const selected = HashMap.filter(
+				u.members,
+				(_, id) => id === recipient.member,
+			)
 			const command: Command = {
-				members: u.members,
+				subjects: HashSet.make(recipient.member),
+				placement: u.placement,
+				resolutions: HashMap.empty(),
+				descriptions: HashMap.empty(),
+				policies: HashMap.empty(),
+				members: Executions.grants(u.members),
 				id: `call-command/${s.nextCallCommand}`,
 				change: "$calls",
 				unit,
 				kind,
-				call,
+				call: { ...call, member: recipient },
 				...(status === undefined ? {} : { callStatus: status }),
 				token: {
 					authority: s.authority,
 					change: "$calls",
 					unit,
 					incarnation: u.incarnation,
-					term: u.term,
+					members: Executions.tokens(selected),
 					view: 0,
 				},
-				target: u.target,
+				target: first.value.target,
 				dispatched: true,
 				participant: "",
 				timer: Option.none(),
@@ -78,6 +106,11 @@ const issue = (
 	})
 const control = (c: CallFact): CallControl => ({
 	key: c.key,
+	member: {
+		member: c.consumerMember,
+		term: c.consumerTerm,
+		generation: c.consumerGeneration,
+	},
 	session: c.session,
 	request: c.request,
 	service: c.service,
@@ -93,8 +126,14 @@ const affected = (s: Working, c: CallFact): Working => {
 				onSome: (u) =>
 					HashSet.union(
 						HashSet.add(set, u.owner),
-						Option.getOrElse(HashMap.get(s.observers, u.instance), () =>
-							HashSet.empty(),
+						HashMap.reduce(u.members, HashSet.empty<string>(), (ids, member) =>
+							HashSet.union(
+								ids,
+								Option.getOrElse(
+									HashMap.get(s.observers, member.instance),
+									HashSet.empty<string>,
+								),
+							),
 						),
 					),
 			}),
@@ -146,7 +185,8 @@ const reject = (
 	reason: string,
 ): Working =>
 	issue(s, "CallReject", u.id, {
-		key: id(u, message.session, message.request),
+		key: id(u, message, message.session, message.request),
+		member: message,
 		session: message.session,
 		request: message.request,
 		service: message.service,
@@ -159,41 +199,72 @@ const available = (s: State, route: BindingRoute): boolean =>
 			u.incarnation === route.incarnation &&
 			u.evidence === "Missing" &&
 			u.phase === "Running" &&
-			Preparation.authorized(s, u.instance, u.target) &&
 			Option.exists(
-				HashMap.get(s.instances, u.instance),
-				(i) => i.healthy && Option.contains(i.current, u.id),
+				HashMap.get(u.members, route.provider),
+				(member) =>
+					member.term === route.term &&
+					member.generation === route.generation &&
+					Preparation.authorized(s, member.instance, member.target) &&
+					(Executions.healthy(s, member.instance) ||
+						startup(s, u, member.instance)),
 			),
 	)
-const startup = (s: State, u: Unit): boolean =>
+
+const cooperative = (s: State, u: Unit, member: string) =>
+	Option.flatMap(HashMap.get(s.memberOperationsByUnit, u.id), (ids) =>
+		Array.findFirst(
+			Array.flatMap(Array.fromIterable(ids), (id) =>
+				Option.toArray(HashMap.get(s.memberOperations, id)),
+			),
+			(operation) =>
+				operation.incarnation === u.incarnation &&
+				HashSet.has(operation.members, member) &&
+				(operation.phase === "Serving" ||
+					operation.phase === "Installing" ||
+					operation.phase === "Activating"),
+		),
+	)
+const startup = (s: State, u: Unit, member: string): boolean =>
 	Option.exists(
 		HashMap.get(s.changes, u.owner),
 		(c) =>
-			Option.contains(c.candidate, u.id) &&
+			HashSet.has(Attempt.units(c), u.id) &&
 			!c.failure &&
 			Array.contains(
 				["Serving", "Readiness", "Probing", "Installing"],
 				c.phase,
 			),
-	)
+	) || Option.isSome(cooperative(s, u, member))
+
 const select = (
 	s: State,
 	u: Unit,
 	message: Extract<CallMessage, { _tag: "Request" }>,
 ): Option.Option<BindingRoute> => {
+	const attempt = cooperative(s, u, message.member)
+	if (Option.isSome(attempt))
+		return Array.findFirst(
+			Bindings.memberView(s, attempt.value).routes,
+			(route) =>
+				route.consumer === message.member &&
+				route.service === message.service &&
+				available(s, route),
+		)
+
 	const committed = HashMap.get(
 		s.routes,
-		Bindings.key(u.instance, message.service),
+		Bindings.key(message.member, message.service),
 	)
-	if (!startup(s, u)) return Option.filter(committed, (r) => available(s, r))
+	if (!startup(s, u, message.member))
+		return Option.filter(committed, (r) => available(s, r))
 	const c = HashMap.get(s.changes, u.owner)
 	return Option.isSome(c) &&
-		Option.contains(c.value.candidate, u.id) &&
+		HashSet.has(Attempt.units(c.value), u.id) &&
 		!c.value.failure
 		? Array.findFirst(
 				Bindings.view(s, c.value).routes,
 				(r) =>
-					r.consumer === u.instance &&
+					r.consumer === message.member &&
 					r.service === message.service &&
 					available(s, r),
 			)
@@ -219,7 +290,13 @@ const admit = (
 	if (HashSet.size(s.activeCalls) >= s.callLimits.concurrency)
 		return reject(s, u, message, "Saturated")
 	const c: CallFact = {
-		key: `${id(u, message.session, message.request)}/${route.incarnation.length}:${route.incarnation}`,
+		consumerMember: message.member,
+		consumerTerm: message.term,
+		consumerGeneration: message.generation,
+		providerMember: route.provider,
+		providerTerm: route.term,
+		providerGeneration: route.generation,
+		key: `${id(u, message, message.session, message.request)}/${route.incarnation.length}:${route.incarnation}`,
 		consumer: u.id,
 		consumerIncarnation: u.incarnation,
 		provider: route.unit,
@@ -240,7 +317,7 @@ const admit = (
 		Option.map(u.description, (d) =>
 			Array.flatMap(d.members, (m) =>
 				Array.flatMap(m.requires, (b) =>
-					b.key === message.service
+					m.instance === message.member && b.key === message.service
 						? Array.map(b.operations, (o) => o.tag)
 						: [],
 				),
@@ -256,12 +333,12 @@ const admit = (
 				callsByUnit: addIndex(s, c),
 				callRequests: HashMap.set(
 					s.callRequests,
-					id(u, message.session, message.request),
+					id(u, message, message.session, message.request),
 					c.key,
 				),
 				callSeen: HashSet.add(
 					s.callSeen,
-					id(u, message.session, message.request),
+					id(u, message, message.session, message.request),
 				),
 			},
 			c,
@@ -275,7 +352,7 @@ const dequeue = (s: Working, w: CallWaiter): Working => {
 	const u = HashMap.get(s.units, w.consumer)
 	const binding = Option.match(u, {
 		onNone: () => "",
-		onSome: (u) => Bindings.key(u.instance, w.message.service),
+		onSome: () => Bindings.key(w.message.member, w.message.service),
 	})
 	return {
 		...s,
@@ -292,7 +369,7 @@ const enqueue = (
 ): Working => {
 	if (HashMap.size(s.callWaiters) >= s.callLimits.waiters)
 		return reject(s, u, message, "WaiterOverflow")
-	const key = id(u, message.session, message.request)
+	const key = id(u, message, message.session, message.request)
 	const w: CallWaiter = {
 		key,
 		consumer: u.id,
@@ -300,7 +377,7 @@ const enqueue = (
 		message,
 		deadline: s.now + Math.min(Math.max(0, message.wait), s.callLimits.wait),
 	}
-	const binding = Bindings.key(u.instance, message.service)
+	const binding = Bindings.key(message.member, message.service)
 	return issue(
 		{
 			...s,
@@ -320,6 +397,7 @@ const enqueue = (
 		u.id,
 		{
 			key,
+			member: message,
 			session: message.session,
 			request: message.request,
 			service: message.service,
@@ -332,7 +410,7 @@ const request = (
 	u: Unit,
 	message: Extract<CallMessage, { _tag: "Request" }>,
 ): Working => {
-	const key = id(u, message.session, message.request)
+	const key = id(u, message, message.session, message.request)
 	if (
 		!Number.isSafeInteger(s.callLimits.concurrency) ||
 		s.callLimits.concurrency < 0 ||
@@ -351,14 +429,23 @@ const request = (
 		return reject(s, u, message, "CancelledBeforeDispatch")
 	if (HashSet.has(s.callSeen, key) || HashMap.has(s.callWaiters, key))
 		return reject(s, u, message, "Duplicate")
-	if (!Preparation.authorized(s, u.instance, u.target))
+	const member = HashMap.get(u.members, message.member)
+	if (
+		Option.isNone(member) ||
+		member.value.term !== message.term ||
+		member.value.generation !== message.generation
+	)
+		return reject(s, u, message, "StaleGeneration")
+	if (!Preparation.authorized(s, message.member, member.value.target))
 		return reject(s, u, message, "Unauthorized")
-	if (!HashMap.has(s.bindings, Bindings.key(u.instance, message.service)))
+	if (member.value.phase !== "Ready" && !startup(s, u, message.member))
+		return reject(s, u, message, "Unavailable")
+	if (!HashMap.has(s.bindings, Bindings.key(message.member, message.service)))
 		return reject(s, u, message, "MissingBinding")
 	return Option.match(select(s, u, message), {
 		onSome: (r) => admit(s, u, message, r),
 		onNone: () =>
-			startup(s, u)
+			startup(s, u, message.member)
 				? reject(s, u, message, "Unavailable")
 				: enqueue(s, u, message),
 	})
@@ -395,12 +482,19 @@ const complete = (
 		onNone: () =>
 			issue(s, "CallCompleteAck", u.id, {
 				key: message.key,
+				member: message,
 				session: "",
 				request: "",
 				service: "",
 			}),
 		onSome: (c) => {
-			if (c.provider !== u.id || c.providerIncarnation !== u.incarnation)
+			if (
+				c.provider !== u.id ||
+				c.providerIncarnation !== u.incarnation ||
+				c.providerMember !== message.member ||
+				c.providerTerm !== message.term ||
+				c.providerGeneration !== message.generation
+			)
 				return s
 			const quality: Working =
 				message.cleanup._tag === "Failed"
@@ -449,7 +543,7 @@ const observeMessage = (s: Working, e: CallEvidence): Working =>
 			if (e.message._tag === "Request") return request(s, u, e.message)
 			if (e.message._tag === "Complete") return complete(s, u, e.message)
 			const message = e.message
-			const key = id(u, message.session, message.request)
+			const key = id(u, message, message.session, message.request)
 			const waiting = HashMap.get(s.callWaiters, key)
 			if (message._tag === "Cancel" && Option.isSome(waiting))
 				return reject(
@@ -506,7 +600,7 @@ export const observed = (s: Working, e: CallEvidence): Working => {
 			...s,
 			cancelledCalls: HashSet.add(
 				s.cancelledCalls,
-				id(u.value, e.message.session, e.message.request),
+				id(u.value, e.message, e.message.session, e.message.request),
 			),
 		},
 		e,
@@ -635,6 +729,20 @@ export const providerOutstanding = (s: State, unit: string): boolean =>
 			(c) => c.credit && c.provider === unit,
 		),
 	)
+export const memberOutstanding = (
+	s: State,
+	unit: string,
+	members: HashSet.HashSet<string>,
+): boolean =>
+	HashSet.some(ids(s, unit), (id) =>
+		Option.exists(
+			HashMap.get(s.calls, id),
+			(call) =>
+				call.credit &&
+				call.provider === unit &&
+				HashSet.has(members, call.providerMember),
+		),
+	)
 export const cancelProvider = (s: Working, unit: string): Working =>
 	HashSet.reduce(ids(s, unit), s, (s, id) =>
 		Option.match(HashMap.get(s.calls, id), {
@@ -722,27 +830,40 @@ export const disconnected = (
 					),
 	})
 const endedUnit = (s: Working, u: Unit): Working =>
-	HashSet.reduce(Bindings.outgoing(s, u.instance), endCalls(s, u), (s, key) =>
-		Option.match(HashMap.get(s.bindings, key), {
-			onNone: () => s,
-			onSome: (b) =>
-				Option.match(
-					Option.flatMap(
-						HashMap.get(s.instances, b.consumer),
-						(i) => i.current,
+	HashSet.reduce(
+		HashMap.reduce(u.members, HashSet.empty<string>(), (ids, member) =>
+			HashSet.union(ids, Bindings.outgoing(s, member.instance)),
+		),
+		endCalls(s, u),
+		(s, key) =>
+			Option.match(HashMap.get(s.bindings, key), {
+				onNone: () => s,
+				onSome: (b) =>
+					Option.match(
+						Option.flatMap(
+							HashMap.get(s.instances, b.consumer),
+							(i) => i.current,
+						),
+						{
+							onNone: () => s,
+							onSome: (consumer) =>
+								issue(s, "RetireRoute", consumer, {
+									member: Option.getOrElse(
+										Option.map(Executions.current(s, b.consumer), (value) => ({
+											member: b.consumer,
+											term: value.member.term,
+											generation: value.member.generation,
+										})),
+										() => ({ member: b.consumer, term: 0, generation: 0 }),
+									),
+									key: u.incarnation,
+									session: "",
+									request: "",
+									service: b.service,
+								}),
+						},
 					),
-					{
-						onNone: () => s,
-						onSome: (consumer) =>
-							issue(s, "RetireRoute", consumer, {
-								key: u.incarnation,
-								session: "",
-								request: "",
-								service: b.service,
-							}),
-					},
-				),
-		}),
+			}),
 	)
 
 export const closed = (s: Working): Working =>
@@ -753,21 +874,26 @@ export const closed = (s: Working): Working =>
 		}),
 	)
 const endedWaiters = (s: Working, u: Unit): Working =>
-	HashSet.reduce(Bindings.incoming(s, u.instance), s, (s, binding) =>
-		HashSet.reduce(
-			Option.getOrElse(HashMap.get(s.waitingByBinding, binding), () =>
-				HashSet.empty<string>(),
-			),
-			s,
-			(s, key) =>
-				Option.match(HashMap.get(s.callWaiters, key), {
-					onNone: () => s,
-					onSome: (w) =>
-						w.consumer === u.id && w.incarnation === u.incarnation
-							? dequeue(s, w)
-							: s,
-				}),
+	HashSet.reduce(
+		HashMap.reduce(u.members, HashSet.empty<string>(), (ids, member) =>
+			HashSet.union(ids, Bindings.incoming(s, member.instance)),
 		),
+		s,
+		(s, binding) =>
+			HashSet.reduce(
+				Option.getOrElse(HashMap.get(s.waitingByBinding, binding), () =>
+					HashSet.empty<string>(),
+				),
+				s,
+				(s, key) =>
+					Option.match(HashMap.get(s.callWaiters, key), {
+						onNone: () => s,
+						onSome: (w) =>
+							w.consumer === u.id && w.incarnation === u.incarnation
+								? dequeue(s, w)
+								: s,
+					}),
+			),
 	)
 export const ended = (s: Working, u: Unit): Working =>
 	endedUnit(endedWaiters(s, u), u)

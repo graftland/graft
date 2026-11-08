@@ -128,7 +128,7 @@ const Plan = Schema.Struct({
 	desiredRealms: Schema.HashMap(Schema.String, Schema.Option(Realm)),
 	members: Strings,
 	reasons: Schema.HashMap(Schema.String, Schema.HashSet(Reason)),
-	oldGroups: Schema.HashMap(Schema.String, Group),
+	recoveryGroups: Schema.HashMap(Schema.String, Group),
 	newGroups: Schema.HashMap(Schema.String, Group),
 	previous: Schema.HashMap(Schema.String, Unit.MemberDeclaration),
 	desired: Schema.HashMap(Schema.String, Unit.MemberDeclaration),
@@ -189,17 +189,18 @@ const Status = Schema.Struct({
 	conclusion: Schema.Option(Conclusion),
 })
 const Fact = Schema.Struct({
+	placement: Unit.PlacementRequirement,
+	memberBudget: Unit.Budget,
+	memberHistory: Schema.HashMap(Schema.String, Unit.MemberExecution),
+	localConsumers: Schema.HashMap(Schema.String, Strings),
+	children: Schema.HashMap(Schema.String, Strings),
 	group: Schema.String,
-	members: Schema.HashMap(Schema.String, Unit.UnitMember),
+	members: Schema.HashMap(Schema.String, Unit.MemberExecution),
 	description: Schema.Option(Unit.Description),
-	endpoint: Schema.Option(Unit.Endpoint),
 	progress: Schema.optionalKey(Schema.String),
 	kind: Schema.Literals(["Inspection", "Execution"]),
 	id: Schema.String,
 	incarnation: Schema.String,
-	instance: Schema.String,
-	term: Schema.Int,
-	target: Unit.Target,
 	owner: Schema.String,
 	claim: Schema.String,
 	spawn: Schema.String,
@@ -247,6 +248,12 @@ const Preparation = Schema.Struct({
 	),
 })
 const Call = Schema.Struct({
+	consumerMember: Schema.String,
+	consumerTerm: Schema.Int,
+	consumerGeneration: Schema.Int,
+	providerMember: Schema.String,
+	providerTerm: Schema.Int,
+	providerGeneration: Schema.Int,
 	key: Schema.String,
 	consumer: Schema.String,
 	consumerIncarnation: Schema.String,
@@ -270,6 +277,9 @@ const Waiter = Schema.Struct({
 	incarnation: Schema.String,
 	deadline: Schema.Finite,
 	message: Schema.TaggedStruct("Request", {
+		member: Schema.String,
+		term: Schema.Int,
+		generation: Schema.Int,
 		session: Schema.String,
 		request: Schema.String,
 		service: Schema.String,
@@ -286,7 +296,7 @@ const Budget = Schema.Struct({
 	stop: Schema.optionalKey(Schema.Finite),
 	terminate: Schema.optionalKey(Schema.Finite),
 })
-const Input = Schema.Struct({
+const InspectionInput = Schema.Struct({
 	realm: Schema.optionalKey(Schema.String),
 	realms: Schema.optionalKey(Schema.Array(Realm)),
 	colocate: Schema.optionalKey(Schema.Array(Schema.String)),
@@ -304,6 +314,34 @@ const Input = Schema.Struct({
 		}),
 	),
 })
+const Input = Schema.Struct({
+	operations: Schema.Array(
+		Schema.Union([
+			Schema.TaggedStruct("Deploy", {
+				instance: Schema.String,
+				target: Unit.Target,
+				expected: Schema.optionalKey(Schema.Int),
+				realm: Schema.optionalKey(Schema.String),
+				colocate: Schema.optionalKey(Schema.Array(Schema.String)),
+				placement: Schema.optionalKey(Unit.PlacementRequirement),
+			}),
+			Schema.TaggedStruct("Remove", {
+				instance: Schema.String,
+				expected: Schema.optionalKey(Schema.Int),
+			}),
+		]),
+	),
+	realms: Schema.optionalKey(Schema.Array(Realm)),
+	key: Schema.optionalKey(Schema.String),
+	strategy: Schema.optionalKey(Schema.Literals(["Restart", "Overlap"])),
+	budget: Schema.optionalKey(Budget),
+	requirements: Schema.optionalKey(
+		Schema.Struct({
+			trial: Schema.optionalKey(Schema.Finite),
+			probes: Schema.optionalKey(Schema.Array(Schema.String)),
+		}),
+	),
+})
 const Policy = Schema.Struct({
 	instance: Schema.String,
 	allowed: Schema.Array(Schema.String),
@@ -313,7 +351,7 @@ export type Policy = typeof Policy.Type
 export const Request = Schema.Union([
 	Schema.TaggedStruct("Ping", {}),
 	Schema.TaggedStruct("Submit", { input: Input }),
-	Schema.TaggedStruct("Inspect", { input: Input }),
+	Schema.TaggedStruct("Inspect", { input: InspectionInput }),
 	Schema.Struct({
 		_tag: Schema.Literals(["Get", "Await", "Cancel", "GetPreparation"]),
 		id: Schema.String,

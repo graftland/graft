@@ -6,6 +6,7 @@ import {
 	Effect,
 	Fiber,
 	FileSystem,
+	HashMap,
 	Layer,
 	Option,
 	Path,
@@ -49,8 +50,9 @@ it.live(
 				const address = yield* Control.serve()
 				const client = yield* Control.connect(address)
 				const first = yield* client.submit({
-					instance: "provider",
-					target: r.target,
+					operations: [
+						{ _tag: "Deploy", instance: "provider", target: r.target },
+					],
 					key: "public",
 					budget,
 				})
@@ -61,8 +63,9 @@ it.live(
 					.pipe(Effect.flatMap(Effect.fromOption))
 				assert.deepEqual(Option.getOrThrow(status.conclusion), outcome)
 				const same = yield* client.submit({
-					instance: "provider",
-					target: r.target,
+					operations: [
+						{ _tag: "Deploy", instance: "provider", target: r.target },
+					],
 					key: "public",
 					budget,
 				})
@@ -75,7 +78,8 @@ it.live(
 						units,
 						(u) =>
 							u.kind === "Execution" &&
-							u.owner === "instance:provider" &&
+							u.owner === `group:${u.group}` &&
+							HashMap.has(u.members, "provider") &&
 							u.evidence === "Missing",
 					),
 				)
@@ -92,8 +96,9 @@ it.effect(
 				const address = yield* Control.serve()
 				const client = yield* Control.connect(address)
 				const change = yield* client.submit({
-					instance: "provider",
-					target: r.target,
+					operations: [
+						{ _tag: "Deploy", instance: "provider", target: r.target },
+					],
 					budget: { ...budget, total: 60000 },
 					requirements: { trial: 10000 },
 				})
@@ -127,7 +132,12 @@ it.live(
 				const address = yield* Control.serve()
 				const client = yield* Control.connect({ ...address, token: "wrong" })
 				const rejected = yield* client
-					.submit({ instance: "provider", target: r.target, budget })
+					.submit({
+						operations: [
+							{ _tag: "Deploy", instance: "provider", target: r.target },
+						],
+						budget,
+					})
 					.pipe(Effect.flip)
 				assert.equal(rejected.reason, "Unauthorized")
 				const good = yield* Control.connect(address)
@@ -216,8 +226,7 @@ it.live(
 				)
 			const client = yield* Control.connect(address)
 			const change = yield* client.submit({
-				instance: "provider",
-				target,
+				operations: [{ _tag: "Deploy", instance: "provider", target }],
 				budget,
 			})
 			const result = yield* change.await
@@ -226,7 +235,10 @@ it.live(
 			assert.isTrue(
 				Array.some(
 					units,
-					(u) => u.kind === "Execution" && u.owner === "instance:provider",
+					(u) =>
+						u.kind === "Execution" &&
+						u.owner === `group:${u.group}` &&
+						HashMap.has(u.members, "provider"),
 				),
 			)
 			yield* client.shutdown

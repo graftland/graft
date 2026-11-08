@@ -3,7 +3,8 @@ title: 變更
 description: 提交、等待及觀察核心變更。
 ---
 
-**變更**替換一個固定的核心實例。核心負責試行、復原及收尾。嵌入式 `Graft.plugin`
+**變更**對核心實例執行 `Deploy` 與 `Remove`
+操作。核心規劃其部署組，並負責試行、復原及收尾。嵌入式 `Graft.plugin`
 組合提供協作式生命週期，不安裝核心服務。
 
 ## 提交與等待
@@ -20,8 +21,7 @@ declare const target: Change.Target
 export const upgrade = Effect.gen(function* () {
 	const handle = yield* Change.submit({
 		key: "forecasts-v2",
-		instance: "forecasts",
-		target,
+		operations: [{ _tag: "Deploy", instance: "forecasts", target }],
 	})
 	const conclusion = yield* handle.await
 	const current = yield* Change.get(handle.id)

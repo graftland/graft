@@ -245,8 +245,7 @@ const upgrade = Effect.fnUntraced(function* (f, client, strategy) {
 	const held = yield* f.u.call("held").pipe(Effect.forkScoped)
 	yield* f.g.held
 	const handle = yield* client.submit({
-		instance: "integration",
-		target: f.next,
+		operations: [{ _tag: "Deploy", instance: "integration", target: f.next }],
 		strategy,
 		budget,
 		requirements: { trial: 5000 },
@@ -287,10 +286,15 @@ const upgrade = Effect.fnUntraced(function* (f, client, strategy) {
 		)
 	}
 	yield* accepted(client, {
-		instance: "unrelated",
-		realm: "other",
+		operations: [
+			{
+				_tag: "Deploy",
+				instance: "unrelated",
+				realm: "other",
+				target: f.unrelated,
+			},
+		],
 		realms: [{ id: "other", parent: Option.none(), isolated: HashSet.empty() }],
-		target: f.unrelated,
 	})
 	yield* client.close
 	return handle.id
@@ -301,8 +305,12 @@ export const prove = Effect.fnUntraced(function* (
 ) {
 	const f = yield* prepare(placement)
 	const client = yield* Control.connect(f.address)
-	yield* accepted(client, { instance: "integration", target: f.old })
-	yield* accepted(client, { instance: "gateway", target: f.consumer })
+	yield* accepted(client, {
+		operations: [{ _tag: "Deploy", instance: "integration", target: f.old }],
+	})
+	yield* accepted(client, {
+		operations: [{ _tag: "Deploy", instance: "gateway", target: f.consumer }],
+	})
 	const session = yield* f.u.session
 	const before = yield* f.u.call("before")
 	const id = yield* upgrade(f, client, strategy)
@@ -315,15 +323,18 @@ export const prove = Effect.fnUntraced(function* (
 	const original = yield* Effect.fromOption(status.conclusion)
 	const after = yield* f.u.call("after")
 	const units = yield* reconnected.units
+	const hosts = (u, instance) =>
+		u.kind === "Execution" && HashMap.has(u.members, instance)
 	const old = yield* Array.findFirst(
 		units,
 		(u) =>
-			u.instance === "integration" && u.kind === "Execution" && u.term === 1,
+			hosts(u, "integration") &&
+			Option.exists(
+				HashMap.get(u.members, "integration"),
+				(member) => member.term === 1,
+			),
 	).pipe(Effect.fromOption)
-	const gateways = Array.filter(
-		units,
-		(u) => u.instance === "gateway" && u.kind === "Execution",
-	)
+	const gateways = Array.filter(units, (u) => hosts(u, "gateway"))
 	const calls = yield* reconnected.calls
 	yield* requireFact(result.outcome === "Accepted", Cause.pretty(result.cause))
 	yield* requireFact(

@@ -1,7 +1,12 @@
 import { Array, Option } from "effect"
 
 import * as Snapshot from "./decisionInput"
-import type { MemberDeclaration, Request, UnitMember } from "./decisionState"
+import type {
+	MemberDeclaration,
+	Request,
+	ResolvedDependency,
+	UnitMember,
+} from "./decisionState"
 
 /** Encoded address and execution authority for a member, not its runtime state. */
 export const requested = (
@@ -9,16 +14,18 @@ export const requested = (
 	term: number,
 	generation: number,
 ): UnitMember => ({
+	dependencies: [],
 	instance: request.instance,
-	declaration: "self",
-	parent: Option.none(),
+	declaration: request.member?.declaration ?? "self",
+	parent: request.member?.parent ?? Option.none(),
 	realm: request.realm ?? "root",
 	target: Snapshot.target(request.target),
 	term,
 	generation,
 	colocate: Array.copy(request.colocate ?? []),
 	placement:
-		request.placement === undefined
+		request.member?.placement ??
+		(request.placement === undefined
 			? request.target.placement === "Worker"
 				? Option.none()
 				: Option.some({
@@ -30,13 +37,15 @@ export const requested = (
 									security: request.target.deployment.runner.owner,
 								}),
 					})
-			: Option.some(Object.freeze({ ...request.placement })),
+			: Option.some(Object.freeze({ ...request.placement }))),
 })
 export const declared = (
 	member: MemberDeclaration,
 	term: number,
 	generation: number,
+	dependencies: ReadonlyArray<ResolvedDependency>,
 ): UnitMember => ({
+	dependencies,
 	instance: member.instance,
 	declaration: member.declaration,
 	parent: member.parent,

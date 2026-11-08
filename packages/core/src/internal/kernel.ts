@@ -38,7 +38,7 @@ export interface Controller {
 	readonly time: Effect.Effect<number>
 	readonly apply: (event: Core.Event) => Effect.Effect<Core.Reply>
 	readonly submit: (request: Core.Input) => Effect.Effect<Submission>
-	readonly inspect: (request: Core.Input) => Effect.Effect<Submission>
+	readonly inspect: (request: Core.InspectionInput) => Effect.Effect<Submission>
 	readonly getPreparation: (
 		id: string,
 	) => Effect.Effect<Option.Option<Core.PreparationStatus>>
@@ -378,19 +378,18 @@ const close = Effect.fnUntraced(function* (runtime: Runtime) {
 })
 const handoff = Effect.fnUntraced(function* (
 	runtime: Runtime,
-	request: Core.Input,
-	inspect: boolean,
+	input:
+		| { readonly _tag: "Requested"; readonly request: Core.Input }
+		| {
+				readonly _tag: "InspectRequested"
+				readonly request: Core.InspectionInput
+		  },
 ) {
 	const waiting = yield* Deferred.make<Submission>()
 	const now = yield* time(runtime)
 	const selected = yield* Effect.tx(
 		Effect.gen(function* () {
-			const result = yield* consumeTx(
-				runtime,
-				inspect
-					? { _tag: "InspectRequested", request, now }
-					: { _tag: "Requested", request, now },
-			)
+			const result = yield* consumeTx(runtime, { ...input, now })
 			if (result.reply._tag === "Preparing") {
 				const pending = yield* TxRef.get(runtime.submissions)
 				const status = yield* TxRef.get(runtime.state).pipe(
@@ -452,10 +451,14 @@ const handoff = Effect.fnUntraced(function* (
 }, Effect.uninterruptible)
 const submit = Effect.fnUntraced(function* (
 	runtime: Runtime,
-	request: Core.Input,
-	inspect = false,
+	input:
+		| { readonly _tag: "Requested"; readonly request: Core.Input }
+		| {
+				readonly _tag: "InspectRequested"
+				readonly request: Core.InspectionInput
+		  },
 ): Effect.fn.Return<Submission> {
-	const delivery = yield* handoff(runtime, request, inspect)
+	const delivery = yield* handoff(runtime, input)
 	return Option.isSome(delivery.waiting)
 		? yield* Deferred.await(delivery.waiting.value)
 		: delivery.result
@@ -504,8 +507,9 @@ export const make = Effect.fnUntraced(function* (
 		),
 		time: time(runtime),
 		apply: (event) => consume(runtime, event),
-		submit: (request) => submit(runtime, request),
-		inspect: (request) => submit(runtime, request, true),
+		submit: (request) => submit(runtime, { _tag: "Requested", request }),
+		inspect: (request) =>
+			submit(runtime, { _tag: "InspectRequested", request }),
 		getPreparation: Effect.fnUntraced(function* (id: string) {
 			const now = yield* time(runtime)
 			yield* consume(runtime, {

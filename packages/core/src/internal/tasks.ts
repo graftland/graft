@@ -15,7 +15,8 @@ export const make = Effect.gen(function* () {
 		Scope.provide(scope),
 	)
 	const failures = yield* Ref.make<Cause.Cause<unknown>>(Cause.empty)
-	return { scope, fibers, failures }
+	const cleanupFailures = yield* Ref.make<Cause.Cause<unknown>>(Cause.empty)
+	return { scope, fibers, failures, cleanupFailures }
 })
 export type Group = Effect.Success<typeof make>
 
@@ -27,6 +28,10 @@ export const run = <A, E, R>(group: Group, effect: Effect.Effect<A, E, R>) =>
 				const scope = yield* Scope.make()
 				const body = yield* Effect.exit(restore(Scope.provide(scope)(effect)))
 				const closed = yield* Effect.exit(Release.close(scope, body))
+				if (Exit.isFailure(closed) && !Cause.hasInterruptsOnly(closed.cause))
+					yield* Ref.update(group.cleanupFailures, (cause) =>
+						Cause.combine(cause, closed.cause),
+					)
 				// Bare worker interruption is supported; nested scopes inside the body must report their own release failures, unlike the separately observed task scope.
 				const failure = Cause.combine(
 					Exit.isFailure(body) && !Cause.hasInterruptsOnly(body.cause)

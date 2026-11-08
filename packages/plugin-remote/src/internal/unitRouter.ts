@@ -10,6 +10,7 @@ import {
 	Option,
 	Queue,
 	Ref,
+	Schema,
 	Scope,
 	String,
 } from "effect"
@@ -25,11 +26,10 @@ import type { Socket } from "effect/socket"
 import type { Kernel } from "@graftland/graft"
 
 import type * as Contract from "../Contract"
-import * as CallFrames from "./callFrames"
 import * as EncodedLimit from "./encodedLimit"
 import { SingleHop } from "./ownedCalls"
 import * as Network from "./unitNetwork"
-import type * as Wire from "./unitProtocol"
+import * as Wire from "./unitProtocol"
 
 type Protocol = RpcClient.Protocol["Service"]
 type Id = RpcMessage.RequestEncoded["id"]
@@ -55,7 +55,7 @@ interface Views {
 	readonly discarded: HashSet.HashSet<string>
 }
 interface Runtime {
-	readonly emit: (message: Wire.CallMessage) => Effect.Effect<void>
+	readonly emit: (message: Wire.CallBody) => Effect.Effect<void>
 	readonly waiting: Ref.Ref<
 		HashMap.HashMap<
 			string,
@@ -275,12 +275,17 @@ const run = (
 							yield* Effect.forEach(
 								ids,
 								(id) =>
-									CallFrames.encode({
-										_tag: "Lost",
-										session: slot.session,
-										request: globalThis.String(id),
-										cause: Cause.fail(frame.error),
-									}).pipe(Effect.orDie, Effect.flatMap(runtime.emit)),
+									Schema.encodeEffect(Wire.Cause)(Cause.fail(frame.error)).pipe(
+										Effect.flatMap((cause) =>
+											runtime.emit({
+												_tag: "Lost",
+												session: slot.session,
+												request: globalThis.String(id),
+												cause,
+											}),
+										),
+										Effect.orDie,
+									),
 								{ discard: true },
 							)
 							yield* receive({ ...frame, requestIds: ids })
@@ -482,7 +487,7 @@ const retire = Effect.fnUntraced(function* (
 })
 export const make = Effect.fnUntraced(function* (
 	services: ReadonlyArray<Contract.Service>,
-	emit: (message: Wire.CallMessage) => Effect.Effect<void>,
+	emit: (message: Wire.CallBody) => Effect.Effect<void>,
 ): Effect.fn.Return<Router, never, Scope.Scope | SecureRandom.SecureRandom> {
 	const random = yield* SecureRandom.SecureRandom
 	const slots = yield* Effect.forEach(services, (service) =>
