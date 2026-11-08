@@ -326,11 +326,11 @@ VS Code:
 
 ## Changes while running
 
-`graft start` reads one revision and rejects `--watch`. The editing and watcher
-rules below describe directly embedded Include and Loader APIs; they provide
-cooperative lifecycle behavior. Include merges file and physical-target
-notifications, debounces them for 100 ms and requests a catch-up read after
-watcher installation.
+With `graft start --watch`, each save becomes a Change; see
+[Watch mode](../cli/#watch-mode). The editing and watcher rules below describe
+directly embedded Include and Loader APIs; they provide cooperative lifecycle
+behavior. Include merges file and physical-target notifications, debounces them
+for 100 ms and requests a catch-up read after watcher installation.
 
 Graft then compares the new entries with the running entries:
 

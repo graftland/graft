@@ -1,16 +1,25 @@
 /**
- * The Loader unit: reads one config revision, prepares every entry in disposable
- * inspection units and submits them to the kernel as one Change.
+ * The Loader unit: reads a config revision, prepares every changed entry in
+ * disposable inspection units and submits them to the kernel as one Change.
  */
 import {
 	Array,
 	Config,
+	Deferred,
 	Effect,
+	Exit,
 	FileSystem,
+	HashMap,
+	HashSet,
 	Option,
 	Path,
 	Record,
+	Ref,
+	Schedule,
 	Schema,
+	Stream,
+	String,
+	type PlatformError,
 } from "effect"
 
 import { Plugin, type Kernel } from "@graftland/graft"
@@ -47,6 +56,8 @@ export const Options = Schema.Struct({
 	config: Schema.String,
 	control: Control.Address,
 	placement: Schema.optionalKey(Schema.Literals(["Worker", "Process"])),
+	/** Turns each saved edit of the config file or a project module into a Change. */
+	watch: Schema.optionalKey(Schema.Boolean),
 })
 export type Options = typeof Options.Type
 
@@ -100,13 +111,22 @@ export const references = (value: unknown): Referenced => {
 	}
 }
 
+interface Tools {
+	readonly options: Options
+	readonly resolver: ModuleResolver.ModuleResolver["Service"]
+	readonly preparation: Effect.Success<ReturnType<typeof Preparation.make>>
+	readonly control: Control.Client
+}
+/** Target identities of the entries the last accepted revision deployed. */
+type Applied = HashMap.HashMap<string, string>
+
+/** Prepares one entry; an entry whose target identity is already applied is left untouched. */
 const operation = Effect.fnUntraced(function* (
 	entry: Entry,
-	options: Options,
-	resolver: ModuleResolver.ModuleResolver["Service"],
-	preparation: Effect.Success<ReturnType<typeof Preparation.make>>,
-	control: Control.Client,
+	tools: Tools,
+	applied: Applied,
 ) {
+	const { options, resolver, preparation, control } = tools
 	const { value, names } = references(entry.config ?? {})
 	const module = yield* resolver.resolve(entry.name)
 	const input: Preparation.Input = {
@@ -117,10 +137,16 @@ const operation = Effect.fnUntraced(function* (
 			? {}
 			: { placement: options.placement }),
 	}
+	const planned = yield* Preparation.target(input, {
+		control: options.control,
+	})
+	if (Option.contains(HashMap.get(applied, entry.id), planned.identity))
+		return {
+			instance: entry.id,
+			identity: planned.identity,
+			operation: Option.none(),
+		}
 	if (names.length > 0) {
-		const planned = yield* Preparation.target(input, {
-			control: options.control,
-		})
 		const values = yield* Effect.forEach(Array.dedupe(names), (name) =>
 			Effect.map(Config.String(name), (v) => [name, v] as const),
 		)
@@ -132,28 +158,49 @@ const operation = Effect.fnUntraced(function* (
 	}
 	const prepared = yield* preparation.inspect(input)
 	return {
-		_tag: "Deploy",
 		instance: entry.id,
-		target: prepared.target,
-	} satisfies Kernel.DeploymentOperation
+		identity: prepared.target.identity,
+		operation: Option.some<Kernel.DeploymentOperation>({
+			_tag: "Deploy",
+			instance: entry.id,
+			target: prepared.target,
+		}),
+	}
 })
 
-/** Reads, prepares and submits one revision; the plugin then stays idle. */
-const deploy = Effect.fnUntraced(function* (options: Options) {
-	const path = yield* Path.Path
-	const control = yield* Control.connect(options.control)
-	const resolver = yield* ModuleResolver.make({
-		base: path.dirname(options.config),
-		control: options.control,
-	})
-	const preparation = yield* Preparation.make({ control: options.control })
-	const read = yield* revision(options.config)
+const isBusy = (error: Control.ControlError) => error.reason === "Busy"
+/** Reads the file, prepares changed entries and submits one Change; returns what is now applied. */
+const revise = Effect.fnUntraced(function* (tools: Tools, applied: Applied) {
+	const read = yield* revision(tools.options.config)
 	const entries = yield* instances(read)
-	const operations = yield* Effect.forEach(entries, (entry) =>
-		operation(entry, options, resolver, preparation, control),
+	const planned = yield* Effect.forEach(entries, (entry) =>
+		operation(entry, tools, applied),
 	)
-	if (operations.length === 0) return
-	const handle = yield* control.submit({ operations, strategy: "Restart" })
+	const present = HashSet.fromIterable(Array.map(planned, (p) => p.instance))
+	const removed = Array.filter(
+		Array.fromIterable(HashMap.keys(applied)),
+		(id) => !HashSet.has(present, id),
+	)
+	const operations = [
+		...Array.getSomes(Array.map(planned, (p) => p.operation)),
+		...Array.map(removed, (instance): Kernel.DeploymentOperation => ({
+			_tag: "Remove",
+			instance,
+		})),
+	]
+	const next: Applied = HashMap.fromIterable(
+		Array.map(planned, (p) => [p.instance, p.identity] as const),
+	)
+	if (operations.length === 0) return next
+	/** A conflicting owner rejects with Busy; the newest revision is kept and submitted again. */
+	const handle = yield* tools.control
+		.submit({ operations, strategy: "Restart" })
+		.pipe(
+			Effect.retry({
+				while: isBusy,
+				schedule: Schedule.spaced("250 millis"),
+			}),
+		)
 	const conclusion = yield* handle.await
 	if (conclusion.outcome !== "Accepted")
 		return yield* DeploymentFailed.make({
@@ -162,8 +209,95 @@ const deploy = Effect.fnUntraced(function* (options: Options) {
 			cause: conclusion.cause,
 		})
 	yield* Effect.logInfo(
-		`Deployed ${operations.length} ${operations.length === 1 ? "entry" : "entries"}`,
+		`Deployed ${operations.length} ${operations.length === 1 ? "change" : "changes"}`,
 	)
+	return next
+})
+
+const ignored = HashSet.make("node_modules", ".graft", ".cache", ".git")
+type Signal = "Initial" | "Edited"
+/**
+ * Applies the first revision only after the watcher is installed, so no save is
+ * missed. Saves within 100 ms coalesce; one made while a revision is applied
+ * runs next, and only the newest is kept. Returns once the first revision
+ * concluded; later failures are logged and leave running entries unchanged.
+ */
+const watched = Effect.fnUntraced(function* (tools: Tools) {
+	const fs = yield* FileSystem.FileSystem
+	const path = yield* Path.Path
+	const root = path.dirname(tools.options.config)
+	const ready = yield* Deferred.make<void>()
+	const first = yield* Deferred.make<
+		void,
+		Effect.Error<ReturnType<typeof revise>> | PlatformError.PlatformError
+	>()
+	const applied = yield* Ref.make<Applied>(HashMap.empty())
+	const edits = fs
+		.watch(root, {
+			recursive: true,
+			onReady: () => Deferred.doneUnsafe(ready, Exit.void),
+		})
+		.pipe(
+			Stream.filter((event) => {
+				const relative = path.isAbsolute(event.path)
+					? path.relative(root, event.path)
+					: event.path
+				return !Array.some(String.split(path.sep)(relative), (segment) =>
+					HashSet.has(ignored, segment),
+				)
+			}),
+			Stream.debounce("100 millis"),
+			Stream.map((): Signal => "Edited"),
+		)
+	const apply = (signal: Signal) =>
+		Ref.get(applied).pipe(
+			Effect.flatMap((current) => revise(tools, current)),
+			Effect.flatMap((next) => Ref.set(applied, next)),
+			Effect.exit,
+			Effect.flatMap((exit) =>
+				signal === "Initial"
+					? Deferred.done(first, exit)
+					: Exit.isFailure(exit)
+						? Effect.logError(
+								"The edited configuration was not applied; running entries are unchanged",
+								exit.cause,
+							)
+						: Effect.void,
+			),
+			Effect.asVoid,
+		)
+	yield* Stream.merge(
+		Stream.fromEffect(Deferred.await(ready).pipe(Effect.as<Signal>("Initial"))),
+		edits,
+	).pipe(
+		Stream.buffer({ capacity: 1, strategy: "sliding" }),
+		Stream.runForEach(apply),
+		Effect.catchCause((cause) =>
+			Deferred.failCause(first, cause).pipe(
+				Effect.andThen(
+					Effect.logError("Watching the configuration stopped", cause),
+				),
+			),
+		),
+		Plugin.fork,
+	)
+	return yield* Deferred.await(first)
+})
+
+/** Applies the first revision, then with `watch` turns each saved edit into a Change. */
+const deploy = Effect.fnUntraced(function* (options: Options) {
+	const path = yield* Path.Path
+	const tools: Tools = {
+		options,
+		control: yield* Control.connect(options.control),
+		resolver: yield* ModuleResolver.make({
+			base: path.dirname(options.config),
+			control: options.control,
+		}),
+		preparation: yield* Preparation.make({ control: options.control }),
+	}
+	if (options.watch === true) return yield* watched(tools)
+	yield* revise(tools, HashMap.empty())
 })
 
 export const plugin = Plugin.make({

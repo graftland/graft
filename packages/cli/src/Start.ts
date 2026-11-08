@@ -27,7 +27,7 @@ import { ApplicationError, ProtocolOutput } from "./Application"
 export interface Options {
 	/** Path of the config file. */
 	readonly config: string
-	/** Live editing is unsupported for this deployment. */
+	/** Turns each saved edit of the config file or a project module into a Change. */
 	readonly watch: boolean
 	/**
 	 * A `.env` file that `!env` reads when the process environment does not set
@@ -100,7 +100,7 @@ const application = Effect.fnUntraced(function* (options: Options) {
 	const target = Units.target({
 		artifact: loader,
 		placement: "Worker",
-		input: { config: file, control: address },
+		input: { config: file, control: address, watch: options.watch },
 		environment: [
 			{
 				artifact: environment,
@@ -152,8 +152,8 @@ const kernel = (protocol: Option.Option<Stdio.Stdio>) =>
 	)
 
 /**
- * Loads one configuration revision through the Loader unit. Watch and live
- * Loader mutation are rejected for this deployment.
+ * Deploys the config file through the Loader unit; with `watch`, each saved
+ * edit becomes a Change for the affected entries.
  */
 export const run = (
 	options: Options,
@@ -162,26 +162,20 @@ export const run = (
 	ApplicationError | PlatformError.PlatformError,
 	Stdio.Stdio
 > =>
-	options.watch
-		? ApplicationError.make({
-				cause: Cause.fail(
-					"Watch and live Loader mutation are unsupported for this deployment",
-				),
-			})
-		: Effect.gen(function* () {
-				const protocol = yield* ProtocolOutput
-				const stdio = yield* Stdio.Stdio
-				return yield* application(options).pipe(
-					Effect.scoped,
-					Effect.catchTags({
-						ArtifactError: (error) =>
-							ApplicationError.make({ cause: Cause.fail(error) }),
-						ChangeRejected: (error) =>
-							ApplicationError.make({ cause: Cause.fail(error) }),
-						ControlError: (error) =>
-							ApplicationError.make({ cause: Cause.fail(error) }),
-					}),
-					// @effect-diagnostics-next-line strictEffectProvide:off -- this runs the whole application, so it is an entry point
-					Effect.provide(kernel(protocol ? Option.some(stdio) : Option.none())),
-				)
-			})
+	Effect.gen(function* () {
+		const protocol = yield* ProtocolOutput
+		const stdio = yield* Stdio.Stdio
+		return yield* application(options).pipe(
+			Effect.scoped,
+			Effect.catchTags({
+				ArtifactError: (error) =>
+					ApplicationError.make({ cause: Cause.fail(error) }),
+				ChangeRejected: (error) =>
+					ApplicationError.make({ cause: Cause.fail(error) }),
+				ControlError: (error) =>
+					ApplicationError.make({ cause: Cause.fail(error) }),
+			}),
+			// @effect-diagnostics-next-line strictEffectProvide:off -- this runs the whole application, so it is an entry point
+			Effect.provide(kernel(protocol ? Option.some(stdio) : Option.none())),
+		)
+	})

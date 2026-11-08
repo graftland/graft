@@ -22,7 +22,9 @@ const start = Command.make(
 		),
 		watch: Flag.Boolean("watch").pipe(
 			Flag.withAlias("w"),
-			Flag.withDescription("Reload plugins and config when files change"),
+			Flag.withDescription(
+				"Turn saved edits of the config and project modules into Changes",
+			),
 			Flag.withDefault(false),
 		),
 		envFile: Flag.String("env-file").pipe(

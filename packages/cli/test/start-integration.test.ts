@@ -5,6 +5,7 @@ import {
 	Fiber,
 	FileSystem,
 	Ref,
+	Schedule,
 	Schema,
 	Stream,
 	String,
@@ -16,36 +17,6 @@ import { assert, it } from "@effect/vitest"
 const quote = Schema.encodeEffect(Schema.fromJsonString(Schema.String))
 const executable = new URL("../.cache/commands/cli/bin.js", import.meta.url)
 	.pathname
-
-it.live(
-	"rejects watch before loading an invalid application revision (O6)",
-	() =>
-		Effect.gen(function* () {
-			const fs = yield* FileSystem.FileSystem
-			const directory = yield* fs.makeTempDirectoryScoped()
-			yield* fs.writeFileString(`${directory}/graft.yml`, "plugins: [\n")
-			const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
-			const child = yield* spawner.spawn(
-				ChildProcess.make(
-					process.execPath,
-					[
-						executable,
-						"--no-plugins",
-						"start",
-						`${directory}/graft.yml`,
-						"--watch",
-					],
-					{ cwd: directory, env: { GRAFT_HOME: directory + "/home" } },
-				),
-			)
-			const output = yield* Stream.mkString(Stream.decodeText(child.all))
-			const code = yield* child.exitCode
-			assert.notEqual(code, 0)
-			assert.include(output, "Watch and live Loader mutation are unsupported")
-			assert.notInclude(output, "YAMLParseError")
-		}).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
-	15000,
-)
 
 it.live(
 	"fails CLI startup on invalid initial YAML without waiting for edits (O6)",
@@ -306,4 +277,85 @@ it.live(
 			assert.strictEqual(code, 0, err)
 		}).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 	30000,
+)
+
+it.live(
+	"turns saved modules and config edits into Changes for the affected entries while the process keeps running (C9)",
+	() =>
+		Effect.gen(function* () {
+			const fs = yield* FileSystem.FileSystem
+			const directory = yield* fs.makeTempDirectoryScoped()
+			const plugin = yield* quote(
+				new URL("../.cache/integration/plugin.mjs", import.meta.url).href,
+			)
+			const effect = yield* quote(import.meta.resolve("effect"))
+			const module = (name: string, line: string) =>
+				`import {Plugin} from ${plugin};import {Effect} from ${effect};export default Plugin.make({name:"${name}",apply:()=>Effect.logInfo("${line}").pipe(Effect.andThen(Effect.addFinalizer(()=>Effect.logInfo("${name} stopped"))))});`
+			/** Each plugin is its own package, so its captured artifact changes alone. */
+			const write = Effect.fnUntraced(function* (name: string, line: string) {
+				yield* fs.makeDirectory(`${directory}/${name}`, { recursive: true })
+				yield* fs.writeFileString(
+					`${directory}/${name}/package.json`,
+					`{"name":"${name}","type":"module"}`,
+				)
+				yield* fs.writeFileString(
+					`${directory}/${name}/index.mjs`,
+					module(name, line),
+				)
+			})
+			yield* write("edited", "EDITED v1")
+			yield* write("other", "OTHER started")
+			yield* fs.writeFileString(
+				`${directory}/graft.yml`,
+				"- id: edited\n  name: ./edited/index.mjs\n- id: other\n  name: ./other/index.mjs\n",
+			)
+			const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+			const child = yield* spawner.spawn(
+				ChildProcess.make(
+					process.execPath,
+					[
+						executable,
+						"--no-plugins",
+						"start",
+						`${directory}/graft.yml`,
+						"--watch",
+					],
+					{
+						cwd: directory,
+						env: { GRAFT_HOME: directory + "/home" },
+						extendEnv: true,
+					},
+				),
+			)
+			const lines = yield* Ref.make<ReadonlyArray<string>>([])
+			yield* child.all.pipe(
+				Stream.decodeText(),
+				Stream.splitLines,
+				Stream.runForEach((line) => Ref.update(lines, Array.append(line))),
+				Effect.forkScoped,
+			)
+			const seen = (text: string) =>
+				Ref.get(lines).pipe(
+					Effect.repeat({
+						schedule: Schedule.spaced("50 millis"),
+						until: Array.some(String.includes(text)),
+					}),
+					Effect.timeout("20 seconds"),
+				)
+			yield* seen("EDITED v1")
+			yield* seen("OTHER started")
+			yield* write("edited", "EDITED v2")
+			yield* seen("EDITED v2")
+			yield* Effect.sleep("1 second")
+			const after = yield* Ref.get(lines)
+			const others = Array.filter(after, String.includes("OTHER started"))
+			assert.lengthOf(others, 1, Array.join(after, "\n"))
+			yield* fs.writeFileString(
+				`${directory}/graft.yml`,
+				"- id: edited\n  name: ./edited/index.mjs\n",
+			)
+			yield* seen("other stopped")
+			yield* child.kill()
+		}).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+	40000,
 )

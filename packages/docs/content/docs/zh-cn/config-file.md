@@ -295,8 +295,8 @@ Code 为例：
 
 ## 在运行期间修改配置
 
-`graft start` 读取一个版本，不支持
-`--watch`。以下编辑和监听规则描述直接嵌入的 Include 与 Loader
+使用 `graft start --watch`
+时，每次保存都会成为一个变更，见[监听模式](../cli/#监听模式)。以下编辑和监听规则描述直接嵌入的 Include 与 Loader
 API，它们提供协作式生命周期。Include 合并文件和实际目标的通知，等待 100 毫秒后刷新，安装 watcher 后也会补读。
 
 随后 Graft 会比较新的配置项与当前正在运行的配置项：
