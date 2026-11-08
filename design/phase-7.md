@@ -35,7 +35,7 @@ emitter. Reasons:
 
 Every delivery rule in §4 is kept. What changes: the emitter cannot tell a slow
 subscriber from a gone one except by idle time (12 × `wait`), and a delivery is
-only as fast as the subscriber's next pull. The owner confirms this deviation.
+only as fast as the subscriber's next pull. `architecture.md` §4 now specifies the pull direction (0.6.0), so this is no longer a deviation.
 
 ## MCP description changes
 
