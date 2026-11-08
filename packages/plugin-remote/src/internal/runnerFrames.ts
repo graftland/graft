@@ -48,6 +48,19 @@ const MemberEvidence = Schema.Union([
 		cleanup: Schema.Literals(["Unknown", "Completed", "Failed"]),
 	}),
 ])
+const RecordingEvidence = Schema.Union([
+	Schema.TaggedStruct("RecorderRegistered", {
+		unit: Schema.String,
+		incarnation: Schema.String,
+		recorder: Schema.String,
+	}),
+	Schema.TaggedStruct("RecordAcknowledged", {
+		unit: Schema.String,
+		incarnation: Schema.String,
+		record: Schema.String,
+		content: Schema.String,
+	}),
+])
 export const Outgoing = Schema.Union([
 	Schema.TaggedStruct("CallEvidence", {
 		event: Schema.Struct({
@@ -62,7 +75,7 @@ export const Outgoing = Schema.Union([
 		result: Wire.Report,
 	}),
 	Schema.TaggedStruct("Evidence", {
-		event: Schema.Union([Evidence, MemberEvidence]),
+		event: Schema.Union([Evidence, MemberEvidence, RecordingEvidence]),
 	}),
 ])
 export type Outgoing = typeof Outgoing.Type
@@ -80,6 +93,11 @@ export const encodeEvent = Effect.fnUntraced(function* (
 			event: { ...event, message: yield* Calls.encode(event.message) },
 		}
 	if (event._tag === "UnitProgress") return { _tag: "Evidence", event }
+	if (
+		event._tag === "RecorderRegistered" ||
+		event._tag === "RecordAcknowledged"
+	)
+		return { _tag: "Evidence", event }
 	if (event._tag === "MemberReady") return { _tag: "Evidence", event }
 	if (event._tag === "MemberFailed" || event._tag === "MemberStopped") {
 		const cause = yield* Schema.encodeEffect(Wire.Cause)(event.cause)
@@ -116,6 +134,8 @@ export const decodeEvent = Effect.fnUntraced(function* (
 		}
 	const e = frame.event
 	if (e._tag === "MemberReady") return e
+	if (e._tag === "RecorderRegistered" || e._tag === "RecordAcknowledged")
+		return e
 	if (e._tag === "MemberFailed" || e._tag === "MemberStopped") {
 		const cause = yield* Schema.decodeEffect(Wire.Cause)(e.cause)
 		return e._tag === "MemberStopped"

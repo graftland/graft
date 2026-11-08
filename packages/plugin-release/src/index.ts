@@ -1,3 +1,4 @@
-/** Immutable release artifacts and journal validation. */
+/** Immutable release artifacts, journal validation and the release recorder. */
 export * from "./Model"
 export { build } from "./internal/storage"
+export * as Recorder from "./Recorder"

@@ -83,6 +83,14 @@ export type {
 	PreparationResult,
 	Policy,
 	Unit,
+	RecordStage,
+	RecordingDeclaration,
+	RecordingPolicy,
+	RecorderGrant,
+	RecordPayload,
+	RecordDuty,
+	RecordingStatus,
+	RecordingSignal,
 } from "./internal/decisionState"
 export type { UnitEvent } from "./internal/unitControl"
 export { UnitControl } from "./internal/unitControl"
@@ -103,6 +111,8 @@ export interface Handle {
 export interface Deployment {
 	readonly callLimits?: Partial<Core.CallLimits>
 	readonly bindings?: ReadonlyArray<Core.FixedBinding>
+	/** Requires an acknowledged record at each stage of Changes that touch the scoped instances. */
+	readonly recording?: Core.RecordingDeclaration
 	readonly authority: string
 	readonly maxUnits: number
 	readonly instances: ReadonlyArray<{
@@ -134,6 +144,11 @@ export class Kernel extends Context.Service<
 		readonly preparations: Stream.Stream<Core.PreparationStatus>
 		readonly inspections: Effect.Effect<ReadonlyArray<Core.PreparationStatus>>
 		readonly units: Effect.Effect<ReadonlyArray<Core.Unit>>
+		/** The current recording grant and every duty not yet acknowledged, including those of ended owners. */
+		readonly recording: Effect.Effect<{
+			readonly grant: Option.Option<Core.RecorderGrant>
+			readonly outstanding: ReadonlyArray<Core.RecordDuty>
+		}>
 		readonly setPolicy: (policy: {
 			readonly instance: string
 			readonly allowed: ReadonlyArray<string>
@@ -204,6 +219,13 @@ export const layer = (
 				units: Effect.map(controller.snapshot, (s) =>
 					Array.fromIterable(HashMap.values(s.units)),
 				),
+				recording: Effect.map(controller.snapshot, (s) => ({
+					grant: s.recorder,
+					outstanding: Array.filter(
+						Array.fromIterable(HashMap.values(s.records)),
+						(duty) => !duty.acknowledged,
+					),
+				})),
 				setPolicy: (policy) =>
 					controller.time.pipe(
 						Effect.flatMap((now) =>

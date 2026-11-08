@@ -43,11 +43,16 @@
 			"source": "./src/index.ts",
 			"default": "./dist/index.js"
 		},
+		"./Recorder": {
+			"source": "./src/Recorder.ts",
+			"default": "./dist/Recorder.js"
+		},
 		"./package.json": "./package.json"
 	},
 	"publishConfig": {
 		"exports": {
 			".": "./dist/index.js",
+			"./Recorder": "./dist/Recorder.js",
 			"./package.json": "./package.json"
 		}
 	},

@@ -259,6 +259,31 @@ export const CallMessage = Schema.Union([
 	}),
 ])
 export type CallMessage = typeof CallMessage.Type
+export const RecordDuty = Schema.Struct({
+	id: Schema.String,
+	recorder: Schema.String,
+	unit: Schema.String,
+	incarnation: Schema.String,
+	content: Schema.String,
+	payload: Schema.Struct({
+		change: Schema.String,
+		stage: Schema.Literals(["Intent", "Commit", "Conclusion"]),
+		members: Schema.Array(Schema.String),
+		targets: Schema.Array(Schema.String),
+		outcome: Schema.Option(
+			Schema.Literals([
+				"Accepted",
+				"Aborted",
+				"Recovered",
+				"RecoveryFailed",
+				"Stuck",
+			]),
+		),
+	}),
+	deliveries: Schema.Int,
+	acknowledged: Schema.Boolean,
+})
+export type RecordDuty = typeof RecordDuty.Type
 export const Command = Schema.Struct({
 	subjects: Schema.HashSet(Schema.String),
 	placement: PlacementRequirement,
@@ -304,7 +329,9 @@ export const Command = Schema.Struct({
 		"CancelTimer",
 		"Publish",
 		"PublishPreparation",
+		"Record",
 	]),
+	record: Schema.optionalKey(RecordDuty),
 	token: Token,
 	target: Target,
 	resolution: Schema.optionalKey(Resolved),
@@ -388,6 +415,11 @@ export const Outgoing = Schema.Union([
 	Schema.TaggedStruct("Diagnostic", { cause: Schema.Json }),
 	Schema.TaggedStruct("Cleanup", { cause: Schema.optionalKey(Schema.Json) }),
 	Schema.TaggedStruct("Progress", { stage: Schema.String }),
+	Schema.TaggedStruct("RecorderRegister", { recorder: Schema.String }),
+	Schema.TaggedStruct("RecordAck", {
+		record: Schema.String,
+		content: Schema.String,
+	}),
 ])
 export type Outgoing = typeof Outgoing.Type
 

@@ -139,6 +139,24 @@ const message = Effect.fnUntraced(
 					stage: frame.stage,
 				})
 				return
+			/** The channel, not the frame, names the unit incarnation that registers or acknowledges. */
+			case "RecorderRegister":
+				yield* Queue.offer(runtime.events, {
+					_tag: "RecorderRegistered",
+					unit: handle.command.unit,
+					incarnation: handle.command.token.incarnation,
+					recorder: frame.recorder,
+				})
+				return
+			case "RecordAck":
+				yield* Queue.offer(runtime.events, {
+					_tag: "RecordAcknowledged",
+					unit: handle.command.unit,
+					incarnation: handle.command.token.incarnation,
+					record: frame.record,
+					content: frame.content,
+				})
+				return
 			case "Diagnostic":
 			case "Failure": {
 				const cause = yield* Schema.decodeEffect(Wire.Cause)(frame.cause)

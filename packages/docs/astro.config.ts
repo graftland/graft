@@ -95,6 +95,7 @@ export default defineConfig({
 						"bindings",
 						"calls",
 						"control",
+						"recording",
 						"application-releases",
 						"trust",
 					],

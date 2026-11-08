@@ -4,5 +4,5 @@ import config from "../../tsdown.config.ts"
 
 export default defineConfig({
 	...config,
-	entry: ["src/index.ts"],
+	entry: ["src/index.ts", "src/Recorder.ts"],
 })

@@ -57,6 +57,10 @@
 			"source": "./src/Publication.ts",
 			"default": "./dist/Publication.js"
 		},
+		"./Recording": {
+			"source": "./src/Recording.ts",
+			"default": "./dist/Recording.js"
+		},
 		"./Testing": {
 			"source": "./src/Testing.ts",
 			"default": "./dist/Testing.js"
@@ -103,6 +107,7 @@
 			"./Errors": "./dist/Errors.js",
 			"./Policy": "./dist/Policy.js",
 			"./Publication": "./dist/Publication.js",
+			"./Recording": "./dist/Recording.js",
 			"./Testing": "./dist/Testing.js",
 			"./Transport": "./dist/Transport.js",
 			"./Units": "./dist/Units.js",

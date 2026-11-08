@@ -46,6 +46,7 @@ business schemas.
 | `handle.cancel`                       | Explicitly requests cancellation; settlement still needs execution evidence.                                                             |
 | `client.units`, `client.preparations` | Expose native exit evidence, cleanup classification, causes and residual reservations, including rejection before admission.             |
 | `client.waiters`                      | Returns bounded queued calls before generation selection; no provider credit is assigned yet.                                            |
+| `client.recording`                    | Returns the recording grant and every unacknowledged [record](../recording/), including those of an exited recorder.                     |
 
 ## Read a deployment plan
 

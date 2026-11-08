@@ -32,6 +32,14 @@ export const Deployment = Schema.Struct({
 			wait: Schema.optionalKey(Schema.Finite),
 		}),
 	),
+	recording: Schema.optionalKey(
+		Schema.Struct({
+			recorder: Schema.String,
+			instance: Schema.String,
+			scope: Schema.Array(Schema.String),
+			maxRecords: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThan(0))),
+		}),
+	),
 })
 export type Deployment = typeof Deployment.Type
 const Cause = Schema.Cause(
@@ -80,6 +88,9 @@ const Rejection = Schema.Literals([
 	"Stale",
 	"Capacity",
 	"KeyConflict",
+	"RecordingUnavailable",
+	"RecordingCapacity",
+	"SelfReplacement",
 ])
 const Cleanup = Schema.Union([
 	Schema.TaggedStruct("Unknown", {}),
@@ -185,8 +196,19 @@ const Status = Schema.Struct({
 		"UnknownCleanup",
 		"Satisfied",
 	]),
+	recording: Schema.Struct({
+		required: Schema.Boolean,
+		gate: Schema.Option(Schema.Literals(["Intent", "Commit", "Conclusion"])),
+		outstanding: Schema.Array(Unit.RecordDuty),
+		blocked: Schema.Boolean,
+	}),
 	cause: Cause,
 	conclusion: Schema.Option(Conclusion),
+})
+const Grant = Schema.Struct({
+	recorder: Schema.String,
+	unit: Schema.String,
+	incarnation: Schema.String,
 })
 const Fact = Schema.Struct({
 	placement: Unit.PlacementRequirement,
@@ -362,6 +384,7 @@ export const Request = Schema.Union([
 			"Preparations",
 			"Calls",
 			"Waiters",
+			"Recording",
 			"Shutdown",
 		]),
 	}),
@@ -377,6 +400,10 @@ export const Response = Schema.Union([
 	Schema.TaggedStruct("Preparation", { value: Schema.Option(Preparation) }),
 	Schema.TaggedStruct("Calls", { value: Schema.Array(Call) }),
 	Schema.TaggedStruct("Waiters", { value: Schema.Array(Waiter) }),
+	Schema.TaggedStruct("Recording", {
+		grant: Schema.Option(Grant),
+		outstanding: Schema.Array(Unit.RecordDuty),
+	}),
 	Schema.TaggedStruct("Ack", {}),
 	Schema.TaggedStruct("Failure", {
 		reason: Schema.String,

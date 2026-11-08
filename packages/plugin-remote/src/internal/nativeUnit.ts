@@ -36,6 +36,7 @@ import { Fork, Graft, Kernel, Plugin, Transition } from "@graftland/graft"
 import * as Artifact from "../Artifact"
 import * as Configuration from "../Configuration"
 import * as Contract from "../Contract"
+import { Recorder } from "../Recording"
 import * as EncodedLimit from "./encodedLimit"
 import * as Operations from "./operations"
 import * as Owned from "./ownedCalls"
@@ -90,6 +91,7 @@ interface UnitRuntime {
 	readonly stopped: Deferred.Deferred<void>
 	readonly commands: FiberMap.FiberMap<string, void, never>
 	readonly replies: Ref.Ref<HashMap.HashMap<string, Wire.Report>>
+	readonly records: Queue.Queue<Wire.RecordDuty>
 	readonly emit: (frame: Wire.Outgoing) => Effect.Effect<void>
 }
 
@@ -320,8 +322,9 @@ const describePlugin = Effect.fnUntraced(function* (
 	const localRequires = Array.flatMap(plugin.inject, (dependency) => {
 		const key = Plugin.isOptional(dependency) ? dependency.key : dependency
 		if (
-			contracts !== undefined &&
-			Array.some(contracts.inject, (service) => service.key.key === key.key)
+			HashSet.has(unitInfrastructure, key.key) ||
+			(contracts !== undefined &&
+				Array.some(contracts.inject, (service) => service.key.key === key.key))
 		)
 			return []
 		return [
@@ -818,6 +821,8 @@ const platform = Effect.fnUntraced(function* (
 		Layer.provideMerge(
 			Layer.succeed(Transition.UnitMember, Option.some(command.token.unit)),
 		),
+		/** Unit infrastructure every plugin can inject, first- or third-party alike. */
+		Layer.provideMerge(Layer.succeed(Recorder, recorder(runtime))),
 	)
 	const built = yield* Layer.buildWithScope(layer, runtime.scope)
 	const services = Context.add(
@@ -827,6 +832,20 @@ const platform = Effect.fnUntraced(function* (
 	)
 	yield* Ref.set(runtime.services, Option.some(services))
 	return services
+})
+/** Services every execution unit provides itself; they are never deployment dependencies. */
+const unitInfrastructure = HashSet.make(Recorder.key)
+/** Deliveries are queued for whichever plugin in this unit holds the role; identity comes from the channel. */
+const recorder = (runtime: UnitRuntime): Recorder["Service"] => ({
+	register: (name) =>
+		runtime.emit({ _tag: "RecorderRegister", recorder: name }),
+	records: Stream.fromQueue(runtime.records),
+	acknowledge: (record) =>
+		runtime.emit({
+			_tag: "RecordAck",
+			record: record.id,
+			content: record.content,
+		}),
 })
 const isolation = (
 	grant: typeof Wire.UnitMember.Type,
@@ -1331,6 +1350,12 @@ const perform = Effect.fnUntraced(function* (
 		case "Stop":
 			yield* stop(runtime)
 			return { _tag: "Succeeded" }
+		case "Record": {
+			if (command.record === undefined)
+				return yield* UnitFault.make({ detail: "The record delivery is empty" })
+			yield* Queue.offer(runtime.records, command.record)
+			return { _tag: "Succeeded" }
+		}
 		default:
 			return yield* UnitFault.make({
 				detail: "Unsupported unit control operation",
@@ -1442,6 +1467,7 @@ const main = Effect.gen(function* () {
 		stopped: yield* Deferred.make<void>(),
 		commands: yield* FiberMap.make<string, void, never>(),
 		replies: yield* Ref.make(HashMap.empty<string, Wire.Report>()),
+		records: yield* Queue.unbounded<Wire.RecordDuty>(),
 		emit: transmit,
 	}
 	yield* runtime.emit({ _tag: "Online" })

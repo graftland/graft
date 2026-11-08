@@ -34,6 +34,8 @@ import type {
 	Outcome,
 	Phase,
 	RealmDeclaration,
+	RecordingDeclaration,
+	RecordStage,
 	Rejection,
 	Request,
 	RequestIdentity,
@@ -57,6 +59,7 @@ import * as Graph from "./groupGraph"
 import * as Members from "./memberCore"
 import * as Grants from "./memberGrant"
 import * as Preparation from "./preparationCore"
+import * as Recording from "./recordingCore"
 
 export const getPreparation = Preparation.get
 export type * from "./decisionState.ts"
@@ -203,6 +206,7 @@ export const get = (s: State, id: string): Option.Option<Status> =>
 		),
 		unconfirmedUnits: HashSet.filter(c.requiredExits, (id) => live(s, id)),
 		settlement: classify(s, c),
+		recording: Recording.status(s, c),
 		cause: c.cause,
 		conclusion: c.conclusion,
 	}))
@@ -214,6 +218,7 @@ export const make = (options: {
 	readonly maxUnits: number
 	readonly callLimits?: Partial<CallLimits>
 	readonly bindings?: ReadonlyArray<FixedBinding>
+	readonly recording?: RecordingDeclaration
 }): State => {
 	const graph = Graph.initialize(options.declarations, options.realms)
 	return Arr.reduce(
@@ -226,6 +231,12 @@ export const make = (options: {
 			),
 		),
 		{
+			recording: Option.map(
+				Option.fromUndefinedOr(options.recording),
+				Recording.policy,
+			),
+			recorder: Option.none(),
+			records: HashMap.empty(),
 			nextMemberOperation: 1,
 			memberOperations: HashMap.empty(),
 			memberOperationsByUnit: HashMap.empty(),
@@ -742,6 +753,19 @@ const conclude = (s: Working, c: Change, outcome: Outcome): Working => {
 	if (classification === "Unresolved" && outcome !== "Stuck") return s
 	if (classification === "Failed" && outcome === "Accepted")
 		return fail(s, c, Cause.fail("Required retirement cleanup failed"))
+	if (
+		outcome === "Accepted" &&
+		c.recorded &&
+		!Recording.acknowledged(s, c.id, "Conclusion")
+	)
+		return Option.contains(c.recordingGate, "Conclusion")
+			? s
+			: gate(
+					disarm(s, c, HashSet.make("Operation", "Trial", "Total", "Evidence")),
+					c,
+					"Conclusion",
+					Option.some(outcome),
+				)
 	const conclusion: Conclusion = {
 		plan: c.plan,
 		calls: Calls.outstanding(s, c.requiredExits),
@@ -790,7 +814,11 @@ const conclude = (s: Working, c: Change, outcome: Outcome): Working => {
 		),
 		next,
 	)
-	return release(transferServing(saved, next), next)
+	const recorded =
+		c.recorded && outcome !== "Accepted"
+			? Recording.request(saved, next, "Conclusion", Option.some(outcome))
+			: saved
+	return release(transferServing(recorded, next), next)
 }
 const terminate = (
 	s: Working,
@@ -975,6 +1003,9 @@ const progressSettlement = (s: Working, c: Change): Working => {
 }
 const fail = (s: Working, c: Change, cause: Cause.Cause<unknown>): Working => {
 	if (Option.isSome(c.conclusion)) return s
+	/** Execution already finished; only the success record is missing, so nothing may be undone. */
+	if (Option.contains(c.recordingGate, "Conclusion"))
+		return save(s, { ...c, cause: Cause.combine(c.cause, cause) })
 	const required = HashSet.union(
 		c.requiredExits,
 		c.shuttingDown || c.oldChanged || !availableOld(s, c)
@@ -1182,7 +1213,7 @@ const install = (s: Working, c: Change): Working => {
 		installed: HashSet.empty<string>(),
 	}
 	const saved = save(disarm(s, c, HashSet.make("Operation")), staged)
-	if (HashSet.size(required) === 0) return commit(saved, staged)
+	if (HashSet.size(required) === 0) return commitRecorded(saved, staged)
 	const installed = HashSet.reduce(required, saved, (s, participant) =>
 		issue(s, c.id, "Install", participant, participant),
 	)
@@ -1529,6 +1560,7 @@ export const empty = (options: {
 	readonly maxUnits: number
 	readonly callLimits?: Partial<CallLimits>
 	readonly bindings?: ReadonlyArray<FixedBinding>
+	readonly recording?: RecordingDeclaration
 	readonly instances: ReadonlyArray<{
 		readonly id: string
 		readonly target: Target
@@ -1618,23 +1650,28 @@ const admit = (s: Working, r: Request, identityRequest: Request): Working => {
 							(m) => !Preparation.authorized(s, m.instance, m.target),
 					  )
 					? reject(s, "Unauthorized")
-					: reserve(
-							s,
-							{
-								...r,
-								proposal: plan.proposal,
-								reads: HashSet.reduce(plan.reads, r.reads, (reads, key) =>
-									HashMap.has(reads, key)
-										? reads
-										: HashMap.set(reads, key, cell(s, key).version),
-								),
-								writes: HashSet.union(r.writes, plan.writes),
-								leases: HashSet.union(r.leases, plan.leases),
-								participants: HashSet.union(r.participants, plan.participants),
-							},
-							plan,
-							identityRequest,
-						),
+					: Option.isSome(Recording.admission(s, plan))
+						? refuseRecording(s, plan)
+						: reserve(
+								s,
+								{
+									...r,
+									proposal: plan.proposal,
+									reads: HashSet.reduce(plan.reads, r.reads, (reads, key) =>
+										HashMap.has(reads, key)
+											? reads
+											: HashMap.set(reads, key, cell(s, key).version),
+									),
+									writes: HashSet.union(r.writes, plan.writes),
+									leases: HashSet.union(r.leases, plan.leases),
+									participants: HashSet.union(
+										r.participants,
+										plan.participants,
+									),
+								},
+								plan,
+								identityRequest,
+							),
 	})
 }
 const reserve = (
@@ -1784,6 +1821,8 @@ const reserve = (
 		conclusion: Option.none(),
 		transferred: HashSet.empty(),
 		released: false,
+		recorded: Recording.required(s, plan),
+		recordingGate: Option.none(),
 	}
 	const admitted = save(
 		{
@@ -1835,10 +1874,89 @@ const reserve = (
 	)
 	const timed = arm(admitted, id, "Total", c.deadline - r.budget.terminate)
 	return withChange(timed, id, (s, c) =>
-		r.strategy === "Restart" && HashSet.size(oldUnits) > 0
-			? stopOld(s, c)
-			: resolve(s, c),
+		c.recorded ? gate(s, c, "Intent", Option.none()) : begin(s, c),
 	)
+}
+/** The first lifecycle action of an admitted Change; recorded Changes reach it only after an acknowledged intent. */
+const begin = (s: Working, c: Change): Working =>
+	c.request.strategy === "Restart" && HashSet.size(c.oldUnits) > 0
+		? stopOld(s, c)
+		: resolve(s, c)
+/** Holds the Change at a recording stage until the owner acknowledges the stage's record. */
+const gate = (
+	s: Working,
+	c: Change,
+	stage: RecordStage,
+	outcome: Option.Option<Outcome>,
+): Working => {
+	const held: Change = { ...c, recordingGate: Option.some(stage) }
+	return Recording.request(save(s, held), held, stage, outcome)
+}
+const refuseRecording = (s: Working, plan: GroupPlan): Working =>
+	Option.match(Recording.admission(s, plan), {
+		onNone: () => s,
+		onSome: (refusal) => reject(s, refusal.reason, refusal.conflicts),
+	})
+/** Route activation needs an acknowledged commit decision; recovery restores safety and is never gated. */
+const commitRecorded = (s: Working, c: Change): Working =>
+	c.recorded && !c.recovering && !Recording.acknowledged(s, c.id, "Commit")
+		? gate(s, c, "Commit", Option.none())
+		: commit(s, c)
+/** Continues the stage a discharged duty was holding, under the Change's current premises and budget. */
+const resume = (s: Working, c: Change, stage: RecordStage): Working => {
+	if (!Option.contains(c.recordingGate, stage) || Option.isSome(c.conclusion))
+		return s
+	const released: Change = { ...c, recordingGate: Option.none() }
+	const saved = save(s, released)
+	switch (stage) {
+		case "Intent":
+			return released.failure || released.cancelRequested
+				? saved
+				: expired(released, s)
+					? fail(
+							saved,
+							released,
+							Cause.fail("Absolute submission deadline exhausted"),
+						)
+					: begin(saved, released)
+		case "Commit":
+			return released.failure
+				? saved
+				: expired(released, s)
+					? fail(
+							saved,
+							released,
+							Cause.fail("Absolute submission deadline exhausted"),
+						)
+					: commit(saved, released)
+		case "Conclusion":
+			return conclude(saved, released, "Accepted")
+	}
+}
+const recordingSignal = (
+	s: Working,
+	event: Extract<
+		Event,
+		{ readonly _tag: "RecorderRegistered" | "RecordAcknowledged" }
+	>,
+): Working => {
+	if (event._tag === "RecorderRegistered") return Recording.register(s, event)
+	const result = Recording.acknowledge(s, event)
+	switch (result._tag) {
+		case "Rejected":
+			return reject(s, "Stale", HashSet.make(event.record))
+		case "Repeated":
+			return s
+		case "Discharged": {
+			const discharged: Working = {
+				...s,
+				records: HashMap.set(s.records, result.duty.id, result.duty),
+			}
+			return withChange(discharged, result.duty.payload.change, (s, c) =>
+				resume(save(s, c), c, result.duty.payload.stage),
+			)
+		}
+	}
 }
 const memberRequest = (c: Change, member: MemberDeclaration): Request => {
 	const {
@@ -2119,7 +2237,7 @@ const reportSuccess = (s: Working, c: Change, command: Command): Working => {
 			return HashSet.every(next.requiredParticipants, (p) =>
 				HashSet.has(next.installed, p),
 			)
-				? commit(saved, next)
+				? commitRecorded(saved, next)
 				: saved
 		}
 		case "Activate":
@@ -2127,6 +2245,7 @@ const reportSuccess = (s: Working, c: Change, command: Command): Working => {
 		case "Terminate":
 		case "ArmTimer":
 		case "Discard":
+		case "Record":
 		case "Describe":
 		case "PublishPreparation":
 		case "Publish":
@@ -2283,6 +2402,7 @@ const reported = (
 					report: Option.some(event.result),
 				}),
 			}
+			if (command.change === Recording.commands) return recorded
 			if (command.change === "$calls")
 				return Calls.reported(recorded, {
 					...command,
@@ -2984,6 +3104,9 @@ const apply = (s: Working, event: Event): Working => {
 			return invalidated(s, event)
 		case "Shutdown":
 			return Preparation.shutdown(shutdown(Calls.closed(s)))
+		case "RecorderRegistered":
+		case "RecordAcknowledged":
+			return recordingSignal(s, event)
 	}
 }
 const eventOwners = (s: State, event: Event): HashSet.HashSet<string> => {
@@ -3041,6 +3164,17 @@ const eventOwners = (s: State, event: Event): HashSet.HashSet<string> => {
 		}
 		case "Shutdown":
 			return s.active
+		case "RecorderRegistered":
+			return HashSet.empty()
+		case "RecordAcknowledged":
+			return HashSet.fromIterable(
+				Option.toArray(
+					Option.map(
+						HashMap.get(s.records, event.record),
+						(duty) => duty.payload.change,
+					),
+				),
+			)
 	}
 }
 const expireObservedDeadlines = (s: Working, id: string): Working =>

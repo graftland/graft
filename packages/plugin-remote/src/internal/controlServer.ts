@@ -75,6 +75,8 @@ const execute = Effect.fnUntraced(function* (
 			return { _tag: "Preparations", value: yield* kernel.inspections }
 		case "Waiters":
 			return { _tag: "Waiters", value: yield* kernel.waiters }
+		case "Recording":
+			return { _tag: "Recording", ...(yield* kernel.recording) }
 		case "Calls":
 			return { _tag: "Calls", value: yield* kernel.calls }
 		case "SetPolicy":

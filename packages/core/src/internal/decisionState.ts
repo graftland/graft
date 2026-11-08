@@ -285,6 +285,54 @@ export interface VerifiedDescription {
 	readonly resolution: ResolvedInput
 	readonly description: Description
 }
+/** Each recorded Change has at most one duty per stage, acknowledged in this order. */
+export type RecordStage = "Intent" | "Commit" | "Conclusion"
+/** Deployment data that names the recording role, the instance allowed to hold it and the instances whose Changes it records. */
+export interface RecordingDeclaration {
+	readonly recorder: string
+	readonly instance: string
+	readonly scope: ReadonlyArray<string>
+	readonly maxRecords?: number
+}
+/** Deployment data naming the recording role, who may hold it and which instances need it. */
+export interface RecordingPolicy {
+	readonly recorder: string
+	readonly instance: string
+	readonly scope: HashSet.HashSet<string>
+	readonly maxRecords: number
+}
+/** The live unit incarnation that registered for the recording role. */
+export interface RecorderGrant {
+	readonly recorder: string
+	readonly unit: string
+	readonly incarnation: string
+}
+/** The immutable payload a recorder stores before acknowledging. */
+export interface RecordPayload {
+	readonly change: string
+	readonly stage: RecordStage
+	readonly members: ReadonlyArray<string>
+	readonly targets: ReadonlyArray<string>
+	readonly outcome: Option.Option<Outcome>
+}
+/** One outstanding or discharged duty, bound to the owner incarnation that received it. */
+export interface RecordDuty {
+	readonly id: string
+	readonly recorder: string
+	readonly unit: string
+	readonly incarnation: string
+	readonly content: string
+	readonly payload: RecordPayload
+	readonly deliveries: number
+	readonly acknowledged: boolean
+}
+/** Recording facts of one Change, projected from core state. */
+export interface RecordingStatus {
+	readonly required: boolean
+	readonly gate: Option.Option<RecordStage>
+	readonly outstanding: ReadonlyArray<RecordDuty>
+	readonly blocked: boolean
+}
 export interface Working extends State {
 	readonly emitted: ReadonlyArray<Command>
 	readonly changed: HashSet.HashSet<string>
@@ -542,6 +590,8 @@ export interface Change {
 	readonly conclusion: Option.Option<Conclusion>
 	readonly transferred: HashSet.HashSet<string>
 	readonly released: boolean
+	readonly recorded: boolean
+	readonly recordingGate: Option.Option<RecordStage>
 }
 export type CommandKind =
 	| "ServeMembers"
@@ -572,6 +622,7 @@ export type CommandKind =
 	| "ArmTimer"
 	| "Publish"
 	| "CancelTimer"
+	| "Record"
 export interface Token {
 	readonly authority: string
 	readonly change: string
@@ -616,6 +667,7 @@ export interface Command {
 	readonly preparation?: PreparationStatus
 	readonly probes?: ReadonlyArray<string>
 	readonly description?: Description
+	readonly record?: RecordDuty
 	readonly id: string
 	readonly change: string
 	readonly kind: CommandKind
@@ -652,6 +704,7 @@ export interface Status {
 	readonly leaseHolders: HashSet.HashSet<string>
 	readonly unconfirmedUnits: HashSet.HashSet<string>
 	readonly settlement: Settlement
+	readonly recording: RecordingStatus
 	readonly cause: Cause.Cause<unknown>
 	readonly conclusion: Option.Option<Conclusion>
 }
@@ -661,6 +714,9 @@ export interface GraphIssue {
 	readonly cause: Cause.Cause<unknown>
 }
 export interface State {
+	readonly recording: Option.Option<RecordingPolicy>
+	readonly recorder: Option.Option<RecorderGrant>
+	readonly records: HashMap.HashMap<string, RecordDuty>
 	readonly nextMemberOperation: number
 	readonly memberOperations: HashMap.HashMap<string, MemberOperation>
 	readonly memberOperationsByUnit: HashMap.HashMap<
@@ -764,8 +820,24 @@ export interface MemberOperation {
 	readonly commandIds: HashSet.HashSet<string>
 	readonly timerIds: HashSet.HashSet<string>
 }
+/** Recorder messages arrive on the unit's own control channel, which identifies the unit incarnation. */
+export type RecordingSignal =
+	| {
+			readonly _tag: "RecorderRegistered"
+			readonly unit: string
+			readonly incarnation: string
+			readonly recorder: string
+	  }
+	| {
+			readonly _tag: "RecordAcknowledged"
+			readonly unit: string
+			readonly incarnation: string
+			readonly record: string
+			readonly content: string
+	  }
 export type Event =
 	| (MemberSignal & { readonly now: number })
+	| (RecordingSignal & { readonly now: number })
 	| (CallEvidence & { readonly now: number })
 	| { readonly _tag: "CallExpired"; readonly key: string; readonly now: number }
 	| {
@@ -895,6 +967,9 @@ export type Rejection =
 	| "Stale"
 	| "Capacity"
 	| "KeyConflict"
+	| "RecordingUnavailable"
+	| "RecordingCapacity"
+	| "SelfReplacement"
 export type Reply =
 	| { readonly _tag: "None" }
 	| { readonly _tag: "Preparing"; readonly preparation: string }

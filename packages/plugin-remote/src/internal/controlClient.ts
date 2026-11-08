@@ -52,6 +52,13 @@ export interface Client {
 		ReadonlyArray<Kernel.PreparationStatus>,
 		Wire.ControlError
 	>
+	readonly recording: Effect.Effect<
+		{
+			readonly grant: Option.Option<Kernel.RecorderGrant>
+			readonly outstanding: ReadonlyArray<Kernel.RecordDuty>
+		},
+		Wire.ControlError
+	>
 	readonly waiters: Effect.Effect<
 		ReadonlyArray<Kernel.CallWaiter>,
 		Wire.ControlError
@@ -239,6 +246,13 @@ const client = (r: Runtime): Client => ({
 	preparations: request(r, { _tag: "Preparations" }).pipe(
 		Effect.flatMap((v) =>
 			v._tag === "Preparations" ? Effect.succeed(v.value) : unexpected(v),
+		),
+	),
+	recording: request(r, { _tag: "Recording" }).pipe(
+		Effect.flatMap((v) =>
+			v._tag === "Recording"
+				? Effect.succeed({ grant: v.grant, outstanding: v.outstanding })
+				: unexpected(v),
 		),
 	),
 	waiters: request(r, { _tag: "Waiters" }).pipe(

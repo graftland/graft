@@ -1,0 +1,89 @@
+---
+title: 记录
+description: 要求变更在执行、提交和成功之前，先取得已确认的记录。
+---
+
+**记录者**是执行单元里持有部署记录角色的插件。变更涉及记录范围内的实例时，内核在每个阶段向记录者发送一条记录，并等待它确认。
+
+- 意图记录确认之前，不执行任何生命周期操作。
+- 提交决定确认之前，不激活任何路由。
+- 结论记录确认之后，才报告 `Accepted`。
+- 停止、终止和退出观察从不等待记录者。
+
+## 声明角色
+
+记录是部署数据。闭包里包含 `scope` 中实例的每个变更都要记录，请求不能选择跳过。
+
+```ts
+import { Layer } from "effect"
+
+import { Kernel } from "@graftland/graft"
+import { Units } from "@graftland/plugin-remote"
+
+declare const instances: Kernel.Deployment["instances"]
+
+export const kernel = Kernel.layer({
+	authority: "shop",
+	maxUnits: 8,
+	instances,
+	recording: { recorder: "release", instance: "release", scope: ["checkout"] },
+}).pipe(Layer.provide(Units.layer))
+```
+
+| 字段         | 含义                                                      |
+| ------------ | --------------------------------------------------------- |
+| `recorder`   | 插件注册时使用的角色名。                                  |
+| `instance`   | 唯一可以持有该角色的实例，角色由它所在的单元持有。        |
+| `scope`      | 需要记录的变更所涉及的实例。                              |
+| `maxRecords` | 未确认与已预留记录的上限，超出的新工作会被拒绝。默认 64。 |
+
+## 运行记录者
+
+`@graftland/plugin-release/Recorder`
+是一个普通的记录者：它把每条记录存进所在单元的内存，然后确认。把它部署为
+`instance`，输入为 `{ recorder: "release" }`。第三方插件通过同一个
+`Recording.Recorder` 服务持有该角色，第一方没有特殊通道。
+
+```ts
+import { Effect, Stream } from "effect"
+
+import { Plugin } from "@graftland/graft"
+import { Recording } from "@graftland/plugin-remote"
+
+export default Plugin.make({
+	name: "audit-recorder",
+	inject: [Recording.Recorder],
+	apply: Effect.fn(function* () {
+		const recorder = yield* Recording.Recorder
+		yield* recorder.records.pipe(
+			Stream.runForEach((record) => recorder.acknowledge(record)),
+			Effect.forkScoped,
+		)
+		yield* recorder.register("release")
+	}),
+})
+```
+
+| 规则     | 行为                                                                   |
+| -------- | ---------------------------------------------------------------------- |
+| 身份     | 单元的控制通道标明化身，插件不能替其他化身注册或确认。                 |
+| 注册     | 接受来自承载 `instance` 的单元的注册；该单元成为当前单元后授权才生效。 |
+| 确认     | 存储之后再确认。重复确认会被忽略；内容、所有者或化身不符则被拒绝。     |
+| 重新连接 | 同一化身再次注册时，内核重发它尚未确认的记录。                         |
+| 持久性   | 无。记录在确认前只保存在记录者的内存和内核中。                         |
+
+## 缺少记录时
+
+| 情形                       | 结果                                                                  |
+| -------------------------- | --------------------------------------------------------------------- |
+| 提交时没有存活的记录者     | 在分配变更 id 之前以 `RecordingUnavailable` 拒绝。                    |
+| 未确认的记录过多           | 以 `RecordingCapacity` 拒绝，不会淘汰任何记录义务。                   |
+| 记录者不再确认或已退出     | 后续工作等待；预算照常耗尽，按通常的[结局规则](../transitions/)收尾。 |
+| 只缺结论记录               | 执行已经完成并保持原样。不报告结局；取消也不改变任何东西。            |
+| 记录者带着未确认的义务退出 | 新的化身不能确认这些义务，`status.recording.blocked` 保持为 `true`。  |
+| 变更会替换记录者所在的单元 | 若该变更需要记录，或存在未确认的义务，以 `SelfReplacement` 拒绝。     |
+
+`status.recording`
+显示当前关卡、未确认的记录以及它们是否受阻。`kernel.recording` 和
+[`client.recording`](../control/)
+列出所有未确认的记录，包括已退出记录者的记录。内核进程丢失时，这些记录随之丢失。

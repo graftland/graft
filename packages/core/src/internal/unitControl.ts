@@ -5,11 +5,13 @@ import type {
 	Cleanup,
 	Command,
 	MemberSignal,
+	RecordingSignal,
 	Report,
 } from "./decisionState"
 
 export type UnitEvent =
 	| MemberSignal
+	| RecordingSignal
 	| CallEvidence
 	| {
 			readonly _tag: "Exited"
