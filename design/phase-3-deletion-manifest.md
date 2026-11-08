@@ -156,3 +156,35 @@ case uses an eligible old Process placement instead of an ineligible old Runner
 placement. Its deadline, fresh term, exclusive retirement and old-placement
 recovery assertions remain; the removed impossible premise is covered by the
 old-Runner Overlap rejection in `group-planning.test.ts`.
+
+## Step 3 (`f0894a2`)
+
+| Removed mechanism                                       | Disposition | Evidence                                                                                                                   |
+| ------------------------------------------------------- | ----------- | -------------------------------------------------------------------------------------------------------------------------- |
+| Single-member native bootstrap and its observers        | Replaced    | `group-native.test.ts`: one native group serves independent member grants; failed provider restarts with its consumer only |
+| `Input.instance` / `Input.target` single-target request | Replaced    | `Input.operations` (`Deploy`/`Remove`); every caller, sample and the transitions page migrated                             |
+| Unit ownership by `instance:<id>`                       | Replaced    | Units are owned by `group:<id>`; `public-control.test.ts` asserts the owning group and the hosted member                   |
+| `GroupPlan.oldGroups`                                   | Replaced    | `GroupPlan.recoveryGroups`; `oldUnitCount` counts the units that actually host selected members                            |
+
+## Step 4 (`614cd79`)
+
+No mechanism was removed. Recording duties, the `Recording.Recorder` unit
+service and the release recorder are new; no retained release journal data is
+read by the new path.
+
+## Step 5
+
+| Removed file, export or case                                                             | Disposition | Replacement or reason                                                                                                                                               |
+| ---------------------------------------------------------------------------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Start.run` activating `Include`, `Application` and intercepts in the host               | Replaced    | Fixed kernel host plus the `@graftland/loader/Deployment` unit; `serves an entry in a unit while neither the host nor the Loader imports plugin or command modules` |
+| Command-plugin discovery before `start`                                                  | Replaced    | `bin.ts` dispatches `start` first; the command host is imported only for other commands                                                                             |
+| `cli/src/internal/watch.ts`, `observeShutdown.ts`                                        | Deleted     | O6: `start` rejects `--watch`; live development returns with the Phase 4 minimal development source                                                                 |
+| `watchEnvFile`, `watchEnvDir`                                                            | Deleted     | Same; the env layer reads its sources once inside the Loader unit                                                                                                   |
+| `cli/src/internal/intercepts.ts` `layer`                                                 | Deleted     | Host intercept activation is gone; `registrations` remain for `graft schema`. Entries with `intercept` are rejected with `DeploymentUnsupported`                    |
+| `watch.test.ts` (7 cases)                                                                | Deferred    | Module watching for `start --watch` (Phase 4)                                                                                                                       |
+| `watch-integration.test.ts`: observes a native import failure after watcher cancellation | Deferred    | Phase 4 development source                                                                                                                                          |
+| `hmr-lifetimes.test.ts`: forwards a real backend failure once with its complete cause    | Deferred    | Phase 4 development source; the HMR package itself is unchanged                                                                                                     |
+| `intercepts.test.ts`: merges annotations and filters parent and child logs               | Deferred    | Unit-local intercept modules (spec "Intercept" row) are not carried yet; `rejects an entry field the kernel deployment does not carry instead of dropping it`       |
+| `env.test.ts`: four watcher cases                                                        | Deferred    | Phase 4; `reads one variable per visible regular file…` and `fails when the directory is missing` remain                                                            |
+| `start --stdio` protocol output                                                          | Deleted     | No plugin owns the process stdio; `rejects protocol stdio because no plugin owns the process stdio`                                                                 |
+| `test/runtime.ts` integration bundle                                                     | Deleted     | Only the deleted watch and HMR tests used it                                                                                                                        |

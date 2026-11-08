@@ -1,24 +1,22 @@
 import {
 	Array,
 	Cause,
-	Console,
 	Effect,
+	Layer,
 	Option,
 	Path,
 	Schema,
 	Stream,
 	String,
 } from "effect"
-import { CliError, CliOutput, Command } from "effect/cli"
+import { CliError, Command } from "effect/cli"
 
 import { Graft, Plugin, type Fork } from "@graftland/graft"
 
-import { ProtocolOutput } from "../Application"
 import { Commands, type Environment } from "../Commands"
 import * as Configuration from "./commandConfig"
 import * as Registry from "./commandRegistry"
 import * as Inspection from "./inspection"
-import { reserve } from "./protocolOutput"
 
 class CommandPluginError extends Schema.TaggedError<
 	CommandPluginError,
@@ -176,58 +174,11 @@ export const run = (...args: Parameters<typeof runCommands>) =>
 		Effect.provide(Inspection.layer),
 	)
 
-const usage = (message: string) =>
-	Console.error(message).pipe(
-		Effect.andThen(
-			CliError.UserError.make({
-				cause: "Invalid process flags",
-				userMessage: message,
-			}),
-		),
+/** Discovers and runs embedded command plugins; `start` never reaches this module. */
+export const main = (...args: Parameters<typeof runCommands>) =>
+	Effect.scoped(
+		Effect.gen(function* () {
+			const context = yield* Layer.build(Graft.layer)
+			return yield* run(...args).pipe(Effect.provideContext(context))
+		}),
 	)
-
-/** Select output policy before discovery or CLI action flags can produce text. */
-export const output = <A, E, R>(
-	effect: Effect.Effect<A, E, R>,
-	args: ReadonlyArray<string>,
-) =>
-	Effect.gen(function* () {
-		const tokens = Array.takeWhile(args, (arg) => arg !== "--")
-		const stdio = tokens.includes("--stdio")
-		const program = Effect.gen(function* () {
-			if (
-				stdio &&
-				Array.some(
-					tokens,
-					(arg) =>
-						arg === "--wizard" ||
-						String.startsWith("--wizard=")(arg) ||
-						arg === "--completions" ||
-						String.startsWith("--completions=")(arg),
-				)
-			)
-				return yield* usage(
-					"--stdio cannot be combined with wizard or completions",
-				)
-			if (
-				Array.some(
-					tokens,
-					(arg) =>
-						String.startsWith("--stdio=")(arg) ||
-						arg === "--no-stdio" ||
-						String.startsWith("--no-plugins=")(arg),
-				)
-			)
-				return yield* usage("Use --stdio and --no-plugins as standalone flags")
-			return yield* effect
-		}).pipe(Effect.provideService(ProtocolOutput, stdio))
-		return yield* stdio
-			? program.pipe(
-					reserve,
-					Effect.provideService(
-						CliOutput.Formatter,
-						CliOutput.defaultFormatter({ colors: false }),
-					),
-				)
-			: program
-	})

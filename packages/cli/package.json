@@ -37,6 +37,10 @@
 			"source": "./src/Commands.ts",
 			"default": "./dist/Commands.js"
 		},
+		"./Environment": {
+			"source": "./src/Environment.ts",
+			"default": "./dist/Environment.js"
+		},
 		"./internal/configSchema": {
 			"source": "./src/internal/configSchema.ts",
 			"default": "./dist/internal/configSchema.js"
@@ -76,6 +80,7 @@
 			"./Application": "./dist/Application.js",
 			"./bin": "./dist/bin.js",
 			"./Commands": "./dist/Commands.js",
+			"./Environment": "./dist/Environment.js",
 			"./internal/configSchema": "./dist/internal/configSchema.js",
 			"./package.json": "./package.json"
 		}

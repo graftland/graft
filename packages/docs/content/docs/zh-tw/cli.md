@@ -36,17 +36,21 @@ graft add --plugin example --global
 ## graft start
 
 ```sh
-graft start [config] [--env-file <path>] [--env-dir <path>] [--stdio]
+graft start [config] [--env-file <path>] [--env-dir <path>]
 ```
 
 執行[設定檔](../config-file/)所描述的應用程式。`config` 預設為
 `graft.yml`。行程會一直執行，直到收到 <kbd>Ctrl</kbd>+<kbd>C</kbd> 或
-`SIGTERM`，然後依序卸載所有外掛。
+`SIGTERM`，然後停止所有單元，並等待其結束證據。
+
+`graft start`
+行程只執行核心，不匯入任何外掛、命令外掛或契約模組。Loader 單元讀取檔案的一個版本，在一次性單元中檢查每個項目，再把所有項目作為一個[變更](../transitions/)提交。每個項目在 Worker 單元中執行。
 
 ### 協定輸出
 
-對 [MCP 伺服器](../mcp-server/overview/)使用
-`graft start --stdio`。標準輸出承載協定位元組；日誌、說明和錯誤寫到標準錯誤。
+`graft start --stdio`
+會被拒絕：外掛在單元中執行，沒有外掛擁有行程的標準輸入輸出。若要透過 stdio 執行
+[MCP 伺服器](../mcp-server/overview/)，請在直接[嵌入](../embedding/)的應用程式中執行。
 
 ### 選項
 
@@ -93,21 +97,13 @@ CLI 回報 cause，並以非零狀態碼結束。
 
 ### 日誌與 intercept
 
-日誌以易讀的格式輸出。外掛寫出的每一行都帶有外掛的名稱和 fork
-id。如需 JSON 輸出或匯出 span，請嵌入 Graft，見[在宿主中選擇輸出](../best-practices/observability/#在宿主中選擇輸出)。
+日誌以易讀的格式輸出。外掛寫出的每一行都帶有外掛名稱與 fork
+id。需要 JSON 輸出或匯出 span 時請嵌入 Graft，見[在宿主中選擇輸出](../best-practices/observability/#在宿主中選擇輸出)。
 
-CLI 為項目的 `intercept` 設定登記了兩個 Reference，對該項目及其子外掛生效：
+使用 `isolate`、`inject` 或 `intercept` 的項目會在任何東西執行之前以
+`DeploymentUnsupported` 拒絕。命令項目（`cli: true`）不參與部署。
 
-| Reference                                 | 行為                   |
-| ----------------------------------------- | ---------------------- |
-| `effect/References/CurrentLogAnnotations` | 與外層註解合併的物件。 |
-| `effect/References/MinimumLogLevel`       | 取代用的日誌層級。     |
-
-可接受的值和範例列在[設定檔頁面](../config-file/#設定檔中的-intercept)。無效的值會讓該項目以
-`InvalidIntercept` 失敗。CLI 不會登記其他 Reference。
-
-共用 HTTP 監聽器使用一般的 `graft start` 載入 [HTTP 伺服器](../http/)，不需要
-`--stdio`。
+若要共用 HTTP 監聽器，以一般的 `graft start` 載入 [HTTP 伺服器](../http/)。
 
 ## graft create
 

@@ -16,8 +16,11 @@ description: 用核心、传输和贡献插件组成 MCP 服务器。
 - name: ./plugins/notes.ts
 ```
 
-运行 `graft start --stdio`。使用 `Effect.log*`
-记录日志；stdout 属于协议。[示例](https://github.com/graftland/graft/tree/main/samples/mcp-tools)包含可运行的客户端配置。
+在直接[嵌入](../../embedding/)的应用中运行这些条目；stdout 属于协议，因此使用
+`Effect.log*` 记录日志。`graft start --stdio`
+会被拒绝，因为插件运行在单元里，没有插件拥有进程的标准输入输出；使用
+`graft start` 时请改用
+[HTTP 传输](#提供-http)。[示例](https://github.com/graftland/graft/tree/main/samples/mcp-tools)包含可运行的客户端配置。
 
 | 条目                                 | 短名称             | 职责                        |
 | ------------------------------------ | ------------------ | --------------------------- |

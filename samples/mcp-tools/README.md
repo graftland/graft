@@ -12,6 +12,10 @@ devenv shell -- pnpm build
 devenv shell -- bash -c "cd samples/mcp-tools && pnpm start"
 ```
 
+`graft start --stdio` is currently rejected: plugins run in units and none owns
+the process stdio. The client configuration below applies once a kernel stdio
+bridge exists; run the sample's tests, or the HTTP configuration, meanwhile.
+
 ```toml
 [mcp_servers.graft-tools]
 command = "sh"

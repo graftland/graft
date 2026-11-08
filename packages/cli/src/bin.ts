@@ -2,16 +2,24 @@
 /**
  * The `graft` executable. Running this module starts the program.
  */
-import { Array, Effect, Layer, Logger, Option, Stdio } from "effect"
+import {
+	Array,
+	Console,
+	Effect,
+	Layer,
+	Logger,
+	Option,
+	Stdio,
+	String,
+} from "effect"
 import { Argument, CliError, Command, Flag } from "effect/cli"
 import { NodeRuntime } from "@effect/platform-node"
 
 import { command as create } from "@graftland/create/Command"
-import { Graft } from "@graftland/graft"
 
 import { version } from "../package.json" with { type: "json" }
 import { platform } from "./Application"
-import * as Host from "./internal/commandHost"
+import { output } from "./internal/processOutput"
 import { schemaFileName } from "./internal/schemaFileName"
 
 const start = Command.make(
@@ -144,23 +152,61 @@ const graft = Command.make("graft").pipe(
 	}),
 )
 
+/** `start` runs before command-plugin discovery, so its host imports no plugin. */
+const starts = (args: ReadonlyArray<string>) =>
+	Option.contains(
+		Array.findFirst(
+			Array.takeWhile(args, (arg) => arg !== "--"),
+			(arg) => !String.startsWith("-")(arg),
+		),
+		"start",
+	)
+const stdioUnsupported =
+	"graft start --stdio is unsupported: plugins run in units and none owns the process stdio"
+/** Help, version and completions only print; they never start the application. */
+const informational = (args: ReadonlyArray<string>) =>
+	Array.some(
+		args,
+		(arg) =>
+			arg === "--help" ||
+			arg === "-h" ||
+			arg === "--version" ||
+			arg === "--wizard" ||
+			String.startsWith("--completions")(arg),
+	)
 const program = Effect.gen(function* () {
 	const stdio = yield* Stdio.Stdio
 	const args = yield* stdio.args
-	return yield* Host.output(
-		Effect.scoped(
-			Effect.gen(function* () {
-				const context = yield* Layer.build(Graft.layer)
-				return yield* Host.run(
-					[start, create, add, remove, schema, check],
-					graft,
-					version,
-					args,
-				).pipe(Effect.provideContext(context))
-			}),
-		),
-		args,
-	)
+	return starts(args)
+		? yield* output(
+				Array.contains(args, "--stdio") && !informational(args)
+					? Console.error(stdioUnsupported).pipe(
+							Effect.andThen(
+								CliError.UserError.make({
+									cause: "Protocol stdio is unsupported for kernel deployments",
+									userMessage: stdioUnsupported,
+								}),
+							),
+						)
+					: Command.runWith(graft.pipe(Command.withSubcommands([start])), {
+							version,
+						})(args),
+				args,
+			)
+		: yield* output(
+				Effect.promise(() => import("./internal/commandHost")).pipe(
+					Effect.uninterruptible,
+					Effect.flatMap((Host) =>
+						Host.main(
+							[start, create, add, remove, schema, check],
+							graft,
+							version,
+							args,
+						),
+					),
+				),
+				args,
+			)
 })
 NodeRuntime.runMain(
 	Effect.scoped(

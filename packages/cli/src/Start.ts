@@ -1,34 +1,26 @@
 /**
- * Runs a Graft application from its config file.
+ * Runs a Graft application from its config file. The host process runs only
+ * the kernel; the Loader and every entry run in units.
  */
+import { fileURLToPath } from "node:url"
+
 import {
 	Cause,
-	Deferred,
 	Effect,
-	Exit,
+	FileSystem,
 	Layer,
 	Logger,
 	Path,
-	Scope,
-	Semaphore,
 	type PlatformError,
-	type Schema,
 } from "effect"
 import { NodeServices } from "@effect/platform-node"
 
-import { Graft, type Transition } from "@graftland/graft"
-import {
-	Entry,
-	Include,
-	Loader,
-	ModuleResolver,
-	type Tree,
-} from "@graftland/loader"
+import { Kernel } from "@graftland/graft"
+import * as Artifact from "@graftland/plugin-remote/Artifact"
+import * as Control from "@graftland/plugin-remote/Control"
+import * as Units from "@graftland/plugin-remote/Units"
 
-import { Application, ApplicationError, platform } from "./Application"
-import { layer as env } from "./internal/env"
-import * as Inspection from "./internal/inspection"
-import { layer as intercepts } from "./internal/intercepts"
+import { ApplicationError } from "./Application"
 
 export interface Options {
 	/** Path of the config file. */
@@ -48,100 +40,124 @@ export interface Options {
 	readonly envDir?: string | undefined
 }
 
+/** The Loader may wait for every entry to be inspected and deployed. */
+const loaderBudget = {
+	total: 600_000,
+	startup: 240_000,
+	probe: 5_000,
+	drain: 5_000,
+	stop: 10_000,
+	terminate: 10_000,
+}
+
+/** The nearest directory with a package.json at or above a module file. */
+const packageOf = (
+	file: string,
+): Effect.Effect<
+	string,
+	PlatformError.PlatformError,
+	FileSystem.FileSystem | Path.Path
+> =>
+	Effect.gen(function* () {
+		const fs = yield* FileSystem.FileSystem
+		const path = yield* Path.Path
+		const directory = path.dirname(file)
+		if (yield* fs.exists(path.join(directory, "package.json"))) return directory
+		if (path.dirname(directory) === directory)
+			return yield* Effect.die("No package.json above the module")
+		return yield* packageOf(directory)
+	})
+/** Captures a built module's package beside its own dependencies, without importing it. */
+const packaged = Effect.fnUntraced(function* (module: URL) {
+	const path = yield* Path.Path
+	const file = fileURLToPath(module)
+	const directory = yield* packageOf(file)
+	return yield* Artifact.capture({
+		directory,
+		entry: path.relative(directory, file),
+		store: path.join(directory, ".cache", "units"),
+		exclude: ["node_modules", ".cache", ".graft", "src", "test"],
+	})
+})
+const resolved = (specifier: string) =>
+	Effect.try({
+		try: () => new URL(import.meta.resolve(specifier)),
+		catch: (cause) => ApplicationError.make({ cause: Cause.fail(cause) }),
+	})
+
+const application = Effect.fnUntraced(function* (options: Options) {
+	const path = yield* Path.Path
+	const file = path.resolve(options.config)
+	const kernel = yield* Kernel.Kernel
+	const address = yield* Control.serve()
+	const deployment = yield* resolved("@graftland/loader/Deployment")
+	const loader = yield* packaged(deployment)
+	const environment = yield* packaged(
+		new URL("./Environment.js", import.meta.url),
+	)
+	const target = Units.target({
+		artifact: loader,
+		placement: "Worker",
+		input: { config: file, control: address },
+		environment: [
+			{
+				artifact: environment,
+				export: "default",
+				options: {
+					...(options.envFile === undefined
+						? {}
+						: { file: path.resolve(options.envFile) }),
+					...(options.envDir === undefined
+						? {}
+						: { dir: path.resolve(options.envDir) }),
+				},
+			},
+		],
+	})
+	const handle = yield* kernel.submit({
+		operations: [{ _tag: "Deploy", instance: "loader", target }],
+		budget: loaderBudget,
+	})
+	const conclusion = yield* handle.await
+	if (conclusion.outcome !== "Accepted")
+		return yield* ApplicationError.make({ cause: conclusion.cause })
+	yield* Effect.logInfo(`Running ${path.relative(process.cwd(), file) || file}`)
+	return yield* Effect.never
+})
+
 /**
- * Loads one configuration revision using inspected module descriptors.
+ * Loads one configuration revision through the Loader unit. Watch and live
+ * Loader mutation are rejected for this deployment.
  */
 export const run = (
 	options: Options,
-): Effect.Effect<
-	void,
-	| ApplicationError
-	| Graft.ServiceConflict
-	| Transition.ManagedFork
-	| PlatformError.BadArgument
-	| PlatformError.PlatformError
-	| Schema.SchemaError
-	| Loader.StoreError
-	| Tree.InvalidOperation
-> =>
-	Effect.gen(function* () {
-		if (options.watch)
-			return yield* ApplicationError.make({
+): Effect.Effect<void, ApplicationError | PlatformError.PlatformError> =>
+	options.watch
+		? ApplicationError.make({
 				cause: Cause.fail(
 					"Watch and live Loader mutation are unsupported for this deployment",
 				),
 			})
-		const scope = yield* Effect.scope
-		const done = yield* Deferred.make<void, ApplicationError>()
-		const protocol = yield* Semaphore.make(1)
-		yield* Graft.provide(Application, {
-			claimProtocol: Effect.acquireRelease(
-				protocol.takeIfAvailable(1).pipe(
-					Effect.flatMap((acquired) =>
-						acquired
-							? Effect.void
-							: Effect.fail(
-									ApplicationError.make({
-										cause: Cause.fail(
-											"Only one runner may own the process stdio channel",
-										),
-									}),
-								),
+		: application(options).pipe(
+				Effect.scoped,
+				Effect.catchTags({
+					ArtifactError: (error) =>
+						ApplicationError.make({ cause: Cause.fail(error) }),
+					ChangeRejected: (error) =>
+						ApplicationError.make({ cause: Cause.fail(error) }),
+					ControlError: (error) =>
+						ApplicationError.make({ cause: Cause.fail(error) }),
+				}),
+				// @effect-diagnostics-next-line strictEffectProvide:off -- this runs the whole application, so it is an entry point
+				Effect.provide(
+					Kernel.layer({
+						authority: "graft-start",
+						maxUnits: 64,
+						instances: [],
+					}).pipe(
+						Layer.provide(Units.layer),
+						Layer.provideMerge(NodeServices.layer),
+						Layer.provideMerge(Logger.layer([Logger.consolePretty()])),
 					),
 				),
-				() => protocol.release(1),
-			),
-			finish: (exit) =>
-				Deferred.done(
-					done,
-					Exit.isFailure(exit)
-						? Exit.fail(ApplicationError.make({ cause: exit.cause }))
-						: Exit.void,
-				).pipe(Effect.asVoid),
-			onExit: (release) => Scope.addFinalizer(scope, release),
-		})
-		const path = yield* Path.Path
-		const file = path.resolve(options.config)
-		const directory = path.dirname(file)
-		const control = yield* Inspection.Address
-		const resolver = yield* ModuleResolver.make({
-			base: directory,
-			control,
-		}).pipe(
-			Effect.mapError((error) =>
-				ApplicationError.make({ cause: Cause.fail(error) }),
-			),
-		)
-		yield* Graft.provide(ModuleResolver.ModuleResolver, resolver)
-		const included = yield* Graft.plugin(Include.Include, {
-			path: file,
-			watch: false,
-		})
-		yield* included.await
-
-		yield* Effect.logInfo(
-			`Running ${path.relative(process.cwd(), file) || file}`,
-		)
-		return yield* Deferred.await(done)
-	}).pipe(
-		Effect.scoped,
-		Effect.provideService(Entry.Select, (entry) => entry["cli"] !== true),
-		// @effect-diagnostics-next-line strictEffectProvide:off -- this runs the whole application, so it is an entry point
-		Effect.provide(
-			Layer.provideMerge(
-				Graft.layer,
-				Layer.mergeAll(
-					platform,
-					Inspection.layer,
-					intercepts,
-					env({ file: options.envFile, dir: options.envDir }).pipe(
-						Layer.provide(NodeServices.layer),
-					),
-					Logger.layer([Logger.consolePretty()]),
-				),
-			),
-		),
-		Effect.catchTag("ControlError", (error) =>
-			ApplicationError.make({ cause: Cause.fail(error) }),
-		),
-	)
+			)

@@ -1,10 +1,10 @@
 # Phase 3 evidence
 
-Status: steps 1–2 are complete. Steps 3–6 are not complete. No architecture
-contradiction or Effect public-API gap has been established. Groundwork
-`c830f91` is retained. This inventory distinguishes native preparation from
-cooperative embedded composition and does not claim group, recorder or CLI
-kernel-only acceptance yet.
+Status: steps 1–5 are complete; step 6 is this inventory, the deletion manifest
+and the exports check. Steps 1–2 and the step 3 draft were written by GPT-6.1
+Sol; Claude finished step 3 and wrote steps 4–6. No architecture contradiction
+or Effect public-API gap was found. Deliberate narrowings are listed under
+"Steps 3–5 interpretations".
 
 ## Specification evidence inventory
 
@@ -352,3 +352,53 @@ intermediate attempts and are retained in this inventory for that reason.
 | `typecheck7.log`                 | TypeScript/build failure                   |
 | `typecheck8.log`                 | TypeScript/build failure                   |
 | `typecheck9.log`                 | TypeScript/build failure                   |
+
+## Step 3 acceptance (`f0894a2`)
+
+| Named test / suite                                                                                                                               | Assertion                                                                                                                                                                       |
+| ------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `group-lifecycle.test.ts` (11 cases)                                                                                                             | Shared old groups stop once and wait for all exit evidence; collateral members settle; stale acknowledgements cannot activate.                                                  |
+| `closes over actual recovered co-residents as well as desired groups when a later Change splits their topology again (I2, I4, I5, I7, F13, F14)` | After a recovery the plan selects every member that actually shares a unit, not only the desired group.                                                                         |
+| `group-native.test.ts` (5 cases, Worker and Process)                                                                                             | One native group serves independent grants; only the failed provider and its local consumer restart; blocked teardown terminates the whole unit with exact collateral evidence. |
+| `group-calls.test.ts`, `multi-root-preparation.test.ts`                                                                                          | Call credits are qualified by member generations; a later root keeps inspection ownership after an earlier root's exit.                                                         |
+| `settles failed startup as Aborted and failed trial as fresh Recovered with public native evidence (I1, I2, I7, I10)`                            | A member failure inside a candidate unit fails only that Change and leaves the healthy previous generation serving.                                                             |
+| `rebuilds unit environments and resolves raw references again during real Restart recovery (F2)`                                                 | Environment modules refine the references plugin configuration reads inside each activation.                                                                                    |
+
+## Step 4 acceptance (`614cd79`)
+
+| Named test / suite                                                                                                                                      | Fault rows               | Assertion                                                                                                                                                                                                                                                                   |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `withholds every lifecycle action until the recorder acknowledges the intent (I8, F16)`                                                                 | F16 (intent)             | One Record command to the recorder unit; no runtime command until the acknowledgement.                                                                                                                                                                                      |
+| `activates no route before an acknowledged commit decision and reports Accepted only after the concluding record (I8, F16)`                             | F16 (commit, conclusion) | No Activate before the commit acknowledgement; serving facts visible while the conclusion is blocked; cancellation then changes nothing.                                                                                                                                    |
+| `keeps a commit-blocked Change unactivated and its duty explicit after the recorder dies, rejecting a new incarnation's acknowledgement (I8, F16, F18)` | F16, F18                 | Dead or different incarnation acknowledgements are rejected; expiry settles without Accepted and without forward activation; the duty stays outstanding.                                                                                                                    |
+| `replays a stored record to the same live owner after a lost acknowledgement and discharges it exactly once (F17)`                                      | F17                      | Re-registration replays the duty; wrong content is rejected; a repeat acknowledgement emits nothing.                                                                                                                                                                        |
+| `rejects direct and indirect self-replacement before admission, without a first-party exemption (I9, F19)`                                              | F19                      | Indirect selection through co-location and direct replacement with outstanding duties are rejected with no Change id; an ordinary replacement without duties is admitted.                                                                                                   |
+| `reserves bounded record capacity and rejects excess work rather than evicting a duty (F16)`                                                            | F16 (bounds)             | `RecordingCapacity`; the existing duty is retained.                                                                                                                                                                                                                         |
+| `never reports success when shutdown arrives while the concluding record is missing (F22)`                                                              | F22                      | No Accepted conclusion; the Conclusion duty stays outstanding.                                                                                                                                                                                                              |
+| `recorder-unit.test.ts` (3 native cases)                                                                                                                | I8, I9, F16, F19         | The built `@graftland/plugin-release/Recorder` artifact records every stage of a real Restart; combined replacement is `SelfReplacement`; a third-party recorder on the same API that withholds acknowledgements leaves the Change unaccepted with its intent duty visible. |
+
+F15 (submitter disconnect) keeps the Phase 2 evidence:
+`reconnects and awaits an admitted Change after disconnect and interrupted await without cancelling it (I1, I10)`.
+
+## Step 5 acceptance
+
+| Named test                                                                                                   | Assertion                                                                                                                                          |
+| ------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `serves an entry in a unit while neither the host nor the Loader imports plugin or command modules (I1, P1)` | A plugin that throws when evaluated in the host process serves in its unit; a configured command module that throws on import is never imported.   |
+| `rejects an entry field the kernel deployment does not carry instead of dropping it (O6)`                    | `isolate` fails with `DeploymentUnsupported`; nothing serves.                                                                                      |
+| `rejects protocol stdio because no plugin owns the process stdio (O6)`                                       | `start --stdio` exits nonzero with an explicit diagnostic.                                                                                         |
+| `rejects watch before loading an invalid application revision (O6)`                                          | Unchanged acceptance, now through the kernel host.                                                                                                 |
+| `fails CLI startup on invalid initial YAML without waiting for edits (O6)`                                   | The Loader unit's YAML cause reaches the CLI output.                                                                                               |
+| `reads !env once from an env file after process environment values (F2, O6)`                                 | `!env` becomes a kernel reference; the Loader unit reads values through the CLI environment module and sets the instance policy before inspection. |
+
+## Steps 3–5 interpretations
+
+| Reading                  | Sources                                           | Decision                                                                                                                                                                                             |
+| ------------------------ | ------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Recording scope          | `phase-3.md:224–250` (O4)                         | Deployment data names `recorder`, `instance` and `scope`. A Change needs recording when its closure contains a scoped instance. Recovery commits are safety actions and are not gated.               |
+| Registration timing      | `phase-3.md` "Register responsibility"            | A unit hosting the policy instance may register while it starts; the grant counts once that unit is current. Without this the release unit, which registers from `apply`, could never hold the role. |
+| Conclusion gate          | O4; `architecture.md:477`                         | While only the concluding record is missing, execution has finished: failures, cancellation and timers cannot undo it. The result is nonterminal until acknowledgement, as O4 allows.                |
+| Unit infrastructure      | `phase-3.md` "Environment" row                    | `Recording.Recorder` is provided by every execution unit and is never a deployment dependency.                                                                                                       |
+| Loader unit placement    | O1/O6; `architecture.md:87–101`                   | The host captures the installed `@graftland/loader` package beside its own dependencies and runs `Deployment.js` in a Worker unit. The CLI environment module is captured the same way.              |
+| Unsupported entry fields | O6                                                | `isolate`, `inject` and `intercept` are rejected with `DeploymentUnsupported` instead of being dropped. Realms and unit-local intercept modules are not carried by the Loader unit yet.              |
+| Protocol stdio           | `architecture.md:87` (kernel runs no plugin code) | `start --stdio` is rejected. A stdio MCP server runs only in an embedded application until a kernel-owned stdio bridge exists. **Owner decision pending.**                                           |

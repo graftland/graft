@@ -124,8 +124,9 @@ identical entries are moved around in a way that is unclear.
 ### Intercepts in a config file
 
 Config-file intercepts accept only
-[explicitly registered references](../intercepts/#config-file-intercepts).
-`graft start` registers two:
+[explicitly registered references](../intercepts/#config-file-intercepts). The
+CLI registers two for `graft schema` and embedded Loaders; `graft start` rejects
+entries with `intercept` (see [graft start](../cli/#logs-and-intercepts)):
 
 | Reference key                             | Configured value                                                     | Behavior                                                         |
 | ----------------------------------------- | -------------------------------------------------------------------- | ---------------------------------------------------------------- |

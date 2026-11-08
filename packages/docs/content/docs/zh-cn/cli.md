@@ -36,17 +36,21 @@ graft add --plugin example --global
 ## graft start
 
 ```sh
-graft start [config] [--env-file <path>] [--env-dir <path>] [--stdio]
+graft start [config] [--env-file <path>] [--env-dir <path>]
 ```
 
 运行[配置文件](../config-file/)中描述的应用。`config` 默认为
 `graft.yml`。进程会持续运行，直到收到 <kbd>Ctrl</kbd>+<kbd>C</kbd> 或
-`SIGTERM`，随后按顺序卸载所有插件。
+`SIGTERM`，随后停止所有单元，并等待它们的退出证据。
+
+`graft start`
+进程只运行内核，不导入任何插件、命令插件或契约模块。Loader 单元读取文件的一个版本，在一次性单元里检查每个配置项，再把所有配置项作为一个[变更](../transitions/)提交。每个配置项运行在 Worker 单元里。
 
 ### 协议输出
 
-对 [MCP 服务器](../mcp-server/overview/)使用
-`graft start --stdio`。标准输出承载协议字节；日志、帮助和错误写到标准错误。
+`graft start --stdio`
+会被拒绝：插件运行在单元里，没有插件拥有进程的标准输入输出。要通过 stdio 运行
+[MCP 服务器](../mcp-server/overview/)，请在直接[嵌入](../embedding/)的应用中运行。
 
 ### 选项
 
@@ -93,21 +97,13 @@ CLI 报告 cause，并以非零状态退出。
 
 ### 日志与 intercept
 
-日志以便于阅读的格式输出。插件写出的每行日志都带有插件名称和 fork
-id。如需 JSON 输出或导出 span，请嵌入 Graft，见[在宿主中选择输出](../best-practices/observability/#在宿主中选择输出)。
+日志以便于阅读的格式输出。插件写出的每一行都带有插件名和 fork
+id。需要 JSON 输出或导出 span 时请嵌入 Graft，见[在宿主中选择输出](../best-practices/observability/#在宿主中选择输出)。
 
-CLI 为配置项的 `intercept` 设置登记了两个 Reference，对该项及其子插件生效：
+使用 `isolate`、`inject` 或 `intercept` 的配置项会在任何东西运行之前以
+`DeploymentUnsupported` 拒绝。命令配置项（`cli: true`）不参与部署。
 
-| Reference                                 | 行为                   |
-| ----------------------------------------- | ---------------------- |
-| `effect/References/CurrentLogAnnotations` | 与外层注解合并的对象。 |
-| `effect/References/MinimumLogLevel`       | 替换日志级别。         |
-
-[配置文件页面](../config-file/#配置文件中的-intercept)列出了合法值和示例。非法值让该项以
-`InvalidIntercept` 失败。CLI 不登记其他 Reference。
-
-共享 HTTP 监听器使用普通的 `graft start` 加载 [HTTP 服务器](../http/)，不需要
-`--stdio`。
+要共享 HTTP 监听器，用普通的 `graft start` 加载 [HTTP 服务器](../http/)。
 
 ## graft create
 

@@ -111,8 +111,9 @@ description: 用 graft.yml 描述应用，并在运行期间修改配置。
 
 ### 配置文件中的 intercept
 
-配置文件中的 intercept 只接受[显式登记的 Reference](../intercepts/#配置文件中的-intercept)。`graft start`
-默认登记了两项：
+配置文件中的 intercept 只接受[显式登记的 Reference](../intercepts/#配置文件中的-intercept)。CLI 为
+`graft schema` 和嵌入式 Loader 登记了两项；`graft start` 会拒绝带 `intercept`
+的配置项（见 [graft start](../cli/#日志与-intercept)）：
 
 | Reference 键                              | 配置值                                                              | 行为                                       |
 | ----------------------------------------- | ------------------------------------------------------------------- | ------------------------------------------ |

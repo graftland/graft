@@ -5,19 +5,7 @@ import { build } from "tsdown"
 import packageConfig from "../../../tsdown.config.ts"
 
 export default function setup() {
-	return build({
-		config: false,
-		entry: [new URL("./runtime.ts", import.meta.url).pathname],
-		outDir: new URL("../.cache/integration", import.meta.url).pathname,
-		format: "esm",
-		platform: "node",
-		dts: false,
-		deps: {
-			alwaysBundle: ["@graftland/graft", "@graftland/hmr", "@graftland/loader"],
-			neverBundle: [/^effect(?:\/|$)/],
-		},
-		inputOptions: { resolve: { conditionNames: ["source", "import", "node"] } },
-	})
+	return Promise.resolve()
 		.then(() =>
 			build({
 				config: false,
@@ -45,7 +33,7 @@ export default function setup() {
 						...packageConfig,
 						config: false,
 						entry: (name === "cli"
-							? ["../src/bin.ts"]
+							? ["../src/bin.ts", "../src/Environment.ts"]
 							: name === "create"
 								? ["../../create/src/index.ts", "../../create/src/Command.ts"]
 								: [`../../${name}/src/index.ts`]

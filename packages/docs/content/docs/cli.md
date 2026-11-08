@@ -37,18 +37,24 @@ repair a broken declaration. Business entries do not run during discovery.
 ## graft start
 
 ```sh
-graft start [config] [--env-file <path>] [--env-dir <path>] [--stdio]
+graft start [config] [--env-file <path>] [--env-dir <path>]
 ```
 
 Runs the application that a [config file](../config-file/) describes. `config`
 defaults to `graft.yml`. The process runs until it gets
-<kbd>Ctrl</kbd>+<kbd>C</kbd> or `SIGTERM`. Then it unloads every plugin in
-order.
+<kbd>Ctrl</kbd>+<kbd>C</kbd> or `SIGTERM`. Then it stops every unit and waits
+for their exit evidence.
+
+The `graft start` process runs only the kernel and imports no plugin, command
+plugin or contract module. A Loader unit reads one revision of the file,
+inspects each entry in a disposable unit and submits all entries as one
+[Change](../transitions/). Each entry runs in a Worker unit.
 
 ### Protocol output
 
-Use `graft start --stdio` for an [MCP server](../mcp-server/overview/). Stdout
-carries protocol bytes; logs, help and errors go to stderr.
+`graft start --stdio` is rejected: plugins run in units, so none of them owns
+the process stdio. Run an [MCP server](../mcp-server/overview/) over stdio from
+a directly [embedded](../embedding/) application.
 
 ### Options
 
@@ -100,20 +106,12 @@ Logs are printed in a readable format. Each line a plugin writes has the
 plugin's name and fork id. For JSON output or exported spans, embed Graft; see
 [Choose the output in your host](../best-practices/observability/#choose-the-output-in-your-host).
 
-The CLI registers two references for the `intercept` setting of entries,
-applying to the entry and its child plugins:
-
-| Reference                                 | Behavior                                 |
-| ----------------------------------------- | ---------------------------------------- |
-| `effect/References/CurrentLogAnnotations` | An object merged with outer annotations. |
-| `effect/References/MinimumLogLevel`       | A replacement log level.                 |
-
-The [config file page](../config-file/#intercepts-in-a-config-file) lists
-accepted values and an example. Invalid values fail the entry with
-`InvalidIntercept`. The CLI does not register other references.
+Entries that use `isolate`, `inject` or `intercept` are rejected with
+`DeploymentUnsupported` before anything runs. Command entries (`cli: true`) are
+left out.
 
 For a shared HTTP listener, load [HTTP server](../http/) with ordinary
-`graft start`; it does not need `--stdio`.
+`graft start`.
 
 ## graft create
 

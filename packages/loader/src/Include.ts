@@ -625,6 +625,22 @@ const prepare = Effect.fnUntraced(function* (
 	return { text: synced, entries } satisfies Synced
 })
 
+/**
+ * Reads one revision of a config file without loading any entry. Missing ids are
+ * assigned and written back first, so the returned entries carry stable ids.
+ */
+export const revision = Effect.fnUntraced(function* (file: string) {
+	const fs = yield* FileSystem.FileSystem
+	const target = yield* fileTarget(file)
+	const text = yield* fs.readFileString(target)
+	const prepared = yield* prepare(text, [], HashMap.empty())
+	if (prepared.text !== text)
+		yield* atomicWrite(target, prepared.text, Option.some(text)).pipe(
+			Effect.provideService(FileSystem.FileSystem, fs),
+		)
+	return prepared.entries
+})
+
 const Config = Schema.Struct({
 	path: Schema.String,
 	/** Picks up changes made to the file while running. */

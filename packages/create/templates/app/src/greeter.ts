@@ -12,6 +12,7 @@ export class Greeter extends Context.Service<
 export default Plugin.make({
 	name: "{{package}}/greeter",
 	config: Schema.Struct({ greeting: Schema.String }),
+	provides: [Greeter],
 	apply: ({ greeting }) =>
 		Effect.gen(function* () {
 			yield* Effect.addFinalizer(() => Effect.logInfo("Greeter stopped"))

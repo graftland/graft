@@ -20,5 +20,3 @@ export const registrations = [
 		(_, level) => level,
 	),
 ]
-
-export const layer = Intercept.layer(registrations)

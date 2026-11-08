@@ -33,7 +33,8 @@ export default Tools.plugin({
 - name: ./src/echo.ts
 ```
 
-运行 `graft start --stdio --watch`。Effect 处理 MCP
+请在直接嵌入的应用中运行；`graft start --stdio`
+会被拒绝，因为插件运行在单元里，没有插件拥有进程的标准输入输出。Effect 处理 MCP
 2026-07-28 和旧版 2025-11-25 客户端。
 
 ## HTTP

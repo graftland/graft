@@ -111,8 +111,9 @@ description: 用 graft.yml 描述應用程式，並在執行期間修改設定�
 
 ### 設定檔中的 intercept
 
-設定檔中的 intercept 只接受[明確登記的 Reference](../intercepts/#設定檔-intercept)。`graft start`
-登記了兩個：
+設定檔中的 intercept 只接受[明確登記的 Reference](../intercepts/#設定檔-intercept)。CLI 為
+`graft schema` 與嵌入式 Loader 登記了兩個；`graft start` 會拒絕帶有 `intercept`
+的項目（見 [graft start](../cli/#日誌與-intercept)）：
 
 | Reference 鍵                              | 設定的值                                                            | 行為                                   |
 | ----------------------------------------- | ------------------------------------------------------------------- | -------------------------------------- |

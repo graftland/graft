@@ -1,35 +1,27 @@
 /**
  * Where `!env` values come from: the process environment, then an optional
- * `.env` file, then an optional directory of secret files. Watch mode reads
- * the file and the directory again when they change.
+ * `.env` file, then an optional directory of secret files.
  */
 import {
 	Array,
-	Cause,
 	ConfigProvider,
 	Context,
-	Deferred,
 	Effect,
-	Exit,
 	FileSystem,
 	Layer,
 	Option,
 	Path,
-	Queue,
 	Record,
 	Ref,
-	Stream,
 	String,
 	type PlatformError,
 } from "effect"
-
-import { observeShutdown } from "./observeShutdown"
 
 // An empty variable is still set: it overrides the file, and the plugin's
 // schema decides whether it is valid.
 const options = { preserveEmptyStrings: true } as const
 
-type Reload = Effect.Effect<boolean, PlatformError.PlatformError>
+export type Reload = Effect.Effect<boolean, PlatformError.PlatformError>
 
 export class EnvFile extends Context.Service<
 	EnvFile,
@@ -182,117 +174,3 @@ export const layer = (sources: {
 			)
 		}),
 	)
-
-/**
- * The handlers below let interruption through, and with it any failure raised
- * while stopping. Log those; failures without interruption are handled there.
- */
-const logStopped =
-	(file: string) =>
-	<A, E>(exit: Exit.Exit<A, E>) =>
-		Exit.isFailure(exit) &&
-		Cause.hasInterrupts(exit.cause) &&
-		(Cause.hasFails(exit.cause) || Cause.hasDies(exit.cause))
-			? Effect.logError(`Watching ${file} stopped with a failure`, exit.cause)
-			: Effect.void
-
-/**
- * Reloads the file when it changes and retries the loader's entries, which
- * reads `!env` again. A file that cannot be read keeps its previous values.
- */
-export const watchEnvFile = Effect.fnUntraced(function* <E, R>(
-	file: string,
-	reload: Reload,
-	retry: Effect.Effect<void, E, R>,
-) {
-	const path = yield* Path.Path
-	const name = path.basename(file)
-	return yield* watchSource(
-		file,
-		path.dirname(file),
-		(changed) => path.basename(changed) === name,
-		reload,
-		retry,
-	)
-})
-
-/**
- * Reloads the directory when anything in it changes and retries the loader's
- * entries. A directory that cannot be read keeps its previous values.
- */
-export const watchEnvDir = <E, R>(
-	directory: string,
-	reload: Reload,
-	retry: Effect.Effect<void, E, R>,
-) => watchSource(directory, directory, () => true, reload, retry)
-
-const watchSource = Effect.fnUntraced(function* <E, R>(
-	file: string,
-	directory: string,
-	matches: (path: string) => boolean,
-	reload: Reload,
-	retry: Effect.Effect<void, E, R>,
-) {
-	const fs = yield* FileSystem.FileSystem
-	const ready = yield* Deferred.make<void>()
-	// As in HMR, own the source scope inside the producer. Observe its
-	// complete Exit after cleanup, before merge can discard it.
-	const events = Stream.callback<
-		FileSystem.WatchEvent,
-		PlatformError.PlatformError
-	>(
-		(queue) =>
-			fs
-				.watch(directory, {
-					onReady: () => Deferred.doneUnsafe(ready, Effect.void),
-				})
-				.pipe(
-					Stream.filter((event) => matches(event.path)),
-					Stream.runForEachArray((events) => Queue.offerAll(queue, events)),
-					Effect.scoped,
-					(effect) =>
-						observeShutdown(
-							effect,
-							`Watching ${file} stopped with interrupted cleanup`,
-						),
-					Effect.onExit(logStopped(file)),
-					Effect.catchCauseIf(
-						(cause) => !Cause.hasInterrupts(cause),
-						(cause) => Effect.logError(`Watching ${file} failed`, cause),
-					),
-					// A failed native backend must not stop content reconciliation.
-					Effect.andThen(Effect.sleep("1 second")),
-					Effect.forever,
-				),
-		{ bufferSize: 16 },
-	)
-	// Native events accelerate updates. Poll the request too: its target
-	// may live outside this directory, change, or lose a notification.
-	yield* Stream.mergeAll(
-		[
-			Stream.as(events, undefined),
-			Stream.fromEffect(Deferred.await(ready)),
-			Stream.tick("1 second").pipe(Stream.drop(1)),
-		],
-		{ concurrency: "unbounded" },
-	).pipe(
-		Stream.runForEach(() =>
-			// Delay to let writes settle.
-			Effect.sleep("100 millis").pipe(
-				Effect.andThen(reload),
-				Effect.flatMap((changed) => (changed ? retry : Effect.void)),
-				Effect.catchCauseIf(
-					(cause) => !Cause.hasInterrupts(cause),
-					(cause) => Effect.logError(`Reloading ${file} failed`, cause),
-				),
-			),
-		),
-		Effect.catchCauseIf(
-			(cause) => !Cause.hasInterrupts(cause),
-			(cause) => Effect.logError(`Stopped watching ${file}`, cause),
-		),
-		// Observe the whole watcher before forkScoped owns it. The steps
-		// before the stream cannot fail, so this covers every failure.
-		Effect.onExit(logStopped(file)),
-	)
-})

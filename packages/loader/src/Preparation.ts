@@ -71,7 +71,11 @@ const environmentModule = Effect.fnUntraced(function* (
 	}
 })
 
-const target = Effect.fnUntraced(function* (input: Input, options: Options) {
+/** The deployment target an inspection would describe, computed without running anything. */
+export const target = Effect.fnUntraced(function* (
+	input: Input,
+	options: Options,
+) {
 	if (input.module.kind !== "Plugin")
 		return yield* PreparationFailed.make({
 			reason: "InvalidModule",

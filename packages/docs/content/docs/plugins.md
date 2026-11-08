@@ -42,15 +42,15 @@ await Effect.runPromise(
 
 ### Options
 
-| Option     | What it does                                                                                                         |
-| ---------- | -------------------------------------------------------------------------------------------------------------------- |
-| `name`     | A name for logs and the fork tree, [built like an Effect service key](../best-practices/packaging/#name-the-plugin). |
-| `config`   | An Effect `Schema`. The input is decoded with it before `apply` runs. Leave it out for no config.                    |
-| `inject`   | The services the plugin needs. See [Dependencies](#dependencies).                                                    |
-| `provides` | Declares local service keys or structural contract descriptors. It does not publish services.                        |
-| `overlap`  | Declares overlap safety; defaults to `false`. Metadata only: restart behavior is unchanged.                          |
-| `apply`    | Starts the plugin. It runs inside the fork's `Scope`.                                                                |
-| `retry`    | A `Schedule` for restarting after `apply` or a supervised task fails.                                                |
+| Option     | What it does                                                                                                                                                                                 |
+| ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `name`     | A name for logs and the fork tree, [built like an Effect service key](../best-practices/packaging/#name-the-plugin).                                                                         |
+| `config`   | An Effect `Schema`. The input is decoded with it before `apply` runs. Leave it out for no config.                                                                                            |
+| `inject`   | The services the plugin needs. See [Dependencies](#dependencies).                                                                                                                            |
+| `provides` | Declares local service keys or structural contract descriptors. It does not publish services. `graft start` resolves `inject` from these declarations, so declare every service you publish. |
+| `overlap`  | Declares overlap safety; defaults to `false`. Metadata only: restart behavior is unchanged.                                                                                                  |
+| `apply`    | Starts the plugin. It runs inside the fork's `Scope`.                                                                                                                                        |
+| `retry`    | A `Schedule` for restarting after `apply` or a supervised task fails.                                                                                                                        |
 
 Register attempt-scoped health checks with [Plugin.probe](../probes/).
 

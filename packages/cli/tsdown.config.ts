@@ -9,6 +9,7 @@ export default defineConfig({
 		"src/Commands.ts",
 		"src/Application.ts",
 		"src/bin.ts",
+		"src/Environment.ts",
 		"src/internal/configSchema.ts",
 	],
 })

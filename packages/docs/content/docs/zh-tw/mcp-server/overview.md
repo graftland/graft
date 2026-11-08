@@ -16,8 +16,11 @@ description: 用核心、傳輸和貢獻外掛組成 MCP 伺服器。
 - name: ./plugins/notes.ts
 ```
 
-執行 `graft start --stdio`。使用 `Effect.log*`
-記錄日誌；stdout 屬於協定。[範例](https://github.com/graftland/graft/tree/main/samples/mcp-tools)包含可執行的用戶端設定。
+在直接[嵌入](../../embedding/)的應用程式中執行這些條目；stdout 屬於協定，因此使用
+`Effect.log*` 記錄日誌。`graft start --stdio`
+會被拒絕，因為外掛在單元中執行，沒有外掛擁有行程的標準輸入輸出；使用
+`graft start` 時請改用
+[HTTP 傳輸](#提供-http)。[範例](https://github.com/graftland/graft/tree/main/samples/mcp-tools)包含可執行的用戶端設定。
 
 | 條目                                 | 短名稱             | 職責                        |
 | ------------------------------------ | ------------------ | --------------------------- |
