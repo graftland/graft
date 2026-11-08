@@ -77,16 +77,18 @@ enable one.
 
 ## Entry fields
 
-| Field       | What it does                                                                                                                   |
-| ----------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| `id`        | Identifies the entry. If an entry has none, Graft adds one and writes it to the file, including inside a plugin's entry lists. |
-| `name`      | The plugin's module: a relative path, a package name, or a short name. Groups ignore it.                                       |
-| `config`    | The plugin's input. For a group, its list of entries.                                                                          |
-| `disabled`  | `true` unloads the entry but keeps it in the file.                                                                             |
-| `group`     | `true` makes the entry a group of other entries.                                                                               |
-| `inject`    | Service keys to wait for before loading the plugin, in addition to its own `inject`.                                           |
-| `isolate`   | Keys to [isolate](../isolation/): `true` for a private realm, or a label for a shared one.                                     |
-| `intercept` | Schema-checked patches for registered references, applying to this entry and its descendants.                                  |
+| Field       | What it does                                                                                                                                                                                                                                                  |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`        | Identifies the entry. If an entry has none, Graft adds one and writes it to the file, including inside a plugin's entry lists.                                                                                                                                |
+| `name`      | The plugin's module: a relative path, a package name, or a short name. Groups ignore it.                                                                                                                                                                      |
+| `config`    | The plugin's input. For a group, its list of entries.                                                                                                                                                                                                         |
+| `disabled`  | `true` unloads the entry but keeps it in the file.                                                                                                                                                                                                            |
+| `group`     | `true` makes the entry a group of other entries.                                                                                                                                                                                                              |
+| `inject`    | Service keys to wait for before loading the plugin, in addition to its own `inject`.                                                                                                                                                                          |
+| `isolate`   | Keys to [isolate](../isolation/): `true` for a private realm, or a label for a shared one.                                                                                                                                                                    |
+| `intercept` | Schema-checked patches for registered references, applying to this entry and its descendants.                                                                                                                                                                 |
+| `recording` | `{ role, scope? }` names this entry as the [recorder](../recording/). At most one entry; groups cannot hold the role. Scope defaults to every other application entry, including disabled entries.                                                            |
+| `contract`  | `{ artifact, module }` selects a captured RPC contract package and a contract module within it. `artifact` is a built module path relative to this config file or absolute; use the same artifact module at both ends of a binding. Groups cannot declare it. |
 
 ### Rules
 

@@ -4,6 +4,7 @@
  */
 import {
 	Array,
+	Cause,
 	Config,
 	Deferred,
 	Effect,
@@ -13,9 +14,9 @@ import {
 	HashSet,
 	Option,
 	Path,
+	Queue,
 	Record,
 	Ref,
-	Schedule,
 	Schema,
 	Stream,
 	String,
@@ -23,11 +24,13 @@ import {
 } from "effect"
 
 import { Plugin, type Kernel } from "@graftland/graft"
+import * as Artifact from "@graftland/plugin-remote/Artifact"
 import * as Control from "@graftland/plugin-remote/Control"
 
 import { Entry as EntrySchema, Env, type Entry } from "./Entry"
 import { revision } from "./Include"
 import { isContainer } from "./internal/snapshot"
+import { replanOnBusy } from "./internal/watchReplanning"
 import * as ModuleResolver from "./ModuleResolver"
 import * as Preparation from "./Preparation"
 
@@ -39,7 +42,13 @@ export class DeploymentUnsupported extends Schema.TaggedError<
 	{ readonly brand: unique symbol }
 >()("DeploymentUnsupported", {
 	entry: Schema.String,
-	field: Schema.Literals(["isolate", "inject", "intercept"]),
+	field: Schema.Literals([
+		"isolate",
+		"inject",
+		"intercept",
+		"recording",
+		"contract",
+	]),
 }) {}
 /** The submitted Change did not conclude `Accepted`. */
 export class DeploymentFailed extends Schema.TaggedError<
@@ -80,13 +89,103 @@ export const instances = (
 const children = Schema.decodeUnknownOption(Schema.Array(EntrySchema))
 const isRecord = Schema.is(Schema.Record(Schema.String, Schema.Unknown))
 const supported = (entry: Entry) =>
-	entry.isolate !== undefined
-		? DeploymentUnsupported.make({ entry: entry.id, field: "isolate" })
-		: (entry.inject ?? []).length > 0
-			? DeploymentUnsupported.make({ entry: entry.id, field: "inject" })
-			: entry.intercept !== undefined
-				? DeploymentUnsupported.make({ entry: entry.id, field: "intercept" })
-				: Effect.void
+	entry.group === true &&
+	(entry.recording !== undefined || entry.contract !== undefined)
+		? DeploymentUnsupported.make({
+				entry: entry.id,
+				field: entry.recording !== undefined ? "recording" : "contract",
+			})
+		: entry.isolate !== undefined
+			? DeploymentUnsupported.make({ entry: entry.id, field: "isolate" })
+			: (entry.inject ?? []).length > 0
+				? DeploymentUnsupported.make({ entry: entry.id, field: "inject" })
+				: entry.intercept !== undefined
+					? DeploymentUnsupported.make({ entry: entry.id, field: "intercept" })
+					: Effect.void
+
+/** A config file cannot assign more than one recording role or assign one to an inactive entry. */
+export class DeploymentRecordingInvalid extends Schema.TaggedError<
+	DeploymentRecordingInvalid,
+	{ readonly brand: unique symbol }
+>()("DeploymentRecordingInvalid", {
+	reason: Schema.Literals([
+		"MultipleRecorders",
+		"InactiveRecorder",
+		"RecordingConflict",
+	]),
+	entries: Schema.Array(Schema.String),
+	cause: Schema.optionalKey(Schema.Cause(Schema.Unknown, Schema.Unknown)),
+}) {
+	override get message(): string {
+		return `Invalid recording declaration (${this.reason}): ${Array.join(this.entries, ", ")}`
+	}
+}
+
+const declaredRecorders = (
+	entries: ReadonlyArray<Entry>,
+): ReadonlyArray<Entry> =>
+	Array.flatMap(entries, (entry) => [
+		...(entry.recording === undefined ? [] : [entry]),
+		...(entry.group === true
+			? declaredRecorders(Option.getOrElse(children(entry.config), () => []))
+			: []),
+	])
+
+const configuredInstances = (
+	entries: ReadonlyArray<Entry>,
+): ReadonlyArray<Entry> =>
+	Array.flatMap(entries, (entry) =>
+		entry.group === true
+			? configuredInstances(Option.getOrElse(children(entry.config), () => []))
+			: entry["cli"] === true
+				? []
+				: [entry],
+	)
+
+/** Resolves the config file's one recording declaration without loading plugin code. */
+export const recordingDeclaration = Effect.fnUntraced(function* (
+	read: ReadonlyArray<Entry>,
+	active: ReadonlyArray<Entry>,
+): Effect.fn.Return<
+	Option.Option<Kernel.RecordingDeclaration>,
+	DeploymentRecordingInvalid | DeploymentUnsupported
+> {
+	const declared = declaredRecorders(read)
+	const grouped = Array.findFirst(declared, (entry) => entry.group === true)
+	if (Option.isSome(grouped))
+		return yield* DeploymentUnsupported.make({
+			entry: grouped.value.id,
+			field: "recording",
+		})
+	if (declared.length > 1)
+		return yield* DeploymentRecordingInvalid.make({
+			reason: "MultipleRecorders",
+			entries: Array.map(declared, (entry) => entry.id),
+		})
+	const recorder = Array.head(declared)
+	if (Option.isNone(recorder)) return Option.none()
+	const entry = recorder.value
+	if (!Array.some(active, (active) => active.id === entry.id))
+		return yield* DeploymentRecordingInvalid.make({
+			reason: "InactiveRecorder",
+			entries: [entry.id],
+		})
+	const declaration = entry.recording
+	if (declaration === undefined) return Option.none()
+	return Option.some({
+		recorder: declaration.role,
+		instance: entry.id,
+		scope:
+			declaration.scope ??
+			Array.map(
+				Array.filter(
+					configuredInstances(read),
+					(other) => other.id !== entry.id,
+				),
+				(entry) => entry.id,
+			),
+	})
+})
 
 export interface Referenced {
 	readonly value: unknown
@@ -121,15 +220,59 @@ interface Tools {
 	readonly resolver: ModuleResolver.ModuleResolver["Service"]
 	readonly preparation: Effect.Success<ReturnType<typeof Preparation.make>>
 	readonly control: Control.Client
+	readonly recording: Ref.Ref<Option.Option<Kernel.RecordingDeclaration>>
 }
-/** What the last accepted revision deployed per entry: code identity and encoded input. */
-type Applied = HashMap.HashMap<string, string>
+/** The last accepted identity and input per entry; None marks an entry affected by conflicting work. */
+type Applied = HashMap.HashMap<string, Option.Option<string>>
 const encodeJson = Schema.encodeEffect(Schema.fromJsonString(Schema.Json))
 /** The code identity does not cover the input, so an edited config alone must still count as a change. */
 const appliedKey = (target: Kernel.Target) =>
 	encodeJson(target.deployment?.input ?? null).pipe(
 		Effect.map((input) => `${target.identity}\u0000${input}`),
 	)
+
+/** Finds the contract's package without evaluating the contract or its implementation. */
+const contractPackage = Effect.fnUntraced(function* (file: string) {
+	const fs = yield* FileSystem.FileSystem
+	const path = yield* Path.Path
+	let directory = path.dirname(file)
+	while (!(yield* fs.exists(path.join(directory, "package.json")))) {
+		const parent = path.dirname(directory)
+		if (parent === directory)
+			return yield* ModuleResolver.ModuleInvalid.make({
+				specifier: file,
+				cause: "A contract artifact must belong to a package with package.json",
+			})
+		directory = parent
+	}
+	return directory
+})
+const captureContract = Effect.fnUntraced(function* (
+	entry: NonNullable<Entry["contract"]>,
+	options: Options,
+) {
+	const path = yield* Path.Path
+	const file = path.resolve(path.dirname(options.config), entry.artifact)
+	const directory = yield* contractPackage(file)
+	const config = path.relative(directory, options.config)
+	const artifact = yield* Artifact.capture({
+		directory,
+		module: path.relative(directory, file),
+		store: path.join(path.dirname(options.config), ".graft", "artifacts"),
+		exclude: [
+			"node_modules",
+			".graft",
+			".cache",
+			".git",
+			...(!path.isAbsolute(config) &&
+			config !== ".." &&
+			!String.startsWith("../")(config)
+				? [config]
+				: []),
+		],
+	})
+	return { artifact, module: entry.module }
+})
 
 /** Prepares one entry; an entry whose target identity is already applied is left untouched. */
 const operation = Effect.fnUntraced(function* (
@@ -140,10 +283,15 @@ const operation = Effect.fnUntraced(function* (
 	const { options, resolver, preparation, control } = tools
 	const { value, names } = references(entry.config ?? {})
 	const module = yield* resolver.resolve(entry.name)
+	const contract =
+		entry.contract === undefined
+			? undefined
+			: yield* captureContract(entry.contract, options)
 	const input: Preparation.Input = {
 		instance: entry.id,
 		module,
 		input: value,
+		...(contract === undefined ? {} : { contract }),
 		...(options.placement === undefined
 			? {}
 			: { placement: options.placement }),
@@ -153,7 +301,7 @@ const operation = Effect.fnUntraced(function* (
 	})
 	const key = yield* appliedKey(planned)
 	const directories = artifactDirectories(planned)
-	if (Option.contains(HashMap.get(applied, entry.id), key))
+	if (Option.contains(Option.flatten(HashMap.get(applied, entry.id)), key))
 		return {
 			instance: entry.id,
 			identity: key,
@@ -183,11 +331,13 @@ const operation = Effect.fnUntraced(function* (
 	}
 })
 
-const isBusy = (error: Control.ControlError) => error.reason === "Busy"
 /** Captured directories a target runs from: its module and its environment modules. */
 const artifactDirectories = (target: Kernel.Target): ReadonlyArray<string> => [
 	...Option.toArray(
 		Option.fromUndefinedOr(target.deployment?.artifact.directory),
+	),
+	...Option.toArray(
+		Option.fromUndefinedOr(target.deployment?.contractArtifact?.directory),
 	),
 	...Array.map(
 		target.deployment?.environment ?? [],
@@ -227,41 +377,90 @@ const prune = Effect.fnUntraced(function* (
 		{ discard: true },
 	)
 })
-/** Reads the file, prepares changed entries and submits one Change; returns what is now applied. */
-const revise = Effect.fnUntraced(function* (tools: Tools, applied: Applied) {
+/** Reads the newest files and submits one Change; false asks the caller to replan. */
+const revise = Effect.fnUntraced(function* (
+	tools: Tools,
+	applied: Ref.Ref<Applied>,
+	edited: Effect.Effect<unknown, PlatformError.PlatformError | Cause.Done>,
+) {
+	const current = yield* Ref.get(applied)
 	const read = yield* revision(tools.options.config)
 	const entries = yield* instances(read)
+	const declaration = yield* recordingDeclaration(read, entries)
+	const previousDeclaration = yield* Ref.get(tools.recording)
+	if (Option.isSome(declaration)) {
+		yield* tools.control.declareRecording(declaration.value).pipe(
+			Effect.catchIf(
+				(error) => error.reason === "RecordingConflict",
+				(error) =>
+					DeploymentRecordingInvalid.make({
+						reason: "RecordingConflict",
+						entries: [declaration.value.instance],
+						cause: Cause.fail(error),
+					}),
+			),
+		)
+		yield* Ref.set(tools.recording, declaration)
+	} else if (Option.isSome(previousDeclaration)) {
+		return yield* DeploymentRecordingInvalid.make({
+			reason: "RecordingConflict",
+			cause: Cause.fail(
+				"Removing the recording declaration requires restarting the application",
+			),
+			entries: [previousDeclaration.value.instance],
+		})
+	}
 	const planned = yield* Effect.forEach(entries, (entry) =>
-		operation(entry, tools, applied),
+		operation(entry, tools, current),
 	)
 	const present = HashSet.fromIterable(Array.map(planned, (p) => p.instance))
 	const removed = Array.filter(
-		Array.fromIterable(HashMap.keys(applied)),
+		Array.fromIterable(HashMap.keys(current)),
 		(id) => !HashSet.has(present, id),
 	)
-	const operations = [
+	const requestedOperations = [
 		...Array.getSomes(Array.map(planned, (p) => p.operation)),
 		...Array.map(removed, (instance): Kernel.DeploymentOperation => ({
 			_tag: "Remove",
 			instance,
 		})),
 	]
+	const recorderOperation = Option.flatMap(declaration, (declaration) =>
+		Array.findFirst(
+			requestedOperations,
+			(operation) => operation.instance === declaration.instance,
+		),
+	)
+	// The role holder must become current before a recorded Change can be admitted.
+	const operations = Option.match(recorderOperation, {
+		onNone: () => requestedOperations,
+		onSome: (operation) => [operation],
+	})
 	const next: Applied = HashMap.fromIterable(
-		Array.map(planned, (p) => [p.instance, p.identity] as const),
+		Array.map(planned, (p) => [p.instance, Option.some(p.identity)] as const),
 	)
 	const keep = HashSet.fromIterable(
 		Array.flatMap(planned, (p) => p.directories),
 	)
-	if (operations.length === 0) return next
-	/** A conflicting owner rejects with Busy; the newest revision is kept and submitted again. */
-	const handle = yield* tools.control
-		.submit({ operations, strategy: "Restart" })
-		.pipe(
-			Effect.retry({
-				while: isBusy,
-				schedule: Schedule.spaced("250 millis"),
-			}),
+	if (operations.length === 0) {
+		yield* Ref.set(applied, next)
+		return true
+	}
+	const submitted = yield* replanOnBusy(
+		tools.control.changes,
+		tools.control.submit({ operations, strategy: "Restart" }),
+		edited,
+	)
+	if (Option.isNone(submitted)) {
+		// Conflicting work can replace an entry even when the newest edit restores its last accepted input.
+		yield* Ref.update(applied, (known) =>
+			Array.reduce(operations, known, (out, operation) =>
+				HashMap.set(out, operation.instance, Option.none()),
+			),
 		)
+		return false
+	}
+	const handle = submitted.value
 	const conclusion = yield* handle.await
 	if (conclusion.outcome !== "Accepted")
 		return yield* DeploymentFailed.make({
@@ -272,8 +471,16 @@ const revise = Effect.fnUntraced(function* (tools: Tools, applied: Applied) {
 	yield* Effect.logInfo(
 		`Deployed ${operations.length} ${operations.length === 1 ? "change" : "changes"}`,
 	)
+	if (Option.isSome(recorderOperation)) {
+		const id = recorderOperation.value.instance
+		yield* Ref.update(applied, (current) =>
+			HashMap.set(current, id, Option.flatten(HashMap.get(next, id))),
+		)
+		return false
+	}
 	yield* prune(tools.options, keep)
-	return next
+	yield* Ref.set(applied, next)
+	return true
 })
 
 const ignored = HashSet.make("node_modules", ".graft", ".cache", ".git")
@@ -311,10 +518,14 @@ const watched = Effect.fnUntraced(function* (tools: Tools) {
 			Stream.debounce("100 millis"),
 			Stream.map((): Signal => "Edited"),
 		)
+	const signals = yield* Stream.merge(
+		Stream.fromEffect(Deferred.await(ready).pipe(Effect.as<Signal>("Initial"))),
+		edits,
+	).pipe(Stream.toQueue({ capacity: 1, strategy: "sliding" }))
 	const apply = (signal: Signal) =>
-		Ref.get(applied).pipe(
-			Effect.flatMap((current) => revise(tools, current)),
-			Effect.flatMap((next) => Ref.set(applied, next)),
+		revise(tools, applied, Queue.take(signals)).pipe(
+			Effect.repeat({ until: (complete) => complete }),
+			Effect.asVoid,
 			Effect.exit,
 			Effect.flatMap((exit) =>
 				signal === "Initial"
@@ -328,11 +539,7 @@ const watched = Effect.fnUntraced(function* (tools: Tools) {
 			),
 			Effect.asVoid,
 		)
-	yield* Stream.merge(
-		Stream.fromEffect(Deferred.await(ready).pipe(Effect.as<Signal>("Initial"))),
-		edits,
-	).pipe(
-		Stream.buffer({ capacity: 1, strategy: "sliding" }),
+	yield* Stream.fromQueue(signals).pipe(
 		Stream.runForEach(apply),
 		Effect.catchCause((cause) =>
 			Deferred.failCause(first, cause).pipe(
@@ -352,6 +559,7 @@ const deploy = Effect.fnUntraced(function* (options: Options) {
 	const tools: Tools = {
 		options,
 		control: yield* Control.connect(options.control),
+		recording: yield* Ref.make(Option.none<Kernel.RecordingDeclaration>()),
 		resolver: yield* ModuleResolver.make({
 			base: path.dirname(options.config),
 			control: options.control,
@@ -360,7 +568,10 @@ const deploy = Effect.fnUntraced(function* (options: Options) {
 		preparation: yield* Preparation.make({ control: options.control }),
 	}
 	if (options.watch === true) return yield* watched(tools)
-	yield* revise(tools, HashMap.empty())
+	const applied = yield* Ref.make<Applied>(HashMap.empty())
+	yield* revise(tools, applied, Effect.never).pipe(
+		Effect.repeat({ until: (complete) => complete }),
+	)
 })
 
 export const plugin = Plugin.make({

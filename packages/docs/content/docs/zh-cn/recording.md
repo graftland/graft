@@ -37,6 +37,29 @@ export const kernel = Kernel.layer({
 | `scope`      | 需要记录的变更所涉及的实例。                              |
 | `maxRecords` | 未确认与已预留记录的上限，超出的新工作会被拒绝。默认 64。 |
 
+## 从配置文件启动
+
+在配置文件中声明记录者，然后运行 `graft start --watch`：
+
+```yaml title="graft.yml"
+- id: release
+  name: "@graftland/plugin-release/Recorder"
+  recording: { role: release }
+  config:
+    recorder: release
+    directory: ./.graft/journal
+
+- id: checkout
+  name: ./plugins/checkout.mjs
+```
+
+| 设置              | 规则                                                                                                                         |
+| ----------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `recording.role`  | 此条目持有的角色，须与插件注册的角色一致。任何实现记录协议的插件都可以持有。                                                 |
+| `recording.scope` | 需要记录变更的条目 id。省略时包含其他所有应用条目，包括嵌套和禁用的条目；空列表表示不记录。                                  |
+| 角色持有者        | 仅一个启用的应用条目可以声明角色，不能用于分组。记录者先单独启动，再启动需要记录的条目。                                     |
+| 后续编辑          | 相同声明可以重复提交。更改或移除角色、持有者或范围需要重启应用；监听模式报告 `RecordingConflict`。增删条目也会改变默认范围。 |
+
 ## 运行记录者
 
 `@graftland/plugin-release/Recorder` 是一个普通的记录者。把它部署为

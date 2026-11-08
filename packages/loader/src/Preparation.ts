@@ -32,6 +32,11 @@ export interface Input {
 	readonly instance: string
 	readonly module: Descriptor
 	readonly input: unknown
+	/** Captured contract bytes and the selected module within their package. */
+	readonly contract?: {
+		readonly artifact: Kernel.ArtifactData
+		readonly module: string
+	}
 	readonly placement?: "Worker" | "Process"
 	readonly environment?: ReadonlyArray<EnvironmentModule>
 	/** Inherited patches precede descendant patches. */
@@ -105,6 +110,12 @@ export const target = Effect.fnUntraced(function* (
 		artifact: input.module.artifact,
 		moduleSuffix: input.module.suffix,
 		input: configuration,
+		...(input.contract === undefined
+			? {}
+			: {
+					contractArtifact: input.contract.artifact,
+					contract: input.contract.module,
+				}),
 		placement: input.placement ?? "Worker",
 		...(environment.length === 0 ? {} : { environment }),
 	})

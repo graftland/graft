@@ -39,6 +39,8 @@ export const make = (options: Options = {}) => {
 		Schema.StructWithRest(
 			Schema.Struct({
 				...shared,
+				recording: Schema.optionalKey(Schema.Never),
+				contract: Schema.optionalKey(Schema.Never),
 				group: Schema.Literal(true).annotate({
 					description: "true makes the entry a group of other entries.",
 				}),
