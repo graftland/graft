@@ -305,7 +305,8 @@ export interface Supervision {
 }
 /** A restart that met a conflicting owner; it is tried again, never dropped. */
 export interface PendingRestart {
-	readonly kind: "Members" | "Unit"
+	/** `Reconcile` brings members to the state a `Committed` Change recorded; `unit` is that Change's id. */
+	readonly kind: "Members" | "Unit" | "Reconcile"
 	readonly unit: string
 	readonly members: HashSet.HashSet<string>
 	readonly cause: Cause.Cause<unknown>
@@ -350,6 +351,10 @@ export interface RecordPayload {
 	readonly targets: ReadonlyArray<string>
 	readonly outcome: Option.Option<Outcome>
 	readonly facts: ReadonlyArray<RecordFact>
+	/** The request key the Change was submitted with, if any. */
+	readonly key: Option.Option<string>
+	/** Canonical text of the normalized request, so a key can be compared after a restart. */
+	readonly request: string
 	/** A `Phase` name; plain text so records stay readable as the phase list evolves. */
 	readonly phase: string
 	/** The Change's cause, rendered; the full cause stays queryable by Change id while the kernel runs. */
@@ -443,7 +448,15 @@ export interface Input {
 	readonly strategy?: Strategy
 	readonly budget?: Partial<Budget>
 	readonly requirements?: Partial<Requirements>
+	/**
+	 * `Serving` (default): concludes once the new state serves. `Committed`: concludes once the
+	 * desired state is validated and recorded; the kernel then reconciles in its own Change.
+	 */
+	readonly completion?: Completion
+	/** The Change this one reconciles after, set by the kernel. */
+	readonly origin?: string
 }
+export type Completion = "Serving" | "Committed"
 export interface RequestIdentity {
 	readonly mode: "Inspect" | "Deploy"
 	readonly operations: ReadonlyArray<DeploymentOperation>
@@ -452,11 +465,14 @@ export interface RequestIdentity {
 	readonly budget: Budget
 	readonly probes: ReadonlyArray<string>
 	readonly trial: number
+	readonly completion: Completion
 }
 
 export interface Request {
 	/** A supervisor restart: a busy admission defers it instead of dropping it. */
 	readonly supervised?: PendingRestart
+	readonly completion?: Completion
+	readonly origin?: string
 	readonly boundary?: PlacementRequirement
 	readonly member?: MemberDeclaration
 	readonly operations?: ReadonlyArray<DeploymentOperation>
@@ -744,6 +760,9 @@ export interface Timer {
 	readonly command: Option.Option<string>
 }
 export interface Status {
+	readonly completion: Completion
+	/** The Change whose committed state this one reconciles, if any. */
+	readonly origin: Option.Option<string>
 	readonly plan: GroupPlan
 	readonly outstandingCalls: HashSet.HashSet<string>
 	readonly id: string
@@ -774,6 +793,10 @@ export interface State {
 	readonly records: HashMap.HashMap<string, RecordDuty>
 	/** Unacknowledged duties; kept incrementally so admission reads no other Change. */
 	readonly recordsOutstanding: number
+	/** Keys journaled in earlier runs: the same request is answered from the record, never run again. */
+	readonly priorKeys: HashMap.HashMap<string, PriorKey>
+	/** Whether a recorder already reported earlier runs during this one. */
+	readonly recovered: boolean
 	/** Stage slots promised to admitted recorded Changes that have not emitted them yet. */
 	readonly recordsPromised: number
 	readonly nextMemberOperation: number
@@ -867,6 +890,8 @@ export interface MemberOperation {
 		| "Completed"
 		| "Failed"
 		| "Unconfirmed"
+	/** The members started again after stopping; revoked members only stop. */
+	readonly restart: HashSet.HashSet<string>
 	readonly retry: boolean
 	readonly currentMember: Option.Option<string>
 	readonly resolutions: HashMap.HashMap<string, ResolvedInput>
@@ -882,12 +907,31 @@ export interface MemberOperation {
 	readonly timerIds: HashSet.HashSet<string>
 }
 /** Recorder messages arrive on the unit's own control channel, which identifies the unit incarnation. */
+/** A request key a durable recorder has journaled in an earlier kernel run. */
+export interface PriorKey {
+	readonly key: string
+	readonly request: string
+	readonly run: string
+	readonly change: string
+}
+/** A Change of an earlier kernel run whose journal has no concluding record. */
+export interface PriorChange {
+	readonly run: string
+	readonly change: string
+	readonly members: ReadonlyArray<string>
+}
+/** What a durable recorder reports from its journal when it registers. */
+export interface RecoveredRecords {
+	readonly keys: ReadonlyArray<PriorKey>
+	readonly unfinished: ReadonlyArray<PriorChange>
+}
 export type RecordingSignal =
 	| {
 			readonly _tag: "RecorderRegistered"
 			readonly unit: string
 			readonly incarnation: string
 			readonly recorder: string
+			readonly recovered?: RecoveredRecords
 	  }
 	| {
 			readonly _tag: "RecordAcknowledged"
@@ -950,6 +994,12 @@ export type Event =
 	| {
 			readonly _tag: "PreparationObserved"
 			readonly preparation: string
+			readonly now: number
+	  }
+	| {
+			/** Declares the recording role once, for kernels started without it (such as `graft start`). */
+			readonly _tag: "RecordingDeclared"
+			readonly declaration: RecordingDeclaration
 			readonly now: number
 	  }
 	| {
@@ -1034,6 +1084,8 @@ export type Rejection =
 	| "RecordingUnavailable"
 	| "RecordingCapacity"
 	| "SelfReplacement"
+	| "RecordingConflict"
+	| "AlreadyRecorded"
 export type Reply =
 	| { readonly _tag: "None" }
 	| { readonly _tag: "Preparing"; readonly preparation: string }

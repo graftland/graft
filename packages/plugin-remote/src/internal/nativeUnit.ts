@@ -880,8 +880,12 @@ const processStdio = (runtime: UnitRuntime): ProcessStdio["Service"] => ({
 })
 /** Deliveries are queued for whichever plugin in this unit holds the role; identity comes from the channel. */
 const recorder = (runtime: UnitRuntime): Recorder["Service"] => ({
-	register: (name) =>
-		runtime.emit({ _tag: "RecorderRegister", recorder: name }),
+	register: (name, recovered) =>
+		runtime.emit({
+			_tag: "RecorderRegister",
+			recorder: name,
+			...(recovered === undefined ? {} : { recovered }),
+		}),
 	records: Stream.fromQueue(runtime.records),
 	acknowledge: (record) =>
 		runtime.emit({
@@ -1337,8 +1341,17 @@ const perform = Effect.fnUntraced(function* (
 						const fork = yield* Ref.get(member.fork).pipe(
 							Effect.flatMap(Effect.fromOption),
 						)
+						// The probes the Change requires, plus those the member declares itself.
+						const declared: ReadonlyArray<string> = Option.match(
+							Array.findFirst(
+								member.metadata.description.members,
+								(declaration: Kernel.MemberDeclaration) =>
+									declaration.instance === instance,
+							),
+							{ onNone: () => [], onSome: (declaration) => declaration.probes },
+						)
 						yield* Effect.forEach(
-							command.probes ?? [],
+							Array.dedupe([...(command.probes ?? []), ...declared]),
 							(name) => fork.probe(name),
 							{ discard: true },
 						)

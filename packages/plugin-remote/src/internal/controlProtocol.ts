@@ -99,6 +99,8 @@ const Rejection = Schema.Literals([
 	"RecordingUnavailable",
 	"RecordingCapacity",
 	"SelfReplacement",
+	"RecordingConflict",
+	"AlreadyRecorded",
 ])
 const Cleanup = Schema.Union([
 	Schema.TaggedStruct("Unknown", {}),
@@ -194,7 +196,10 @@ const Conclusion = Schema.Struct({
 	members: Schema.HashMap(Schema.String, Member),
 	units: Strings,
 })
+const Completion = Schema.Literals(["Serving", "Committed"])
 const Status = Schema.Struct({
+	completion: Completion,
+	origin: Schema.Option(Schema.String),
 	plan: Plan,
 	outstandingCalls: Strings,
 	id: Schema.String,
@@ -379,6 +384,7 @@ const Input = Schema.Struct({
 			probes: Schema.optionalKey(Schema.Array(Schema.String)),
 		}),
 	),
+	completion: Schema.optionalKey(Completion),
 })
 const Policy = Schema.Struct({
 	instance: Schema.String,
@@ -409,6 +415,14 @@ export const Request = Schema.Union([
 		]),
 	}),
 	Schema.TaggedStruct("SetPolicy", { policy: Policy }),
+	Schema.TaggedStruct("DeclareRecording", {
+		declaration: Schema.Struct({
+			recorder: Schema.String,
+			instance: Schema.String,
+			scope: Schema.Array(Schema.String),
+			maxRecords: Schema.optionalKey(Schema.Int),
+		}),
+	}),
 ])
 export type Request = typeof Request.Type
 export const Response = Schema.Union([

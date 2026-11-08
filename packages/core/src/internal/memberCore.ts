@@ -465,13 +465,14 @@ const grant = (s: Working, operation: MemberOperation): Working =>
 			)
 		},
 	})
-/** `retry` false stops the failed members without starting them again. */
+/** `retry` false stops the failed members without starting them again; with `retry`, only `restart` starts again. */
 export const start = (
 	s: Working,
 	unit: Unit,
 	affected: HashSet.HashSet<string>,
 	cause: Cause.Cause<unknown>,
 	retry: boolean,
+	restart: HashSet.HashSet<string> = affected,
 ): Working => {
 	const id = `member-operation-${s.nextMemberOperation}`
 	const writes = HashSet.reduce(affected, affected, (keys, member) =>
@@ -529,7 +530,8 @@ export const start = (
 		incarnation: unit.incarnation,
 		members: affected,
 		phase: "Stopping",
-		retry,
+		retry: retry && HashSet.size(restart) > 0,
+		restart,
 		currentMember: Option.none(),
 		resolutions: HashMap.empty(),
 		resolved: HashSet.empty(),
@@ -591,7 +593,7 @@ export const stopped = (s: Working, unit: Unit): Working =>
 					),
 				)
 					? operation.retry
-						? nextResolution(s, operation)
+						? nextResolution(s, { ...operation, members: operation.restart })
 						: finish(s, operation, false)
 					: s,
 			),

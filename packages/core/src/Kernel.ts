@@ -53,6 +53,7 @@ export type {
 	Budget,
 	Requirements,
 	Status,
+	Completion,
 	MemberAttempt,
 	MemberFact,
 	Conclusion,
@@ -91,7 +92,10 @@ export type {
 	RecordingPolicy,
 	RecorderGrant,
 	RecordFact,
+	PriorChange,
+	PriorKey,
 	RecordPayload,
+	RecoveredRecords,
 	RecordDuty,
 	RecordingStatus,
 	RecordingSignal,
@@ -171,6 +175,13 @@ export class Kernel extends Context.Service<
 			readonly sandbox?: boolean
 			readonly values: Readonly<Record<string, Schema.Json>>
 		}) => Effect.Effect<void>
+		/**
+		 * Declares the recording role for a kernel started without one. The same role
+		 * again is accepted; a different one fails with `RecordingConflict`.
+		 */
+		readonly declareRecording: (
+			declaration: Core.RecordingDeclaration,
+		) => Effect.Effect<void, ChangeRejected>
 		readonly shutdown: Effect.Effect<void>
 	}
 >()("@graftland/graft/Kernel") {}
@@ -255,6 +266,21 @@ export const layer = (
 						(duty) => !duty.acknowledged,
 					),
 				})),
+				declareRecording: Effect.fnUntraced(function* (
+					declaration: Core.RecordingDeclaration,
+				) {
+					const now = yield* controller.time
+					const reply = yield* controller.apply({
+						_tag: "RecordingDeclared",
+						declaration,
+						now,
+					})
+					if (reply._tag === "Rejected")
+						return yield* ChangeRejected.make({
+							reason: reply.reason,
+							conflicts: Array.fromIterable(reply.conflicts),
+						})
+				}),
 				setPolicy: (policy) =>
 					controller.time.pipe(
 						Effect.flatMap((now) =>
