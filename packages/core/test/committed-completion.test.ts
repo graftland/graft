@@ -1,4 +1,4 @@
-import { Array, HashMap, Option } from "effect"
+import { Array, HashMap, Option, type Schema } from "effect"
 import { assert, it } from "@effect/vitest"
 
 import * as Core from "../src/internal/decisionCore"
@@ -91,4 +91,56 @@ it("refuses a Committed removal, which cannot be reconciled yet (K1)", () => {
 		completion: "Committed",
 	})
 	assert.equal(refused.reply._tag, "Rejected")
+})
+
+const reconciling = (state: Core.State, origin: string) =>
+	Array.filter(
+		Array.fromIterable(HashMap.values(state.changes)),
+		(c) => c.request.origin === origin,
+	)
+const withInput = (t: Core.Target, input: Schema.Json): Core.Target => ({
+	...t,
+	deployment: { ...t.deployment!, input },
+})
+
+it("reconciles a Committed configuration change with the same code (K1)", () => {
+	const old = withInput(target("same"), { value: 1 })
+	const next = withInput(target("same"), { value: 2 })
+	assert.equal(old.identity, next.identity)
+	const state = Core.make({
+		authority: "committed",
+		maxUnits: 6,
+		declarations: Array.map(
+			declaredMembers([{ id: "a", target: old }]),
+			(member) => ({ ...member, placement: Option.none() }),
+		),
+		realms: rootRealms,
+	})
+	const first = prepare(state, {
+		operations: [{ _tag: "Deploy", instance: "a", target: next }],
+		completion: "Committed",
+	})
+	const p = id(first)
+	const admitted = exit(described(first.state, p, description(next, "a")), p)
+	assert.equal(admitted.reply._tag, "Admitted")
+	const change = admitted.reply._tag === "Admitted" ? admitted.reply.change : ""
+	assert.lengthOf(reconciling(admitted.state, change), 1)
+})
+
+it("keeps the committed probes and trial for reconciliation (K1)", () => {
+	const first = prepare(running(), {
+		...input(),
+		completion: "Committed",
+		requirements: { probes: ["deep"], trial: 500 },
+	})
+	const p = id(first)
+	const admitted = exit(
+		described(first.state, p, description(target(), "a")),
+		p,
+	)
+	const change = admitted.reply._tag === "Admitted" ? admitted.reply.change : ""
+	const linked = reconciling(admitted.state, change)
+	assert.lengthOf(linked, 1)
+	assert.deepStrictEqual(linked[0]!.request.probes, ["deep"])
+	assert.equal(linked[0]!.request.trial, 500)
 })

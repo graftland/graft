@@ -10,6 +10,9 @@ type Change = {
 	readonly plan: Pick<Kernel.Status["plan"], "reads" | "writes">
 }
 
+/** How long a Busy revision waits for evidence before it is prepared again anyway. */
+const fallback = "10 seconds"
+
 /** A successful submission is never interrupted by an edit; only a rejected revision can be superseded. */
 export const replanOnBusy = Effect.fnUntraced(function* <A, E, R>(
 	changes: Stream.Stream<Change, Control.ControlError>,
@@ -49,6 +52,12 @@ export const replanOnBusy = Effect.fnUntraced(function* <A, E, R>(
 							),
 							Stream.runHead,
 							Effect.raceFirst(edited),
+							// Some owners release without a Change conclusion (a supervisor's member
+							// restart): replan after a while even without evidence, so no edit is lost.
+							Effect.timeoutOrElse({
+								duration: fallback,
+								orElse: () => Effect.void,
+							}),
 							Effect.as(Option.none<A>()),
 						)
 					},

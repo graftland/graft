@@ -1431,6 +1431,7 @@ const keyedReply = (
 	s: Working,
 	key: string,
 	identity: RequestIdentity,
+	fingerprint: string | undefined,
 ): Option.Option<Working> =>
 	Option.orElse(
 		Option.map(HashMap.get(s.keys, key), (prior) =>
@@ -1444,7 +1445,7 @@ const keyedReply = (
 		() =>
 			Option.orElse(
 				Option.map(HashMap.get(s.priorKeys, key), (prior) =>
-					prior.request === Recording.requestText(identity)
+					fingerprint !== undefined && prior.request === fingerprint
 						? reject(
 								s,
 								"AlreadyRecorded",
@@ -1541,6 +1542,9 @@ const requested = (
 			? {}
 			: { completion: batch.completion }),
 		...(batch?.origin === undefined ? {} : { origin: batch.origin }),
+		...(batch?.fingerprint === undefined
+			? {}
+			: { fingerprint: batch.fingerprint }),
 	}
 
 	if (input.key !== undefined && HashMap.has(s.keys, input.key))
@@ -1597,7 +1601,12 @@ const requestedBatch = (s: Working, input: Input): Working => {
 	)
 		return reject(s, "InvalidDeclaration")
 	if (input.key !== undefined) {
-		const prior = keyedReply(s, input.key, normalizedIdentity(input))
+		const prior = keyedReply(
+			s,
+			input.key,
+			normalizedIdentity(input),
+			input.fingerprint,
+		)
 		if (Option.isSome(prior)) return prior.value
 	}
 	const stale = Arr.filter(
@@ -2045,7 +2054,15 @@ const commitDesired = (s: Working, c: Change): Working => {
 		{ ...applied, graph: Graph.commit(applied.graph, c.plan, false) },
 		next,
 	)
-	return reconcile(conclude(committed, next, "Accepted"), c.id, c.plan.members)
+	return reconcile(
+		conclude(committed, next, "Accepted"),
+		c.id,
+		c.plan.members,
+		{
+			probes: c.request.probes ?? [],
+			trial: c.request.trial,
+		},
+	)
 }
 /**
  * Brings members whose running target differs from the desired one to it, in one
@@ -2055,6 +2072,7 @@ const reconcile = (
 	s: Working,
 	origin: string,
 	members: HashSet.HashSet<string>,
+	requirements: PendingRestart["requirements"],
 ): Working => {
 	const differing = HashSet.filter(members, (id) =>
 		Option.exists(
@@ -2063,9 +2081,9 @@ const reconcile = (
 				Preparation.authorized(s, id, m.target) &&
 				!(
 					Executions.healthy(s, id) &&
-					Option.exists(
-						Executions.current(s, id),
-						({ member }) => member.target.identity === m.target.identity,
+					Option.exists(Executions.current(s, id), ({ member }) =>
+						// The whole target: its identity leaves out configuration and placement.
+						Recording.sameTarget(member.target, m.target),
 					)
 				),
 		),
@@ -2076,6 +2094,7 @@ const reconcile = (
 		unit: origin,
 		members: differing,
 		cause: Cause.empty,
+		...(requirements === undefined ? {} : { requirements }),
 	}
 	if (HashSet.some(differing, (id) => Option.isSome(cell(s, id).writer)))
 		return defer(s, restart)
@@ -2094,6 +2113,8 @@ const reconcile = (
 		),
 		strategy: "Restart",
 		origin,
+		// The committed request's probes and trial apply when its state is reached.
+		...(requirements === undefined ? {} : { requirements }),
 	})
 	const reply = submitted.reply
 	const next: Working = { ...submitted, reply: s.reply }
@@ -3262,21 +3283,21 @@ const superviseMembers = (
 	pending?: PendingRestart,
 ): Working => {
 	if (!s.open) return s
-	if (!Supervisor.allows(s, affected))
-		return Members.start(
-			Supervisor.escalate(s, affected),
-			unit,
-			affected,
-			cause,
-			false,
-		)
 	// A revoked target only stops: it is never granted again, so it is no attempt
-	// and does not hold back its authorized co-members.
+	// and does not hold back its authorized co-members, its intensity included.
 	const permitted = HashSet.filter(affected, (id) =>
 		Option.exists(HashMap.get(unit.members, id), (member) =>
 			Preparation.authorized(s, id, member.target),
 		),
 	)
+	if (!Supervisor.allows(s, permitted))
+		return Members.start(
+			Supervisor.escalate(s, permitted),
+			unit,
+			affected,
+			cause,
+			false,
+		)
 	const restart = pending ?? {
 		kind: "Members",
 		unit: unit.id,
@@ -3376,7 +3397,12 @@ const retryPending = (s: Working): Working =>
 			pendingRestarts: HashMap.remove(next.pendingRestarts, key),
 		}
 		if (restart.kind === "Reconcile")
-			return reconcile(cleared, restart.unit, restart.members)
+			return reconcile(
+				cleared,
+				restart.unit,
+				restart.members,
+				restart.requirements,
+			)
 		if (restart.kind === "Unit")
 			return superviseUnit(
 				cleared,

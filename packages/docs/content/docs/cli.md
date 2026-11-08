@@ -104,14 +104,14 @@ The CLI reports the cause and exits with a nonzero status.
 [Change](../transitions/). The Loader unit watches the config file's directory,
 except `node_modules`, `.graft`, `.cache` and `.git`.
 
-| Rule         | Behavior                                                                                                                                                                                              |
-| ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| What changes | Entries whose config or captured package changed are redeployed; removed entries are removed; other entries and their sessions keep running.                                                          |
-| Packages     | A module's artifact is its whole package, so an edit redeploys every entry from that package. Give plugins their own packages to reload them alone.                                                   |
-| Timing       | Saves within 100 ms coalesce. A save made while a Change runs is applied next; only the newest is kept.                                                                                               |
-| Busy         | After `Busy`, keeps the newest input and replans when a conflicting Change concludes or another edit arrives, without polling. With no named conflicts, waits for the next Change conclusion or edit. |
-| Failure      | The failed revision is logged and the next save tries again. Under the default `Restart` strategy the old entry has stopped first; the Change recovers it, or reports `RecoveryFailed`.               |
-| Not watched  | `--env-file`, `--env-dir` and installed packages; restart after changing them.                                                                                                                        |
+| Rule         | Behavior                                                                                                                                                                                                                                                                             |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| What changes | Entries whose config or captured package changed are redeployed; removed entries are removed; other entries and their sessions keep running.                                                                                                                                         |
+| Packages     | A module's artifact is its whole package, so an edit redeploys every entry from that package. Give plugins their own packages to reload them alone.                                                                                                                                  |
+| Timing       | Saves within 100 ms coalesce. A save made while a Change runs is applied next; only the newest is kept.                                                                                                                                                                              |
+| Busy         | After `Busy`, keeps the newest input and replans when a conflicting Change concludes or another edit arrives. With no named conflicts, waits for the next Change conclusion or edit. A supervisor restart ends without a Change, so the revision is also replanned after 10 seconds. |
+| Failure      | The failed revision is logged and the next save tries again. Under the default `Restart` strategy the old entry has stopped first; the Change recovers it, or reports `RecoveryFailed`.                                                                                              |
+| Not watched  | `--env-file`, `--env-dir` and installed packages; restart after changing them.                                                                                                                                                                                                       |
 
 ### Restart requirements
 

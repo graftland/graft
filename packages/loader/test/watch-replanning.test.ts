@@ -228,3 +228,23 @@ it.effect(
 			assert.strictEqual(result, failure)
 		}).pipe(Effect.scoped),
 )
+
+it.effect("replans after the fallback when no Change ends the conflict", () =>
+	Effect.gen(function* () {
+		const attempts = yield* Ref.make(0)
+		const replan = yield* replanOnBusy(
+			Stream.never,
+			Ref.update(attempts, (n) => n + 1).pipe(
+				Effect.andThen(busy(["instance:a"])),
+			),
+			Effect.never,
+		).pipe(Effect.forkChild)
+		yield* TestClock.adjust("9 seconds")
+		assert.isUndefined(replan.pollUnsafe())
+		yield* TestClock.adjust("2 seconds")
+		const result = yield* Fiber.join(replan)
+		assert.isTrue(Option.isNone(result))
+		const submitted = yield* Ref.get(attempts)
+		assert.equal(submitted, 1)
+	}),
+)

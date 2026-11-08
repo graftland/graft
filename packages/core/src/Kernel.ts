@@ -12,6 +12,7 @@ import {
 	Schema,
 	Stream,
 } from "effect"
+import { Digest } from "effect/crypto"
 
 import * as Core from "./internal/decisionCore"
 import * as Interpreter from "./internal/kernel"
@@ -306,4 +307,4 @@ export const layer = (
 				shutdown: controller.shutdown,
 			})
 		}),
-	)
+	).pipe(Layer.provide(Digest.layerWebCrypto))

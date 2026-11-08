@@ -15,10 +15,12 @@ import {
 	TxQueue,
 	TxRef,
 } from "effect"
+import { Digest } from "effect/crypto"
 
 import * as Core from "./decisionCore"
 import { waitUntil } from "./kernelDeadline"
 import { UnknownChange } from "./observation"
+import * as Recording from "./recordingCore"
 import { UnitControl } from "./unitControl"
 
 export interface Completion {
@@ -50,6 +52,7 @@ export interface Controller {
 	readonly shutdown: Effect.Effect<void>
 }
 interface Runtime {
+	readonly digest: Digest.Digest["Service"]
 	readonly state: TxRef.TxRef<Core.State>
 	readonly outbox: TxQueue.TxQueue<Core.Command>
 	readonly callEvents: TxPubSub.TxPubSub<Core.CallFact>
@@ -469,15 +472,36 @@ const submit = Effect.fnUntraced(function* (
 				readonly request: Core.InspectionInput
 		  },
 ): Effect.fn.Return<Submission> {
-	const delivery = yield* handoff(runtime, input)
+	// A keyed request is fingerprinted here, so records never hold its content.
+	const fingerprinted =
+		input._tag === "Requested" && input.request.key !== undefined
+			? {
+					...input,
+					request: {
+						...input.request,
+						fingerprint: yield* runtime.digest.digestHex(
+							Digest.sha256,
+							new TextEncoder().encode(
+								Recording.requestText(Core.normalizedIdentity(input.request)),
+							),
+						),
+					},
+				}
+			: input
+	const delivery = yield* handoff(runtime, fingerprinted)
 	return Option.isSome(delivery.waiting)
 		? yield* Deferred.await(delivery.waiting.value)
 		: delivery.result
 })
 export const make = Effect.fnUntraced(function* (
 	initial: Core.State,
-): Effect.fn.Return<Controller, never, Scope.Scope | UnitControl> {
+): Effect.fn.Return<
+	Controller,
+	never,
+	Scope.Scope | UnitControl | Digest.Digest
+> {
 	const runtime: Runtime = {
+		digest: yield* Digest.Digest,
 		state: yield* TxRef.make(initial),
 		outbox: yield* TxQueue.bounded<Core.Command>(1024 + initial.maxUnits * 256),
 		events: yield* TxPubSub.sliding<Core.Status>(64),

@@ -110,8 +110,8 @@ it without a running kernel and returns one summary per kernel run and Change
 id: stages, members, targets, outcome, `concluded`, and from the latest record
 each member's desired and actual target, health and what the attempt did
 (`NotStarted`, `Started`, `Ready`, `Failed`, `Stopped`), the phase and a
-diagnostic reference. While retained, the summary also includes the full
-rendered cause.
+diagnostic reference. While retained, the summary also includes the rendered
+cause (at most 4,096 characters).
 
 | Situation                      | Result                                                                                                                                            |
 | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -139,10 +139,12 @@ remove request keys or durable member facts.
 
 ## Retain diagnostics
 
-A **diagnostic reference** is an opaque identifier for a full rendered cause in
-`directory/diagnostics`. Journal lines keep the reference and its expiry time;
-they do not contain the cause. Diagnostic files can contain secrets: restrict
-access to this directory as you would other sensitive application data.
+A **diagnostic reference** is an opaque identifier for a rendered cause in
+`directory/diagnostics`; the kernel sends the first 4,096 characters of a longer
+cause, and the full cause stays queryable by Change id while the kernel runs.
+Journal lines keep the reference and its expiry time; they do not contain the
+cause. Diagnostic files can contain secrets: restrict access to this directory
+as you would other sensitive application data.
 
 | Setting or field      | Behavior                                                                                                                                                      |
 | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |

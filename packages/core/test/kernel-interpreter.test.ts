@@ -13,6 +13,7 @@ import {
 	Scope,
 	Stream,
 } from "effect"
+import { Digest } from "effect/crypto"
 import { TestClock } from "effect/testing"
 import { assert, it } from "@effect/vitest"
 
@@ -77,6 +78,7 @@ it.effect(
 			const core = initial()
 			const kernel = yield* make(core).pipe(
 				Effect.provideService(UnitControl, control(commands)),
+				Effect.provide(Digest.layerWebCrypto),
 			)
 			const observations = yield* Effect.forkScoped(
 				Stream.runCollect(Stream.take(kernel.changes, 2)),
@@ -130,6 +132,7 @@ it.effect(
 			})
 			const kernel = yield* make(core).pipe(
 				Effect.provideService(UnitControl, backend),
+				Effect.provide(Digest.layerWebCrypto),
 			)
 			yield* kernel.apply({ _tag: "Submit", request: request(core), now: 0 })
 			const ending = yield* terminal(kernel, "change-1")
@@ -158,6 +161,7 @@ it.effect(
 			})
 			const kernel = yield* make(core).pipe(
 				Effect.provideService(UnitControl, backend),
+				Effect.provide(Digest.layerWebCrypto),
 			)
 			yield* kernel.apply({ _tag: "Submit", request: request(core), now: 0 })
 			yield* Deferred.await(started)
@@ -186,6 +190,7 @@ it.effect(
 			const commands = yield* Queue.unbounded<Core.Command>()
 			const kernel = yield* make(core).pipe(
 				Effect.provideService(UnitControl, control(commands)),
+				Effect.provide(Digest.layerWebCrypto),
 			)
 			yield* kernel.apply({ _tag: "Submit", request: request(core), now: 0 })
 			const spawn = yield* take(commands, "Spawn")
@@ -239,6 +244,7 @@ it.effect(
 			const owner = yield* Scope.make()
 			const kernel = yield* Interpreter.make(core).pipe(
 				Effect.provideService(UnitControl, backend),
+				Effect.provide(Digest.layerWebCrypto),
 				Scope.provide(owner),
 			)
 			yield* kernel.apply({ _tag: "Submit", request: request(core), now: 0 })
@@ -276,6 +282,7 @@ it.effect(
 			})
 			const kernel = yield* make(core).pipe(
 				Effect.provideService(UnitControl, backend),
+				Effect.provide(Digest.layerWebCrypto),
 			)
 			const first = yield* kernel.submit(publicInput)
 			const handle = Option.getOrThrow(first.completion)
@@ -322,6 +329,7 @@ it.effect(
 			})
 			const kernel = yield* Interpreter.make(withDescription(initial())).pipe(
 				Effect.provideService(UnitControl, backend),
+				Effect.provide(Digest.layerWebCrypto),
 				Effect.provideService(Clock.Clock, broken),
 			)
 			yield* kernel.submit(publicInput)

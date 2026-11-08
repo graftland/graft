@@ -321,6 +321,8 @@ export interface SupervisionFact extends Supervision {
 /** A restart waiting for backoff or a conflicting owner; waiting consumes no attempt. */
 export interface PendingRestart {
 	readonly timer?: string
+	/** For `Reconcile`: the committed request's probes and trial. */
+	readonly requirements?: Requirements
 	/** `Reconcile` brings members to the state a `Committed` Change recorded; `unit` is that Change's id. */
 	readonly kind: "Members" | "Unit" | "Reconcile"
 	readonly unit: string
@@ -369,7 +371,7 @@ export interface RecordPayload {
 	readonly facts: ReadonlyArray<RecordFact>
 	/** The request key the Change was submitted with, if any. */
 	readonly key: Option.Option<string>
-	/** Canonical text of the normalized request, so a key can be compared after a restart. */
+	/** Fingerprint of the normalized request, so a key can be compared after a restart. */
 	readonly request: string
 	/** A `Phase` name; plain text so records stay readable as the phase list evolves. */
 	readonly phase: string
@@ -471,6 +473,11 @@ export interface Input {
 	readonly completion?: Completion
 	/** The Change this one reconciles after, set by the kernel. */
 	readonly origin?: string
+	/**
+	 * SHA-256 of the canonical request, set by the kernel for keyed requests; a value
+	 * the caller gives is replaced. Records keep this, never the request's content.
+	 */
+	readonly fingerprint?: string
 }
 export type Completion = "Serving" | "Committed"
 export interface RequestIdentity {
@@ -489,6 +496,7 @@ export interface Request {
 	readonly supervised?: PendingRestart
 	readonly completion?: Completion
 	readonly origin?: string
+	readonly fingerprint?: string
 	readonly boundary?: PlacementRequirement
 	readonly member?: MemberDeclaration
 	readonly operations?: ReadonlyArray<DeploymentOperation>

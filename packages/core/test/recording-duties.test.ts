@@ -494,8 +494,10 @@ it("answers a key journaled in an earlier run from its record and concludes that
 			},
 		],
 		key: "deploy-a",
+		// The kernel fingerprints keyed requests; this reducer test sets it directly.
+		fingerprint: "fingerprint-1",
 	}
-	const text = Recording.requestText(Core.normalizedIdentity(request))
+	const text = "fingerprint-1"
 	const s = initial()
 	const unit = unitOf(s, "release")
 	const registered = Core.reduce(s, {
@@ -535,7 +537,7 @@ it("answers a key journaled in an earlier run from its record and concludes that
 	)
 	const different = Core.reduce(registered.state, {
 		_tag: "Requested",
-		request: { ...request, strategy: "Overlap" },
+		request: { ...request, strategy: "Overlap", fingerprint: "fingerprint-2" },
 		now: s.now,
 	})
 	assert.equal(

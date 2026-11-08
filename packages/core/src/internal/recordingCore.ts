@@ -26,6 +26,7 @@ import type {
 	Rejection,
 	RequestIdentity,
 	State,
+	Target,
 	Unit,
 	Working,
 } from "./decisionState"
@@ -239,12 +240,26 @@ const canonical = (value: unknown): string =>
 						",",
 					)}}`
 				: `${value}`
-/** Canonical text of a normalized request; equal requests give equal text in every run. */
+/** Whether two targets select the same code, configuration and placement. */
+export const sameTarget = (a: Target, b: Target): boolean =>
+	canonical(a) === canonical(b)
+/**
+ * Canonical text of a normalized request; equal requests give equal text in every run.
+ * It contains configuration, so the kernel stores only its digest.
+ */
 export const requestText = (identity: RequestIdentity): string =>
 	Arr.join(
 		Arr.map(
 			[
 				identity.mode,
+				// Realm topology decides dependency resolution, so it is part of the request.
+				canonical(
+					Arr.map(identity.realms, (realm) => ({
+						id: realm.id,
+						parent: Option.getOrElse(realm.parent, () => ""),
+						isolated: Arr.sort(Arr.fromIterable(realm.isolated), stringOrder),
+					})),
+				),
 				identity.strategy,
 				identity.completion,
 				Arr.join(
@@ -348,8 +363,7 @@ export const request = (
 			outcome,
 			facts,
 			key: Option.fromUndefinedOr(c.request.key),
-			request:
-				c.request.identity === undefined ? "" : requestText(c.request.identity),
+			request: c.request.fingerprint ?? "",
 			phase: Option.match(c.conclusion, {
 				onNone: () => c.phase,
 				onSome: (conclusion) => conclusion.phase,
