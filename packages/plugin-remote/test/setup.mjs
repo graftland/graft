@@ -1,8 +1,52 @@
-import { copyFile, mkdir } from "node:fs/promises"
+import { spawnSync } from "node:child_process"
+import { copyFile, cp, mkdir } from "node:fs/promises"
+import { dirname, join } from "node:path"
+import { fileURLToPath } from "node:url"
 
 import { build } from "tsdown"
 
-export default async function setup() {
+export default async function setup(project) {
+	const nativeAddon = new URL("../.cache/native-addon/", import.meta.url)
+	let compiler
+	for (const command of ["cc", "gcc", "clang"]) {
+		const check = spawnSync(command, ["--version"], { encoding: "utf8" })
+		if (check.error?.code === "ENOENT") continue
+		if (check.error) throw check.error
+		if (check.status !== 0)
+			throw new Error(`${command} failed: ${check.stderr}`)
+		compiler = command
+		break
+	}
+	project.provide(
+		"nativeAddonSkipReason",
+		compiler ? "" : "No C compiler found (tried cc, gcc and clang)",
+	)
+	if (compiler) {
+		await cp(
+			new URL("./fixtures/native-addon/", import.meta.url),
+			nativeAddon,
+			{ recursive: true },
+		)
+		const compiled = spawnSync(
+			compiler,
+			[
+				"-shared",
+				"-fPIC",
+				...(process.platform === "darwin"
+					? ["-undefined", "dynamic_lookup"]
+					: []),
+				"-I",
+				join(dirname(process.execPath), "..", "include", "node"),
+				fileURLToPath(new URL("addon.c", nativeAddon)),
+				"-o",
+				fileURLToPath(new URL("addon.node", nativeAddon)),
+			],
+			{ encoding: "utf8" },
+		)
+		if (compiled.error) throw compiled.error
+		if (compiled.status !== 0)
+			throw new Error(`Native addon compilation failed: ${compiled.stderr}`)
+	}
 	await build({
 		config: false,
 		entry: [

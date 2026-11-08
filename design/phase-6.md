@@ -27,11 +27,11 @@ uses after each accepted revision.
 
 ## Module formats
 
-| Module       | Worker                    | Process   | Evidence                                   |
-| ------------ | ------------------------- | --------- | ------------------------------------------ |
-| ES module    | Supported                 | Supported | Every native test                          |
-| CommonJS     | Supported                 | Supported | `module-formats.test.ts` (both placements) |
-| Native addon | Only context-aware addons | Supported | Not tested; documented as untested         |
+| Module       | Worker                    | Process   | Evidence                                                             |
+| ------------ | ------------------------- | --------- | -------------------------------------------------------------------- |
+| ES module    | Supported                 | Supported | Every native test                                                    |
+| CommonJS     | Supported                 | Supported | `module-formats.test.ts` (both placements)                           |
+| Native addon | Only context-aware addons | Supported | `module-formats.test.ts` (compiled N-API addon, Process replacement) |
 
 ## Changed
 

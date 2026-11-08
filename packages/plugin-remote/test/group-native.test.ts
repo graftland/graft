@@ -19,9 +19,11 @@ import * as Artifact from "../src/Artifact"
 import * as Control from "../src/Control"
 import * as Units from "../src/Units"
 
+// Native imports share CPU with other integration projects; this test checks
+// restart locality, while the blocked-teardown case keeps its short stop deadline.
 const budget = {
-	total: 20000,
-	startup: 3000,
+	total: 60000,
+	startup: 10000,
 	probe: 500,
 	drain: 500,
 	stop: 500,
@@ -123,7 +125,7 @@ for (const placement of ["Worker", "Process"] as const) {
 					assert.equal(observed2, "1")
 				}).pipe(Effect.provide(f.layer))
 			}).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
-		30000,
+		90000,
 	)
 
 	it.live(
@@ -142,7 +144,8 @@ for (const placement of ["Worker", "Process"] as const) {
 						strategy: "Restart",
 						budget,
 					})
-					assert.equal((yield* handle.await).outcome, "Accepted")
+					const result = yield* handle.await
+					assert.equal(result.outcome, "Accepted", Cause.pretty(result.cause))
 					yield* exists(f.directory, "active-b-1")
 					const observed4 = yield* client.units
 					const before = Option.getOrThrow(
@@ -196,7 +199,7 @@ for (const placement of ["Worker", "Process"] as const) {
 					)
 				}).pipe(Effect.provide(f.layer))
 			}).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
-		30000,
+		90000,
 	)
 }
 
@@ -256,5 +259,5 @@ it.live(
 				assert.equal(HashSet.size(status.unconfirmedUnits), 0)
 			}).pipe(Effect.provide(f.layer))
 		}).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
-	30000,
+	90000,
 )

@@ -91,11 +91,11 @@ remain errors. Neither connection closure nor a frame error proves unit exit.
 
 ### Module formats
 
-| Module                                                     | `Worker`                                                 | `Process`                                                      |
-| ---------------------------------------------------------- | -------------------------------------------------------- | -------------------------------------------------------------- |
-| ES module                                                  | Supported                                                | Supported                                                      |
-| CommonJS (`.cjs`, or a package without `"type": "module"`) | Supported                                                | Supported                                                      |
-| Native addon (`.node`)                                     | Only if the addon supports several instances per process | Supported; each unit loads its own copy. Not covered by tests. |
+| Module                                                     | `Worker`                                                 | `Process`                                                         |
+| ---------------------------------------------------------- | -------------------------------------------------------- | ----------------------------------------------------------------- |
+| ES module                                                  | Supported                                                | Supported                                                         |
+| CommonJS (`.cjs`, or a package without `"type": "module"`) | Supported                                                | Supported                                                         |
+| Native addon (`.node`)                                     | Only if the addon supports several instances per process | Supported; tested with a compiled N-API addon across replacement. |
 
 Each reload starts a new unit, so a module's code, cache and addons are loaded
 fresh; nothing from the previous generation stays in memory.
