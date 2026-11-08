@@ -5,6 +5,22 @@ Started 2026-11-08 from `feat/architecture` (`5eb026c`). Claude and Sol
 Sources in order: `architecture.md` (v1.0), `value.md`, the phase specs,
 `review-fixes.md`, `CLAUDE.md`.
 
+## Status (2026-11-09)
+
+All items are merged into `release/0.6.0`; each has the tests named in its
+acceptance column. Notable decisions while doing them:
+
+- `graft start` had no way to declare the recording role; the kernel now accepts
+  `declareRecording` once after start, and a graft.yml entry holds the role with
+  `recording: { role, scope? }` (generic, no first-party path).
+- `Committed` removals are refused for now: reconciling them needs the removed
+  declaration.
+- An interrupted Change from an earlier kernel run gets a concluding record with
+  no outcome and phase `Interrupted`; the kernel does not resume it.
+- Backoff defaults to no delay; down reasons take precedence `Revoked`,
+  `Escalated`, `WaitingForDependency`, `RestartPending`.
+- The package manager moved to pnpm 10 because Changesets 3 needs it.
+
 ## Work items
 
 | Id  | Item                                                                                                                                                                                                                                                                | Architecture      | Owner  | Acceptance                                                                                                                                                         |
