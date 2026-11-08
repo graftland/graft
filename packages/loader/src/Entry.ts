@@ -57,6 +57,35 @@ const Fields = Schema.Struct({
 			description: "true makes the entry a group of other entries.",
 		}),
 	),
+	contract: Schema.optionalKey(
+		Schema.Struct({
+			artifact: Schema.String.annotate({
+				description:
+					"A built module selecting the contract package, relative to the config file or absolute. Use the same module for both ends of a binding.",
+			}),
+			module: Schema.String.annotate({
+				description:
+					"The contract module to load within that captured package.",
+			}),
+		}).annotate({
+			description:
+				"The RPC contract for this entry. Groups cannot declare a contract.",
+		}),
+	),
+	recording: Schema.optionalKey(
+		Schema.Struct({
+			role: Schema.String.annotate({
+				description: "The recording role this entry holds.",
+			}),
+			scope: Schema.optionalKey(Schema.Array(Schema.String)).annotateKey({
+				description:
+					"Entry ids whose Changes require recording. Defaults to every other application entry, including disabled entries.",
+			}),
+		}).annotate({
+			description:
+				"Declares this entry as the application's recorder. At most one entry may declare a role; groups cannot hold it.",
+		}),
+	),
 	inject: Schema.optionalKey(
 		Schema.Array(Schema.String).annotate({
 			description:

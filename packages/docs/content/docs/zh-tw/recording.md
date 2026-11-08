@@ -37,6 +37,29 @@ export const kernel = Kernel.layer({
 | `scope`      | 需要記錄的變更所涉及的實例。                              |
 | `maxRecords` | 未確認與已預留記錄的上限，超出的新工作會被拒絕。預設 64。 |
 
+## 從設定檔啟動
+
+在設定檔中宣告記錄者，再執行 `graft start --watch`：
+
+```yaml title="graft.yml"
+- id: release
+  name: "@graftland/plugin-release/Recorder"
+  recording: { role: release }
+  config:
+    recorder: release
+    directory: ./.graft/journal
+
+- id: checkout
+  name: ./plugins/checkout.mjs
+```
+
+| 設定              | 規則                                                                                                                         |
+| ----------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `recording.role`  | 此項目持有的角色，須與外掛註冊的角色一致。任何實作記錄協定的外掛都可以持有。                                                 |
+| `recording.scope` | 需要記錄變更的項目 id。省略時包含其他所有應用項目，包括巢狀和停用的項目；空清單表示不記錄。                                  |
+| 角色持有者        | 僅一個啟用的應用項目可以宣告角色，不能用於群組。記錄者先獨立啟動，再啟動需要記錄的項目。                                     |
+| 後續編輯          | 相同宣告可重複提交。變更或移除角色、持有者或範圍須重新啟動應用；監看模式回報 `RecordingConflict`。增刪項目也會改變預設範圍。 |
+
 ## 執行記錄者
 
 `@graftland/plugin-release/Recorder` 是一般的記錄者。將它部署為

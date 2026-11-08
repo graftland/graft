@@ -42,6 +42,29 @@ export const kernel = Kernel.layer({
 | `scope`      | Instances whose Changes need recording.                                         |
 | `maxRecords` | Bound on outstanding and promised records. Excess work is rejected. Default 64. |
 
+## Start from a config file
+
+Run `graft start --watch` with a recorder entry:
+
+```yaml title="graft.yml"
+- id: release
+  name: "@graftland/plugin-release/Recorder"
+  recording: { role: release }
+  config:
+    recorder: release
+    directory: ./.graft/journal
+
+- id: checkout
+  name: ./plugins/checkout.mjs
+```
+
+| Setting           | Rule                                                                                                                                                                                                                     |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `recording.role`  | The role this entry holds; match the role its plugin registers. Any plugin implementing the recording protocol can hold it.                                                                                              |
+| `recording.scope` | Entry ids whose Changes require recording. Omit it for every other application entry, including nested and disabled entries. An empty list records none.                                                                 |
+| Role holder       | Exactly one enabled application entry may declare a role; groups cannot. It starts separately before recorded entries.                                                                                                   |
+| Later edits       | The same declaration is accepted again. Changing or removing the role, holder or scope requires restarting the application; watch reports `RecordingConflict`. Adding or removing entries changes the default scope too. |
+
 ## Run a recorder
 
 `@graftland/plugin-release/Recorder` is an ordinary recorder. Deploy it as

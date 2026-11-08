@@ -80,3 +80,13 @@ it("routes hosted entries through registered child config constraints", () => {
 			"Identifies the entry. Graft adds one, and writes it to the file, if an entry has none.",
 	})
 })
+
+it("describes the recording role on plugin entries and forbids it on groups", () => {
+	const document = ConfigSchema.make()
+	assert.deepNestedInclude(document.definitions.Entry, {
+		"anyOf[0].properties.recording": { not: {} },
+		"anyOf[1].properties.recording.properties.role.type": "string",
+		"anyOf[1].properties.recording.properties.scope.items.type": "string",
+		"anyOf[1].properties.recording.required": ["role"],
+	})
+})
