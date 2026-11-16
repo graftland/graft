@@ -5,7 +5,9 @@ import {
 	Effect,
 	Exit,
 	Fiber,
+	Layer,
 	Option,
+	Ref,
 	Schedule,
 	Schema,
 	Stream,
@@ -13,11 +15,12 @@ import {
 } from "effect"
 import { assert, it } from "@effect/vitest"
 
-import { Fork, Graft, Plugin } from "../src/index.ts"
-import { reach, run } from "./utils.ts"
+import * as Graft from "../src/Graft.ts"
+import { CleanupError } from "../src/Mount.ts"
+import { reach, run } from "./b1c-utils.ts"
 
 for (const phase of ["initialize", "step"] as const) {
-	it.effect("configuration changes cancel retry " + phase, () =>
+	it.effect("restarts cancel retry " + phase, () =>
 		Effect.gen(function* () {
 			const entered = yield* Deferred.make<void>()
 			const cancelled = yield* Deferred.make<void>()
@@ -25,60 +28,64 @@ for (const phase of ["initialize", "step"] as const) {
 				Effect.andThen(Effect.never),
 				Effect.ensuring(Deferred.succeed(cancelled, undefined)),
 			)
-			const fork = yield* Graft.plugin(
-				Plugin.make({
+			const mode = yield* Ref.make(true)
+			const mount = yield* Graft.mount(
+				Layer.effectDiscard(
+					Effect.gen(function* () {
+						if (yield* Ref.get(mode))
+							return yield* Effect.fail("startup failure")
+					}),
+				),
+				{
 					name: "retry initialization probe",
-					config: Schema.Boolean,
 					retry:
 						phase === "initialize"
 							? Schedule.fromStep(pending)
 							: Schedule.fromStep(Effect.succeed(() => pending)),
-					apply: (broken) =>
-						broken ? Effect.fail("startup failure") : Effect.void,
-				}),
-				true,
+				},
 			)
 			yield* Deferred.await(entered)
-			yield* fork.update(false)
+			yield* Ref.set(mode, false)
+			yield* mount.restart
 			const stopped = yield* Deferred.isDone(cancelled)
 			assert.isTrue(
 				stopped,
-				"The obsolete retry must finish cleanup before the update is accepted",
+				"The obsolete retry must finish cleanup before the restart is accepted",
 			)
-			yield* reach(fork, "Active")
-			yield* fork.dispose
+			yield* reach(mount, "Active")
+			yield* mount.unmount
 		}).pipe(run),
 	)
 }
 
 for (const phase of ["initialize", "step"] as const) {
-	it.effect(`retains ${phase} cancellation cleanup in repeated disposal`, () =>
+	it.effect(`retains ${phase} cancellation cleanup in repeated unmount`, () =>
 		Effect.gen(function* () {
 			const entered = yield* Deferred.make<void>()
 			const pending = Deferred.succeed(entered, undefined).pipe(
 				Effect.andThen(Effect.never),
 				Effect.ensuring(Effect.die("retry cleanup defect")),
 			)
-			const fork = yield* Graft.plugin(
-				Plugin.make({
+			const mount = yield* Graft.mount(
+				Layer.effectDiscard(Effect.fail("published startup failure")),
+				{
 					name: "retry disposal",
 					retry:
 						phase === "initialize"
 							? Schedule.fromStep(pending)
 							: Schedule.fromStep(Effect.succeed(() => pending)),
-					apply: () => Effect.fail("published startup failure"),
-				}),
+				},
 			)
 			yield* Deferred.await(entered)
-			const result = yield* Effect.exit(fork.dispose)
-			const repeated = yield* Effect.exit(fork.dispose)
+			const result = yield* Effect.exit(mount.unmount)
+			const repeated = yield* Effect.exit(mount.unmount)
 			assert.deepStrictEqual(result, repeated)
 			assert.isTrue(Exit.isFailure(result))
 			if (Exit.isFailure(result)) {
 				const error = Cause.findErrorOption(result.cause)
 				assert.isTrue(Option.isSome(error))
 				if (Option.isSome(error)) {
-					assert.isTrue(Schema.is(Fork.CleanupError)(error.value))
+					assert.isTrue(Schema.is(CleanupError)(error.value))
 					assert.include(
 						Cause.pretty(error.value.cause),
 						"retry cleanup defect",
@@ -94,24 +101,27 @@ for (const phase of ["initialize", "step"] as const) {
 	)
 
 	it.effect(
-		`publishes ${phase} failure before waiting for another configuration`,
+		`publishes ${phase} failure before waiting for another restart`,
 		() =>
 			Effect.gen(function* () {
 				const failed = Effect.die("retry operation defect")
-				const fork = yield* Graft.plugin(
-					Plugin.make({
+				const mode = yield* Ref.make(true)
+				const mount = yield* Graft.mount(
+					Layer.effectDiscard(
+						Effect.gen(function* () {
+							if (yield* Ref.get(mode))
+								return yield* Effect.fail("startup failure")
+						}),
+					),
+					{
 						name: "retry failure",
-						config: Schema.Boolean,
 						retry:
 							phase === "initialize"
 								? Schedule.fromStep(failed)
 								: Schedule.fromStep(Effect.succeed(() => failed)),
-						apply: (broken) =>
-							broken ? Effect.fail("startup failure") : Effect.void,
-					}),
-					true,
+					},
 				)
-				const state = yield* fork.state.pipe(
+				const state = yield* mount.state.pipe(
 					Stream.filter(
 						(state) =>
 							state._tag === "Failed" &&
@@ -122,15 +132,16 @@ for (const phase of ["initialize", "step"] as const) {
 					Stream.runHead,
 				)
 				assert.isTrue(Option.isSome(state))
-				const result = yield* Effect.exit(fork.await)
+				const result = yield* Effect.exit(mount.await)
 				assert.isTrue(Exit.isFailure(result))
 				if (Exit.isFailure(result)) {
 					assert.include(Cause.pretty(result.cause), "startup failure")
 					assert.include(Cause.pretty(result.cause), "retry operation defect")
 				}
-				yield* fork.update(false)
-				yield* reach(fork, "Active")
-				yield* fork.dispose
+				yield* Ref.set(mode, false)
+				yield* mount.restart
+				yield* reach(mount, "Active")
+				yield* mount.unmount
 			}).pipe(run),
 	)
 }
@@ -141,101 +152,104 @@ it.effect("dependency changes cancel retry initialization", () =>
 			"@graftland/graft/test/retry-lifecycle.test/Ready",
 		) {}
 		const entered = yield* Deferred.make<void>()
-		const consumer = yield* Graft.plugin(
-			Plugin.make({
+		const consumer = yield* Graft.mount(
+			Layer.effectDiscard(
+				Effect.gen(function* () {
+					const value = yield* Effect.serviceOption(Ready)
+					if (Option.isNone(value)) return yield* Effect.fail("not ready")
+				}),
+			),
+			{
 				name: "retry on dependency change",
-				inject: [Plugin.optional(Ready)],
+				requires: [Graft.optional(Ready)],
 				retry: Schedule.fromStep(
 					Deferred.succeed(entered, undefined).pipe(
 						Effect.andThen(Effect.never),
 					),
 				),
-				apply: () =>
-					Effect.serviceOption(Ready).pipe(
-						Effect.flatMap((value) =>
-							Option.isSome(value) ? Effect.void : Effect.fail("not ready"),
-						),
-					),
-			}),
+			},
 		)
 		yield* Deferred.await(entered)
-		const provider = yield* Graft.plugin(
-			Plugin.service(Ready, Effect.succeed(true), { name: "ready" }),
-		)
+		const provider = yield* Graft.publish(Ready, true)
 		yield* provider.await
 		yield* reach(consumer, "Active")
-		yield* consumer.dispose
+		yield* consumer.unmount
 	}).pipe(run),
 )
 
-it.effect(
-	"disposal observes retry cleanup already started by a configuration change",
-	() =>
-		Effect.gen(function* () {
-			const entered = yield* Deferred.make<void>()
-			const cleaning = yield* Deferred.make<void>()
-			const release = yield* Deferred.make<void>()
-			const stopping = yield* Deferred.make<void>()
-			const fork = yield* Graft.plugin(
-				Plugin.make({
-					name: "retry cleanup handoff",
-					config: Schema.Boolean,
-					retry: Schedule.fromStep(
-						Effect.succeed(() =>
-							Deferred.succeed(entered, undefined).pipe(
-								Effect.andThen(Effect.never),
-								Effect.ensuring(
-									Deferred.succeed(cleaning, undefined).pipe(
-										Effect.andThen(Deferred.await(release)),
-										Effect.andThen(Effect.die("overlapping retry cleanup")),
-									),
+it.effect("unmount observes retry cleanup already started by a restart", () =>
+	Effect.gen(function* () {
+		const entered = yield* Deferred.make<void>()
+		const cleaning = yield* Deferred.make<void>()
+		const release = yield* Deferred.make<void>()
+		const stopping = yield* Deferred.make<void>()
+		const mode = yield* Ref.make(true)
+		const mount = yield* Graft.mount(
+			Layer.effectDiscard(
+				Effect.gen(function* () {
+					if (yield* Ref.get(mode)) return yield* Effect.fail("startup failure")
+				}),
+			),
+			{
+				name: "retry cleanup handoff",
+				retry: Schedule.fromStep(
+					Effect.succeed(() =>
+						Deferred.succeed(entered, undefined).pipe(
+							Effect.andThen(Effect.never),
+							Effect.ensuring(
+								Deferred.succeed(cleaning, undefined).pipe(
+									Effect.andThen(Deferred.await(release)),
+									Effect.andThen(Effect.die("overlapping retry cleanup")),
 								),
 							),
 						),
 					),
-					apply: (broken) =>
-						broken ? Effect.fail("startup failure") : Effect.void,
-				}),
-				true,
-				{
-					intercept: [
-						{
-							apply: (effect) =>
-								Effect.raceFirst(
-									effect,
-									Effect.never.pipe(
-										Effect.onInterrupt(() =>
-											Deferred.succeed(stopping, undefined),
-										),
+				),
+				intercept: [
+					{
+						apply: (effect) =>
+							Effect.raceFirst(
+								effect,
+								Effect.never.pipe(
+									Effect.onInterrupt(() =>
+										Deferred.succeed(stopping, undefined),
 									),
 								),
-						},
-					],
-				},
-			)
-			yield* Deferred.await(entered)
-			const changing = yield* Effect.forkScoped(fork.update(false))
-			yield* Deferred.await(cleaning)
-			const closing = yield* Effect.forkScoped(Effect.exit(fork.dispose))
-			yield* Deferred.await(stopping)
-			yield* Deferred.succeed(release, undefined)
-			const result = yield* Fiber.join(closing)
-			yield* Fiber.join(changing)
-			assert.isTrue(Exit.isFailure(result))
-			if (Exit.isFailure(result))
-				assert.include(Cause.pretty(result.cause), "overlapping retry cleanup")
-		}).pipe(run),
+							),
+					},
+				],
+			},
+		)
+		yield* Deferred.await(entered)
+		yield* Ref.set(mode, false)
+		const changing = yield* Effect.forkScoped(mount.restart)
+		yield* Deferred.await(cleaning)
+		const closing = yield* Effect.forkScoped(Effect.exit(mount.unmount))
+		yield* Deferred.await(stopping)
+		yield* Deferred.succeed(release, undefined)
+		const result = yield* Fiber.join(closing)
+		yield* Fiber.join(changing)
+		assert.isTrue(Exit.isFailure(result))
+		if (Exit.isFailure(result))
+			assert.include(Cause.pretty(result.cause), "overlapping retry cleanup")
+	}).pipe(run),
 )
 
 it.effect(
-	"publishes retry cancellation failures on configuration changes without replaying them at disposal",
+	"publishes retry cancellation failures on restarts without replaying them at unmount",
 	() =>
 		Effect.gen(function* () {
 			const entered = yield* Deferred.make<void>()
-			const fork = yield* Graft.plugin(
-				Plugin.make({
+			const mode = yield* Ref.make(true)
+			const mount = yield* Graft.mount(
+				Layer.effectDiscard(
+					Effect.gen(function* () {
+						if (yield* Ref.get(mode))
+							return yield* Effect.fail("startup failure")
+					}),
+				),
+				{
 					name: "retry failure handoff",
-					config: Schema.Boolean,
 					retry: Schedule.fromStep(
 						Effect.succeed(() =>
 							Deferred.succeed(entered, undefined).pipe(
@@ -244,13 +258,10 @@ it.effect(
 							),
 						),
 					),
-					apply: (broken) =>
-						broken ? Effect.fail("startup failure") : Effect.void,
-				}),
-				true,
+				},
 			)
 			yield* Deferred.await(entered)
-			const failed = yield* fork.state.pipe(
+			const failed = yield* mount.state.pipe(
 				Stream.filter(
 					(state) =>
 						state._tag === "Failed" &&
@@ -261,7 +272,8 @@ it.effect(
 				Stream.runHead,
 				Effect.forkScoped,
 			)
-			yield* fork.update(false)
+			yield* Ref.set(mode, false)
+			yield* mount.restart
 			const observed = yield* Fiber.join(failed)
 			const state = Option.getOrThrow(observed)
 			assert.strictEqual(state._tag, "Failed")
@@ -269,7 +281,7 @@ it.effect(
 				assert.include(Cause.pretty(state.cause), "startup failure")
 				assert.include(Cause.pretty(state.cause), "obsolete retry cleanup")
 			}
-			yield* reach(fork, "Active")
-			yield* fork.dispose
+			yield* reach(mount, "Active")
+			yield* mount.unmount
 		}).pipe(run),
 )

@@ -1,91 +1,89 @@
-# Resources, background work, timers and logging
+# Resources, background work and release
+
+A mount owns everything it acquires. The discipline is to give every resource
+and fiber an owner and a scope, and to let Graft close that scope at the right
+moment.
 
 ## Resources
 
-Everything `apply` acquires is released when the fork stops, in reverse order.
+Acquire resources with `Effect.acquireRelease` inside the layer. The release
+finalizer runs when the mount is torn down — after every consumer below it has
+finished:
 
 ```ts
-apply: ({ port }) =>
-	Effect.gen(function* () {
-		const server = yield* Effect.acquireRelease(
-			Effect.promise(() => listen(port)),
-			(server) => Effect.promise(() => server.close()),
-		)
-		yield* Effect.log(`listening on ${server.port}`)
-	})
+const poolLayer = Layer.scoped(
+	Pool,
+	Effect.acquireRelease(openPool(config), (pool) => pool.close()),
+)
 ```
 
-| Need                                    | Use                                                    |
-| --------------------------------------- | ------------------------------------------------------ |
-| Open and close a resource               | `Effect.acquireRelease(open, close)`                   |
-| Run something on stop                   | `Effect.addFinalizer(() => ...)`                       |
-| Release part of the work earlier        | `Effect.scoped` around it, or a child `Scope`          |
-| Wrap a promise that rejects normally    | `Effect.tryPromise({ try, catch })` with a typed error |
-| Wrap a promise whose rejection is a bug | `Effect.promise`                                       |
+- The release runs in the mount's scope, so it may still use services the mount
+  published.
+- Long cleanup delays teardown; keep finalizers bounded.
+- A failing finalizer fails the unmount with `CleanupError`, preserving the
+  original `Cause`.
 
 ## Background work
 
-Every long-running task goes through `Plugin.fork`:
+Work that must outlive the current fiber, but not the mount, goes through
+`Graft.fork`:
 
 ```ts
-apply: () =>
-	Effect.gen(function* () {
-		const feed = yield* Feed
-		yield* feed.messages.pipe(
-			Stream.runForEach((message) => Event.emit(Message, message)),
-			Plugin.fork,
-		)
-	})
-```
-
-- The fork keeps the fiber in its `FiberSet`; dropping the handle with
-  `Effect.asVoid` is fine.
-- The task inherits the services in `inject` and has its own `Scope`.
-- An unhandled failure or defect fails the whole fork with its `Cause`, then
-  `retry` applies with a fresh task group. Interruption alone is not failure.
-- To survive an error, catch it inside the task before `Plugin.fork`:
-
-```ts
-const prices = Plugin.make({
-	name: "app/prices",
-	apply: () =>
-		fetchPrices.pipe(
-			Effect.catch((error) => Effect.logWarning("poll failed", error)),
-			Effect.repeat(Schedule.spaced("5 seconds")),
-			Plugin.fork,
-			Effect.asVoid,
-		),
+const worker = Effect.gen(function* () {
+	yield* Graft.fork(
+		Effect.forever(Effect.andThen(Clock.sleep("1 minute"), refresh)),
+	)
 })
 ```
 
-Catching the error of the launch effect or of a joined fiber does not undo
-supervision. A bare `Effect.forkScoped` ends with the scope but hides its
-failures from Graft; use it only when you watch its `Exit` yourself.
+- The fiber is interrupted when the mount is torn down.
+- A failure fails the mount; add `retry` on the mount to rebuild it.
+- `Effect.forkScoped` also ties a fiber to the mount's scope, but its failure
+  does not fail the mount. Use `Graft.fork` when the failure matters.
 
-## Timers
+## Retries
 
-| Need                       | Use                                                           |
-| -------------------------- | ------------------------------------------------------------- |
-| Wait                       | `yield* Effect.sleep("2 seconds")`                            |
-| Run once later             | `Plugin.fork(Effect.delay(task, "2 seconds"))`                |
-| Repeat                     | `Plugin.fork(Effect.repeat(task, Schedule.spaced(ms)))`       |
-| Consume ticks              | `Stream.tick(ms)` in a `Plugin.fork` task                     |
-| Throttle or debounce calls | `Stream.throttle` / `Stream.debounce` over a `Queue` of calls |
-| Time out                   | `Effect.timeout`                                              |
+`retry` rebuilds a failed mount on a schedule:
 
-Durations accept milliseconds or strings such as `"5 seconds"`. Tests drive them
-with `TestClock`. Raw `setTimeout` and `setInterval` outlive the scope.
+```ts
+const mounted = Effect.gen(function* () {
+	yield* Graft.mount(flakyLayer, {
+		retry: Schedule.exponential("1 second").pipe(Schedule.jittered),
+	})
+})
+```
 
-## Logging
+- The schedule applies to a whole build attempt, not to one effect inside it.
+- Without `retry`, a failed mount waits for a requirement to change.
+- Test retries with `TestClock` by providing `TestContext`.
 
-- `Effect.log`, `logInfo`, `logWarning`, `logError`, `logDebug`.
-- Lines a plugin writes carry `graft.fork` and `graft.plugin` annotations
-  automatically; add more with `Effect.annotateLogs`.
-- Log a failure's `Cause`, not its message:
-  `Effect.logError("sync failed", cause)`.
-- The host chooses output. `graft start` prints readable lines; an embedding
-  host installs a `Logger` layer. With an embedded loader, `graft.yml` can set
-  `effect/References/MinimumLogLevel` per entry; `graft start` rejects
-  `intercept`.
-- `Graft.logs` streams recent log entries (the last 1000, then live), for admin
-  plugins and tests.
+## Releasing scopes safely: `Release`
+
+Ordinary `Scope.close` can lose a release interrupted by an enclosing
+cancellation: the finalizer's work is discarded and the cancellation looks like
+the only cause. The `Release` module keeps them distinct:
+
+```ts
+import { Release } from "@graftland/graft"
+
+const main = Effect.gen(function* () {
+	yield* Release.scoped(program) // run with its own scope, closed safely
+	yield* Release.close(scope, exit) // close an existing scope safely
+})
+```
+
+| Member               | Use                                                                                              |
+| -------------------- | ------------------------------------------------------------------------------------------------ |
+| `Release.scoped(f)`  | Run `f` in a fresh scope and close it with `Release.close`.                                      |
+| `Release.close`      | Close a scope; interrupted finalizers become a `ReleaseInterrupted` defect carried in the cause. |
+| `ReleaseInterrupted` | The release itself was interrupted; its `cause` holds the interrupts.                            |
+
+- Real failures in the release stay as they are, combined with the body's cause.
+- A release that is only interrupted (not cancelled) is reported as
+  `ReleaseInterrupted`, so it is not silently swallowed.
+- Use these when you manage scopes yourself; mounts already release safely.
+
+## Timers and clocks
+
+Use `Clock` for time and `Schedule` for delays. Under `TestClock` they advance
+on demand, so tests do not wait in real time.

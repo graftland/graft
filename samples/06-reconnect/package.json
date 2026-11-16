@@ -1,0 +1,13 @@
+{
+	"name": "@graftland-samples/06-reconnect",
+	"private": true,
+	"type": "module",
+	"description": "A dropped connection withdraws remote services, and reconnecting restores them",
+	"scripts": {
+		"start": "node src/main.ts"
+	},
+	"dependencies": {
+		"@graftland/graft": "workspace:*",
+		"effect": "4.1.2"
+	}
+}

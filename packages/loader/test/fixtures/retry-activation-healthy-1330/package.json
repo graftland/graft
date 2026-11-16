@@ -1,6 +1,0 @@
-{
-	"name": "retry-activation-healthy-1330",
-	"version": "1.0.0",
-	"type": "module",
-	"exports": "./index.mjs"
-}

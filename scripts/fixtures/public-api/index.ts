@@ -1,126 +1,79 @@
-import { Context, Effect, Layer, Schema } from "effect"
-import { Command } from "effect/cli"
-import { Rpc, RpcGroup } from "effect/rpc"
+import {
+	Context,
+	Effect,
+	Exit,
+	Layer,
+	Option,
+	Schedule,
+	Scope,
+	Stream,
+} from "effect"
 
-import { Commands } from "@graftland/cli/Commands"
-import { Event, Graft, Plugin } from "@graftland/graft"
-import { Group, Include, Loader, ModuleResolver } from "@graftland/loader"
-import * as Remote from "@graftland/plugin-remote"
+import { Graft, Mount, Release } from "@graftland/graft"
 
 class Word extends Context.Service<Word, string>()("fixture/Word") {}
-class Greeter extends Context.Service<
-	Greeter,
-	{ readonly read: Effect.Effect<string> }
->()("fixture/Greeter") {}
-const config = Schema.Struct({ greeting: Schema.String })
+class Count extends Context.Service<Count, number>()("fixture/Count") {}
 
-export const plain = Plugin.make({ name: "plain", apply: () => Effect.void })
-export const configured = Plugin.make({
-	name: "configured",
-	config,
-	apply: ({ greeting }) => Effect.log(greeting),
+const label = Context.Reference<string>("fixture/label", {
+	defaultValue: () => "default",
 })
-export const injected = Plugin.make({
-	name: "injected",
-	inject: [Word],
-	apply: () => Effect.asVoid(Word),
-})
-export const configuredAndInjected = Plugin.make({
-	name: "both",
-	config,
-	inject: [Word],
-	apply: ({ greeting }) =>
-		Effect.flatMap(Word, (word) => Effect.log(greeting, word)),
-})
-export const service = Plugin.service(Word, Effect.succeed("hello"), {
-	name: "word",
-})
-export const layer = Plugin.layer(Layer.succeed(Word, "hello"), {
-	name: "layer",
-	provides: [Word],
-})
-export const event = Event.make<[string]>("greeting")
-export const middleware = Event.middleware<string, string>(
-	"greeting middleware",
+
+const word = Layer.effect(Word, Effect.succeed("hello"))
+const count = Layer.effect(
+	Count,
+	Effect.map(Word, (value) => value.length),
 )
-export const descriptor = Remote.Contract.service(
-	Greeter,
-	RpcGroup.make(
-		Remote.Contract.operation(
-			"@app/greeter/Read",
-			1,
-			Rpc.make("Read", { success: Schema.String }),
-		),
+const maybeCount = Layer.effect(
+	Count,
+	Effect.map(
+		Effect.serviceOption(Word),
+		Option.match({ onNone: () => 0, onSome: (value) => value.length }),
 	),
-	{
-		toHandlers: (value) => ({ Read: () => value.read }),
-		fromClient: (client) => ({ read: Effect.orDie(client.Read()) }),
-	},
 )
-export const declaration: Plugin.ProvidedContract = descriptor
-export const operationCheck: Remote.Contract.OperationComparison =
-	Remote.Contract.compareOperations(
-		descriptor.operations,
-		descriptor.operations,
-	)
-export const implementation = Plugin.make({
-	name: "implementation",
-	provides: [declaration],
-	overlap: true,
-	apply: () => Graft.provide(Greeter, { read: Effect.succeed("hello") }),
-})
-export const contract = Remote.Contract.make({
-	name: "greeter",
-	config,
-	provides: [descriptor],
-})
-export const declaredError = Remote.Contract.make({
-	name: "fallible",
-	config,
-	error: Schema.Literal("unavailable"),
-})
-export const loader = Loader.plugin
-export const include = Include.Include
-export const group = Group.Group
-export const resolver = ModuleResolver.make({
-	base: "/app",
-	control: { port: 12345, host: "127.0.0.1", token: "public-api" },
-})
-export const load = Graft.plugin(Loader.plugin, [])
-export const loadFile = Graft.plugin(Include.Include, { path: "graft.yml" })
-export default Plugin.make({ name: "default", apply: () => Effect.void })
 
-export const commands = Plugin.make({
-	name: "fixture-commands",
-	inject: [Commands],
-	apply: () =>
-		Effect.flatMap(Commands, (commands) =>
-			commands.register(Command.make("example", {}, () => Effect.void)),
-		),
-})
+export default Graft.layer
 
-export const capture = Remote.Artifact.capture({
-	directory: "./built-plugin",
-	module: "index.js",
-	store: "./artifacts",
+export const layer = Graft.layer
+export const mount = Graft.mount(word)
+export const named = Graft.mount(word, {
+	name: "word",
+	retry: Schedule.exponential("100 millis"),
 })
-export const probePlugin = Plugin.make({
-	name: "public-probe",
-	apply: () => Plugin.probe("health", Effect.void),
+export const required = Graft.mount(count, { requires: [Word] })
+export const optional = Graft.mount(maybeCount, {
+	requires: [Graft.optional(Word)],
 })
+export const isolated = Graft.mount(word, { isolate: [Word] })
+export const labelled = Graft.mount(word, { isolate: [[Word, "tenant"]] })
+export const intercepted = Graft.mount(word, {
+	intercept: [Graft.intercept(label, (outer) => `${outer}!`)],
+})
+export const publication = Graft.publish(Word, "hello")
+export const background = Graft.fork(Effect.succeed(1))
+export const watch = Graft.watch(Word)
+export const awaiting = Graft.await(Word)
+export const used = Graft.use(Word, (value) => Effect.succeed(value.length))
+export const whileAvailable = Graft.whileAvailable(Word, (value) =>
+	Effect.log(value),
+)
+export const mounts = Graft.mounts
+export const logs = Graft.logs
 
-export const unitTarget = Remote.Units.target({
-	artifact: {
-		identity: {
-			version: 1,
-			algorithm: "sha256",
-			digest: "a".repeat(64),
-			module: "plugin.js",
-		},
-		directory: "./captured",
-	},
-	contract: "contract.js",
-	input: { greeting: "hello" },
-	placement: "Worker",
-})
-export const connectControl = Remote.Control.connect
+export const states = (handle: Mount.Mount) => Stream.runCollect(handle.state)
+export const settled = (handle: Mount.Mount) => handle.await
+export const stable = (handle: Mount.Mount) => handle.stable
+export const restart = (handle: Mount.Mount) => handle.restart
+export const unmount = (handle: Mount.Mount) => handle.unmount
+export const set = (value: Mount.Publication<string>) => value.set("next")
+export const children = (tree: Mount.MountTree) => tree.children
+export const options = (value: Graft.MountOptions<readonly []>) => value
+export type State = Mount.MountState
+
+export const scoped = Release.scoped(Effect.succeed(1))
+export const close = (
+	scope: Scope.Closeable,
+	exit: Exit.Exit<unknown, unknown>,
+) => Release.close(scope, exit)
+export const released = (error: Release.ReleaseInterrupted) => error
+export const conflict = (error: Graft.ServiceConflict) => error
+export const withdrawn = (error: Graft.ServiceWithdrawn) => error

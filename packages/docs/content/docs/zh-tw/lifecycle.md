@@ -1,146 +1,99 @@
 ---
 title: 生命週期
-description: 載入外掛、觀察狀態，並在執行期間修改外掛。
+description: 掛載的狀態、它的歸屬，以及拆除它的順序。
 ---
 
-## 載入外掛
+掛載不是一次性的建置。隨著圖變化，它被建置、拆除、再建置，每次都遵循固定的順序。
 
-`Graft.plugin` 載入外掛並回傳它的 fork（請參閱
-[fork 控制代碼](../fork-handle/)）：
+## 掛載狀態
 
-```ts title="app.ts"
-import { Effect, Schema } from "effect"
+| 狀態        | 含義                                            |
+| ----------- | ----------------------------------------------- |
+| `Loading`   | 正在建置 Layer，或正在發布一個值。              |
+| `Pending`   | 等待必要的服務。`missing` 列出缺少的鍵。        |
+| `Active`    | 已建置並在服務；它的服務已經發布。              |
+| `Failed`    | 建置、背景 fiber 或清理失敗。`cause` 包含一切。 |
+| `Unmounted` | 已移除。這是最後一個狀態。                      |
 
-import { Graft, Plugin } from "@graftland/graft"
+掛載會自行在狀態之間移動：
 
-const greeter = Plugin.make({
-	name: "app/greeter",
-	config: Schema.Struct({ greeting: Schema.String }),
-	apply: ({ greeting }) => Effect.log(`${greeting}, world`),
-})
+| 從        | 到          | 何時                                  |
+| --------- | ----------- | ------------------------------------- |
+| `Pending` | `Loading`   | 必要的服務出現。                      |
+| `Active`  | `Loading`   | 某個相依項目或它使用的發布發生變化。  |
+| `Failed`  | `Loading`   | 規格或相依項目變化，或 `retry` 到點。 |
+| 任何狀態  | `Unmounted` | scope 關閉，或執行 `unmount`。        |
 
-export const app = Plugin.make({
-	name: "app/app",
-	apply: () =>
-		Effect.gen(function* () {
-			const fork = yield* Graft.plugin(greeter, { greeting: "Hello" })
-			yield* fork.await
-		}),
-})
-```
+## 歸屬
 
-| 引數    | 內容                                                         |
-| ------- | ------------------------------------------------------------ |
-| 第 1 個 | 外掛。                                                       |
-| 第 2 個 | 外掛的輸入，由外掛的設定 schema 解碼。不需要設定時可以省略。 |
-| 第 3 個 | 選項：[`isolate` 和 `intercept`](../isolation/)。            |
+掛載屬於建立它的 scope。
 
-### 歸屬與停止順序
+- 關閉該 scope 會卸載它。
+- 在 Layer 裡建立的掛載是這個掛載的子掛載，父層停止或重新啟動時隨之停止。
+- `Graft.fork` 的背景 fiber 歸掛載所有；`Effect.forkScoped`
+  的 fiber 歸擁有該 scope 的一方所有。
 
-fork 隸屬於目前的 `Scope`。這個 `Scope` 關閉時，fork 就會卸載。在 `apply`
-內，目前的 `Scope` 屬於外掛自身，因此在其中載入的外掛就是它的子外掛。
+`Graft.layer` 本身隨執行階段關閉。關閉它會卸載圖中的一切。
 
-- 父外掛停止或重新啟動時，子外掛也會停止。
-- 和父外掛 `Scope`
-  中的其他內容一樣，它們依相反順序釋放：在父外掛開啟某個資源之後載入的子外掛，會在該資源關閉之前停止。
-- 子外掛如果透過 `inject`
-  使用父外掛的服務，則無論順序如何都會先停止。請參閱[服務撤回流程](../services/#服務撤回流程)。
+## 拆除順序
 
-## fork 狀態
+當掛載因變化、失敗、`restart` 或 `unmount` 被拆除時：
 
-fork 一律處於下列其中一個狀態：
+1. **停止建置**，如果它還在執行。
+2. **撤回服務**，在一筆交易裡完成，並關閉這個掛載，使它不能再發布，新的消費者也無法再租借這些服務。
+3. **排空消費者。** 等每個消費者釋放租約，然後讓它們各自依相依項目重新啟動。
+4. **停止背景 fiber** 並關閉它們的 scope，等待清理完成。
+5. **關閉掛載的 scope**，這會停止子掛載並執行終結器。
+6. **釋放掛載自己的租約**，即它需要的那些服務。
 
-| 狀態       | 含義                                         |
-| ---------- | -------------------------------------------- |
-| `Loading`  | 正在解碼設定或執行 `apply`。                 |
-| `Pending`  | 等待必要的服務，`missing` 列出缺少的服務鍵。 |
-| `Active`   | `apply` 已執行完畢，外掛正在執行。           |
-| `Failed`   | 啟動或執行失敗，`cause` 包含完整的 `Cause`。 |
-| `Disposed` | 已卸載，這是最終狀態。                       |
+| 消費者的情況         | 重新啟動之後       |
+| -------------------- | ------------------ |
+| 存在環境後備值       | 使用後備值。       |
+| 必要相依，沒有後備值 | 變成 `Pending`。   |
+| 可選相依，沒有後備值 | 不含該服務地重建。 |
 
-fork 會自動在這些狀態之間切換：
+第 3 步期間，健康的背景 fiber 及其資源對消費者的終結器仍然可用。如果排空超過 10 秒，Graft 會記錄一則警告：兩個掛載可能在互相等待。
 
-| 從        | 到         | 時機                                      |
-| --------- | ---------- | ----------------------------------------- |
-| `Pending` | `Loading`  | 所需的服務出現。                          |
-| `Active`  | `Pending`  | 所需的服務消失。                          |
-| `Failed`  | `Loading`  | 設定或相依項目變更，或 `retry` 排程觸發。 |
-| 任何狀態  | `Disposed` | fork 被卸載，或其父 Scope 關閉。          |
+拆除期間的失敗併入掛載的 `Failed` `Cause`。`unmount` 把它回報為
+`Mount.CleanupError`，它的 `cause` 保留原始原因。
 
-### 失敗與重試
+## 重新啟動與卸載
 
-| 失敗來源                       | 結果                                                                        |
-| ------------------------------ | --------------------------------------------------------------------------- |
-| `apply`                        | `Failed`，然後走一般的 `retry` 路徑。                                       |
-| `Plugin.fork` 任務（非純中斷） | 與 `apply` 相同。兄弟任務被取消並清理之後，完整的 `Cause` 仍會保留。        |
-| 建構或執行 intercept           | `Failed` 並保留完整的 `Cause`，`await` 隨之結束。`retry` 排程**不會**重試。 |
-| 單純的 `Effect.forkScoped`     | 不會回報給 supervisor。                                                     |
+| 呼叫      | 作用                                                                                                 |
+| --------- | ---------------------------------------------------------------------------------------------------- |
+| `await`   | 等到穩定（不再是 `Loading`）；`Pending` 算作穩定；`Failed` 以它的 `Cause` 失敗，即使設定了 `retry`。 |
+| `restart` | 即使什麼都沒變，也拆除並重新建置。等重建開始後才完成。                                               |
+| `unmount` | 拆除掛載並從圖中移除它，以及它下面的一切。                                                           |
+| `stable`  | 等掛載及其子掛載都不再處於 `Loading`。                                                               |
 
-對於 intercept 失敗，fork 會等待設定更新或明確呼叫
-`restart`。失敗歸屬於 supervisor 當時正在處理的 spec，包括原地更新。已經處理過的更新不會觸發再次嘗試；清理期間送達的新請求仍保持待處理。
+並行和重複的 `unmount` 呼叫共用同一個清理結果。
 
-重試如何與變更互動：
+### 掛載仍在建置時卸載
 
-- retry driver 的初始化和每一步執行，都受同一個變更監督管理。
-- 設定或相依項目變更會取消過時的操作，並等待其清理完成後再開始下一次嘗試。
-- spec 和相依項目解析均未變更時，保留原有的 `Schedule` 狀態與重試預算。
-- 排程失敗（包括變更引發的清理失敗）會合併進 activation 的 `Failed`
-  `Cause`。卸載取消重試時新發生的失敗，則進入
-  `CleanupError.cause`；先前已經發布的啟動失敗不會重播。
+在掛載仍處於 `Loading`
+時卸載，會取消建置並正常成功。只有當建置中已取得的資源終結器自身中斷或失敗時，`unmount`
+才以 `Mount.CleanupError` 失敗；這種失敗不會被回報為
+`Release.ReleaseInterrupted`。
 
-### 清理順序
+| 建置期間的終結器     | `unmount` 的 cause                 | 日誌                                                     |
+| -------------------- | ---------------------------------- | -------------------------------------------------------- |
+| 只有自中斷           | 僅含中斷原因                       | 無。                                                     |
+| 以 defect 或失敗結束 | 該 defect 或失敗，另含一個中斷原因 | 記錄一筆錯誤：`Releasing the mount's resources failed`。 |
 
-1. 停止 `apply`。
-2. 關閉發布並撤回服務。
-3. 排空所有消費者。健康的任務繼續服務消費者的 finalizer，即使這次清理是由另一個任務的失敗觸發也一樣。
-4. 停止剩餘任務並關閉它們的 Scope。
-5. 關閉 activation Scope。
-6. 釋放外掛自身相依項目的 lease。
+已經完成載入的掛載保持上面的行為不變。
 
-排空期間發生的失敗同樣保留完整的
-`Cause`，並由 Graft 記錄日誌。如果清理由失敗觸發，這些失敗會併入最終的 `Failed`
-狀態。
+## 重建就是一次新的啟用
 
-## 觀察應用程式
+每次建置都是獨立的：
 
-### fork 樹
+- 它的終結器在自己的 scope 裡執行。
+- 它的背景 fiber 是新的；沒有 fiber 能跨過一次重建。
+- 它的服務是新的值，即使還是同一個 Layer。
 
-`Graft.forks`
-是一個串流，描述整棵 fork 樹，並在每次變化時再次送出。每個節點包含 fork 的
-`id`、`name`、`input`、`state` 和 `children`：
+任何必須跨重建存活的東西，應該放在建置 `Graft.layer`
+的環境裡，或者放在一個不會被重建的父掛載裡。
 
-```ts import.meta.vitest name="lifecycle: read the fork tree"
-import { Effect, Option, Stream } from "effect"
+## 來自環境的服務
 
-import { Fork, Graft } from "@graftland/graft"
-
-import { app } from "./app.ts"
-
-const trees = await Effect.runPromise(
-	Effect.gen(function* () {
-		const fork = yield* Graft.plugin(app)
-		yield* fork.stable
-		return yield* Stream.runHead(Graft.forks)
-	}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
-)
-
-trees // => Option.some([{ id: 1, name: "app/app", input: undefined, state: Fork.ForkState.Active(), children: [{ id: 2, name: "app/greeter", input: { greeting: "Hello" }, state: Fork.ForkState.Active(), children: [] }] }])
-```
-
-### 日誌
-
-`Graft.logs` 收集使用 `Graft.layer` 的環境中的日誌，包括宿主應用程式的日誌。
-
-- 新的訂閱者會先收到最近的 1000 筆日誌。
-- 外掛執行時送出的日誌帶有 `graft.fork` 和 `graft.plugin` 註解。
-- 宿主日誌保留自己的註解，Graft 不會替它們捏造外掛身分。因此讀取日誌時，應允許這些註解缺少。
-- 日誌層級、自訂註解和 span，請見[日誌與追蹤](../best-practices/observability/)。
-
-## 相關頁面
-
-| 頁面                                           | 內容                                                |
-| ---------------------------------------------- | --------------------------------------------------- |
-| [fork 控制代碼](../fork-handle/)               | `await`、`stable`、`update`、`restart`、`dispose`。 |
-| [變更](../transitions/)                        | 在核心中部署外掛的新版本。                          |
-| [錯誤](../errors/)                             | 所有具名的錯誤，以及該如何處理。                    |
-| [疑難排解](../best-practices/troubleshooting/) | 找出 fork 為何沒有啟動或什麼也不做。                |
+建置 `Graft.layer` 的環境裡的服務無需發布即可滿足
+`requires`。它們的存在時間與那個環境一致，而不是與某個掛載一致。把連線、檔案系統和設定這類貫穿整個程式的資源放進環境。

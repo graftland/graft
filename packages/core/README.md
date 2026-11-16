@@ -5,108 +5,60 @@ English |
 |
 [繁體中文](https://github.com/graftland/graft/blob/main/packages/core/README.zh-TW.md)
 
-A plugin framework built on Effect: plugins, forks, services, isolation, events
-and logs.
-
-The supported Node.js minimum is 22.19.
+Effect layers that mount and unmount while the application runs.
 
 ```sh
-npm install @graftland/graft effect
+npm install effect @graftland/graft
 ```
 
-Define plugins with `Plugin`, run them with `Graft`, and connect them with
-services and `Event`.
+`effect` is a peer dependency, constrained to `4.1.*`. The supported Node.js
+minimum is 22.19.
 
-Use `Plugin.fork(effect)` for background work that a plugin owns.
+```ts
+import { Context, Effect, Layer } from "effect"
 
-- If a worker fails or has a defect and nobody handles it, the activation fails.
-  The failure carries its complete Cause. The activation then follows its retry
-  schedule.
-- Pure interruption of a worker body does not fail the activation.
-- After a plugin is withdrawn, healthy workers keep serving existing consumers.
-  They stop only after those consumers release their leases. This happens before
-  the activation resources close.
-- The error types of the workers are part of the plugin contract, through
-  `Plugin.Tasks<E>`.
-- Handle recoverable errors inside the worker, before you fork it.
-- Bare `Effect.forkScoped` manages lifetime, but it does not send failures to
-  Graft.
+import { Graft } from "@graftland/graft"
 
-`fork.dispose` has type `Effect<void, Fork.CleanupError>`.
+class Region extends Context.Service<Region, string>()("app/Region") {}
 
-- Concurrent and repeated callers share the same cleanup result.
-- `CleanupError.cause` keeps all the original failure reasons. If release of a
-  framework-owned Scope is interrupted, Graft reports a
-  `FinalizationInterrupted` defect whose `cause` retains the original
-  interruption. This keeps release failures visible through nested events and
-  background tasks; ordinary cancellation remains an interruption.
-- Cleanup continues through resource release and dependency lease release, even
-  when a finalizer fails.
-- Activation failures also include cleanup failures in `Failed.cause`.
-- When the parent scope closes automatically, Graft reports a cleanup error as a
-  defect. The defect keeps the original Cause.
+const region = Layer.effect(Region, Effect.succeed("eu"))
 
-`fork.state` replays the current state, emits changes, and ends with `Disposed`,
-including for subscriptions started after disposal. `fork.await` waits for this
-fork to leave `Loading`; `Pending` counts as settled and `Failed` fails with the
-plugin's cause.
+export const program = Effect.gen(function* () {
+	const mount = yield* Graft.mount(region, { name: "region" })
+	yield* mount.await
+})
+```
 
-`fork.stable` waits until this fork and its descendants have no `Loading`
-states. It also treats `Pending` and `Failed` as settled and does not fail on a
-failed child. It reads a subtree counter without constructing or subscribing to
-the fork tree. Configuration coordinators must still check their own request
-versions and queued refreshes: this barrier describes current fork states and
-does not wait for requests that have not started yet.
+## What it does
 
-These rules apply to dependencies declared in `inject`:
+- `Graft.mount` builds a layer while its `requires` are available, publishes its
+  services, and tears it down when a requirement goes away.
+- `Graft.publish` puts a value in the graph; `set` rebuilds what requires it.
+- `Graft.watch`, `await`, `use` and `whileAvailable` read services as they come
+  and go.
+- `Graft.fork` starts a background fiber owned by the mount. Its failure fails
+  the mount with the fiber's complete `Cause`; bare interruption does not.
+- `Graft.mounts` and `Graft.logs` show the mount tree and the collected logs.
 
-- A provision in the consumer's realm wins over the environment where
-  `Graft.layer` was built.
-- Required and optional consumers both restart when that provision appears or is
-  withdrawn. They fall back to the environment when it is available.
-- Provisions are never inherited from a parent plugin. Each child resolves its
-  own dependencies.
-- Ambient services stay available across realms.
-- Injected `Context.Reference` keys also fall back to inherited values and
-  intercepts, or to their defaults. They never stay `Pending` for lack of a
-  value. A provision still takes priority.
+Each mount owns a `Scope`, so a teardown stops consumers before the provider and
+then releases resources. `Mount.CleanupError` keeps every failure reason.
 
-Realm labels and service keys are independent parts of identity. This is also
-true when either one contains NUL characters. Shared labels never address
-private realms or the default root realm.
+## Entries
 
-A publication can restart its own provider through dependency changes or
-descendant scopes. Graft rejects such a publication atomically with
-`ServiceConflict`.
-
-- Required `Pending` dependencies are waiting to start. They do not count as
-  restart watchers.
-- A rejected provider waits until its configuration, its dependencies, or the
-  blocking graph change.
-
-See the [service documentation](https://docs.graft.land/services/).
-
-Plugin identity is object reference identity.
-
-- Reusing a definition refers to the same plugin.
-- `{ ...plugin }` creates a distinct plugin, even with identical fields.
-- Loading and conflict checks use this rule. They use it whatever the
-  definition's own `Equal` or `Hash` behavior is.
-
-## Resource release
-
-Use `Finalization.scoped` when interrupted finalizers must remain visible
-through enclosing cancellation. `Finalization.close` does the same for an
-existing scope. When the release cause contains only interrupts, a finalizer’s
-own interruption becomes a `FinalizationInterrupted` defect carrying the
-original cause; expected external cancellation remains an Interrupt. Causes
-containing other failures stay unchanged.
+| Entry       | Contents                                        |
+| ----------- | ----------------------------------------------- |
+| `.`         | `Graft`, `Mount` and `Release`.                 |
+| `./rpc`     | Remote services over any `effect/rpc` protocol. |
+| `./node`    | Child process and worker protocols for Node.js. |
+| `./testing` | An in-memory protocol for tests.                |
 
 ## Documentation
 
-- [Plugins](https://docs.graft.land/plugins/)
-- [Services](https://docs.graft.land/services/)
-- [Lifecycle](https://docs.graft.land/lifecycle/)
+- [Quickstart](https://graftland.github.io/graft/quickstart/)
+- [Mounting](https://graftland.github.io/graft/mounting/)
+- [Publications](https://graftland.github.io/graft/publications/)
+- [Lifecycle](https://graftland.github.io/graft/lifecycle/)
+- [Remote services](https://graftland.github.io/graft/remote/)
 
 Part of [Graft](https://github.com/graftland/graft). Licensed under
 [Apache 2.0](https://github.com/graftland/graft/blob/main/LICENSE).

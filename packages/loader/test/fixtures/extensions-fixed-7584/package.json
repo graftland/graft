@@ -1,6 +1,0 @@
-{
-	"name": "extensions-fixed-7584",
-	"version": "1.0.0",
-	"type": "module",
-	"exports": "./index.mjs"
-}

@@ -1,0 +1,13 @@
+{
+	"name": "@graftland-samples/02-publish-rebuild",
+	"private": true,
+	"type": "module",
+	"description": "Publish a value, mount a layer that requires it, and rebuild the layer when the value changes",
+	"scripts": {
+		"start": "node src/main.ts"
+	},
+	"dependencies": {
+		"@graftland/graft": "workspace:*",
+		"effect": "4.1.2"
+	}
+}

@@ -79,7 +79,7 @@ it.effect(
 			assert.strictEqual(logs.length, 1)
 			const [log] = logs
 			assert.deepStrictEqual(log?.message, [
-				"Fork cleanup failed after its dispose caller was interrupted",
+				"Releasing the mount failed after its unmount caller was interrupted",
 			])
 			assert.strictEqual(
 				Cause.squash(log?.cause ?? Cause.empty),

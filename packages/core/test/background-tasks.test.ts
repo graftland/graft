@@ -1,50 +1,128 @@
 import {
 	Array,
 	Cause,
+	Context,
 	Deferred,
 	Effect,
 	Exit,
 	Fiber,
+	Layer,
 	Option,
 	PubSub,
 	Pull,
 	Ref,
 	Schedule,
-	Schema,
 	Stream,
+	type Scope,
 } from "effect"
 import { TestClock } from "effect/testing"
 import { assert, describe, it } from "@effect/vitest"
 
-import { Graft, Plugin } from "../src/index.ts"
+import { Graft, Mount } from "../src/index.ts"
 import { RuntimeContext } from "../src/internal/runtimeContext"
 import { makeJournal, reach, run } from "./utils.ts"
 
+/**
+ * Advances virtual time in 1ms steps, yielding between steps so the retry
+ * sleep is registered before the next adjustment wakes it.
+ */
+const advanceRetry = Effect.repeat(
+	Effect.andThen(Effect.yieldNow, TestClock.adjust("1 millis")),
+	Schedule.recurs(4),
+)
+
+class Service extends Context.Service<Service, string>()(
+	"@graftland/graft/test/background-tasks.test/Service",
+) {}
+
+type Mounted<E> = Effect.Effect<
+	Mount.Mount<E>,
+	never,
+	Graft.Graft | Scope.Scope
+>
+
 describe("supervised background tasks", () => {
+	it("retains asynchronous errors in mount contracts even when launch errors are handled", () => {
+		const task = Layer.effectDiscard(
+			Graft.fork(Effect.fail("task failed" as const)),
+		)
+		const typed: Mounted<"task failed" | Graft.ServiceConflict> =
+			Graft.mount(task)
+		assert.isTrue(Effect.isEffect(typed))
+		// @ts-expect-error A task's error cannot disappear from its mount contract.
+		const quiet: Mounted<Graft.ServiceConflict> = Graft.mount(task)
+		assert.isTrue(Effect.isEffect(quiet))
+		const caught = Layer.effectDiscard(
+			Graft.fork(Effect.fail("task failed" as const)).pipe(
+				Effect.catchCause(() => Effect.void),
+				Effect.asVoid,
+			),
+		)
+		const stillTyped: Mounted<"task failed" | Graft.ServiceConflict> =
+			Graft.mount(caught)
+		assert.isTrue(Effect.isEffect(stillTyped))
+		// @ts-expect-error Handling the launch effect does not handle the worker.
+		const stillNotQuiet: Mounted<Graft.ServiceConflict> = Graft.mount(caught)
+		assert.isTrue(Effect.isEffect(stillNotQuiet))
+		const service = Layer.effect(
+			Service,
+			Graft.fork(Effect.fail("service failed" as const)).pipe(
+				Effect.as("ready"),
+			),
+		)
+		const serviceTyped: Mounted<"service failed" | Graft.ServiceConflict> =
+			Graft.mount(service)
+		assert.isTrue(Effect.isEffect(serviceTyped))
+		const layer = Layer.effect(
+			Service,
+			Graft.fork(Effect.fail("layer failed" as const)).pipe(Effect.as("ready")),
+		)
+		const layerTyped: Mounted<"layer failed" | Graft.ServiceConflict> =
+			Graft.mount(layer)
+		assert.isTrue(Effect.isEffect(layerTyped))
+		const nested = Layer.effectDiscard(
+			Graft.fork(Graft.fork(Effect.fail("nested failed" as const))).pipe(
+				Effect.asVoid,
+			),
+		)
+		const nestedTyped: Mounted<"nested failed" | Graft.ServiceConflict> =
+			Graft.mount(nested)
+		assert.isTrue(Effect.isEffect(nestedTyped))
+		const missing = Layer.effectDiscard(Graft.fork(Service).pipe(Effect.asVoid))
+		type Assert<T extends true> = T
+		type ServiceId = "@graftland/graft/test/background-tasks.test/Service"
+		type Undeclared =
+			ServiceId extends Graft.Required<readonly []> ? true : false
+		// @ts-expect-error A background task still requires declared dependencies.
+		const undeclared: Assert<Undeclared> = true
+		assert.isTrue(undeclared)
+		const missingMount = Graft.mount(missing, { requires: [Service] })
+		assert.isTrue(Effect.isEffect(missingMount))
+	})
+
 	it.effect(
-		"fails an active plugin and releases its resources after a worker fails",
+		"fails an active mount and releases its resources after a worker fails",
 		() =>
 			Effect.gen(function* () {
 				const fail = yield* Deferred.make<void>()
 				const journal = yield* makeJournal
-				const fork = yield* Graft.plugin(
-					Plugin.make({
-						name: "worker owner",
-						apply: () =>
-							Effect.gen(function* () {
-								yield* Effect.addFinalizer(() => journal.record("released"))
-								yield* Plugin.fork(
-									Deferred.await(fail).pipe(
-										Effect.andThen(Effect.fail("worker failed")),
-									),
-								)
-							}),
-					}),
+				const mount = yield* Graft.mount(
+					Layer.effectDiscard(
+						Effect.gen(function* () {
+							yield* Effect.addFinalizer(() => journal.record("released"))
+							yield* Graft.fork(
+								Deferred.await(fail).pipe(
+									Effect.andThen(Effect.fail("worker failed")),
+								),
+							)
+						}),
+					),
+					{ name: "worker owner" },
 				)
-				yield* fork.await
+				yield* mount.await
 				yield* Deferred.succeed(fail, undefined)
-				yield* reach(fork, "Failed")
-				const exit = yield* Effect.exit(fork.await)
+				yield* reach(mount, "Failed")
+				const exit = yield* Effect.exit(mount.await)
 				assert.isTrue(Exit.isFailure(exit))
 				if (Exit.isFailure(exit))
 					assert.deepStrictEqual(
@@ -60,17 +138,16 @@ describe("supervised background tasks", () => {
 		() =>
 			Effect.gen(function* () {
 				const stopped = yield* Ref.make(false)
-				const fork = yield* Graft.plugin(
-					Plugin.make({
-						name: "loading owner",
-						apply: () =>
-							Plugin.fork(Effect.fail("early failure")).pipe(
-								Effect.andThen(Effect.never),
-								Effect.ensuring(Ref.set(stopped, true)),
-							),
-					}),
+				const mount = yield* Graft.mount(
+					Layer.effectDiscard(
+						Graft.fork(Effect.fail("early failure")).pipe(
+							Effect.andThen(Effect.never),
+							Effect.ensuring(Ref.set(stopped, true)),
+						),
+					),
+					{ name: "loading owner" },
 				)
-				yield* reach(fork, "Failed")
+				yield* reach(mount, "Failed")
 				const cleaned = yield* Ref.get(stopped)
 				assert.isTrue(cleaned)
 			}).pipe(run),
@@ -82,30 +159,29 @@ describe("supervised background tasks", () => {
 			Effect.gen(function* () {
 				const fail = yield* Deferred.make<void>()
 				const started = yield* Deferred.make<void>()
-				const fork = yield* Graft.plugin(
-					Plugin.make({
-						name: "two workers",
-						apply: () =>
-							Effect.gen(function* () {
-								yield* Plugin.fork(
-									Deferred.succeed(started, undefined).pipe(
-										Effect.andThen(Effect.never),
-										Effect.ensuring(Effect.die("worker cleanup defect")),
-									),
-								)
-								yield* Plugin.fork(
-									Deferred.await(fail).pipe(
-										Effect.andThen(Effect.fail("initial failure")),
-									),
-								)
-							}),
-					}),
+				const mount = yield* Graft.mount(
+					Layer.effectDiscard(
+						Effect.gen(function* () {
+							yield* Graft.fork(
+								Deferred.succeed(started, undefined).pipe(
+									Effect.andThen(Effect.never),
+									Effect.ensuring(Effect.die("worker cleanup defect")),
+								),
+							)
+							yield* Graft.fork(
+								Deferred.await(fail).pipe(
+									Effect.andThen(Effect.fail("initial failure")),
+								),
+							)
+						}),
+					),
+					{ name: "two workers" },
 				)
-				yield* fork.await
+				yield* mount.await
 				yield* Deferred.await(started)
 				yield* Deferred.succeed(fail, undefined)
-				yield* reach(fork, "Failed")
-				const exit = yield* Effect.exit(fork.await)
+				yield* reach(mount, "Failed")
+				const exit = yield* Effect.exit(mount.await)
 				assert.isTrue(Exit.isFailure(exit))
 				if (Exit.isFailure(exit)) {
 					assert.deepStrictEqual(
@@ -126,42 +202,7 @@ describe("supervised background tasks", () => {
 	)
 
 	it.effect(
-		"uses the accepted configuration when a worker fails after an in-place update",
-		() =>
-			Effect.gen(function* () {
-				const fail = yield* Deferred.make<void>()
-				const starts = yield* Ref.make(0)
-				const fork = yield* Graft.plugin(
-					Plugin.make({
-						name: "updated owner",
-						config: Schema.String,
-						apply: () =>
-							Effect.gen(function* () {
-								yield* Ref.update(starts, (n) => n + 1)
-								yield* Plugin.fork(
-									Deferred.await(fail).pipe(
-										Effect.andThen(Effect.fail("late failure")),
-									),
-								)
-								return () => Effect.succeed(true)
-							}),
-					}),
-					"initial",
-				)
-				yield* fork.await
-				yield* fork.update("accepted")
-				yield* Deferred.succeed(fail, undefined)
-				yield* reach(fork, "Failed")
-				yield* TestClock.adjust("1 millis")
-				const count = yield* Ref.get(starts)
-				const snapshot = yield* Stream.runHead(Graft.forks)
-				assert.strictEqual(count, 1)
-				assert.strictEqual(Option.getOrThrow(snapshot)[0]?.input, "accepted")
-			}).pipe(run),
-	)
-
-	it.effect(
-		"bounds retries of background failures with the plugin schedule",
+		"bounds retries of background failures with the mount schedule",
 		() =>
 			Effect.gen(function* () {
 				const attempts = yield* Ref.make(0)
@@ -179,20 +220,19 @@ describe("supervised background tasks", () => {
 							),
 					),
 				)
-				const fork = yield* Graft.plugin(
-					Plugin.make({
-						name: "retrying workers",
-						retry,
-						apply: () =>
-							Effect.gen(function* () {
-								yield* Ref.update(attempts, (n) => n + 1)
-								yield* Plugin.fork(Effect.fail("task failed"))
-							}),
-					}),
+				const mount = yield* Graft.mount(
+					Layer.effectDiscard(
+						Effect.gen(function* () {
+							yield* Ref.update(attempts, (n) => n + 1)
+							yield* Graft.fork(Effect.fail("task failed"))
+						}),
+					),
+					{ name: "retrying workers", retry },
 				)
+				yield* advanceRetry
 				yield* Deferred.await(exhausted)
 				const count = yield* Ref.get(attempts)
-				const snapshot = yield* Stream.runHead(fork.state)
+				const snapshot = yield* Stream.runHead(mount.state)
 				assert.strictEqual(count, 2)
 				assert.strictEqual(Option.getOrThrow(snapshot)._tag, "Failed")
 			}).pipe(run),
@@ -203,20 +243,19 @@ describe("supervised background tasks", () => {
 		() =>
 			Effect.gen(function* () {
 				const worker = yield* Deferred.make<Fiber.Fiber<never>>()
-				const fork = yield* Graft.plugin(
-					Plugin.make({
-						name: "cancelled worker",
-						apply: () =>
-							Effect.gen(function* () {
-								const fiber = yield* Plugin.fork(Effect.interrupt)
-								yield* Deferred.succeed(worker, fiber)
-							}),
-					}),
+				const mount = yield* Graft.mount(
+					Layer.effectDiscard(
+						Effect.gen(function* () {
+							const fiber = yield* Graft.fork(Effect.interrupt)
+							yield* Deferred.succeed(worker, fiber)
+						}),
+					),
+					{ name: "cancelled worker" },
 				)
 				const fiber = yield* Deferred.await(worker)
 				yield* Fiber.await(fiber)
-				yield* fork.await
-				const snapshot = yield* Stream.runHead(fork.state)
+				yield* mount.await
+				const snapshot = yield* Stream.runHead(mount.state)
 				assert.strictEqual(Option.getOrThrow(snapshot)._tag, "Active")
 			}).pipe(run),
 	)
@@ -230,33 +269,32 @@ describe("supervised background tasks", () => {
 				const finish = yield* Deferred.make<void>()
 				const started = yield* Deferred.make<void>()
 				const journal = yield* makeJournal
-				const fork = yield* Graft.plugin(
-					Plugin.make({
-						name: "resource owner",
-						apply: () =>
-							Effect.gen(function* () {
-								yield* Effect.addFinalizer(() => Ref.set(live, false))
-								yield* Plugin.fork(
-									Deferred.succeed(started, undefined).pipe(
-										Effect.andThen(Effect.never),
-										Effect.ensuring(
-											Effect.gen(function* () {
-												yield* Deferred.succeed(cleaning, undefined)
-												yield* Deferred.await(finish)
-												const alive = yield* Ref.get(live)
-												yield* journal.record(
-													alive ? "live" : "released too early",
-												)
-											}),
-										),
+				const mount = yield* Graft.mount(
+					Layer.effectDiscard(
+						Effect.gen(function* () {
+							yield* Effect.addFinalizer(() => Ref.set(live, false))
+							yield* Graft.fork(
+								Deferred.succeed(started, undefined).pipe(
+									Effect.andThen(Effect.never),
+									Effect.ensuring(
+										Effect.gen(function* () {
+											yield* Deferred.succeed(cleaning, undefined)
+											yield* Deferred.await(finish)
+											const alive = yield* Ref.get(live)
+											yield* journal.record(
+												alive ? "live" : "released too early",
+											)
+										}),
 									),
-								)
-							}),
-					}),
+								),
+							)
+						}),
+					),
+					{ name: "resource owner" },
 				)
-				yield* fork.await
+				yield* mount.await
 				yield* Deferred.await(started)
-				const closing = yield* Effect.forkScoped(fork.dispose)
+				const closing = yield* Effect.forkScoped(mount.unmount)
 				yield* Deferred.await(cleaning)
 				const alive = yield* Ref.get(live)
 				assert.isTrue(alive)
@@ -267,56 +305,26 @@ describe("supervised background tasks", () => {
 				assert.isFalse(after)
 			}).pipe(run),
 	)
-	it.effect("preempts an update that starts a failing worker", () =>
-		Effect.gen(function* () {
-			const fork = yield* Graft.plugin(
-				Plugin.make({
-					name: "update launcher",
-					config: Schema.String,
-					apply: () =>
-						Effect.succeed(() =>
-							Plugin.fork(Effect.fail("update task failed")).pipe(
-								Effect.andThen(Effect.never),
-							),
-						),
-				}),
-				"initial",
-			)
-			yield* fork.await
-			yield* fork.update("processing")
-			yield* reach(fork, "Failed")
-			const exit = yield* Effect.exit(fork.await)
-			assert.isTrue(Exit.isFailure(exit))
-			if (Exit.isFailure(exit))
-				assert.deepStrictEqual(
-					Cause.findErrorOption(exit.cause),
-					Option.some("update task failed"),
-				)
-			const snapshot = yield* Stream.runHead(Graft.forks)
-			assert.strictEqual(Option.getOrThrow(snapshot)[0]?.input, "processing")
-		}).pipe(run),
-	)
 
 	it.effect(
-		"preserves worker cleanup defects when disposal wins the race",
+		"preserves worker cleanup defects when unmounting wins the race",
 		() =>
 			Effect.gen(function* () {
 				const started = yield* Deferred.make<void>()
-				const fork = yield* Graft.plugin(
-					Plugin.make({
-						name: "disposed worker",
-						apply: () =>
-							Plugin.fork(
-								Deferred.succeed(started, undefined).pipe(
-									Effect.andThen(Effect.never),
-									Effect.ensuring(Effect.die("disposed worker defect")),
-								),
-							).pipe(Effect.asVoid),
-					}),
+				const mount = yield* Graft.mount(
+					Layer.effectDiscard(
+						Graft.fork(
+							Deferred.succeed(started, undefined).pipe(
+								Effect.andThen(Effect.never),
+								Effect.ensuring(Effect.die("disposed worker defect")),
+							),
+						).pipe(Effect.asVoid),
+					),
+					{ name: "disposed worker" },
 				)
-				yield* fork.await
+				yield* mount.await
 				yield* Deferred.await(started)
-				const cleanup = yield* Effect.exit(fork.dispose)
+				const cleanup = yield* Effect.exit(mount.unmount)
 				assert.isTrue(Exit.isFailure(cleanup))
 				yield* Effect.log("Review task shutdown failures")
 				const { runtime } = yield* RuntimeContext
@@ -345,19 +353,18 @@ describe("supervised background tasks", () => {
 		() =>
 			Effect.gen(function* () {
 				const observed = yield* Deferred.make<Exit.Exit<unknown, unknown>>()
-				const fork = yield* Graft.plugin(
-					Plugin.make({
-						name: "finalizer context",
-						apply: () =>
-							Effect.gen(function* () {
-								yield* Effect.addFinalizer((exit) =>
-									Deferred.succeed(observed, exit),
-								)
-								yield* Plugin.fork(Effect.fail("resource owner failed"))
-							}),
-					}),
+				const mount = yield* Graft.mount(
+					Layer.effectDiscard(
+						Effect.gen(function* () {
+							yield* Effect.addFinalizer((exit) =>
+								Deferred.succeed(observed, exit),
+							)
+							yield* Graft.fork(Effect.fail("resource owner failed"))
+						}),
+					),
+					{ name: "finalizer context" },
 				)
-				yield* reach(fork, "Failed")
+				yield* reach(mount, "Failed")
 				const exit = yield* Deferred.await(observed)
 				assert.isTrue(Exit.isFailure(exit))
 				if (Exit.isFailure(exit))
@@ -375,25 +382,24 @@ describe("supervised background tasks", () => {
 				const finish = yield* Deferred.make<void>()
 				const released = yield* Ref.make(false)
 				const worker = yield* Deferred.make<Fiber.Fiber<void>>()
-				const fork = yield* Graft.plugin(
-					Plugin.make({
-						name: "scoped launcher",
-						apply: () =>
-							Effect.gen(function* () {
-								const fiber = yield* Plugin.fork(
-									Effect.gen(function* () {
-										yield* Effect.acquireRelease(
-											Deferred.succeed(acquired, undefined),
-											() => Ref.set(released, true),
-										)
-										yield* Deferred.await(finish)
-									}),
-								).pipe(Effect.scoped)
-								yield* Deferred.succeed(worker, fiber)
-							}),
-					}),
+				const mount = yield* Graft.mount(
+					Layer.effectDiscard(
+						Effect.gen(function* () {
+							const fiber = yield* Graft.fork(
+								Effect.gen(function* () {
+									yield* Effect.acquireRelease(
+										Deferred.succeed(acquired, undefined),
+										() => Ref.set(released, true),
+									)
+									yield* Deferred.await(finish)
+								}),
+							).pipe(Effect.scoped)
+							yield* Deferred.succeed(worker, fiber)
+						}),
+					),
+					{ name: "scoped launcher" },
 				)
-				yield* fork.await
+				yield* mount.await
 				yield* Deferred.await(acquired)
 				const early = yield* Ref.get(released)
 				assert.isFalse(early)
@@ -402,26 +408,25 @@ describe("supervised background tasks", () => {
 				yield* Fiber.join(fiber)
 				const after = yield* Ref.get(released)
 				assert.isTrue(after)
-				const snapshot = yield* Stream.runHead(fork.state)
+				const snapshot = yield* Stream.runHead(mount.state)
 				assert.strictEqual(Option.getOrThrow(snapshot)._tag, "Active")
 			}).pipe(run),
 	)
 
 	it.effect("supervises defects from a task's scoped finalizers", () =>
 		Effect.gen(function* () {
-			const fork = yield* Graft.plugin(
-				Plugin.make({
-					name: "task finalizer",
-					apply: () =>
-						Plugin.fork(
-							Effect.acquireRelease(Effect.void, () =>
-								Effect.die("scoped worker cleanup failed"),
-							),
-						).pipe(Effect.asVoid),
-				}),
+			const mount = yield* Graft.mount(
+				Layer.effectDiscard(
+					Graft.fork(
+						Effect.acquireRelease(Effect.void, () =>
+							Effect.die("scoped worker cleanup failed"),
+						),
+					).pipe(Effect.asVoid),
+				),
+				{ name: "task finalizer" },
 			)
-			yield* reach(fork, "Failed")
-			const exit = yield* Effect.exit(fork.await)
+			yield* reach(mount, "Failed")
+			const exit = yield* Effect.exit(mount.await)
 			assert.isTrue(Exit.isFailure(exit))
 			if (Exit.isFailure(exit))
 				assert.isTrue(

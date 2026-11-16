@@ -1,19 +1,17 @@
 ---
 title: Graft
-description: >-
-  園藝學 Effect 系統。面向長期執行的 TypeScript 應用程式、以 Effect
-  打造的外掛執行環境，可在行程執行期間載入、取代和卸載外掛。
+description: 在應用程式執行期間掛載和卸載 Effect 的 Layer。
 template: splash
 hero:
   title: "<span>園藝學</span> <span>Effect</span> <span>系統</span>"
   tagline:
-    Graft 在 Effect
-    上把應用程式養成一棵外掛樹。行程持續執行，任意一枝都可以載入、取代或卸載。放心修剪。
+    Graft 在相依項目可用時掛載 Effect 的
+    Layer，發布它提供的服務，並在相依項目消失時把它拆除。
   image:
     alt: Graft 標誌：一個 G，橫筆是插向圓心的箭頭
     file: ../../../src/assets/graft-mark.svg
   actions:
-    - text: 種下第一個外掛
+    - text: 掛載第一個 Layer
       link: quickstart/
       icon: right-arrow
     - text: 核心概念
@@ -25,135 +23,102 @@ import { Card, CardGrid } from "@astrojs/starlight/components"
 
 <div class="graft-manifesto">
 	<p>
-		<strong>軟體不是造出來的，是長出來的。</strong>
+		<strong>Layer 不由啟動時決定，而是長出來的。</strong>
 	</p>
 	<p>
-		外掛到來、生根、結果。有的被剪掉，有的在樹不倒的情況下被換掉。好園丁從不擔心一根枝條從哪裡來，也不擔心剪掉它會怎樣。
+		相依項目到來時，Layer
+		隨之出現；執行期間，它結出自己的服務；相依項目消失時，它被剪掉。枝條在變，整棵樹卻始終立著。
 	</p>
 	<p>
-		Graft 給你這份確定。每個外掛都嫁接在一個 scope 上，每個 fiber
-		都有歸屬，每個失敗都能追溯到根。
+		Graft 只補充 Effect 所沒有的部分：一張會變化的 Layer
+		圖，以及讓這些變化保持安全的保證。
 	</p>
 </div>
 
 ## 三項承諾
 
 <CardGrid>
-	<Card title="熱替換">
-		不砍樹，只換品種。監看模式把每次儲存變成一個變更，只重新部署受影響的外掛；變更失敗時舊外掛繼續執行。見
-		<a href="cli/#監看模式">監看模式</a>。
+	<Card title="砧木">
+		服務就是 Effect 的 <code>Context</code> 鍵。掛載在 <code>requires</code>{" "}
+		中列出所需項目，由編譯器檢查。見<a href="mounting/">掛載</a>。
 	</Card>
-	<Card title="乾淨卸載">
-		每個外掛都在自己的 <code>Scope</code>{" "}
-		中執行。外掛消失時，相依於它的部分先停止，再執行它的
-		finalizer。失敗保留完整的 <code>Cause</code>。見
-		<a href="lifecycle/">生命週期</a>。
+	<Card title="修剪">
+		每個掛載都有自己的 <code>Scope</code>
+		。相依項目消失時，使用它的部分先停止，然後才關閉它的資源。失敗保留完整的{" "}
+		<code>Cause</code>。見<a href="lifecycle/">生命週期</a>。
 	</Card>
-	<Card title="相依受檢查">
-		服務是 Effect 的 <code>Context</code> 鍵，由 layer 或其他外掛提供。外掛在{" "}
-		<code>inject</code> 中列出所需服務，由編譯器檢查。見
-		<a href="services/">服務</a>。
+	<Card title="可用性">
+		服務存在時讀取它，或者只在它存在時執行工作。撤回會中斷工作，而不是留下過期的值。見
+		<a href="availability/">服務可用性</a>。
 	</Card>
 </CardGrid>
 
-## 第一次嫁接
+## 第一次掛載
 
-```ts import.meta.vitest name="index: a first graft"
-import { Context, Effect, Option, Schema, Stream } from "effect"
+```ts import.meta.vitest name="index: a first mount"
+import { Context, Effect, Layer, Option, Stream } from "effect"
 
-import { Fork, Graft, Plugin } from "@graftland/graft"
+import { Graft, Mount } from "@graftland/graft"
 
 class Greeter extends Context.Service<
 	Greeter,
 	{ readonly greet: (name: string) => Effect.Effect<void> }
 >()("app/Greeter") {}
 
-// Publishes a Greeter while it is loaded.
-const greeter = Plugin.make({
-	name: "app/greeter",
-	config: Schema.Struct({ greeting: Schema.String }),
-	apply: ({ greeting }) =>
-		Graft.provide(Greeter, {
-			greet: (name) => Effect.log(`${greeting}, ${name}!`),
-		}),
-})
+const greeter = Layer.effect(
+	Greeter,
+	Effect.succeed({ greet: (name) => Effect.log(`Hello, ${name}!`) }),
+)
 
-// Starts once a Greeter exists, and stops before it goes away.
-const hello = Plugin.make({
-	name: "app/hello",
-	inject: [Greeter],
-	apply: () => Effect.flatMap(Greeter, (greeter) => greeter.greet("world")),
-})
-
-const states = await Effect.runPromise(
+const state = await Effect.runPromise(
 	Effect.gen(function* () {
-		const helloFork = yield* Graft.plugin(hello)
-		yield* helloFork.await
-		const waiting = yield* Stream.runHead(helloFork.state)
-
-		yield* Graft.plugin(greeter, { greeting: "Hello" })
-		const started = yield* helloFork.state.pipe(
-			Stream.filter(
-				(state) => state._tag !== "Pending" && state._tag !== "Loading",
-			),
-			Stream.runHead,
-		)
-		return [waiting, started]
+		const mount = yield* Graft.mount(greeter, { name: "greeter" })
+		yield* mount.await
+		return yield* Stream.runHead(mount.state)
 	}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
 )
-states // => [Option.some(Fork.ForkState.Pending({ missing: ["app/Greeter"] })), Option.some(Fork.ForkState.Active())]
+state // => Option.some(Mount.MountState.Active())
 ```
 
-## 找到你的方向
+## 找到你的路
 
 <CardGrid>
-	<Card title="快速上手" icon="rocket">
-		依照[快速開始](quickstart/)建立專案，並在執行中修改它。接著閱讀[核心概念](concepts/)。
+	<Card title="開始使用" icon="rocket">
+		在[快速開始](quickstart/)中掛載一個 Layer，然後閱讀[核心概念](concepts/)。
 	</Card>
-	<Card title="撰寫外掛" icon="puzzle">
-		[外掛](plugins/)、[服務](services/)和[事件](events/)：應用程式的基本組成。
+	<Card title="改變圖" icon="puzzle">
+		在[掛載](mounting/)中掛載
+		Layer，在[發布](publications/)中放入值，在[服務可用性](availability/)中隨服務出現和消失讀取它們。
 	</Card>
-	<Card title="執行應用程式" icon="setting">
-		用[設定檔](config-file/)描述它，用[命令列](cli/)啟動它，並以[監看模式](cli/#監看模式)在執行中修改它。
+	<Card title="保持安全" icon="shield">
+		[生命週期](lifecycle/)、[失敗與重試](failures-retry/)和[隔離](isolation/)說明各項保證。
 	</Card>
-	<Card title="在別處執行外掛" icon="laptop">
-		用 [Remote](remote/overview/) 把某個外掛放到子行程、worker
-		或另一台機器上執行，使用它的外掛不必修改。
-	</Card>
-	<Card title="從 cordis 遷移？" icon="open-book">
-		了解 [cordis 的概念在 Graft 中如何對應](cordis/)。
+	<Card title="在別處執行" icon="laptop">
+		透過[遠端服務](remote/)連線或 [Node](node/)
+		行程把服務提供出去，並在記憶體中測試它們。
 	</Card>
 </CardGrid>
 
 ## 文件地圖
 
-| 區段           | 頁面                                                                                       | 閱讀目的                               |
-| -------------- | ------------------------------------------------------------------------------------------ | -------------------------------------- |
-| **從這裡開始** | [快速開始](quickstart/)、[核心概念](concepts/)、[從 cordis 遷移](cordis/)                  | 了解模型並執行點什麼。                 |
-| **建構外掛**   | [外掛](plugins/)、[服務](services/)、[事件](events/)                                       | 撰寫程式碼。                           |
-| **結構**       | [生命週期](lifecycle/)、[領域](isolation/)、[Intercept](intercepts/)、[變更](transitions/) | 控制外掛之間的關係與變化。             |
-| **應用程式**   | [設定檔](config-file/)、[命令列](cli/)、[在自己的程式中使用 Graft](embedding/)             | 執行並維運應用程式。                   |
-| **Remote**     | [概覽](remote/overview/)、[單元](units/)、[綁定](bindings/)、[控制](control/)              | 讓外掛在另一個行程或另一台機器上執行。 |
-| **參考**       | [Fork 控制代碼](fork-handle/)、[Loader API](loader-api/)、[錯誤](errors/)                  | 查閱確切行為。                         |
-| **專案**       | [發版](publishing/)                                                                        | 檢查並發佈 Graft。                     |
+| 部分     | 頁面                                                                                   | 用來……                             |
+| -------- | -------------------------------------------------------------------------------------- | ---------------------------------- |
+| **開始** | [快速開始](quickstart/)、[核心概念](concepts/)                                         | 了解模型並執行起來。               |
+| **建置** | [掛載](mounting/)、[發布](publications/)、[服務可用性](availability/)                  | 把 Layer 和值放進圖裡。            |
+| **結構** | [生命週期](lifecycle/)、[失敗與重試](failures-retry/)、[隔離](isolation/)              | 控制掛載之間的關係、失敗和變化。   |
+| **執行** | [背景 fiber](background-fibers/)、[Intercept](intercepts/)、[可觀測性](observability/) | 掌握工作歸屬、調整設定、觀察過程。 |
+| **遠端** | [遠端服務](remote/)、[Node 行程](node/)、[測試](testing/)                              | 跨越行程邊界。                     |
+| **專案** | [發布流程](releases/)                                                                  | 檢查和發布 Graft。                 |
 
-## 套件
+## 一個套件
 
-| 套件                           | 功能                                                                                                 |
-| ------------------------------ | ---------------------------------------------------------------------------------------------------- |
-| `@graftland/graft`             | 基於 Effect 的外掛框架：外掛、fork、服務、隔離、事件和日誌。                                         |
-| `@graftland/loader`            | 從設定項目清單或 YAML 設定檔載入外掛。                                                               |
-| `@graftland/cli`               | 提供 `graft` 命令：`start`、`create`、`add` 和 `remove`。                                            |
-| `@graftland/create`            | 建立新的 Graft 專案：`npm create @graftland` 與 `graft create`。                                     |
-| `@graftland/package-manager`   | 使用 npm、pnpm 或 Yarn 安裝相依套件。安裝失敗時，透過[快照還原](cli/#套件管理器)復原。               |
-| `@graftland/plugin-remote`     | 讓外掛在子行程、worker 或另一台機器上執行。見 [Remote](remote/overview/)。                           |
-| `@graftland/plugin-otlp`       | 把一棵外掛子樹的 span 匯出到 OpenTelemetry。見[匯出 span](best-practices/observability/#匯出-span)。 |
-| `@graftland/plugin-http`       | [共用 HTTP 伺服器；路由與串流隨外掛的生命週期載入與卸載。](http/)                                    |
-| `@graftland/plugin-http-api`   | [即時 HttpApi 路由群組、型別化用戶端與 OpenAPI 文件。](http-api/)                                    |
-| `@graftland/plugin-mcp-server` | 把外掛的工具提供給 MCP 用戶端。見 [MCP 伺服器](mcp-server/overview/)。                               |
+Graft 只有一個套件 `@graftland/graft`，`effect` 是它的 peer 相依項目。
 
-所有套件共用同一個版本號，一同發布，並需要 `effect` 4.1.x。
+| 入口            | 內容                                   |
+| --------------- | -------------------------------------- |
+| `graft`         | `Graft`、`Mount` 與 `Release`。        |
+| `graft/rpc`     | 透過任意 `effect/rpc` 協定的遠端服務。 |
+| `graft/node`    | Node.js 的子行程和 worker 協定。       |
+| `graft/testing` | 供測試使用的記憶體協定。               |
 
-園藝只出現在這一頁。在其餘文件和程式碼裡，`Scope` 仍然叫
-`Scope`。Graft的外掛模型借鑑自
-[cordis](https://github.com/cordiverse/cordis)。cordis 在時空中組合，Graft 只照料自己的園子。
+從更早的版本升級？見[發布流程](releases/)。

@@ -1,6 +1,0 @@
-{
-	"name": "updatable",
-	"version": "1.0.0",
-	"type": "module",
-	"exports": "./index.mjs"
-}

@@ -1,37 +1,27 @@
-import { Array, Effect, Stream } from "effect"
+import { Array, Effect, Layer, Stream } from "effect"
 import { assert, it } from "@effect/vitest"
 
-import { Event, Graft, Plugin } from "../src/index.ts"
-import { run } from "./utils.ts"
+import * as Graft from "../src/Graft.ts"
+import { run } from "./b1b-utils.ts"
 
 it.effect(
-	"replays host logs without inventing plugin identity and retains plugin log annotations",
+	"replays host logs without inventing mount identity and retains mount log annotations",
 	() =>
 		Effect.gen(function* () {
-			const event = Event.make<[]>("log-context")
 			yield* Effect.log("host log")
-			const fork = yield* Graft.plugin(
-				Plugin.make({
-					name: "logged plugin",
-					apply: () =>
-						Effect.log("plugin startup").pipe(
-							Effect.andThen(
-								Event.on(event, () => Effect.log("plugin handler")),
-							),
-						),
-				}),
+			const mount = yield* Graft.mount(
+				Layer.effectDiscard(Effect.log("mount startup")),
+				{ name: "logged mount" },
 			)
-			yield* fork.await
-			yield* Event.emit(event)
-			const entries = yield* Graft.logs.pipe(Stream.take(3), Stream.runCollect)
+			yield* mount.await
+			const entries = yield* Graft.logs.pipe(Stream.take(2), Stream.runCollect)
 			assert.deepStrictEqual(
 				Array.map(entries, (entry) => entry.message),
-				[["host log"], ["plugin startup"], ["plugin handler"]],
+				[["host log"], ["mount startup"]],
 			)
 			assert.deepStrictEqual(entries[0]?.annotations, {})
-			for (const entry of Array.drop(entries, 1)) {
-				assert.strictEqual(entry.annotations["graft.fork"], fork.id)
-				assert.strictEqual(entry.annotations["graft.plugin"], "logged plugin")
-			}
+			const startup = entries[1]
+			assert.strictEqual(startup?.annotations["graft.mount"], mount.id)
+			assert.strictEqual(startup?.annotations["graft.name"], "logged mount")
 		}).pipe(run),
 )

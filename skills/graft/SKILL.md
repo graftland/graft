@@ -1,135 +1,148 @@
 ---
 name: graft
 description:
-  Use when designing, writing, testing, running or debugging code built on
-  Graft (`@graftland/graft`, `@graftland/loader`, `@graftland/cli`,
-  `@graftland/plugin-remote`): splitting an app into plugins, services and
-  events, background tasks, realms and intercepts, `graft.yml` and
-  `graft start`, embedding the runtime, running a plugin in another process or
-  on another machine, or a fork stuck `Pending` or `Failed`.
+  Use when building on Graft (`@graftland/graft`), Effect's dynamic Layer: mounting
+  layers that build and tear down as their dependencies come and go, publishing
+  values such as config, background fibers, multi-tenant isolation, watching or
+  awaiting services, running a service in another process over
+  `@graftland/graft/rpc`, or a mount stuck `Pending` or `Failed`.
 ---
 
 # Build with Graft
 
-Graft runs an application as a tree of plugins on Effect 4. A **plugin** is a
-value; loading it makes a **fork** with its own config and `Scope`. Forks
-publish **services** (Effect `Context` keys), handle **events** (typed tokens)
-and load child forks. Graft adds only what Effect lacks: services that come and
-go at run time, the plugin tree, events, config files and Changes. The rest is
-plain Effect.
+Graft is a library, not a framework. It makes Effect `Layer` a **dynamic**
+layer: mount a layer, and Graft builds it while everything it requires is
+available, publishes the services it provides, and tears it down — dependents
+first — when a requirement goes away. There is no config file, no CLI and no
+process to hand over.
 
 The API is small; the skill is the **thinking**. Shape the program around
-lifetimes and owners first, and the code becomes short.
+lifetimes and dependencies first, and the code becomes short.
 
 ## Version gate
 
-`@graftland/graft`, `@graftland/loader` and `@graftland/cli` (and
-`@graftland/plugin-remote`, if used) of one release, `effect` 4.1.x, Node.js
-22.19 or later. Check the project's `package.json`; if Effect is 3.x, stop and
-tell the user Graft needs Effect 4.
+`@graftland/graft` with `effect` `4.1.x`, Node.js 22.19 or later. Check the
+project's `package.json`; if Effect is 3.x, stop and tell the user Graft needs
+Effect 4.
 
-## Think in plugins
+The package exports three namespaces: `Graft`, `Mount` and `Release`.
 
-- **A plugin is a lifetime.** Anything that can be turned on or off,
-  reconfigured, replaced or fail on its own is a plugin, one entry in
-  `graft.yml`.
-- **A service is a capability, an event is an announcement.** Callers `inject`
-  the service they need; senders emit events without knowing who listens.
-- **The registrant owns the registration.** Handlers, services, resources and
-  child forks belong to the fork that created them and vanish with it. A
-  registry, an unregister call, an `if (client)` check or a startup order list
-  means an owner or a dependency is missing.
-- **State lives with its owner.** Other forks reach it only through that fork's
-  service or events.
-- **Variation has a home.** Per instance: a realm. Per caller: an intercept.
-  Chosen by the operator: a config field. Fixed for the process: the
-  environment.
-- **Where code runs is a deployment choice.** A plugin that must survive
-  another's crash, use its own thread or sit on another machine is still a
-  plugin that provides the same service. `graft start` runs each entry in its
-  own unit; [native units](references/remote.md) choose a Worker, Process or
-  Runner placement.
+```ts
+import { Graft, Mount, Release } from "@graftland/graft"
+```
+
+Types are qualified: a mount handle is `Mount.Mount<E>`, a publication is
+`Mount.Publication<S>`, a state is `Mount.MountState`.
+
+## Think in lifetimes
+
+| Term            | Meaning                                                                    |
+| --------------- | -------------------------------------------------------------------------- |
+| **Graph**       | The running dependency graph, provided by `Graft.layer`                    |
+| **Mount**       | One layer in the graph: built while its requirements hold, torn down after |
+| **Publication** | A value placed in the graph directly, such as config; can be updated       |
+
+- **Anything that comes and goes is a mount.** A database client, a feature, a
+  per-tenant set of services: write a normal `Layer` and mount it.
+- **Requirements live in the type.** The Layer's `RIn` says what it needs; the
+  mount's `requires` only adds Graft bookkeeping. A type error on a service read
+  means a missing requirement or `Layer`.
+- **The provider owns the service.** A service's resources belong to the mount
+  that publishes it and vanish with it. A registry, an unregister call or a
+  startup-order list means an owner is missing.
+- **Value changes are re-mounts.** Publishing a new value with `set` tears down
+  and rebuilds everything that requires it; never mutate a published value in
+  place.
+- **Where code runs is a deployment choice.** A service that must survive
+  another process's crash still provides the same key; move it with
+  [Remote](references/remote.md) and leave its consumers alone.
 
 ## Think in Effects
 
 - **Describe, then run at the edge.** Importing a module only defines values;
-  `apply` is where anything is acquired; the host runs it all.
+  building a mount is where anything is acquired; the host runs it all.
 - **Every lifetime is a `Scope`.** For each resource and fiber, name its owner
-  and when it ends. Background work goes through `Plugin.fork`.
+  and when it ends. Background work inside a mount goes through `Graft.fork`.
 - **Failures are values with a `Cause`.** Expected failures are tagged errors in
-  the type. Recover where you can act; let the rest fail the fork, which is
-  cleaned up and retried while the others keep running.
-- **Dependencies live in the type.** A type error on a service read means a
-  missing `inject`; satisfy requirements with `inject` or a `Layer`, never a
-  global, `any` or an assertion.
-- **Validate at the boundary.** A `Schema` decodes config and input once;
-  inside, values are typed and immutable.
+  the type. A failed build or background fiber puts the mount in `Failed` with
+  the full cause; add `retry` to rebuild it.
+- **Validate at the boundary.** A `Schema` decodes input once; inside, values
+  are typed and immutable.
 
-Design questions, the bookkeeping that ownership replaces, a worked example and
-the checklist: [design](references/design.md).
+Design questions, ownership, a worked example and a checklist:
+[design](references/design.md).
 
 ## Steps for new work
 
 ### 1. Design
 
 Read [design](references/design.md) and map every part of the problem to a
-plugin, service, event, realm, intercept, environment service or config field.
-Present the table to the user when the split is a real choice. Done when every
-line of the design checklist holds.
+layer, a published value, an optional requirement, a realm or a remote service.
+Present the table to the user when the split is a real choice.
 
-### 2. Declare the tokens
+### 2. Declare the keys
 
-Put every service key, event token and `Context.Reference` in a module that the
-plugin and its consumers both import, with package-scoped key strings such as
-`"@acme/graft-plugin-db/Database"`. Done when the module typechecks and
-importing it performs no I/O.
+Put every service key in a module that the provider and its consumers both
+import, with package-scoped key strings such as `"@acme/app/Database"`. Done
+when the module typechecks and importing it performs no I/O.
 
-### 3. Write the plugins
+### 3. Write the layers and mount them
 
-| The plugin…                               | Use                                               |
-| ----------------------------------------- | ------------------------------------------------- |
-| Does work, reads services, handles events | `Plugin.make({ name, config, inject, apply })`    |
-| Only builds and publishes one service     | `Plugin.service(Key, build, { name })`            |
-| Only publishes the services of a `Layer`  | `Plugin.layer(Layer, { name, inject, provides })` |
+| The part…                          | Use                                                 |
+| ---------------------------------- | --------------------------------------------------- |
+| Builds services, reads other ones  | A plain `Layer` passed to `Graft.mount`             |
+| Is external input, such as config  | `Graft.publish(Key, value)`, then `publication.set` |
+| Must run in the background         | `Graft.fork(effect)` inside the mounted layer       |
+| Needs a service that may be absent | `requires: [Graft.optional(Key)]`                   |
 
-Inside `apply`, give each kind of work to its owner: `Effect.acquireRelease` for
-resources, `Plugin.fork` for background work, `Graft.provide` for services,
-`Event.on` for handlers, `Graft.plugin` for children. Export the plugin as the
-module's default export. Name it like an Effect service key: package, module
-path under `src/` without `index`, then the binding unless it is the default
-export (`@acme/graft-plugin-db`, `@acme/graft-plugin-db/migrations/warmup`).
-Done when it typechecks with no `any` or assertion.
+```ts
+const program = Effect.gen(function* () {
+	const pricing = yield* Graft.mount(pricingLayer, {
+		name: "pricing",
+		requires: [Database, Graft.optional(Cache)],
+		retry: Schedule.exponential("1 second"),
+	})
+	const config = yield* Graft.publish(AppConfig, { region: "eu" })
+	yield* config.await // available before anyone relies on it
+	yield* config.set({ region: "us" }) // rebuilds everything requiring it
+})
+```
 
-### 4. Test
+Done when it typechecks with no `any` or assertion. Remember `publish` only
+creates the publication; `await`/`stable` is what makes it available.
 
-Load each plugin in a fresh runtime and assert on states, services, events and
-logs. Done when every behavior the design promises (waiting, starting, stopping,
-updating, the failures it handles) has a test.
+### 4. Consume across lifetimes
 
-### 5. Run
+Ordinary code reading a disappearing service uses `Graft.watch`, `Graft.await`,
+`Graft.use` or `Graft.whileAvailable`; see [services](references/services.md).
+Done when service arrival, withdrawal and return are covered by a test.
 
-Run the app with `graft start`. In development, `graft start --watch` turns each
-save into a Change that redeploys only the affected entries; a failed Change
-leaves the running entries as they are ([apps](references/apps.md)). Use
-captured native unit targets and public Kernel control when a plugin runs
-outside its caller. Contracts and configuration decoding stay inside units; see
-[native units](references/remote.md).
+### 5. Test
+
+Run each mount in a fresh graph and assert on states, services and logs. Done
+when every behavior the design promises — waiting, building, tearing down,
+updating, the failures it handles — has a test.
+
+### 6. Run and watch
+
+Provide `Graft.layer` to a `ManagedRuntime` or `runMain` like any Layer. Use
+`Graft.mounts` and `Graft.logs` to observe the graph. If a mount belongs in
+another process, wrap it with [Remote](references/remote.md) only after it works
+in process.
 
 ## References
 
-| Topic                                                  | Read                                             |
-| ------------------------------------------------------ | ------------------------------------------------ |
-| Splitting a problem, ownership, Effect habits          | [design](references/design.md)                   |
-| Config, `inject`, children, updates, retries, packages | [plugins](references/plugins.md)                 |
-| Publishing and consuming services, withdrawal order    | [services](references/services.md)               |
-| Resources, background tasks, timers, logging           | [resources](references/resources.md)             |
-| Handlers, dispatch, middleware                         | [events](references/events.md)                   |
-| Side-by-side instances and per-subtree settings        | [realms](references/realms.md)                   |
-| Tests with `@effect/vitest`                            | [testing](references/testing.md)                 |
-| `graft.yml`, the CLI, watch mode, embedding            | [apps](references/apps.md)                       |
-| A plugin in a child process, a worker or a runner      | [remote](references/remote.md)                   |
-| A fork `Pending` or `Failed`, an error name            | [troubleshooting](references/troubleshooting.md) |
+| Topic                                                      | Read                                             |
+| ---------------------------------------------------------- | ------------------------------------------------ |
+| Splitting a problem, ownership, Effect habits              | [design](references/design.md)                   |
+| Mounting layers, `requires`, `optional`, retry, publish    | [mounting](references/mounting.md)               |
+| Consuming services, `watch`/`await`/`use`/`whileAvailable` | [services](references/services.md)               |
+| Realms and intercepts for multi-tenancy                    | [isolation](references/isolation.md)             |
+| Resources, background fibers, `Release`, retries           | [resources](references/resources.md)             |
+| `mounts`, `logs`, observing the graph                      | [observability](references/observability.md)     |
+| A service in another process or thread                     | [remote](references/remote.md)                   |
+| Subprocess and worker Protocols                            | [node](references/node.md)                       |
+| In-memory Protocol and tests with `@effect/vitest`         | [testing](references/testing.md)                 |
+| A mount `Pending` or `Failed`, an error name               | [troubleshooting](references/troubleshooting.md) |
 
-`https://docs.graft.land/` is the source of truth for exact behavior. The
-repository's `samples/` folder holds runnable programs with tests, from
-`01-hello` to `05-config-file` and multi-tenant apps.
+`https://graftland.github.io/graft/` is the source of truth for exact behavior.

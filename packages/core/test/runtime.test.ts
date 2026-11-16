@@ -1,8 +1,8 @@
 import { Array, Context, Effect, Layer, Option, Stream } from "effect"
 import { assert, describe, it } from "@effect/vitest"
 
-import { Graft, Plugin } from "../src/index.ts"
-import { makeJournal, reach, run } from "./utils.ts"
+import * as Graft from "../src/Graft.ts"
+import { makeJournal, reach, run } from "./b1c-utils.ts"
 
 class Greeter extends Context.Service<
 	Greeter,
@@ -22,26 +22,27 @@ describe("runtime", () => {
 		() =>
 			Effect.gen(function* () {
 				const journal = yield* makeJournal
-				const greeter = Plugin.service(
-					Greeter,
-					Effect.succeed({
-						greet: Effect.map(Punctuation, (mark) => `hello${mark}`),
-					}),
-					{ name: "greeter" },
-				)
-				const caller = Plugin.make({
-					name: "caller",
-					inject: [Greeter],
-					apply: () =>
-						Effect.gen(function* () {
-							const greeter = yield* Greeter
-							const greeting = yield* greeter.greet
-							yield* journal.record(greeting)
-						}),
+				const greeter = Layer.succeed(Greeter, {
+					greet: Effect.map(Punctuation, (mark) => `hello${mark}`),
 				})
-				yield* Effect.flatMap(Graft.plugin(greeter), (fork) => fork.await)
-				yield* Effect.flatMap(Graft.plugin(caller), (fork) => fork.await)
-				const loud = yield* Graft.plugin(caller, undefined, {
+				const caller = Layer.effectDiscard(
+					Effect.gen(function* () {
+						const greeter = yield* Greeter
+						const greeting = yield* greeter.greet
+						yield* journal.record(greeting)
+					}),
+				)
+				yield* Effect.flatMap(
+					Graft.mount(greeter, { name: "greeter" }),
+					(mount) => mount.await,
+				)
+				yield* Effect.flatMap(
+					Graft.mount(caller, { name: "caller", requires: [Greeter] }),
+					(mount) => mount.await,
+				)
+				const loud = yield* Graft.mount(caller, {
+					name: "caller",
+					requires: [Greeter],
 					intercept: [Graft.intercept(Punctuation, (mark) => `${mark}!!`)],
 				})
 				yield* loud.await
@@ -49,18 +50,22 @@ describe("runtime", () => {
 			}).pipe(run),
 	)
 
-	it.effect("reports the fork tree", () =>
+	it.effect("reports the mount tree", () =>
 		Effect.gen(function* () {
-			const child = Plugin.make({ name: "child", apply: () => Effect.void })
-			const parent = Plugin.make({
-				name: "parent",
-				apply: () => Effect.flatMap(Graft.plugin(child), (fork) => fork.await),
-			})
-			yield* Effect.flatMap(Graft.plugin(parent), (fork) => fork.await)
-			const tree = yield* Stream.runHead(Graft.forks)
-			const shape = Option.map(
-				tree,
-				Array.map((node) => [
+			const child = Layer.effectDiscard(Effect.void)
+			const parent = Layer.effectDiscard(
+				Effect.gen(function* () {
+					const mount = yield* Graft.mount(child, { name: "child" })
+					yield* mount.await
+				}),
+			)
+			yield* Effect.flatMap(
+				Graft.mount(parent, { name: "parent" }),
+				(mount) => mount.await,
+			)
+			const tree = yield* Stream.runHead(Graft.mounts)
+			const shape = Option.map(tree, (nodes) =>
+				Array.map(nodes, (node) => [
 					node.name,
 					node.state._tag,
 					Array.map(node.children, (child) => child.name),
@@ -73,41 +78,38 @@ describe("runtime", () => {
 		}).pipe(run),
 	)
 
-	it.effect("annotates logs with the fork that wrote them", () =>
+	it.effect("annotates logs with the mount that wrote them", () =>
 		Effect.gen(function* () {
-			const chatty = Plugin.make({
-				name: "chatty",
-				apply: () => Effect.log("hi"),
-			})
-			const fork = yield* Graft.plugin(chatty)
-			yield* fork.await
+			const chatty = Layer.effectDiscard(Effect.log("hi"))
+			const mount = yield* Graft.mount(chatty, { name: "chatty" })
+			yield* mount.await
 			const entry = yield* Stream.runHead(Graft.logs)
 			assert.deepStrictEqual(
 				Option.map(entry, (entry) => [
 					entry.message,
-					entry.annotations["graft.plugin"],
-					entry.annotations["graft.fork"],
+					entry.annotations["graft.name"],
+					entry.annotations["graft.mount"],
 				]),
-				Option.some([["hi"], "chatty", fork.id]),
+				Option.some([["hi"], "chatty", mount.id]),
 			)
 		}).pipe(run),
 	)
 
 	it.effect(
-		"satisfies inject from the environment the graft was built in",
+		"satisfies requires from the environment the graph was built in",
 		() =>
 			Effect.gen(function* () {
 				const journal = yield* makeJournal
-				const plugin = Plugin.make({
+				const ambient = Layer.effectDiscard(
+					Effect.flatMap(Greeter, (greeter) =>
+						Effect.flatMap(greeter.greet, journal.record),
+					),
+				)
+				const mount = yield* Graft.mount(ambient, {
 					name: "ambient",
-					inject: [Greeter],
-					apply: () =>
-						Effect.flatMap(Greeter, (greeter) =>
-							Effect.flatMap(greeter.greet, journal.record),
-						),
+					requires: [Greeter],
 				})
-				const fork = yield* Graft.plugin(plugin)
-				yield* reach(fork, "Active")
+				yield* reach(mount, "Active")
 				yield* journal.expect(["ambient hello"])
 			}).pipe(
 				Effect.scoped,
@@ -124,7 +126,7 @@ describe("runtime", () => {
 	)
 
 	it.effect(
-		"leaves mutually dependent plugins pending instead of deadlocking",
+		"leaves mutually dependent mounts pending instead of deadlocking",
 		() =>
 			Effect.gen(function* () {
 				class Left extends Context.Service<Left, {}>()(
@@ -133,24 +135,18 @@ describe("runtime", () => {
 				class Right extends Context.Service<Right, {}>()(
 					"@graftland/graft/test/runtime.test/Right",
 				) {}
-				const left = Plugin.make({
-					name: "left",
-					inject: [Right],
-					apply: () => Graft.provide(Left, {}),
-				})
-				const right = Plugin.make({
-					name: "right",
-					inject: [Left],
-					apply: () => Graft.provide(Right, {}),
-				})
-				const forks = yield* Effect.all([
-					Graft.plugin(left),
-					Graft.plugin(right),
-				])
-				yield* Effect.forEach(forks, (fork) => reach(fork, "Pending"), {
-					discard: true,
-				})
-				yield* Effect.forEach(forks, (fork) => fork.dispose, { discard: true })
+				const left = yield* Graft.mount(
+					Layer.effect(Left, Effect.as(Right, {})),
+					{ name: "left", requires: [Right] },
+				)
+				const right = yield* Graft.mount(
+					Layer.effect(Right, Effect.as(Left, {})),
+					{ name: "right", requires: [Left] },
+				)
+				yield* reach(left, "Pending")
+				yield* reach(right, "Pending")
+				yield* left.unmount
+				yield* right.unmount
 			}).pipe(run),
 	)
 
@@ -158,35 +154,30 @@ describe("runtime", () => {
 		"survives concurrent loading and unloading of providers and consumers",
 		() =>
 			Effect.gen(function* () {
-				const provider = Plugin.service(
-					Greeter,
-					Effect.succeed({ greet: Effect.succeed("hi") }),
-					{ name: "provider" },
-				)
-				const consumer = Plugin.make({
-					name: "consumer",
-					inject: [Greeter],
-					apply: () => Effect.asVoid(Greeter),
+				const provider = Layer.succeed(Greeter, {
+					greet: Effect.succeed("hi"),
 				})
+				const consumer = Layer.effectDiscard(Effect.asVoid(Greeter))
 				const consumers = yield* Effect.forEach(Array.range(1, 20), () =>
-					Graft.plugin(consumer),
+					Graft.mount(consumer, { name: "consumer", requires: [Greeter] }),
 				)
 				yield* Effect.forEach(
 					Array.range(1, 30),
 					() =>
-						Effect.flatMap(Graft.plugin(provider), (fork) =>
-							Effect.andThen(fork.await, fork.dispose),
+						Effect.flatMap(
+							Graft.mount(provider, { name: "provider" }),
+							(mount) => Effect.andThen(mount.await, mount.unmount),
 						),
 					{ concurrency: 1 },
 				)
-				const final = yield* Graft.plugin(provider)
+				const final = yield* Graft.mount(provider, { name: "provider" })
 				yield* final.await
-				yield* Effect.forEach(consumers, (fork) => reach(fork, "Active"), {
+				yield* Effect.forEach(consumers, (mount) => reach(mount, "Active"), {
 					discard: true,
 					concurrency: "unbounded",
 				})
-				yield* final.dispose
-				yield* Effect.forEach(consumers, (fork) => reach(fork, "Pending"), {
+				yield* final.unmount
+				yield* Effect.forEach(consumers, (mount) => reach(mount, "Pending"), {
 					discard: true,
 					concurrency: "unbounded",
 				})
@@ -195,29 +186,17 @@ describe("runtime", () => {
 })
 
 describe("types", () => {
-	it("rejects requirements that inject does not declare", () => {
-		Plugin.make({
-			name: "declared",
-			inject: [Greeter],
-			apply: () => Effect.asVoid(Greeter),
-		})
-		Plugin.make({
-			name: "undeclared",
-			// @ts-expect-error Greeter is required but not injected
-			// @effect-diagnostics-next-line missingEffectContext:off -- this line asserts the type error below
-			apply: () => Effect.asVoid(Greeter),
-		})
-		Plugin.make({
-			name: "optional",
-			inject: [Plugin.optional(Greeter)],
-			// @ts-expect-error an optional dependency cannot satisfy a requirement
-			// @effect-diagnostics-next-line missingEffectContext:off -- this line asserts the type error below
-			apply: () => Effect.asVoid(Greeter),
-		})
-		Plugin.make({
-			name: "extra",
-			inject: [Greeter, Punctuation],
-			apply: () => Effect.void,
-		})
+	it("rejects requirements that requires does not declare", () => {
+		const needsGreeter = Layer.effectDiscard(Effect.asVoid(Greeter))
+		const accepted = Effect.all([
+			Graft.mount(needsGreeter, { requires: [Greeter] }),
+			Graft.mount(Layer.effectDiscard(Effect.void), {
+				requires: [Greeter, Punctuation],
+			}),
+		])
+		// @ts-expect-error Greeter is required but not declared
+		// @effect-diagnostics-next-line missingLayerContext:off -- this line asserts the type error below
+		const undeclared = Graft.mount(needsGreeter)
+		void [accepted, undeclared]
 	})
 })

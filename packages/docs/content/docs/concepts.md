@@ -1,91 +1,58 @@
 ---
-title: Core concepts
-description: The few ideas that the rest of the documentation builds on.
+title: Concepts
+description: The graph, the mounts on it and the values published into it.
 ---
 
-Graft runs an application as a **tree of plugins**. This page names the parts.
-Each row links to the page that explains it.
+Graft has three terms. Each one has a page for the rest of its rules.
 
-## Core words
+| Term            | What it is                                                                       | Learn more                       |
+| --------------- | -------------------------------------------------------------------------------- | -------------------------------- |
+| **Graph**       | The running dependency graph of services, provided by `Graft.layer`.             | [Mounting](../mounting/)         |
+| **Mount**       | One layer placed in the graph. It is built while its requirements are available. | [Mounting](../mounting/)         |
+| **Publication** | One value placed in the graph from outside a layer, such as configuration.       | [Publications](../publications/) |
 
-Each of these words has one meaning in every package and page.
-
-| Word                 | Meaning                                                                                       | Learn more                                       |
-| -------------------- | --------------------------------------------------------------------------------------------- | ------------------------------------------------ |
-| **Plugin**           | A value that declares and implements one capability: config, dependencies, services, startup. | [Plugins](../plugins/)                           |
-| **Instance**         | A plugin in a deployment with a stable identity. A Loader entry id is an instance name.       | [Config file](../config-file/)                   |
-| **Service**          | An Effect service. Graft adds publication, withdrawal and leases at run time.                 | [Services](../services/)                         |
-| **Contract**         | An Effect `RpcGroup` plus the identity of each operation.                                     | [Remote contracts](../remote/contracts/)         |
-| **Realm**            | The boundary within which services and contributions are visible.                             | [Realms](../isolation/)                          |
-| **Deployment group** | Instances that share one unit and are affected together when it ends.                         | [Units](../units/)                               |
-| **Unit**             | A Worker, child process or runner execution that hosts instances.                             | [Units](../units/)                               |
-| **Generation**       | One execution of an instance, from start to end.                                              | [Changes](../transitions/)                       |
-| **Placement**        | The kind of unit and who manages it.                                                          | [Units](../units/)                               |
-| **Artifact**         | Content-addressed plugin code whose bytes do not change while it runs.                        | [Artifacts](../remote/artifacts/)                |
-| **Release**          | Immutable artifacts, config (secrets as references) and deployment declarations.              | [Application releases](../application-releases/) |
-| **Change**           | One identified change to the running state.                                                   | [Changes](../transitions/)                       |
-| **Outcome**          | How a Change ended, with its evidence.                                                        | [Outcomes](../transitions/#outcomes)             |
-| **Probe**            | A named health check that a plugin registers.                                                 | [Probes](../probes/)                             |
-| **Trust policy**     | Operator rules for trust tiers, grants, approval and revocation.                              | [Trust](../trust/)                               |
-
-## Other terms
-
-| Term          | Meaning                                                                  | Learn more                     |
-| ------------- | ------------------------------------------------------------------------ | ------------------------------ |
-| **Fork**      | The handle of a running plugin, with its own config and `Scope`.         | [Lifecycle](../lifecycle/)     |
-| **Event**     | A typed token. Handlers belong to the plugin that registered them.       | [Events](../events/)           |
-| **Intercept** | A change to a `Context.Reference` for one fork and everything below it.  | [Intercepts](../intercepts/)   |
-| **Entry**     | One line of `graft.yml`. It deploys one instance.                        | [Config file](../config-file/) |
-| **Loader**    | Turns a list of entries into Changes, and keeps them in sync with edits. | [Loader API](../loader-api/)   |
+A **service** is an Effect `Context` key with a value. Services in the graph can
+be published by a mount, published directly, or supplied by the environment
+where `Graft.layer` was built.
 
 ## How the parts relate
 
-1. A plugin is **loaded** into a fork. Loading the same plugin twice gives two
-   independent forks.
-2. A fork can **publish** services and **inject** services from others.
-3. A fork can **load children**. They stop when the parent stops.
-4. Realms and intercepts shape what a fork and its children can see.
-5. A fork's code usually runs in the application's process. With
-   [Remote](../remote/overview/), it runs in a child process, a worker or on
-   another machine instead, and its services are still published and injected in
-   the application as usual.
+1. A mount **requires** entries: services and `Context.Reference` keys, some of
+   them optional.
+2. While every required entry is available, Graft **builds** the layer.
+3. When the build finishes, Graft **publishes** each service in the layer's
+   output context.
+4. When a required entry **changes or disappears**, Graft stops every mount that
+   uses these services, then releases the layer and builds it again.
+5. A publication's **`set`** replaces its value, which rebuilds everything that
+   requires it.
+
+Mounts form a tree: a mount created inside another mount's layer is its child.
+Closing a scope unmounts everything created in it.
 
 ## Guarantees
 
-| Guarantee                                                      | Where it comes from                                             |
-| -------------------------------------------------------------- | --------------------------------------------------------------- |
-| Dependencies are declared and checked                          | `inject` is checked by the compiler.                            |
-| Consumers stop before providers                                | [How withdrawal works](../services/#how-withdrawal-works).      |
-| Resources are always released                                  | Each fork owns a `Scope`; tasks belong to a `FiberSet`.         |
-| Failures keep their full `Cause`                               | [Fork states](../lifecycle/#fork-states), [Errors](../errors/). |
-| A failed Change restores the old plugins, or says it could not | [Change outcomes](../transitions/#outcomes).                    |
+| Guarantee                                    | Where it comes from                                                     |
+| -------------------------------------------- | ----------------------------------------------------------------------- |
+| Requirements are declared and type checked   | `requires` is checked against the layer's input type.                   |
+| Consumers stop before the provider goes away | Leases and teardown order in [lifecycle](../lifecycle/#teardown-order). |
+| Resources are always released                | Every mount owns a `Scope`; its fibers belong to it.                    |
+| Failures keep their full `Cause`             | [Failures and retries](../failures-retry/).                             |
+| A change is accepted atomically              | Publishing, withdrawal and dependency checks share a transaction.       |
 
 ## Built on Effect
 
-Graft adds no parallel vocabulary. It maps directly onto Effect:
+Graft adds no parallel vocabulary. It maps onto Effect:
 
-| In Graft                 | In Effect                          |
-| ------------------------ | ---------------------------------- |
-| Plugin activation        | An `Effect` that runs in a `Scope` |
-| Service                  | A `Context` key                    |
-| Plugin config            | A `Schema`                         |
-| Background task          | A `Fiber`, owned by a `FiberSet`   |
-| Retry                    | A `Schedule`                       |
-| Reference-based settings | `Context.Reference`                |
+| In Graft           | In Effect                                            |
+| ------------------ | ---------------------------------------------------- |
+| A mount            | A `Layer` built in a `Scope`                         |
+| A service          | A `Context` key                                      |
+| A published value  | A `Context` key with a value                         |
+| Background work    | A `Fiber` owned by the mount                         |
+| Retry              | A `Schedule`                                         |
+| Per-mount settings | `Context.Reference` and [intercepts](../intercepts/) |
+| Isolation          | Realms, described in [isolation](../isolation/)      |
 
 Graft adds only what Effect does not have: services that come and go at run
-time, the plugin tree, events, config files and Changes. For habits that keep
-plugin code within these mappings, see
-[Effect in plugins](../best-practices/effect/).
-
-## Where to go next
-
-| I want to…                       | Read                                               |
-| -------------------------------- | -------------------------------------------------- |
-| Run something now                | [Quickstart](../quickstart/)                       |
-| Write a plugin                   | [Plugins](../plugins/)                             |
-| Know why a plugin is not running | [Lifecycle](../lifecycle/)                         |
-| Configure an app without code    | [Config file](../config-file/)                     |
-| Understand an error name         | [Errors](../errors/)                               |
-| Run a plugin in another process  | [Remote](../remote/overview/)                      |
-| Plan the parts of an application | [Design an application](../best-practices/design/) |
+time, a graph of layers that reacts to that, and safe teardown across it.

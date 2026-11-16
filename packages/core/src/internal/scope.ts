@@ -1,8 +1,8 @@
 import { Cause, Deferred, Effect, Exit, Ref, Scope } from "effect"
 
-import * as Finalization from "../Finalization"
+import * as Release from "../Release"
 
-/** Keep ownership until cleanup finishes, even if a dispose caller is cancelled. */
+/** Keep ownership until cleanup finishes, even if an unmount caller is cancelled. */
 export const ownedScope = Effect.fnUntraced(function* <E = never>(
 	parent: Scope.Scope,
 	afterClose: Effect.Effect<void, E> = Effect.void,
@@ -22,7 +22,7 @@ export const ownedScope = Effect.fnUntraced(function* <E = never>(
 	const reportUnobserved = (result: Exit.Exit<void, E>) =>
 		Exit.isFailure(result)
 			? Effect.logError(
-					"Fork cleanup failed after its dispose caller was interrupted",
+					"Releasing the mount failed after its unmount caller was interrupted",
 					result.cause,
 				)
 			: Effect.void
@@ -34,7 +34,7 @@ export const ownedScope = Effect.fnUntraced(function* <E = never>(
 		yield* Effect.gen(function* () {
 			const result = yield* Effect.exit(
 				Effect.gen(function* () {
-					const closed = yield* Effect.exit(Finalization.close(scope, exit))
+					const closed = yield* Effect.exit(Release.close(scope, exit))
 					const observed = yield* Effect.exit(afterClose)
 					if (Exit.isFailure(closed))
 						return yield* Effect.failCause(
@@ -47,9 +47,9 @@ export const ownedScope = Effect.fnUntraced(function* <E = never>(
 				}),
 			)
 			yield* Deferred.done(ready, result)
-			yield* Finalization.close(link, exit).pipe(
+			yield* Release.close(link, exit).pipe(
 				Effect.catchCause((cause) =>
-					Effect.logError("Closing fork ownership failed", cause),
+					Effect.logError("Closing mount ownership failed", cause),
 				),
 			)
 			yield* Deferred.done(completed, result)
@@ -103,7 +103,7 @@ export const ownedScope = Effect.fnUntraced(function* <E = never>(
 					: // The explicit close caller owns the result: it receives it, or the worker logs it if that caller was interrupted.
 						Effect.asVoid(Effect.exit(Deferred.await(ready))),
 			),
-			Effect.ensuring(Finalization.close(workers, exit)),
+			Effect.ensuring(Release.close(workers, exit)),
 		),
 	)
 	return { scope, close }

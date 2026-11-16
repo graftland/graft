@@ -6,78 +6,59 @@ import {
 	Fiber,
 	HashMap,
 	HashSet,
+	Layer,
 	Option,
 	References,
 	Scope,
 	TxRef,
+	TxSubscriptionRef,
 } from "effect"
 import { assert, it } from "@effect/vitest"
 
-import { Graft, Plugin } from "../src/index.ts"
-import { supervise } from "../src/internal/activation.ts"
-import * as ForkStatus from "../src/internal/forkState.ts"
-import { realmKey, type GraphNode, type Spec } from "../src/internal/runtime.ts"
-import { RuntimeContext } from "../src/internal/runtimeContext"
-import * as Snapshots from "../src/internal/snapshot.ts"
-import { registrySnapshot, run } from "./utils.ts"
+import * as Graft from "../src/Graft.ts"
+import { realmKey, type Runtime } from "../src/internal/runtime.ts"
+import { RuntimeContext } from "../src/internal/runtimeContext.ts"
+import { registrySnapshot, run } from "./b1b-utils.ts"
 
 class Service extends Context.Service<Service, string>()(
 	"@graftland/graft/test/interruption.test/Service",
 ) {}
+
+/** Only the persistent publication is left once a cancelled mount is released. */
+const settled = (runtime: Runtime, expected: number) =>
+	Effect.tx(
+		Effect.gen(function* () {
+			const mounts = yield* TxSubscriptionRef.get(runtime.mounts)
+			if (HashMap.size(mounts) !== expected) return yield* Effect.txRetry
+		}),
+	)
 
 it.effect(
 	"balances acquisition leases under interruption at varied scheduler boundaries",
 	() =>
 		Effect.gen(function* () {
 			const { runtime } = yield* RuntimeContext
-			yield* Graft.provide(Service, "ready")
+			const publication = yield* Graft.publish(Service, "ready")
+			yield* publication.await
 			const registry = yield* registrySnapshot(runtime)
 			const provision = Option.getOrThrow(
 				HashMap.get(registry, realmKey("", Service.key)),
 			)
-			const plugin = Plugin.make({
-				name: "consumer",
-				inject: [Service],
-				apply: () => Effect.never,
-			})
 			for (const ticks of Array.range(0, 100)) {
-				const spec = yield* TxRef.make<Spec>({
-					plugin,
-					requested: plugin,
-					input: undefined,
-					revision: 0,
-				})
-				const initial = yield* TxRef.get(spec)
-				const processing = yield* TxRef.make(initial)
-				const node: GraphNode = {
-					id: -1,
-					parent: undefined,
-					state: TxRef.makeUnsafe<GraphNode["state"]["value"]>({
-						live: true,
-						resolutions: HashMap.empty(),
-					}),
-				}
-				const status = yield* ForkStatus.make(false, undefined, initial)
-				const supervisor = yield* supervise(
-					runtime,
-					-1,
-					spec,
-					processing,
-					node,
-					status,
-				).pipe(
+				const owner = yield* Scope.make()
+				const mounting = yield* Graft.mount(Layer.effectDiscard(Effect.never), {
+					name: "consumer",
+					requires: [Service],
+				}).pipe(
+					Scope.provide(owner),
 					Effect.provideService(References.MaxOpsBeforeYield, 4),
 					Effect.forkScoped,
 				)
 				for (const _ of Array.range(0, ticks)) yield* Effect.yieldNow
-				yield* Fiber.interrupt(supervisor)
+				yield* Fiber.interrupt(mounting)
+				yield* Scope.close(owner, Exit.void)
+				yield* settled(runtime, 1)
 				const count = yield* TxRef.get(provision.consumers)
-				const graph = yield* TxRef.get(node.state)
-				assert.strictEqual(
-					HashMap.size(graph.resolutions),
-					0,
-					`Activation leaked after ${ticks} yields`,
-				)
 				assert.strictEqual(
 					HashSet.size(count),
 					0,
@@ -88,29 +69,26 @@ it.effect(
 )
 
 it.effect(
-	"removes a fork entry when its registering caller is interrupted",
+	"removes a mount entry when its registering caller is interrupted",
 	() =>
 		Effect.gen(function* () {
 			const { runtime } = yield* RuntimeContext
 			const owner = yield* Scope.make()
-			const plugin = Plugin.make({
+			const registering = yield* Graft.mount(Layer.effectDiscard(Effect.void), {
 				name: "interrupted registration",
-				apply: () => Effect.void,
-			})
-			const registering = yield* Graft.plugin(plugin).pipe(
-				Effect.provideService(Scope.Scope, owner),
+			}).pipe(
+				Scope.provide(owner),
 				Effect.provideService(References.MaxOpsBeforeYield, 4),
 				Effect.forkScoped,
 			)
 			yield* Effect.tx(
 				Effect.gen(function* () {
-					const forks = yield* Snapshots.get(runtime.forks)
-					if (HashMap.size(forks) === 0) return yield* Effect.txRetry
+					const mounts = yield* TxSubscriptionRef.get(runtime.mounts)
+					if (HashMap.size(mounts) === 0) return yield* Effect.txRetry
 				}),
 			)
 			yield* Fiber.interrupt(registering)
 			yield* Scope.close(owner, Exit.void)
-			const remaining = yield* Snapshots.get(runtime.forks)
-			assert.strictEqual(HashMap.size(remaining), 0)
+			yield* settled(runtime, 0)
 		}).pipe(run),
 )

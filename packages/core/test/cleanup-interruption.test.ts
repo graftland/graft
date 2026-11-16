@@ -4,6 +4,7 @@ import {
 	Effect,
 	Exit,
 	Fiber,
+	Layer,
 	Option,
 	Ref,
 	Schedule,
@@ -12,14 +13,13 @@ import {
 } from "effect"
 import { assert, it } from "@effect/vitest"
 
-import { FinalizationInterrupted } from "../src/Finalization.ts"
-import { Fork, Graft, Plugin } from "../src/index.ts"
+import { Graft, Mount, Release } from "../src/index.ts"
 
 const assertReleaseInterruption = <E>(cause: Cause.Cause<E>) => {
 	assert.isAbove(cause.reasons.length, 0)
 	for (const reason of cause.reasons) {
 		assert(reason._tag === "Die")
-		assert(Schema.is(FinalizationInterrupted)(reason.defect))
+		assert(Schema.is(Release.ReleaseInterrupted)(reason.defect))
 		assert.isTrue(Cause.hasInterruptsOnly(reason.defect.cause))
 	}
 }
@@ -32,28 +32,27 @@ for (const mode of ["self", "worker"]) {
 				const completed = yield* Ref.make(false)
 				const independent = yield* Ref.make(false)
 				yield* Effect.gen(function* () {
-					const fork = yield* Graft.plugin(
-						Plugin.make({
-							name: "interrupted cleanup",
-							apply: () =>
-								Effect.gen(function* () {
-									const worker = yield* Plugin.fork(Effect.never)
-									yield* Effect.addFinalizer(() => Ref.set(independent, true))
-									yield* Effect.addFinalizer(() =>
-										(mode === "self"
-											? Effect.interrupt
-											: Fiber.join(worker)
-										).pipe(Effect.andThen(Ref.set(completed, true))),
-									)
-								}),
-						}),
+					const mount = yield* Graft.mount(
+						Layer.effectDiscard(
+							Effect.gen(function* () {
+								const worker = yield* Graft.fork(Effect.never)
+								yield* Effect.addFinalizer(() => Ref.set(independent, true))
+								yield* Effect.addFinalizer(() =>
+									(mode === "self"
+										? Effect.interrupt
+										: Fiber.join(worker)
+									).pipe(Effect.andThen(Ref.set(completed, true))),
+								)
+							}),
+						),
+						{ name: "interrupted cleanup" },
 					)
-					yield* fork.await
+					yield* mount.await
 					for (const attempt of [1, 2]) {
-						const result = yield* Effect.result(fork.dispose)
+						const result = yield* Effect.result(mount.unmount)
 						assert(
 							result._tag === "Failure",
-							`dispose ${attempt} must report unfinished cleanup`,
+							`unmount ${attempt} must report unfinished cleanup`,
 						)
 						assert.strictEqual(result.failure._tag, "CleanupError")
 						assertReleaseInterruption(result.failure.cause)
@@ -70,17 +69,15 @@ for (const mode of ["self", "worker"]) {
 it.effect("reports an interrupted finalizer when its owner scope closes", () =>
 	Effect.gen(function* () {
 		const result = yield* Effect.gen(function* () {
-			const fork = yield* Graft.plugin(
-				Plugin.make({
-					name: "automatic cleanup interruption",
-					apply: () => Effect.addFinalizer(() => Effect.interrupt),
-				}),
+			const mount = yield* Graft.mount(
+				Layer.effectDiscard(Effect.addFinalizer(() => Effect.interrupt)),
+				{ name: "automatic cleanup interruption" },
 			)
-			yield* fork.await
+			yield* mount.await
 		}).pipe(Effect.scoped, Effect.provide(Graft.layer), Effect.exit)
 		assert(Exit.isFailure(result))
 		const error = Cause.squash(result.cause)
-		assert(Schema.is(Fork.CleanupError)(error))
+		assert(Schema.is(Mount.CleanupError)(error))
 		assertReleaseInterruption(error.cause)
 	}),
 )
@@ -90,44 +87,41 @@ for (const finish of ["success", "cancel"]) {
 		Effect.gen(function* () {
 			const ready = yield* Deferred.make<void>()
 			const completed = yield* Ref.make(false)
-			const fork = yield* Graft.plugin(
-				Plugin.make({
-					name: "worker resource interruption",
-					apply: () =>
-						Plugin.fork(
-							Effect.addFinalizer(() =>
-								Effect.interrupt.pipe(Effect.andThen(Ref.set(completed, true))),
-							).pipe(
-								Effect.andThen(Deferred.succeed(ready, undefined)),
-								Effect.andThen(
-									finish === "cancel" ? Effect.never : Effect.void,
-								),
-							),
-						).pipe(Effect.asVoid),
-				}),
+			const mount = yield* Graft.mount(
+				Layer.effectDiscard(
+					Graft.fork(
+						Effect.addFinalizer(() =>
+							Effect.interrupt.pipe(Effect.andThen(Ref.set(completed, true))),
+						).pipe(
+							Effect.andThen(Deferred.succeed(ready, undefined)),
+							Effect.andThen(finish === "cancel" ? Effect.never : Effect.void),
+						),
+					).pipe(Effect.asVoid),
+				),
+				{ name: "worker resource interruption" },
 			)
 			yield* Deferred.await(ready)
 			if (finish === "success") {
-				const state = yield* fork.state.pipe(
+				const state = yield* mount.state.pipe(
 					Stream.filter((state) => state._tag === "Failed"),
 					Stream.runHead,
 				)
 				assert(Option.isSome(state) && state.value._tag === "Failed")
 				assertReleaseInterruption(state.value.cause)
-			} else yield* fork.await
+			} else yield* mount.await
 			if (finish === "cancel") {
 				for (const attempt of [1, 2]) {
-					const result = yield* Effect.result(fork.dispose)
+					const result = yield* Effect.result(mount.unmount)
 					assert(
 						result._tag === "Failure",
-						`dispose ${attempt} must retain worker cleanup`,
+						`unmount ${attempt} must retain worker cleanup`,
 					)
 					assertReleaseInterruption(result.failure.cause)
 				}
 			} else {
 				// Once supervision publishes Failed, it owns the completed attempt's cause.
-				yield* fork.dispose
-				yield* fork.dispose
+				yield* mount.unmount
+				yield* mount.unmount
 			}
 			const released = yield* Ref.get(completed)
 			assert.isFalse(released)
@@ -139,29 +133,28 @@ it.effect("reports worker scope interruption on automatic disposal", () =>
 	Effect.gen(function* () {
 		const ready = yield* Deferred.make<void>()
 		const result = yield* Effect.gen(function* () {
-			const fork = yield* Graft.plugin(
-				Plugin.make({
-					name: "owned worker resource",
-					apply: () =>
-						Plugin.fork(
-							Effect.addFinalizer(() => Effect.interrupt).pipe(
-								Effect.andThen(Deferred.succeed(ready, undefined)),
-								Effect.andThen(Effect.never),
-							),
-						).pipe(Effect.asVoid),
-				}),
+			const mount = yield* Graft.mount(
+				Layer.effectDiscard(
+					Graft.fork(
+						Effect.addFinalizer(() => Effect.interrupt).pipe(
+							Effect.andThen(Deferred.succeed(ready, undefined)),
+							Effect.andThen(Effect.never),
+						),
+					).pipe(Effect.asVoid),
+				),
+				{ name: "owned worker resource" },
 			)
-			yield* fork.await
+			yield* mount.await
 			yield* Deferred.await(ready)
 		}).pipe(Effect.scoped, Effect.provide(Graft.layer), Effect.exit)
 		assert(Exit.isFailure(result))
 		const error = Cause.squash(result.cause)
-		assert(Schema.is(Fork.CleanupError)(error))
+		assert(Schema.is(Mount.CleanupError)(error))
 		assertReleaseInterruption(error.cause)
 	}),
 )
 
-for (const phase of ["apply", "update", "retry initialization", "retry step"]) {
+for (const phase of ["apply", "retry initialization", "retry step"]) {
 	it.effect(`retains pure cleanup interruption while cancelling ${phase}`, () =>
 		Effect.gen(function* () {
 			const entered = yield* Deferred.make<void>()
@@ -169,28 +162,21 @@ for (const phase of ["apply", "update", "retry initialization", "retry step"]) {
 				Effect.andThen(Effect.never),
 				Effect.ensuring(Effect.interrupt),
 			)
-			const fork = yield* Graft.plugin(
-				Plugin.make({
+			const mount = yield* Graft.mount(
+				Layer.effectDiscard(
+					phase === "apply" ? pending : Effect.fail("startup failed"),
+				),
+				{
 					name: "interrupted operation cleanup",
 					...(phase === "retry initialization"
 						? { retry: Schedule.fromStep(pending) }
 						: phase === "retry step"
 							? { retry: Schedule.fromStep(Effect.succeed(() => pending)) }
 							: {}),
-					apply: () =>
-						phase === "apply"
-							? pending
-							: phase === "update"
-								? Effect.succeed(() => pending)
-								: Effect.fail("startup failed"),
-				}),
+				},
 			)
-			if (phase === "update") {
-				yield* fork.await
-				yield* fork.update(undefined).pipe(Effect.forkScoped)
-			}
 			yield* Deferred.await(entered)
-			const result = yield* Effect.result(fork.dispose)
+			const result = yield* Effect.result(mount.unmount)
 			assert(result._tag === "Failure")
 			assert.strictEqual(result.failure._tag, "CleanupError")
 			assert.isTrue(Cause.hasInterruptsOnly(result.failure.cause))

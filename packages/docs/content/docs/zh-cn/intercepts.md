@@ -1,187 +1,74 @@
 ---
 title: Intercept
-description: 为一个 fork 及其所有后代修改某项设置。
+description: 为某个挂载及其下所有挂载调整一个 Context.Reference。
 ---
 
-intercept 为一个 fork 及其所有后代修改 `Context.Reference`
-的值。Reference 是始终有值的键。Effect 自身的设置就是 Reference，例如每行日志附带的注解。
+**intercept** 为某个挂载改变一个 `Context.Reference`
+的值。该挂载及其下的 Layer 和子挂载读到调整后的值，应用的其余部分保持原值。
 
-| 你想要……                        | 使用                                                    |
-| ------------------------------- | ------------------------------------------------------- |
-| 在代码中修改 Reference          | `intercept` 选项中的 `Graft.intercept`。                |
-| 在 `graft.yml` 中修改 Reference | 已登记的[配置文件 intercept](#配置文件中的-intercept)。 |
-| 让 fork 拥有自己的服务或事件    | 改用[领域](../isolation/)。                             |
+## 拦截一个 Reference
 
-## 修改 Reference
+```ts import.meta.vitest name="intercepts: adjust a reference"
+import { Context, Effect, Layer } from "effect"
 
-```ts import.meta.vitest name="intercepts: change a reference"
-import { Effect, References, Schema, Stream } from "effect"
+import { Graft } from "@graftland/graft"
 
-import { Graft, Plugin } from "@graftland/graft"
+class Greeting extends Context.Service<Greeting, string>()("app/Greeting") {}
 
-const tenant = Plugin.make({
-	name: "app/tenant",
-	config: Schema.Struct({ name: Schema.String }),
-	apply: () => Effect.log("ready"),
+const Prefix = Context.Reference<string>("app/Prefix", {
+	defaultValue: () => "Hello",
 })
 
-const tenantA = Graft.plugin(
-	tenant,
-	{ name: "a" },
-	{
-		intercept: [
-			Graft.intercept(References.CurrentLogAnnotations, (outer) => ({
-				...outer,
-				tenant: "a",
-			})),
-		],
-	},
+const greeting = Layer.effect(
+	Greeting,
+	Effect.map(Prefix, (prefix) => `${prefix}, world`),
 )
 
-const [line] = await Effect.runPromise(
+const text = await Effect.runPromise(
 	Effect.gen(function* () {
-		yield* (yield* tenantA).await
-		return yield* Graft.logs.pipe(Stream.take(1), Stream.runCollect)
-	}).pipe(
-		Effect.annotateLogs({ app: "shop" }),
-		Effect.scoped,
-		Effect.provide(Graft.layer),
-	),
-)
-line?.annotations["tenant"] // => "a"
-line?.annotations["app"] // => "shop"
-```
-
-函数接收外层的值，因此 intercept 可以嵌套：该 fork 及其后代插件输出的每行日志都会带上
-`tenant: "a"`，同时保留上层添加的注解。
-
-## 跟随调用者的设置
-
-如果某项设置需要由服务从调用者处读取，可以使用 Reference。返回 Effect 的服务方法在调用者的 fiber 中运行，因此能读到调用者的 intercept：
-
-```ts import.meta.vitest name="intercepts: settings that follow the caller"
-import { Context, Effect, Stream } from "effect"
-
-import { Graft, Plugin } from "@graftland/graft"
-
-const Formal = Context.Reference<boolean>("app/Formal", {
-	defaultValue: () => false,
-})
-
-class Greeter extends Context.Service<
-	Greeter,
-	{ readonly greet: (name: string) => Effect.Effect<void> }
->()("app/Greeter") {}
-
-const greeter = Plugin.make({
-	name: "app/greeter",
-	apply: () =>
-		Graft.provide(Greeter, {
-			greet: (name) =>
-				Effect.flatMap(Formal, (formal) =>
-					Effect.log(formal ? `Good day, ${name}.` : `Hi, ${name}!`),
-				),
-		}),
-})
-
-const hello = Plugin.make({
-	name: "app/hello",
-	inject: [Greeter],
-	apply: () => Effect.flatMap(Greeter, (greeter) => greeter.greet("Ada")),
-})
-
-const messages = await Effect.runPromise(
-	Effect.gen(function* () {
-		yield* Graft.plugin(greeter)
-		yield* (yield* Graft.plugin(hello)).await
-		const formal = Graft.intercept(Formal, () => true)
-		yield* (yield* Graft.plugin(hello, undefined, { intercept: [formal] }))
-			.await
-		return yield* Graft.logs.pipe(
-			Stream.take(2),
-			Stream.map((line) => line.message),
-			Stream.runCollect,
-		)
+		const mount = yield* Graft.mount(greeting, {
+			name: "greeting",
+			requires: [Prefix],
+			intercept: [Graft.intercept(Prefix, (prefix) => `${prefix}!`)],
+		})
+		yield* mount.await
+		return yield* Graft.await(Greeting)
 	}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
 )
-messages // => [["Hi, Ada!"], ["Good day, Ada."]]
+text // => "Hello!, world"
 ```
 
-加载插件时使用 `Graft.intercept(Formal, () => true)`，就能让它从大家共用的同一个
-`Greeter` 收到正式的问候。
+`Graft.intercept`
+接收 Reference 和一个把外层值变成新值的函数。同一个 Reference 的多个 intercept 由内向外应用：列表里靠后的那个看到的是前面几个的结果。
 
-## `inject` 中的 Reference
+## 拦截到达哪里
 
-Reference 也可以列在 `inject` 中。
+| 到达                             | 不到达                 |
+| -------------------------------- | ---------------------- |
+| 挂载自身的构建                   | 兄弟挂载               |
+| 它的后台 fiber                   | 它的父挂载             |
+| 每个子挂载及其子挂载             | 另一个领域里发布的服务 |
+| 通过 `requires` 读取的 Reference | 非 Reference 的服务    |
 
-- 本 fork 所在领域的 provision 优先于 intercept 的兜底值。
-- 子插件先剥离父级 provision，再应用自己的 intercept；它们会保留父级的兜底值，包括被该 provision 遮蔽的 intercept。
+intercept 随创建挂载时的上下文传递，所以子挂载在继承来的值之上叠加自己的 intercept。
 
-## 配置文件中的 intercept
+## 解析顺序
 
-原生准备过程传递有序的 JSON 补丁和不可变的环境模块描述符。解码和合并代码在检查单元与执行单元中运行。环境模块导出 Layer，`Configuration.Options`
-提供编码后的选项。
+对于 `requires` 里的 Reference，值按以下顺序解析：
 
-```ts title="settings.ts"
-import { Context, Effect, Layer, Schema } from "effect"
+1. 挂载所在领域里发布的值。
+2. 继承来的 Reference 值，包括 intercept。
+3. Reference 的默认值。
 
-import { Configuration } from "@graftland/plugin-remote"
+Reference 总有回落值，所以它不会让挂载停在
+`Pending`。发布仍然优先，该值出现或消失时挂载重建。直接读取值的方式见[服务可用性](../availability/)。
 
-export const Settings = Context.Reference("app/Settings", {
-	defaultValue: () => ({ color: "blue", size: 12 }),
-})
-const Patch = Schema.Struct({
-	color: Schema.optionalKey(Schema.Trim),
-	size: Schema.optionalKey(Schema.Finite),
-})
-export default Layer.effect(
-	Settings,
-	Effect.gen(function* () {
-		const input = yield* Configuration.Options
-		const patch = yield* Schema.decodeUnknownEffect(Patch)(input)
-		const outer = yield* Settings
-		return { ...outer, ...patch }
-	}),
-)
-```
+## 何时使用 intercept
 
-按 Reference 的键登记模块描述符，再准备插件；准备不会激活插件。
+| 用 intercept 来……            | 用发布来……               |
+| ---------------------------- | ------------------------ |
+| 给一个子树不同的设置         | 改变整个应用的值         |
+| 为某个租户收窄超时或特性开关 | 从文件读取配置           |
+| 调整库已经在读取的 Reference | 提供一个原本不存在的服务 |
 
-```ts
-import { Effect, HashMap } from "effect"
-
-import { ModuleResolver, Preparation } from "@graftland/loader"
-import type * as Control from "@graftland/plugin-remote/Control"
-
-declare const control: Control.Address
-
-export const prepared = Effect.gen(function* () {
-	const resolver = yield* ModuleResolver.make({ base: "/app", control })
-	const module = yield* resolver.resolve("@acme/graft-plugin-api")
-	const settings = yield* resolver.resolve("./dist/settings.js", {
-		kind: "Environment",
-	})
-	const prepare = yield* Preparation.make({
-		control,
-		intercepts: HashMap.make(["app/Settings", settings]),
-	})
-	return yield* prepare.inspect({
-		instance: "api",
-		module,
-		input: { port: 8080 },
-		intercept: [{ key: "app/Settings", patch: { color: "red" } }],
-	})
-})
-```
-
-| 输入           | 规则                                                                   |
-| -------------- | ---------------------------------------------------------------------- |
-| 继承           | 先应用父级补丁，再应用子级补丁；每份配置都构建新的 Layer。             |
-| 未登记的键     | 在启动单元前返回 `PreparationFailed`，原因为 `UnregisteredIntercept`。 |
-| 无效补丁       | 检查保留完整 cause 并失败，不调用插件的 apply。                        |
-| 函数和活动对象 | 因不是 JSON 数据而被拒绝。                                             |
-| 恢复           | 重新构建环境，并按当前策略重新解析引用。                               |
-
-显式嵌入的应用可以用 `Intercept.make` 和 `Intercept.layer`
-登记单元内部的解码与合并逻辑。这些函数和环境服务不会跨越原生边界。准备过程见
-[Loader API](../loader-api/)，协作式组合见[嵌入](../embedding/)。
+如果目标是一个独立的提供者而不是不同的 Reference 值，用[隔离](../isolation/)。

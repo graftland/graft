@@ -6,142 +6,109 @@
 
 English | [简体中文](README.zh-CN.md) | [繁體中文](README.zh-TW.md)
 
-[![npm](https://img.shields.io/npm/v/@graftland/graft)](https://www.npmjs.com/package/@graftland/graft)
-[![CI](https://github.com/graftland/graft/actions/workflows/ci.yml/badge.svg)](https://github.com/graftland/graft/actions/workflows/ci.yml)
-[![License](https://img.shields.io/github/license/graftland/graft)](LICENSE)
+Layers are not fixed at startup. They are grown.
 
-Graft is an [Effect](https://effect.website)-native plugin runtime for
-long-running TypeScript applications. Each capability is a plugin with explicit
-dependencies and its own lifecycle, so you can change one capability with a
-controlled blast radius. Edit a plugin and `graft start --watch` swaps only the
-plugins your change affects, inside the running process.
-
-Software is not built. It is grown. Your application is a tree of plugins. Each
-plugin is grafted onto a scope, draws on the services around it, and publishes
-services of its own. You can load, reconfigure, replace and unload any branch
-while the process keeps running. Cut anywhere, and the rest of the tree carries
-on.
+Graft makes Effect `Layer`s dynamic. Mount a layer and Graft builds it while
+everything it requires is available, publishes the services it provides, and
+tears it down, dependents first, when a requirement goes away. Configuration is
+an ordinary published value, and changing it rebuilds what depends on it.
 
 ```ts
-import { Context, Effect, Schema } from "effect"
+import { Context, Effect, Layer } from "effect"
 
-import { Graft, Plugin } from "@graftland/graft"
+import { Graft } from "@graftland/graft"
 
-class Greeter extends Context.Service<
-	Greeter,
-	{ readonly greet: (name: string) => Effect.Effect<void> }
->()("app/Greeter") {}
+class Region extends Context.Service<Region, string>()("app/Region") {}
+class Report extends Context.Service<Report, string>()("app/Report") {}
 
-// Publishes a Greeter while it is loaded.
-const greeter = Plugin.make({
-	name: "app/greeter",
-	config: Schema.Struct({ greeting: Schema.String }),
-	apply: ({ greeting }) =>
-		Graft.provide(Greeter, {
-			greet: (name) => Effect.log(`${greeting}, ${name}!`),
-		}),
-})
+const report = Layer.effect(
+	Report,
+	Effect.map(Region, (region) => `Report for ${region}`),
+)
 
-// Starts once a Greeter exists, and stops before it goes away.
-const hello = Plugin.make({
-	name: "app/hello",
-	inject: [Greeter],
-	apply: () => Effect.flatMap(Greeter, (greeter) => greeter.greet("world")),
+export const program = Effect.gen(function* () {
+	// A value from outside any layer. `set` rebuilds its consumers.
+	const region = yield* Graft.publish(Region, "eu")
+
+	// Built while Region is available, torn down and rebuilt when it changes.
+	const mount = yield* Graft.mount(report, {
+		name: "report",
+		requires: [Region],
+	})
+	yield* mount.await
+
+	yield* region.set("us")
 })
 ```
 
 ## Why Graft
 
-- **Hot swap.** Change the variety without felling the tree.
-  `graft start --watch` turns each save into one Change that redeploys only the
-  entries it affects. If the Change fails, the kernel restores the previous
-  version, or reports `RecoveryFailed` when it cannot.
-- **Clean teardown.** Every plugin runs in its own `Scope`, and every fiber it
-  starts has an owner. When a plugin goes away, the plugins that depend on it
-  stop first. Then its finalizers run. A failure, including one during cleanup,
-  keeps its full `Cause`.
-- **Live upgrades.** Replace a plugin running in a Worker or a child process
-  while the plugins that use it keep running. The candidate starts from an
-  immutable artifact and must pass the probes the Change names. With `Overlap`,
-  new calls reach it while old calls drain, then the old unit is terminated. An
-  upgrade ends as `Accepted`, `Aborted`, `Recovered`, `RecoveryFailed` or
-  `Stuck`; one that a release recorder must record waits for its acknowledgement
-  and shows as recording-blocked until then. See
-  [Changes](https://docs.graft.land/transitions/).
-- **Checked dependencies.** Services are Effect `Context` keys, provided by
-  `Layer`s or by other plugins. A plugin declares what it needs in `inject`, and
-  the compiler checks it.
+- **Availability drives the graph.** A mount waits for its required services,
+  builds when they are all there, and stops when one disappears. Optional
+  requirements rebuild the mount when they come or go.
+- **Teardown follows ownership.** Every mount owns a `Scope`, and every fiber it
+  starts has an owner. Consumers stop before their provider, then resources
+  close, and a failure keeps its full `Cause`.
+- **Services can be read as they come and go.** `watch`, `await`, `use` and
+  `whileAvailable` read the graph from ordinary Effect code, and withdrawal
+  interrupts work instead of leaving stale values.
+- **Remote services are still services.** Serve a service over any `effect/rpc`
+  protocol and publish it in another process or on another machine. Mounts that
+  use it do not change.
 
-When one branch needs ground of its own,
-[Remote](https://docs.graft.land/remote/overview/) runs that plugin in a child
-process, a Node worker or on another machine. The plugins that use its services
-do not change.
-
-To run Graft on Node.js, you need version 22.19 or later. To develop this
-workspace, you need Node.js 22.22 or later. This includes building the
-documentation with Astro.
+Graft depends only on `effect`; `@effect/platform-node` is optional and needed
+only for the `node` entry. To run Graft on Node.js, you need version 22.19 or
+later. To develop this workspace, you need Node.js 22.22 or later, which also
+builds the documentation.
 
 ## Get started
 
 ```sh
-npm create @graftland@latest my-app
-cd my-app
-npm run dev
+npm install effect @graftland/graft
 ```
 
 Read the [documentation](https://docs.graft.land/) (also in
 [简体中文](https://docs.graft.land/zh-cn/) and
-[繁體中文](https://docs.graft.land/zh-tw/)). Working with a coding agent? The
-[`graft` skill](skills/graft) teaches it to design an application as plugins and
-Effects, then write, test and run them: `npx skills add graftland/graft`.
+[繁體中文](https://docs.graft.land/zh-tw/)). The
+[quickstart](https://docs.graft.land/quickstart/) mounts a first layer;
+[concepts](https://docs.graft.land/concepts/) names the graph, mounts and
+publications.
 
-Graft draws its plugin model from
-[cordis](https://github.com/cordiverse/cordis). Where cordis composes across
-space and time, Graft keeps to the garden. See
-[how cordis concepts map to Graft](https://docs.graft.land/cordis/). To let a
-coding agent do the port, install the [migration skills](skills).
+## One package
 
-## Samples
+Graft publishes only `@graftland/graft`.
 
-[`samples/`](samples) starts with six short, numbered samples. Each one teaches
-one idea, from a first plugin to running from `graft.yml` and moving a plugin
-into another process.
+| Entry           | What it holds                                   |
+| --------------- | ----------------------------------------------- |
+| `graft`         | `Graft`, `Mount` and `Release`.                 |
+| `graft/rpc`     | Remote services over `effect/rpc`.              |
+| `graft/node`    | Child process and worker protocols for Node.js. |
+| `graft/testing` | An in-memory protocol for tests.                |
 
-After those, larger applications show what Graft is for:
+## Former packages
 
-- a [WebSocket integration gateway](samples/integration-gateway) that upgrades a
-  plugin while keeping its session
-- a chat bot built from plugins, with its weather integration in a child process
-- an HTTP gateway driven by `graft.yml`
-- an MCP server whose tools are plugins that reload while a client is connected
-- a multi-tenant service
-- a market data pipeline that survives a flaky upstream
+Graft 0.7.0 is a dynamic Layer library. APIs from earlier versions were removed
+and are not compatible.
 
-## Packages
+These packages are no longer developed and receive no further updates:
 
-| Package                                                      | What it does                                                                                |
-| ------------------------------------------------------------ | ------------------------------------------------------------------------------------------- |
-| [`@graftland/graft`](packages/core)                          | A plugin framework built on Effect: plugins, forks, services, isolation, events and logs.   |
-| [`@graftland/loader`](packages/loader)                       | Loads plugins from a list of entries or a YAML config file.                                 |
-| [`@graftland/cli`](packages/cli)                             | The `graft` command: `start`, `create`, `add` and `remove`.                                 |
-| [`@graftland/create`](packages/create)                       | Generates a new Graft project: `npm create @graftland` and `graft create`.                  |
-| [`@graftland/package-manager`](packages/package-manager)     | Installs dependencies with npm, pnpm or Yarn, and rolls back on failure.                    |
-| [`@graftland/plugin-remote`](packages/plugin-remote)         | Runs a plugin in a child process, a worker or on another machine; `graft start runner.yml`. |
-| [`@graftland/plugin-otlp`](packages/plugin-otlp)             | Exports the spans of a subtree of plugins to an OpenTelemetry collector.                    |
-| [`@graftland/plugin-http`](packages/plugin-http)             | Shared HTTP server; routes and streams follow plugin lifetimes.                             |
-| [`@graftland/plugin-http-api`](packages/plugin-http-api)     | Live Effect HttpApi groups, typed clients and OpenAPI documentation.                        |
-| [`@graftland/plugin-mcp-server`](packages/plugin-mcp-server) | Serves the tools of plugins to MCP clients; tools reload without reconnecting.              |
+| Package                        | Last release  | Use instead                                      |
+| ------------------------------ | ------------- | ------------------------------------------------ |
+| `@graftland/loader`            | `0.6.0`       | `Graft.mount` in your own program.               |
+| `@graftland/hmr`               | `0.5.0`       | Nothing; Graft no longer reloads modules.        |
+| `@graftland/cli`               | `0.6.0`       | Nothing; there is no command and no config file. |
+| `@graftland/create`            | `0.6.0`       | Nothing.                                         |
+| `@graftland/package-manager`   | `0.6.0`       | Nothing.                                         |
+| `@graftland/plugin-remote`     | `0.6.0`       | The `graft/rpc` entry.                           |
+| `@graftland/plugin-http`       | `0.5.0`       | Nothing.                                         |
+| `@graftland/plugin-http-api`   | `0.5.0`       | Nothing.                                         |
+| `@graftland/plugin-mcp-server` | `0.5.0`       | Nothing.                                         |
+| `@graftland/plugin-otlp`       | `0.5.0`       | Nothing.                                         |
+| `@graftland/plugin-release`    | Not published | Nothing.                                         |
 
-All packages are released together with the same version. They all need `effect`
-4.1.x.
-
-## Direction
-
-Live upgrades work today for plugins in Workers, child processes and runners
-(runners restart rather than overlap); state handoff and session continuation
-come next. The design is public: the [value definition](design/value.md) and the
-[architecture](design/architecture.md), both in Chinese. This README describes
-only what is implemented.
+`@graftland/plugin-release` was never published, so there is nothing to
+deprecate. Marking the published packages as deprecated on npm is a separate,
+optional decision.
 
 ## Contributing
 
@@ -153,8 +120,8 @@ devenv shell -- pnpm typecheck
 devenv shell -- pnpm test
 ```
 
-See [Publishing](https://docs.graft.land/publishing/) for the checks, the
-release process and the docs site.
+See [Releases](https://docs.graft.land/releases/) for the checks, the release
+process and the docs site.
 
 ## License
 

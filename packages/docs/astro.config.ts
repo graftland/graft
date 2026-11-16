@@ -3,13 +3,11 @@ import { defineConfig } from "astro/config"
 import starlightLlmsTxt from "starlight-llms-txt"
 
 import { referenceLinkCheck } from "./check-links.mjs"
-import { hoverTypes } from "./hover-types.mjs"
 import { reference } from "./reference.mjs"
 
-// DOCS_URL is the public address of the site. Its path becomes the base of
-// every page. The default is the deployed address, so a local build checks
-// links against the same base as the deployed site.
-const url = new URL(process.env["DOCS_URL"] ?? "https://docs.graft.land/")
+// DOCS_URL is the public address of the site, such as
+// https://graftland.github.io/graft/. Its path becomes the base of every page.
+const url = new URL(process.env["DOCS_URL"] ?? "http://localhost:4321/")
 
 export default defineConfig({
 	site: url.origin,
@@ -20,11 +18,10 @@ export default defineConfig({
 		starlight({
 			title: "Graft",
 			description:
-				"Horticultural Effect Systems. A plugin framework for Effect: load, replace and unload plugins in a running process.",
+				"Horticultural Effect Systems. Effect layers that mount and unmount while the application runs.",
 			favicon: "/favicon.svg",
 			logo: { src: "./src/assets/graft-mark.svg" },
 			customCss: ["./src/styles/garden.css"],
-			expressiveCode: { plugins: [hoverTypes()] },
 			head: [
 				{
 					tag: "link",
@@ -73,82 +70,32 @@ export default defineConfig({
 				{
 					label: "Start here",
 					translations: { "zh-CN": "开始", "zh-TW": "開始" },
-					items: ["index", "quickstart", "concepts", "cordis"],
+					items: ["index", "quickstart", "concepts"],
 				},
 				{
-					label: "Build plugins",
-					translations: { "zh-CN": "编写插件", "zh-TW": "編寫插件" },
-					items: ["plugins", "probes", "services", "events"],
+					label: "Build",
+					translations: { "zh-CN": "构建", "zh-TW": "建構" },
+					items: ["mounting", "publications", "availability"],
 				},
 				{
 					label: "Structure",
 					translations: { "zh-CN": "组织与变更", "zh-TW": "組織與變更" },
-					items: [
-						"lifecycle",
-						"isolation",
-						"intercepts",
-						"transitions",
-						"units",
-						"bindings",
-						"calls",
-						"control",
-						"recording",
-						"application-releases",
-						"trust",
-					],
+					items: ["lifecycle", "failures-retry", "isolation", "intercepts"],
 				},
 				{
-					label: "Applications",
-					translations: { "zh-CN": "应用", "zh-TW": "應用" },
-					items: [
-						"config-file",
-						"cli",
-						"embedding",
-						"http",
-						"http-api",
-						"http-authorization",
-						"mcp-server/overview",
-						"mcp-server/contributing",
-						"mcp-server/projection",
-						"mcp-server/extending",
-					],
-				},
-				{
-					label: "Ecosystem",
-					translations: { "zh-CN": "生态", "zh-TW": "生態" },
-					items: [
-						"ecosystem/manifest",
-						"ecosystem/compatibility",
-						"ecosystem/conformance",
-					],
+					label: "Run",
+					translations: { "zh-CN": "运行", "zh-TW": "執行" },
+					items: ["background-fibers", "observability"],
 				},
 				{
 					label: "Remote",
 					translations: { "zh-CN": "Remote", "zh-TW": "Remote" },
-					items: ["remote/overview", "remote/contracts", "remote/artifacts"],
-				},
-				{
-					label: "Best practices",
-					translations: { "zh-CN": "最佳实践", "zh-TW": "最佳實務" },
-					items: [
-						"best-practices/design",
-						"best-practices/effect",
-						"best-practices/testing",
-						"best-practices/observability",
-						"best-practices/packaging",
-						"best-practices/production",
-						"best-practices/troubleshooting",
-					],
-				},
-				{
-					label: "API guides",
-					translations: { "zh-CN": "API 使用说明", "zh-TW": "API 使用說明" },
-					items: ["fork-handle", "loader-api", "errors"],
+					items: ["remote", "node", "testing"],
 				},
 				{
 					label: "Project",
 					translations: { "zh-CN": "项目", "zh-TW": "專案" },
-					items: ["publishing"],
+					items: ["releases"],
 				},
 				// Generated from the public entries at build time; always the last group.
 				{

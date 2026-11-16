@@ -1,8 +1,8 @@
 import { Cause, Deferred, Effect, Exit, FiberSet, Ref, Scope } from "effect"
 
-import * as Finalization from "../Finalization"
+import * as Release from "../Release"
 
-// This requirement carries asynchronous errors to Plugin.make; it has no public service key.
+// This requirement carries background fiber errors to the mount; it has no public service key.
 declare const TaskErrors: unique symbol
 export interface Tasks<out E> {
 	readonly [TaskErrors]: E
@@ -15,8 +15,7 @@ export const make = Effect.gen(function* () {
 		Scope.provide(scope),
 	)
 	const failures = yield* Ref.make<Cause.Cause<unknown>>(Cause.empty)
-	const cleanupFailures = yield* Ref.make<Cause.Cause<unknown>>(Cause.empty)
-	return { scope, fibers, failures, cleanupFailures }
+	return { scope, fibers, failures }
 })
 export type Group = Effect.Success<typeof make>
 
@@ -27,17 +26,13 @@ export const run = <A, E, R>(group: Group, effect: Effect.Effect<A, E, R>) =>
 			Effect.gen(function* () {
 				const scope = yield* Scope.make()
 				const body = yield* Effect.exit(restore(Scope.provide(scope)(effect)))
-				const closed = yield* Effect.exit(Finalization.close(scope, body))
-				if (Exit.isFailure(closed) && !Cause.hasInterruptsOnly(closed.cause))
-					yield* Ref.update(group.cleanupFailures, (cause) =>
-						Cause.combine(cause, closed.cause),
-					)
+				const closed = yield* Effect.exit(Release.close(scope, body))
 				// Bare worker interruption is supported; nested scopes inside the body must report their own release failures, unlike the separately observed task scope.
 				const failure = Cause.combine(
 					Exit.isFailure(body) && !Cause.hasInterruptsOnly(body.cause)
 						? body.cause
 						: Cause.empty,
-					// Finalization.close marks independent interruptions; an unmarked one is pending cancellation.
+					// Release.close marks independent interruptions; an unmarked one is pending cancellation.
 					Exit.isFailure(closed) && !Cause.hasInterruptsOnly(closed.cause)
 						? closed.cause
 						: Cause.empty,
@@ -48,7 +43,10 @@ export const run = <A, E, R>(group: Group, effect: Effect.Effect<A, E, R>) =>
 					)
 					// Publish only after the task's resource scope has finished closing.
 					yield* Deferred.failCause(group.fibers.deferred, failure)
-					yield* Effect.logError("The plugin's background task failed", failure)
+					yield* Effect.logError(
+						"A background fiber of the mount failed",
+						failure,
+					)
 				}
 				if (Exit.isFailure(closed))
 					return yield* Effect.failCause(

@@ -5,143 +5,82 @@ import {
 	Effect,
 	Fiber,
 	HashMap,
+	Layer,
 	Option,
-	Schema,
 	Stream,
+	TxQueue,
 	TxRef,
+	TxSubscriptionRef,
 } from "effect"
 import { assert, describe, it } from "@effect/vitest"
 
-import { Fork, Graft, Plugin } from "../src/index.ts"
-import { setState } from "../src/internal/forkState.ts"
+import { Graft, Mount } from "../src/index.ts"
+import { setState } from "../src/internal/mountStatus.ts"
 import { RuntimeContext } from "../src/internal/runtimeContext"
-import * as Snapshots from "../src/internal/snapshot.ts"
 import { reach, run } from "./utils.ts"
 
-const entryOf = Effect.fnUntraced(function* (fork: Fork.Fork) {
+const entryOf = Effect.fnUntraced(function* (mount: Mount.Mount) {
 	const { runtime } = yield* RuntimeContext
-	const entries = yield* Snapshots.get(runtime.forks)
-	return Option.getOrThrow(HashMap.get(entries, fork.id))
+	const entries = yield* TxSubscriptionRef.get(runtime.mounts)
+	return Option.getOrThrow(HashMap.get(entries, mount.id))
 })
 
 class Missing extends Context.Service<Missing, string>()(
 	"@graftland/graft/test/fork-local-state.test/Missing",
 ) {}
 
-describe("fork-local state", () => {
+describe("mount-local state", () => {
 	it.effect(
-		"does not notify a local subscriber when an unrelated fork changes",
+		"does not notify a local subscriber when an unrelated mount changes",
 		() =>
 			Effect.gen(function* () {
-				const definition = Plugin.make({
-					name: "independent",
-					apply: () => Effect.void,
-				})
-				const first = yield* Graft.plugin(definition)
+				const definition = Layer.effectDiscard(Effect.void)
+				const first = yield* Graft.mount(definition, { name: "independent" })
 				yield* first.await
 				const entry = yield* entryOf(first)
-				const changes = yield* Snapshots.changes(entry.status.snapshot)
-				const initial = yield* Snapshots.take(changes)
+				const changes = yield* TxSubscriptionRef.changes(entry.status.snapshot)
+				const initial = yield* TxQueue.take(changes)
 				assert.strictEqual(initial.state._tag, "Active")
-				const second = yield* Graft.plugin(definition)
+				const second = yield* Graft.mount(definition, { name: "independent" })
 				yield* second.await
 				yield* second.restart
 				yield* second.await
-				yield* second.dispose
-				const changed = yield* Snapshots.poll(changes)
+				yield* second.unmount
+				const changed = yield* TxQueue.poll(changes)
 				assert.isTrue(Option.isNone(changed))
 			}).pipe(run),
 	)
 
-	it.effect(
-		"accepts a new input while Active without emitting a duplicate public state",
-		() =>
-			Effect.gen(function* () {
-				const subscribed = yield* Deferred.make<void>()
-				const fork = yield* Graft.plugin(
-					Plugin.make({
-						name: "in-place update",
-						config: Schema.String,
-						apply: () => Effect.succeed(() => Effect.succeed(true)),
-					}),
-					"initial",
-				)
-				yield* fork.await
-				const states = yield* fork.state.pipe(
-					Stream.tap(() => Deferred.succeed(subscribed, undefined)),
-					Stream.runCollect,
-					Effect.forkScoped,
-				)
-				yield* Deferred.await(subscribed)
-				const entry = yield* entryOf(fork)
-				const previous = yield* Snapshots.get(entry.status.snapshot)
-				yield* fork.update("updated")
-				const next = yield* Snapshots.get(entry.status.snapshot)
-				assert.strictEqual(next.state._tag, "Active")
-				assert.notStrictEqual(next.accepted, previous.accepted)
-				assert.strictEqual(next.accepted?.input, "updated")
-				yield* fork.dispose
-				const observed = yield* Fiber.join(states)
-				assert.deepStrictEqual(
-					Array.map(observed, (state) => state._tag),
-					["Active", "Disposed"],
-				)
-			}).pipe(run),
-	)
-
-	it.effect("replays Disposed and ends for a late subscriber", () =>
+	it.effect("replays Unmounted and ends for a late subscriber", () =>
 		Effect.gen(function* () {
-			const fork = yield* Graft.plugin(
-				Plugin.make({ name: "short-lived", apply: () => Effect.void }),
-			)
-			yield* fork.await
-			yield* fork.dispose
-			const states = yield* Stream.runCollect(fork.state)
-			assert.deepStrictEqual(states, [Fork.ForkState.Disposed()])
-			yield* fork.update(undefined)
-			yield* fork.stable
+			const mount = yield* Graft.mount(Layer.effectDiscard(Effect.void), {
+				name: "short-lived",
+			})
+			yield* mount.await
+			yield* mount.unmount
+			const states = yield* Stream.runCollect(mount.state)
+			assert.deepStrictEqual(states, [Mount.MountState.Unmounted()])
+			yield* mount.stable
 		}).pipe(run),
 	)
 
-	it.effect(
-		"keeps historical tree snapshots unchanged after an accepted update",
-		() =>
-			Effect.gen(function* () {
-				const fork = yield* Graft.plugin(
-					Plugin.make({
-						name: "snapshot input",
-						config: Schema.String,
-						apply: () => Effect.succeed(() => Effect.succeed(true)),
-					}),
-					"before",
-				)
-				yield* fork.await
-				const before = yield* Stream.runHead(Graft.forks)
-				yield* fork.update("after")
-				const after = yield* Stream.runHead(Graft.forks)
-				assert.strictEqual(Option.getOrThrow(before)[0]?.input, "before")
-				assert.strictEqual(Option.getOrThrow(after)[0]?.input, "after")
-			}).pipe(run),
-	)
-	it.effect("groups roots and children in increasing fork order", () =>
+	it.effect("groups roots and children in increasing mount order", () =>
 		Effect.gen(function* () {
-			const group = Plugin.make({
-				name: "wide parent",
-				apply: () =>
-					Effect.forEach(
-						Array.range(1, 8),
-						(id) =>
-							Graft.plugin(
-								Plugin.make({ name: `child ${id}`, apply: () => Effect.void }),
-							),
-						{ discard: true },
-					),
-			})
-			const first = yield* Graft.plugin(group)
+			const group = Layer.effectDiscard(
+				Effect.forEach(
+					Array.range(1, 8),
+					(id) =>
+						Graft.mount(Layer.effectDiscard(Effect.void), {
+							name: `child ${id}`,
+						}),
+					{ discard: true },
+				),
+			)
+			const first = yield* Graft.mount(group, { name: "wide parent" })
 			yield* first.stable
-			const second = yield* Graft.plugin(group)
+			const second = yield* Graft.mount(group, { name: "wide parent" })
 			yield* second.stable
-			const snapshot = yield* Stream.runHead(Graft.forks)
+			const snapshot = yield* Stream.runHead(Graft.mounts)
 			const roots = Option.getOrThrow(snapshot)
 			assert.deepStrictEqual(
 				Array.map(roots, (node) => node.id),
@@ -163,20 +102,17 @@ describe("subtree stability", () => {
 		() =>
 			Effect.gen(function* () {
 				const release = yield* Deferred.make<void>()
-				const child = Plugin.make({
-					name: "loading child",
-					apply: () => Deferred.await(release),
-				})
-				const middle = Plugin.make({
-					name: "middle",
-					apply: () => Graft.plugin(child).pipe(Effect.asVoid),
-				})
-				const parent = yield* Graft.plugin(
-					Plugin.make({
-						name: "parent",
-						apply: () =>
-							Graft.plugin(middle).pipe(Effect.flatMap((fork) => fork.await)),
-					}),
+				const child = Layer.effectDiscard(Deferred.await(release))
+				const middle = Layer.effectDiscard(
+					Graft.mount(child, { name: "loading child" }).pipe(Effect.asVoid),
+				)
+				const parent = yield* Graft.mount(
+					Layer.effectDiscard(
+						Graft.mount(middle, { name: "middle" }).pipe(
+							Effect.flatMap((mount) => mount.await),
+						),
+					),
+					{ name: "parent" },
 				)
 				yield* parent.await
 				const entry = yield* entryOf(parent)
@@ -194,26 +130,23 @@ describe("subtree stability", () => {
 		"treats Pending and Failed descendants as settled and reads only its own counter",
 		() =>
 			Effect.gen(function* () {
-				const pending = Plugin.make({
-					name: "pending child",
-					inject: [Missing],
-					apply: () => Effect.void,
-				})
-				const failed = Plugin.make({
-					name: "failed child",
-					apply: () => Effect.fail("expected failure"),
-				})
-				const parent = yield* Graft.plugin(
-					Plugin.make({
-						name: "settled parent",
-						apply: () =>
-							Effect.gen(function* () {
-								const pendingFork = yield* Graft.plugin(pending)
-								const failedFork = yield* Graft.plugin(failed)
-								yield* reach(pendingFork, "Pending")
-								yield* reach(failedFork, "Failed")
-							}),
-					}),
+				const pending = Layer.effectDiscard(Effect.void)
+				const failed = Layer.effectDiscard(Effect.fail("expected failure"))
+				const parent = yield* Graft.mount(
+					Layer.effectDiscard(
+						Effect.gen(function* () {
+							const pendingMount = yield* Graft.mount(pending, {
+								name: "pending child",
+								requires: [Missing],
+							})
+							const failedMount = yield* Graft.mount(failed, {
+								name: "failed child",
+							})
+							yield* reach(pendingMount, "Pending")
+							yield* reach(failedMount, "Failed")
+						}),
+					),
+					{ name: "settled parent" },
 				)
 				yield* parent.await
 				const entry = yield* entryOf(parent)
@@ -232,21 +165,18 @@ describe("subtree stability", () => {
 		"rolls back local state, display state and ancestor counts together",
 		() =>
 			Effect.gen(function* () {
-				const handle = yield* Deferred.make<Fork.Fork>()
-				const parent = yield* Graft.plugin(
-					Plugin.make({
-						name: "transactional parent",
-						apply: () =>
-							Effect.gen(function* () {
-								const child = yield* Graft.plugin(
-									Plugin.make({
-										name: "transactional child",
-										apply: () => Effect.never,
-									}),
-								)
-								yield* Deferred.succeed(handle, child)
-							}),
-					}),
+				const handle = yield* Deferred.make<Mount.Mount>()
+				const parent = yield* Graft.mount(
+					Layer.effectDiscard(
+						Effect.gen(function* () {
+							const child = yield* Graft.mount(
+								Layer.effectDiscard(Effect.never),
+								{ name: "transactional child" },
+							)
+							yield* Deferred.succeed(handle, child)
+						}),
+					),
+					{ name: "transactional parent" },
 				)
 				yield* parent.await
 				const child = yield* Deferred.await(handle)
@@ -254,17 +184,17 @@ describe("subtree stability", () => {
 				const childEntry = yield* entryOf(child)
 				const { runtime } = yield* RuntimeContext
 				const spec = yield* TxRef.get(childEntry.spec)
-				const before = yield* Snapshots.get(childEntry.status.snapshot)
+				const before = yield* TxSubscriptionRef.get(childEntry.status.snapshot)
 				yield* Effect.tx(
 					setState(
 						runtime,
 						child.id,
 						childEntry.status,
-						Fork.ForkState.Active(),
+						Mount.MountState.Active(),
 						spec,
 					).pipe(Effect.andThen(Effect.fail("roll back"))),
 				).pipe(Effect.flip)
-				const after = yield* Snapshots.get(childEntry.status.snapshot)
+				const after = yield* TxSubscriptionRef.get(childEntry.status.snapshot)
 				const count = yield* TxRef.get(parentEntry.status.loading)
 				const display = yield* entryOf(child)
 				assert.strictEqual(after, before)
@@ -273,30 +203,27 @@ describe("subtree stability", () => {
 			}).pipe(run),
 	)
 
-	it.effect("updates ancestor counts when a Loading child is disposed", () =>
+	it.effect("updates ancestor counts when a Loading child is unmounted", () =>
 		Effect.gen(function* () {
-			const handle = yield* Deferred.make<Fork.Fork>()
-			const parent = yield* Graft.plugin(
-				Plugin.make({
-					name: "parent of cancelled child",
-					apply: () =>
-						Effect.gen(function* () {
-							const child = yield* Graft.plugin(
-								Plugin.make({
-									name: "cancelled child",
-									apply: () => Effect.never,
-								}),
-							)
-							yield* Deferred.succeed(handle, child)
-						}),
-				}),
+			const handle = yield* Deferred.make<Mount.Mount>()
+			const parent = yield* Graft.mount(
+				Layer.effectDiscard(
+					Effect.gen(function* () {
+						const child = yield* Graft.mount(
+							Layer.effectDiscard(Effect.never),
+							{ name: "cancelled child" },
+						)
+						yield* Deferred.succeed(handle, child)
+					}),
+				),
+				{ name: "parent of cancelled child" },
 			)
 			yield* parent.await
 			const child = yield* Deferred.await(handle)
 			const entry = yield* entryOf(parent)
 			const loading = yield* TxRef.get(entry.status.loading)
 			assert.strictEqual(loading, 1)
-			yield* child.dispose
+			yield* child.unmount
 			yield* parent.stable
 			const settled = yield* TxRef.get(entry.status.loading)
 			assert.strictEqual(settled, 0)

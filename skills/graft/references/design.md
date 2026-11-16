@@ -1,112 +1,105 @@
-# Designing with plugins and Effects
+# Designing with dynamic layers and Effects
 
 Design before code. A Graft program is good when its shape matches the problem's
 **lifetimes**: what can start, stop, change, fail and be replaced on its own.
 Find those first; the API calls follow.
 
-## Think in plugins
+## Think in layers
 
 Take the feature list and ask of each part, in order:
 
-| Question                                                              | If yes, it is…                                             |
-| --------------------------------------------------------------------- | ---------------------------------------------------------- |
-| Could someone turn it on or off, reconfigure it, or replace it alone? | A **plugin** (one entry in `graft.yml`)                    |
-| Does it offer a capability that other parts call?                     | A **service** its plugin publishes; callers `inject` it    |
-| Does it announce something that any number of parts may react to?     | An **event**; the sender does not know the receivers       |
-| Do parts contribute pieces to one result (help text, menus, routes)?  | An event collected with `Event.parallel` or `Event.bail`   |
-| Do parts transform one value in a chain (filters, rendering)?         | A **middleware** event with `Event.waterfall`              |
-| Does it vary per tenant or instance, side by side?                    | A **realm**: the same plugins under a group with `isolate` |
-| Does a shared service need a per-caller setting?                      | An **intercept** on a `Context.Reference`                  |
-| Does it live as long as the process and nobody configures it?         | An **environment** service in the host's layer             |
-| Must it crash alone, use its own thread or run on another machine?    | A **plugin** in its own unit ([Remote](remote.md))         |
-| Is it a value the operator chooses?                                   | A field in the plugin's config **schema**                  |
+| Question                                                             | If yes, it is…                                                    |
+| -------------------------------------------------------------------- | ----------------------------------------------------------------- |
+| Could someone turn it on or off, or replace it alone?                | Its own **mount**: a `Layer` mounted with `Graft.mount`           |
+| Does it offer a capability that other parts call?                    | A **service** the layer provides; callers require its key         |
+| Does it choose a value the operator or user sets at run time?        | A **publication** (`Graft.publish`), updated with `set`           |
+| Is it a capability that can be absent without stopping the consumer? | A `Graft.optional` requirement                                    |
+| Does it vary per tenant or instance, side by side?                   | A **realm** (`isolate`), with per-caller settings via `intercept` |
+| Does it live as long as the process and nobody configures it?        | An **environment** service in the host's layer                    |
+| Must it crash alone, use its own thread or run on another machine?   | Still a service; the provider is moved with [Remote](remote.md)   |
 
-Then put **state where its owner lives**. State belongs to the fork that creates
-it (a `Ref`, a connection, a cache), and other forks reach it only through that
-fork's service or events. When the fork stops, its state goes with it; when it
-restarts, it starts clean.
+Then put **state where its owner lives**. State belongs to the mount that
+creates it (a `Ref`, a connection, a cache), and other parts reach it only
+through that mount's service. When the mount is torn down, its state goes with
+it; when it rebuilds, it starts clean.
 
 ### Ownership replaces bookkeeping
 
-Most code a plugin system usually needs disappears when every registration has
-an owner. Reach for the right-hand column:
+Most code a dynamic system usually needs disappears when every registration has
+an owner:
 
-| Hand-written approach                              | Graft approach                                                       |
-| -------------------------------------------------- | -------------------------------------------------------------------- |
-| A central registry plus code that unregisters      | `Event.on` or `Graft.provide` inside `apply`; the scope unregisters  |
-| `if (client)` checks before using an optional part | `inject: [Client]`: the code runs only while `Client` exists         |
-| A startup order list                               | Dependencies: each plugin waits for what it injects                  |
-| A module-level singleton                           | A service published by a plugin, or an environment service           |
-| Feature flags in code                              | `disabled: true` on the entry                                        |
-| Restarting the process to reconfigure              | A new entry `config` (a Change); embedded forks: an update function  |
-| A list kept in sync with what is enabled (`/help`) | An event every feature handles; collect it on demand                 |
-| try/catch that keeps a broken part limping         | Let the fork fail; it is cleaned up and retried, others keep running |
+| Hand-written approach                              | Graft approach                                                   |
+| -------------------------------------------------- | ---------------------------------------------------------------- |
+| A central registry plus code that unregisters      | Publish inside the layer; the mount's scope withdraws it         |
+| `if (client)` checks before using an optional part | `requires: [Graft.optional(Client)]`, read with `serviceOption`  |
+| A startup order list                               | `requires`: each layer waits for what it needs                   |
+| A module-level singleton                           | A service published by a mount, or an environment service        |
+| Feature flags and config files                     | Mount it or don't; publish the settings as a value               |
+| Restarting the process to reconfigure              | `publication.set(next)`; dependents rebuild                      |
+| A list kept in sync with what is enabled (`/help`) | An ordinary `Stream` over `Graft.watch` of each capability       |
+| try/catch that keeps a broken part limping         | Let the build fail; it is retried, everything else keeps running |
 
-### Sizing plugins
+### Sizing mounts
 
-- One plugin per independently useful unit. A plugin too large forces unrelated
+- One mount per independently useful unit. A mount too large forces unrelated
   parts to restart together; one too small spreads one lifetime over several
-  entries that are always loaded together.
-- Split by what changes together: a client and the commands that use it are two
-  plugins when the commands can exist without being reconfigured with the
-  client.
-- A plugin that loads a fixed set of children is a composition; a group entry in
-  `graft.yml` is the same composition left to the operator. Prefer the group
-  when the operator should choose the members.
+  mounts that are always mounted together.
+- Split by what changes together: a client and the work that uses it are two
+  mounts when the work can outlive a client rebuild.
+- A mount that mounts a fixed set of children is a composition; call
+  `Graft.mount` for each from inside a parent layer.
 
 ## Think in Effects
 
-| Habit                                       | In practice                                                                                                                           |
-| ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| **Describe, then run at the edge.**         | Modules define values. Only the host runs them, and only `apply` acquires anything.                                                   |
-| **Every lifetime is a `Scope`.**            | For each resource and fiber, name its owner and when it ends: the fork, a task, a handler call.                                       |
-| **Failures are values.**                    | Expected failures are tagged errors in the type; bugs are defects. Both keep their `Cause`.                                           |
-| **Recover where you can act.**              | Catch an error at the closest point that can do something useful; let the rest fail the fork and retry.                               |
-| **Dependencies live in the type.**          | A requirement shows up in `R`; satisfy it with `inject` or a `Layer`, never a global.                                                 |
-| **Concurrency is structured.**              | Fibers have owners (`Plugin.fork`, `FiberSet`). Use `Stream` for sequences, `Queue` or `PubSub` for hand-off, `Ref` for shared state. |
-| **Time and randomness are services.**       | `Schedule`, `Clock` and `Random` make retries and timing testable with `TestClock`.                                                   |
-| **Validate at the boundary, trust inside.** | `Schema` decodes config, files and network input once; inside, values are typed and immutable (`Option`, `Data`, `HashMap`).          |
+| Habit                                       | In practice                                                                                                                   |
+| ------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| **Describe, then run at the edge.**         | Modules define layers and values. The host provides `Graft.layer` and runs them.                                              |
+| **Every lifetime is a `Scope`.**            | For each resource and fiber, name its owner and when it ends: the mount, a task, a call.                                      |
+| **Failures are values.**                    | Expected failures are tagged errors in the type; bugs are defects. Both keep their `Cause`.                                   |
+| **Recover where you can act.**              | Catch an error at the closest point that can do something useful; let the rest fail the mount and retry.                      |
+| **Dependencies live in the type.**          | A requirement shows up in `R`; satisfy it with a layer, never a global.                                                       |
+| **Concurrency is structured.**              | Fibers have owners (`Graft.fork`, `FiberSet`). Use `Stream` for sequences, `Queue` or `PubSub` for hand-off, `Ref` for state. |
+| **Time and randomness are services.**       | `Schedule`, `Clock` and `Random` make retries and timing testable with `TestClock`.                                           |
+| **Validate at the boundary, trust inside.** | `Schema` decodes external input once; inside, values are typed and immutable (`Option`, `Data`, `HashMap`).                   |
 
 A useful test: if a piece of code needs to remember to clean something up, an
-owner is missing. If it needs to check whether something exists, a dependency is
-missing. If it catches an error only to log and continue, decide whether that
-error is expected (handle it where it happens) or a failure (let the fork fail).
+owner is missing. If it needs to check whether something exists, a requirement
+is missing. If it catches an error only to log and continue, decide whether that
+error is expected (handle it where it happens) or a failure (let the mount
+fail).
 
-## Worked example: a chat bot
+## Worked example: a pricing service
 
-Features: `/roll`, `/weather <city>` (needs a weather API client), `/help`
-listing whatever commands are enabled, a moderation filter with an editable word
-list.
+Features: quote prices from a database, cache them, read the region from
+operator-run settings, serve several tenants with different databases, and keep
+the database client in its own process.
 
-| Part                    | Becomes                                                                                 | Why                                                                     |
-| ----------------------- | --------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
-| Incoming messages       | Middleware event `Inbound`, run with `Event.waterfall`; `last` dispatches the command   | Filters can wrap, change or stop a message                              |
-| Commands                | Event `Command` answered with `Event.bail`                                              | The first command that recognizes the name answers                      |
-| Help lines              | Event `Describe` collected with `Event.parallel`                                        | Each command contributes its own line                                   |
-| Moderation              | Plugin with an `Inbound` handler and an update function                                 | Answers without `next` on a banned word; the word list changes in place |
-| Weather client          | Plugin publishing service `Forecasts`                                                   | A capability with a connection to own                                   |
-| `/weather`              | Plugin with `inject: [Forecasts]`                                                       | Exists only while the client does                                       |
-| `/roll`, `/help`        | One plugin each                                                                         | Turned on and off independently                                         |
-| A real client's API key | `Schema.RedactedFromValue(Schema.String)` in the client's config, `!env` in `graft.yml` | The operator's secret, hidden in logs                                   |
+| Part                 | Becomes                                                                 | Why                                                |
+| -------------------- | ----------------------------------------------------------------------- | -------------------------------------------------- |
+| Database client      | A `Layer` mounted with `graft.mount(dbLayer, { requires: [Database] })` | A connection with a lifetime                       |
+| Cache                | `requires: [Graft.optional(Cache)]` in the pricing layer                | Works with or without it, rebuilds when it appears |
+| Region and markup    | `Graft.publish(AppConfig, …)`, updated with `set`                       | Chosen at run time; rebuilds pricing on change     |
+| Pricing              | A `Layer` requiring `Database` and the config service                   | Built only while its inputs exist                  |
+| Per-tenant databases | `isolate: [Database]` on the tenant mount                               | Same layers, separate services per tenant          |
+| A per-caller region  | `intercept` on a `Context.Reference`                                    | One shared service, settings scoped to the caller  |
+| The database process | `Remote.service` + `Remote.connect`                                     | Same key; only where it runs changes               |
 
-What follows without extra code: unloading the weather client stops `/weather`
-first, `/help` stops listing it, and an invalid moderation config fails only
-moderation. The repository's `samples/chat-bot` is this design, with tests;
-`samples/market-feed` and `samples/saas-tenants` apply the same questions to a
-data pipeline and to per-tenant realms.
+What follows without extra code: updating the config tears pricing down first
+and rebuilds it; losing the cache keeps pricing running; unmounting a tenant
+takes only that tenant's services with it.
 
 ## Design checklist
 
 Done when every line holds:
 
-- Every part has a row: plugin, service, event, realm, intercept, environment or
-  config field.
-- Every piece of state has one owning fork, reached by others only through a
-  service or an event.
+- Every part has a row: layer, service, publication, optional requirement,
+  realm, intercept or environment service.
+- Every piece of state has one owning mount, reached by others only through a
+  service.
 - Every resource has an owning scope, and every background fiber goes through
-  `Plugin.fork`.
-- Every interaction between plugins is a token in a shared module.
+  `Graft.fork`.
+- Every service key lives in a module shared by provider and consumers.
 - Every expected failure has a recovery point, and every other failure is left
-  to fail its fork, with a `retry` schedule where retrying helps.
-- Every setting is either a config field, an environment service, or an
-  intercept, chosen by who sets it and how long it lives.
+  to fail its mount, with a `retry` schedule where retrying helps.
+- Every setting is a publication, an environment service or an intercept, chosen
+  by who sets it and how long it lives.

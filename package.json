@@ -33,7 +33,6 @@
 		"test:packages": "node --test scripts/packages.test.mjs scripts/release-notes.test.mjs",
 		"packages:pack": "pnpm build && node scripts/packages.mjs pack",
 		"packages:publish": "node scripts/packages.mjs publish",
-		"bench": "pnpm --filter @graftland/benchmarks bench",
 		"changeset": "changeset",
 		"changeset-version": "changeset version && pnpm format"
 	}

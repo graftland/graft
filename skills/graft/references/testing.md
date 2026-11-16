@@ -1,88 +1,106 @@
 # Testing
 
-Tests are Effects run by `@effect/vitest`, each with a fresh Graft runtime.
+Test behavior at the level the design promises: which mounts reach `Active`,
+which services are published, what is torn down in what order, and which
+failures are retried. Each test runs in a fresh graph.
 
-## Skeleton
+## A fresh graph per test
 
 ```ts
-import { Effect, Layer, Stream } from "effect"
-import { assert, describe, it } from "@effect/vitest"
+import { Effect, Layer } from "effect"
+import { expect, it } from "@effect/vitest"
 
-import { Graft } from "@graftland/graft"
+import { Graft, Mount } from "@graftland/graft"
 
-import plugin from "../src/index.ts"
+const run = <A, E>(effect: Effect.Effect<A, E, Graft.Graft | Scope.Scope>) =>
+	effect.pipe(Effect.scoped, Effect.provide(Layer.fresh(Graft.layer)))
 
-describe("greeter", () => {
-	it.effect("starts once the database exists", () =>
+it.effect("mounts pricing while the database is available", () =>
+	run(
 		Effect.gen(function* () {
-			const fork = yield* Graft.plugin(plugin, { greeting: "Hello" })
-			yield* fork.await
-			// ...assertions
-		}).pipe(Effect.scoped, Effect.provide(Layer.fresh(Graft.layer))),
+			const db = yield* Graft.publish(Database, fakeDb)
+			const pricing = yield* Graft.mount(pricingLayer, { requires: [Database] })
+			yield* pricing.await
+			expect(yield* reach(pricing, "Active")).toBe(true)
+		}),
+	),
+)
+```
+
+- `Layer.fresh` gives each test its own graph; never share one between tests.
+- `@effect/vitest`'s `it.effect` provides the runtime and `TestContext`.
+- `Effect.scoped` at the top keeps mounts alive for the test and unmounts them
+  after.
+
+## Assert on states and services
+
+```ts
+const reach = (mount: Mount.Mount, tag: Mount.MountState["_tag"]) =>
+	mount.state.pipe(
+		Stream.filter((state) => state._tag === tag),
+		Stream.runHead,
+		Effect.flatMap(
+			Option.match({
+				onNone: () => Effect.die(new Error(`Mount ended before ${tag}`)),
+				onSome: () => Effect.succeed(true),
+			}),
+		),
 	)
+```
+
+- Record start and stop events in a `Ref` to assert teardown order.
+- Use `mount.await` for "settled", `mount.stable` for "nothing loading below".
+- Read services through `Graft.use` / `Graft.await` to test the consumer view.
+
+## Time and retries
+
+Provide `TestContext` and advance the clock with `TestClock`; a mount with
+`retry: Schedule.exponential(...)` retries when time advances, without real
+delay.
+
+## Remote and in-memory transport
+
+`@graftland/graft/testing` provides an in-memory pair of `effect/rpc` protocols,
+so `Remote.serve` and `Remote.connect` run in one process without sockets, HTTP
+or workers. Messages still go through encode/decode but never become bytes.
+
+```ts
+import { Remote } from "@graftland/graft/rpc"
+import * as Testing from "@graftland/graft/testing"
+
+const program = Effect.gen(function* () {
+	const protocol = yield* Testing.make
+	const serving = yield* Remote.serve({
+		services: [PricingRemote],
+		protocol: protocol.server,
+	})
+	const connected = yield* Remote.connect({
+		services: [PricingRemote],
+		protocol: protocol.client,
+		retry: Schedule.exponential("10 millis"),
+	})
+	yield* connected.await
+	// ... assert the remote service is published and callable
+	yield* protocol.disconnect
 })
 ```
 
-- `Layer.fresh(Graft.layer)` gives each test its own registry.
-- `Effect.scoped` unloads every plugin the test loaded, so teardown runs and its
-  failures surface in the test. To assert on what teardown did, close an inner
-  `Effect.scoped` first and assert after it.
-- Add environment services the plugin needs with
-  `Layer.provideMerge(Graft.layer, ...)`.
+- `Testing.make` is an `Effect` (`Scope`), not a function; it returns
+  `{ server, client, disconnect }`.
+- `server` is a `Layer<RpcServer.Protocol>` for `Remote.serve`.
+- `client` is an `Effect` that opens a **new** connection each time it runs, so
+  each reconnect attempt is independent.
+- `disconnect` ends the current connection: calls in flight fail (with
+  `RemoteUnavailable` through a remote service) and the next `client` run opens
+  a fresh connection.
+- Use it to test contracts, availability mirroring and reconnection without a
+  child process. For real subprocess or worker behavior use [node](node.md) in
+  an integration test.
 
-## Helpers
+## Checklist
 
-```ts
-// The fork's current state tag.
-const state = (fork: Fork.Fork) =>
-	Effect.map(Stream.runHead(fork.state), (state) =>
-		state._tag === "Some" ? state.value._tag : "Disposed",
-	)
-
-// Wait until the fork runs. `fork.await` returns already at `Pending`.
-const running = (fork: Fork.Fork) =>
-	Stream.runHead(Stream.filter(fork.state, (state) => state._tag === "Active"))
-```
-
-## Techniques
-
-| To check…                       | Do                                                                             |
-| ------------------------------- | ------------------------------------------------------------------------------ |
-| The fork waits for a service    | `fork.await`, then `state(fork)` is `"Pending"`                                |
-| A dependency starts it          | Load a test plugin that calls `Graft.provide(Key, fake)`, then `running(fork)` |
-| A failure                       | `Effect.exit(fork.await)` or `Effect.flip`, then assert on the error           |
-| An update in place or a restart | `fork.update(input)`, then compare a counter or the logs                       |
-| Teardown order                  | Record steps in a `Ref` or a journal service; assert on the sequence           |
-| Calls to a dependency           | A fake service that records into a `Ref`                                       |
-| Timers and retries              | `TestClock.adjust` (installed by `it.effect`)                                  |
-| Concurrent steps                | `Deferred` handshakes between the test and the plugin                          |
-| Log output                      | Collect `Graft.logs` and compare messages                                      |
-
-Wait on an explicit signal (`Deferred`, `running`, a state) rather than yielding
-in loops or sleeping, so the test does not depend on scheduling. With
-`TestClock`, make sure the code under test has started its sleep before you
-advance the clock.
-
-## Collecting logs
-
-```ts
-const text = (entry: Graft.LogEntry) =>
-	Array.join(
-		Array.map(Array.ensure(entry.message), (part) => `${part}`),
-		" ",
-	)
-
-const messages = Effect.gen(function* () {
-	yield* Effect.log("end of log")
-	const entries = yield* Stream.runCollect(
-		Stream.takeUntil(Graft.logs, (entry) => text(entry) === "end of log"),
-	)
-	return Array.dropRight(Array.map(entries, text), 1)
-})
-```
-
-## Config-file and loader tests
-
-Load `Loader.plugin` with entries that name built module files, and a
-`ModuleResolver` connected to a live control endpoint; use `loader.ready` to
-wait for reconciliation. See [apps](apps.md#embed-graft).
+- Every promised behavior has a test: waiting, building, tearing down, updating
+  with `set`, the failures it handles.
+- Lifecycle tests assert order and cleanup; do not weaken an assertion to make a
+  race pass — fix the implementation or the synchronization.
+- No test depends on real time; use `TestClock`.

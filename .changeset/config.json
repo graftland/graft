@@ -7,21 +7,7 @@
 		}
 	],
 	"commit": false,
-	"fixed": [
-		[
-			"@graftland/cli",
-			"@graftland/graft",
-			"@graftland/create",
-			"@graftland/loader",
-			"@graftland/package-manager",
-			"@graftland/plugin-http",
-			"@graftland/plugin-http-api",
-			"@graftland/plugin-mcp-server",
-			"@graftland/plugin-otlp",
-			"@graftland/plugin-release",
-			"@graftland/plugin-remote"
-		]
-	],
+	"fixed": [["@graftland/graft"]],
 	"linked": [],
 	"access": "public",
 	"baseBranch": "main",

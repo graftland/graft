@@ -4,24 +4,21 @@ import {
 	Effect,
 	Exit,
 	Fiber,
-	HashMap,
-	Option,
+	Layer,
 	PubSub,
 	Ref,
 	References,
-	Schema,
-	Stream,
 	String,
 	TxRef,
 } from "effect"
 import { assert, it } from "@effect/vitest"
 
-import { Graft, Plugin } from "../src/index.ts"
+import * as Graft from "../src/Graft.ts"
 import { supervise } from "../src/internal/activation.ts"
-import * as ForkStatus from "../src/internal/forkState.ts"
+import * as MountStatus from "../src/internal/mountStatus.ts"
 import type { GraphNode, Spec } from "../src/internal/runtime.ts"
 import { RuntimeContext } from "../src/internal/runtimeContext"
-import { run } from "./utils.ts"
+import { current, run } from "./b1c-utils.ts"
 
 it.effect(
 	"records every completed apply defect when supervision is interrupted",
@@ -31,8 +28,10 @@ it.effect(
 			const failed = yield* Ref.make<ReadonlyArray<string>>([])
 			for (const ticks of Array.range(0, 60)) {
 				const marker = `completed apply defect (${ticks})`
-				const plugin = Plugin.make({
+				const definition = {
 					name: "failure ownership",
+					requires: [],
+					retry: undefined,
 					apply: () =>
 						Effect.die(marker).pipe(
 							Effect.onExit((exit) =>
@@ -41,10 +40,9 @@ it.effect(
 									: Effect.void,
 							),
 						),
-				})
+				}
 				const spec = yield* TxRef.make<Spec>({
-					plugin,
-					requested: plugin,
+					definition,
 					input: undefined,
 					revision: 0,
 				})
@@ -55,10 +53,10 @@ it.effect(
 					parent: undefined,
 					state: TxRef.makeUnsafe<GraphNode["state"]["value"]>({
 						live: true,
-						resolutions: HashMap.empty(),
+						resolution: undefined,
 					}),
 				}
-				const status = yield* ForkStatus.make(false, undefined, initial)
+				const status = yield* MountStatus.make(undefined, initial)
 				const supervisor = yield* supervise(
 					runtime,
 					-1,
@@ -97,59 +95,24 @@ it.effect(
 		}).pipe(run),
 )
 
-it.effect(
-	"handles a synchronous decoder defect during an in-place update",
-	() =>
-		Effect.gen(function* () {
-			const base = Plugin.make({
-				name: "throwing update decoder",
-				config: Schema.String,
-				apply: () => Effect.succeed(() => Effect.succeed(true)),
-			})
-			const fork = yield* Graft.plugin(
-				{
-					...base,
-					decode: (input: string): Effect.Effect<string> => {
-						if (input === "bad")
-							throw new Error("update decoder construction failed")
-						return Effect.succeed(input)
-					},
-				},
-				"initial",
-			)
-			yield* fork.await
-			yield* fork.update("bad")
-			yield* Effect.exit(fork.await)
-			const snapshot = yield* Stream.runHead(fork.state)
-			yield* fork.dispose
-			const state = Option.getOrThrow(snapshot)
-			assert.strictEqual(state._tag, "Failed")
-			if (state._tag === "Failed")
-				assert.include(
-					Cause.pretty(state.cause),
-					"update decoder construction failed",
-				)
-		}).pipe(run),
-)
-
-it.effect("captures a synchronous decoder defect inside the activation", () =>
+it.effect("captures a synchronous defect inside the activation", () =>
 	Effect.gen(function* () {
-		const base = Plugin.make({
-			name: "throwing decoder",
-			apply: () => Effect.void,
-		})
-		const fork = yield* Graft.plugin({
-			...base,
-			decode: (_input: void): Effect.Effect<void> => {
-				throw new Error("decoder construction failed")
-			},
-		})
-		yield* Effect.exit(fork.await)
-		const snapshot = yield* Stream.runHead(fork.state)
-		yield* fork.dispose
-		const state = Option.getOrThrow(snapshot)
+		const mount = yield* Graft.mount(
+			Layer.effectDiscard(
+				Effect.sync(() => {
+					throw new Error("activation construction defect")
+				}),
+			),
+			{ name: "synchronous defect" },
+		)
+		yield* Effect.exit(mount.await)
+		const state = yield* current(mount)
+		yield* mount.unmount
 		assert.strictEqual(state._tag, "Failed")
 		if (state._tag === "Failed")
-			assert.include(Cause.pretty(state.cause), "decoder construction failed")
+			assert.include(
+				Cause.pretty(state.cause),
+				"activation construction defect",
+			)
 	}).pipe(run),
 )

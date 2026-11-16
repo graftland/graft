@@ -2,7 +2,7 @@ import { Effect, HashMap, HashSet, Option, TxRef } from "effect"
 
 import type { ActiveResolution, GraphNode, ServiceKey } from "./runtime"
 
-/** The exact dependency snapshot must still be valid when plugin code publishes. */
+/** The exact dependency snapshot must still be valid when a mount publishes. */
 export const resolutionChanged = Effect.fnUntraced(function* (
 	resolution: ActiveResolution,
 ) {
@@ -36,12 +36,12 @@ export const publicationCycle = Effect.fnUntraced(function* (
 		if (HashSet.has(seen, node.id)) continue
 		seen = HashSet.add(seen, node.id)
 		const state = yield* TxRef.get(node.state)
-		if (!state.live && HashMap.size(state.resolutions) === 0) continue
-		const resolutions =
+		if (!state.live) continue
+		const resolution =
 			node === publisher && candidate !== undefined
-				? [candidate, ...HashMap.values(state.resolutions)]
-				: HashMap.values(state.resolutions)
-		for (const resolution of resolutions) {
+				? candidate
+				: state.resolution
+		if (resolution !== undefined) {
 			if (HashMap.has(resolution.watch, key)) return true
 			for (const provision of resolution.provisions) {
 				pending = { node: provision.node, next: pending }

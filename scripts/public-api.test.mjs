@@ -1,4 +1,3 @@
-import { execFileSync } from "node:child_process"
 import {
 	mkdirSync,
 	mkdtempSync,
@@ -59,64 +58,63 @@ function fixture(files, run) {
 }
 
 it("keeps every published entry's signature publicly nameable", () => {
-	assert.lengthOf(publicPackages(root), 11)
+	assert.lengthOf(publicPackages(root), 1)
 	assert.deepEqual(checkWorkspace(root), [])
 })
 
-it("imports the public trust entry independently of the package barrel", () => {
-	const output = execFileSync(
-		process.execPath,
-		[
-			"--input-type=module",
-			"--eval",
-			'import * as Trust from "@graftland/graft/Trust"; console.log(typeof Trust.register, typeof Trust.Projection, "service" in Trust, "immutable" in Trust, "enabled" in Trust)',
-		],
-		{ cwd: join(root, "packages/core"), encoding: "utf8" },
-	)
-	assert.equal(output.trim(), "function function false false false")
-})
-
-it("imports the Remote policy service through its independent public entry", () => {
-	const output = execFileSync(
-		process.execPath,
-		[
-			"--input-type=module",
-			"--eval",
-			'import { install, Policy, Service } from "@graftland/plugin-remote/Policy"; console.log(typeof install, typeof Policy, typeof Service)',
-		],
-		{ cwd: join(root, "packages/plugin-remote"), encoding: "utf8" },
-	)
-	assert.equal(output.trim(), "function function function")
-})
-
 it("emits unannotated consumer declarations using only public entry paths", () => {
-	const declaration = readFileSync(
-		join(root, ".cache/public-api/consumer/index.d.ts"),
-		"utf8",
-	)
-	for (const name of [
-		"plain",
-		"configured",
-		"injected",
-		"configuredAndInjected",
-		"service",
-		"layer",
-		"event",
-		"middleware",
-		"descriptor",
-		"contract",
-		"declaredError",
-		"unitTarget",
-		"connectControl",
-		"loader",
-		"include",
-		"group",
-		"resolver",
-		"load",
-		"loadFile",
-	])
-		assert.include(declaration, `export declare const ${name}:`)
 	const directory = join(root, ".cache/public-api/consumer")
+	const declarations = Object.fromEntries(
+		["index", "rpc", "node", "testing"].map((name) => [
+			name,
+			readFileSync(join(directory, `${name}.d.ts`), "utf8"),
+		]),
+	)
+	for (const [name, entry] of [
+		[
+			"index",
+			[
+				"layer",
+				"mount",
+				"named",
+				"required",
+				"optional",
+				"isolated",
+				"labelled",
+				"intercepted",
+				"publication",
+				"background",
+				"watch",
+				"awaiting",
+				"used",
+				"whileAvailable",
+				"mounts",
+				"logs",
+				"states",
+				"settled",
+				"stable",
+				"restart",
+				"unmount",
+				"set",
+				"children",
+				"options",
+				"scoped",
+				"close",
+				"released",
+				"conflict",
+				"withdrawn",
+			],
+		],
+		["rpc", ["pricing", "serve", "connect", "any", "unavailable"]],
+		["node", ["subprocess", "worker", "stdio", "workerServer"]],
+		["testing", ["connection", "server", "client", "disconnect"]],
+	])
+		for (const exported of entry)
+			assert.include(
+				declarations[name],
+				`export declare const ${exported}:`,
+				`${name}.d.ts exports ${exported}`,
+			)
 	for (const file of readdirSync(directory).filter((file) =>
 		file.endsWith(".d.ts"),
 	)) {
@@ -124,7 +122,7 @@ it("emits unannotated consumer declarations using only public entry paths", () =
 		assert.notInclude(output, "/internal/", file)
 		assert.notInclude(output, "/src/", file)
 	}
-	assert.include(declaration, "export default")
+	assert.include(declarations.index, "export default")
 })
 
 it("rejects an unexported type in the entry itself", () =>
@@ -214,26 +212,5 @@ it("skips artifact directories without hiding invalid package manifests", () => 
 		assert.throws(() => publicPackages(directory), SyntaxError)
 	} finally {
 		rmSync(directory, { recursive: true, force: true })
-	}
-})
-
-it("keeps shared Graft runtime packages as peers with development copies", () => {
-	for (const { manifest } of publicPackages(root)) {
-		assert.isString(manifest.engines?.node, `${manifest.name}: Node engine`)
-		for (const name of [
-			"@graftland/graft",
-			"@graftland/loader",
-			"@graftland/cli",
-		]) {
-			assert.isUndefined(
-				manifest.dependencies?.[name],
-				`${manifest.name}: ${name} must be a peer`,
-			)
-			if (manifest.peerDependencies?.[name] !== undefined)
-				assert.isString(
-					manifest.devDependencies?.[name],
-					`${manifest.name}: ${name} development copy`,
-				)
-		}
 	}
 })

@@ -1,6 +1,0 @@
-{
-	"name": "extensions-worker-10154",
-	"version": "1.0.0",
-	"type": "module",
-	"exports": "./index.mjs"
-}

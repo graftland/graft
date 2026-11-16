@@ -1,159 +1,93 @@
 ---
-title: Realms and isolation
-description: Give part of the plugin tree its own services and events.
+title: Isolation
+description:
+  Give a mount its own services, or share one set across several mounts.
 ---
 
-Realms control which services and events a fork can see. Use them to run
-separate instances side by side, such as one set of services per tenant. To
-change a setting instead, see [Intercepts](../intercepts/).
+A **realm** is the namespace in which a service resolves. By default every mount
+uses one shared realm. `isolate` gives a mount a different one.
 
-The `isolate` option of `Graft.plugin` applies to the fork and everything below
-it.
+## Give a mount its own realm
 
-Realms are a **visibility** boundary inside one process: they decide what a fork
-can see, not where its code runs. To move a plugin's code into a child process,
-a worker or another machine, use [Remote](../remote/overview/), which draws an
-**execution** boundary instead. Neither limits what the plugin's code may do;
-for that, run a Remote runner in a container or a VM.
+```ts
+import { Context, Effect, Layer } from "effect"
 
-## Realms
+import { Graft } from "@graftland/graft"
 
-Every service key and event belongs to a **realm**. By default, the whole
-application is one realm: a service published anywhere is visible everywhere,
-and an event reaches every handler.
+class Database extends Context.Service<Database, string>()("app/Database") {}
+class Tenant extends Context.Service<Tenant, string>()("app/Tenant") {}
 
-The `isolate` option gives a fork, and everything below it, its own realm for
-some keys:
-
-```ts import.meta.vitest name="isolation: realms"
-import { Context, Effect, Schema, Stream } from "effect"
-
-import { Graft, Plugin } from "@graftland/graft"
-
-class Database extends Context.Service<Database, { readonly url: string }>()(
-	"app/Database",
-) {}
-
-const app = Plugin.make({
-	name: "app/app",
-	inject: [Database],
-	apply: () =>
-		Effect.flatMap(Database, (db) => Effect.log(`app uses ${db.url}`)),
-})
-
-const tenant = Plugin.make({
-	name: "app/tenant",
-	config: Schema.Struct({ name: Schema.String }),
-	apply: ({ name }) =>
-		Effect.gen(function* () {
-			yield* Graft.provide(Database, { url: `postgres://${name}` })
-			yield* Graft.plugin(app)
-		}),
-})
-
-const tenants = Plugin.make({
-	name: "app/tenants",
-	apply: () =>
-		Effect.gen(function* () {
-			yield* Graft.plugin(tenant, { name: "a" }, { isolate: [Database] })
-			yield* Graft.plugin(tenant, { name: "b" }, { isolate: [Database] })
-		}),
-})
-
-const messages = await Effect.runPromise(
+const tenant = Layer.effect(
+	Tenant,
 	Effect.gen(function* () {
-		yield* Graft.plugin(tenants)
-		return yield* Graft.logs.pipe(
-			Stream.take(2),
-			Stream.map((line) => line.message),
-			Stream.runCollect,
-		)
-	}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
+		const database = yield* Database
+		return `tenant on ${database}`
+	}),
 )
-messages // => [["app uses postgres://a"], ["app uses postgres://b"]]
+
+export const program = Effect.gen(function* () {
+	yield* Graft.mount(Layer.effect(Database, Effect.succeed("dedicated")), {
+		name: "database",
+		isolate: [Database],
+	})
+	yield* Graft.mount(tenant, { name: "tenant", requires: [Database] })
+})
 ```
 
-Here, each `tenant` fork can publish its own `Database`.
+`isolate: [Database]` gives that mount a private realm for `Database`. Its
+children inherit the mapping: they look up `Database` in the same private realm,
+so they see the dedicated value.
 
-- Plugins inside each fork see only that fork's `Database`.
-- A `Database` published outside is not visible inside, and the other way round.
-- Keys that are not isolated are shared as usual.
+| Option form                   | Realm                                                                  |
+| ----------------------------- | ---------------------------------------------------------------------- |
+| Absent                        | The shared root realm.                                                 |
+| `isolate: [Database]`         | A private realm for this mount.                                        |
+| `isolate: [[Database, "eu"]]` | The shared realm labelled `eu`; every mount using the label shares it. |
 
-`isolate` takes anything with a `key`: a service key such as `Database`, or an
-[event](../events/).
+Labels let several mounts share one set of services. Private realms and the root
+realm cannot be reached through a label.
 
-### Shared realms
+## What isolation covers
 
-A label puts forks into one shared realm instead of a private one:
+| Rule                     | Detail                                                                                     |
+| ------------------------ | ------------------------------------------------------------------------------------------ |
+| Per key                  | Each key is isolated separately. A mount can isolate `Database` and share everything else. |
+| Inheritance              | A child mount starts with the realms of where it was created.                              |
+| Unique providers         | Within one realm, one mount or publication provides a key.                                 |
+| Lookup                   | A mount finds a service in its realm first, then in the environment of `Graft.layer`.      |
+| No inheritance of values | A child never receives a parent's provision directly; it resolves the same realm itself.   |
+| Environment              | Services from the environment stay visible in every realm.                                 |
 
-```ts import.meta.vitest name="isolation: shared realms"
-import { Context, Effect, Stream } from "effect"
+Realm labels and service keys are independent parts of a service's identity,
+even when either contains unusual characters.
 
-import { Graft, Plugin } from "@graftland/graft"
+## Publication cycles
 
-class Database extends Context.Service<Database, { readonly url: string }>()(
-	"app/Database",
-) {}
+Publishing a value can restart the mount that publishes it, directly or through
+other mounts. Graft rejects such a publication atomically with
+`Graft.ServiceConflict` and the realm stays unchanged.
 
-const database = Plugin.service(
-	Database,
-	Effect.succeed({ url: "postgres://staging" }),
-	{ name: "database" },
-)
+1. **Find the watchers** of that key in the target realm: running mounts that
+   use it as an optional dependency or through an ambient fallback.
+2. **Follow** their descendants and the consumers of every provider they use.
+3. **Reject** the publication if the publisher is among them.
 
-const api = Plugin.make({
-	name: "app/api",
-	inject: [Database],
-	apply: () =>
-		Effect.flatMap(Database, (db) => Effect.log(`api uses ${db.url}`)),
-})
+| `reason`          | Case                                               |
+| ----------------- | -------------------------------------------------- |
+| `SelfDependency`  | The mount watches the key it is publishing.        |
+| `DependencyCycle` | Another mount in the cycle watches it.             |
+| `Invalidated`     | A dependency change already invalidated the mount. |
 
-const worker = Plugin.make({
-	name: "app/worker",
-	inject: [Database],
-	apply: () =>
-		Effect.flatMap(Database, (db) => Effect.log(`worker uses ${db.url}`)),
-})
+A rejected mount waits for a change in its spec, its dependencies or the
+blocking graph. It does not retry into the same cycle. See
+[failures and retries](../failures-retry/#serviceconflict).
 
-const staging = Effect.gen(function* () {
-	yield* Graft.plugin(database, undefined, { isolate: [[Database, "staging"]] })
-	yield* Graft.plugin(api, undefined, { isolate: [[Database, "staging"]] })
-	yield* Graft.plugin(worker, undefined, { isolate: [[Database, "staging"]] })
-})
+## Isolation and intercepts
 
-const messages = await Effect.runPromise(
-	Effect.gen(function* () {
-		yield* Graft.provide(Database, { url: "postgres://production" })
-		yield* staging
-		return yield* Graft.logs.pipe(
-			Stream.take(2),
-			Stream.map((line) => line.message),
-			Stream.runCollect,
-		)
-	}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
-)
-messages // => [["api uses postgres://staging"], ["worker uses postgres://staging"]]
-```
+| Tool        | Changes                                                            |
+| ----------- | ------------------------------------------------------------------ |
+| `isolate`   | Which realm a service resolves in, so which provider a mount sees. |
+| `intercept` | The value of a `Context.Reference` for a mount and its children.   |
 
-`api` and `worker` share the `Database` of the `staging` realm, wherever they
-are in the tree. They do not see a `Database` published in any other realm.
-
-Rules for labels:
-
-- A label and a service or event key are separate parts of identity. Graft
-  treats each as a complete string, including embedded NUL characters.
-- A label that begins with `#` or `@` does not address a private realm.
-- The empty label names a shared realm. It is different from the default root
-  realm.
-
-### Environment fallback and inheritance
-
-Realms isolate published services. They do not isolate ambient services from the
-environment where `Graft.layer` was built.
-
-| Question                                                          | Answer                                                                                                                        |
-| ----------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| A realm has no provision for an injected key. What happens?       | Its consumers may use the ambient value.                                                                                      |
-| Does publishing in realm A restart ambient consumers in realm B?  | No. Neither does withdrawing.                                                                                                 |
-| Do a parent's provisions pass to children through Effect context? | No. Each child must declare its own `inject` to get provisions in its own realm.                                              |
-| Do values inherited from the environment stay available?          | Yes. If a parent's provision hid a root environment value, the child can use that fallback again, across several generations. |
+Use `isolate` to keep tenants apart; use [intercepts](../intercepts/) to adjust
+settings such as a timeout or a feature flag.

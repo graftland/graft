@@ -4,119 +4,98 @@
 
 **园艺学 Effect 系统。** _放心修剪。_
 
-[English](README.md) | 简体中文 | [繁體中文](README.zh-TW.md)
+English | 简体中文 | [繁體中文](README.zh-TW.md)
 
-[![npm](https://img.shields.io/npm/v/@graftland/graft)](https://www.npmjs.com/package/@graftland/graft)
-[![CI](https://github.com/graftland/graft/actions/workflows/ci.yml/badge.svg)](https://github.com/graftland/graft/actions/workflows/ci.yml)
-[![License](https://img.shields.io/github/license/graftland/graft)](LICENSE)
+Layer 不由启动时决定。它们是长出来的。
 
-Graft 是面向长期运行的 TypeScript 应用、基于 [Effect](https://effect.website)
-的插件运行时。每项能力都是一个依赖显式、生命周期独立的插件，因此你能以可控的影响范围更换其中一项。改动一个插件，`graft start --watch`
-只在运行中的进程里替换受影响的插件。
-
-软件不是造出来的，是长出来的。应用是一棵插件树：每个插件嫁接在一个 scope 上，从周围汲取服务，也发布自己的服务。你可以在进程持续运行的同时加载、重新配置、替换和卸载任意一枝。剪掉哪里，树的其余部分都照常生长。
+Graft 让 Effect 的 `Layer`
+变成动态的。挂载一个 Layer，Graft 会在它需要的一切都可用时构建它，发布它提供的服务，并在某个依赖消失时先把依赖它的部分停掉，再拆除它。配置就是一个普通的发布值，修改它会让依赖它的一切重建。
 
 ```ts
-import { Context, Effect, Schema } from "effect"
+import { Context, Effect, Layer } from "effect"
 
-import { Graft, Plugin } from "@graftland/graft"
+import { Graft } from "@graftland/graft"
 
-class Greeter extends Context.Service<
-	Greeter,
-	{ readonly greet: (name: string) => Effect.Effect<void> }
->()("app/Greeter") {}
+class Region extends Context.Service<Region, string>()("app/Region") {}
+class Report extends Context.Service<Report, string>()("app/Report") {}
 
-// Publishes a Greeter while it is loaded.
-const greeter = Plugin.make({
-	name: "app/greeter",
-	config: Schema.Struct({ greeting: Schema.String }),
-	apply: ({ greeting }) =>
-		Graft.provide(Greeter, {
-			greet: (name) => Effect.log(`${greeting}, ${name}!`),
-		}),
-})
+const report = Layer.effect(
+	Report,
+	Effect.map(Region, (region) => `Report for ${region}`),
+)
 
-// Starts once a Greeter exists, and stops before it goes away.
-const hello = Plugin.make({
-	name: "app/hello",
-	inject: [Greeter],
-	apply: () => Effect.flatMap(Greeter, (greeter) => greeter.greet("world")),
+export const program = Effect.gen(function* () {
+	// A value from outside any layer. `set` rebuilds its consumers.
+	const region = yield* Graft.publish(Region, "eu")
+
+	// Built while Region is available, torn down and rebuilt when it changes.
+	const mount = yield* Graft.mount(report, {
+		name: "report",
+		requires: [Region],
+	})
+	yield* mount.await
+
+	yield* region.set("us")
 })
 ```
 
 ## 为什么选择 Graft
 
-- **热替换。** 不砍树，只换品种。`graft start --watch`
-  把每次保存变成一个变更，只重新部署受影响的配置项。变更失败时，内核恢复之前的版本；恢复不了就报告
-  `RecoveryFailed`。
-- **干净卸载。** 每个插件都在自己的 `Scope`
-  中运行，它启动的每个 fiber 都有归属。插件消失时，依赖它的插件先停止，然后执行它的 finalizer。失败（包括清理时的失败）也保留完整的
+- **可用性驱动图。**
+  挂载等待它需要的服务，全部到齐时构建，其中一个消失时停止。可选依赖出现或消失时，挂载重建。
+- **拆除跟随归属。** 每个挂载拥有一个
+  `Scope`，它启动的每个 fiber 都有归属。消费者先于提供者停止，然后关闭资源，失败保留完整的
   `Cause`。
-- **在线升级。**
-  替换运行在 Worker 或子进程中的插件，使用它的插件继续运行。候选从不可变制品启动，必须通过变更指定的探针；使用
-  `Overlap` 时，新调用进入候选，旧调用排空后终止旧单元。升级以
-  `Accepted`、`Aborted`、`Recovered`、`RecoveryFailed` 或 `Stuck`
-  结束；需要发布记录器记录的升级会等待确认，确认之前显示为记录受阻，见[变更](https://docs.graft.land/zh-cn/transitions/)。
-- **依赖受检查。** 服务是 Effect 的 `Context` 键，由 `Layer`
-  或其他插件提供。插件在 `inject` 中声明依赖，由编译器检查。
+- **服务来来去去时也能读取。** `watch`、`await`、`use` 和 `whileAvailable`
+  从普通 Effect 代码里读取图，撤回会中断工作，而不是留下过期的值。
+- **远程服务仍是服务。** 通过任意 `effect/rpc`
+  协议提供一个服务，并在另一个进程或另一台机器上发布它。使用它的挂载无需改动。
 
-某根枝条需要单独栽种时，[Remote](https://docs.graft.land/zh-cn/remote/overview/)
-可以让这个插件在子进程、Node
-worker 或另一台机器上运行，使用它服务的插件不必改动。
+Graft 只依赖 `effect`；`@effect/platform-node` 是可选的，只有 `node`
+入口需要它。在 Node.js 上运行 Graft 需要 22.19 或更高版本。开发本工作区需要 Node.js
+22.22 或更高版本，它同时用于构建文档。
 
-在 Node.js 上运行 Graft 需要 22.19 或更高版本。开发本工作区需要 Node.js
-22.22 或更高版本，其中包括用 Astro 构建文档。
-
-## 快速开始
+## 开始使用
 
 ```sh
-npm create @graftland@latest my-app
-cd my-app
-npm run dev
+npm install effect @graftland/graft
 ```
 
-阅读[文档](https://docs.graft.land/zh-cn/)。和编程智能体一起开发？[`graft` skill](skills/graft)
-教它用插件化、Effect 化的方式拆解应用，再编写、测试和运行：`npx skills add graftland/graft`。
+阅读[文档](https://docs.graft.land/zh-cn/)。[快速开始](https://docs.graft.land/zh-cn/quickstart/)挂载第一个 Layer；[核心概念](https://docs.graft.land/zh-cn/concepts/)说明图、挂载和发布。
 
-Graft 的插件模型借鉴自
-[cordis](https://github.com/cordiverse/cordis)。cordis 在时空中组合，Graft 只照料自己的园子。请看
-[cordis 的概念如何对应到 Graft](https://docs.graft.land/zh-cn/cordis/)。想让编程智能体完成迁移，可以安装[迁移 skills](skills)。
+## 一个包
 
-## 示例
+Graft 只发布 `@graftland/graft`。
 
-[`samples/`](samples)
-以六个简短的编号示例开头。每个示例讲一个概念，从第一个插件到通过 `graft.yml`
-运行，再到把插件移到另一个进程。
+| 入口            | 内容                             |
+| --------------- | -------------------------------- |
+| `graft`         | `Graft`、`Mount` 与 `Release`。  |
+| `graft/rpc`     | 通过 `effect/rpc` 的远程服务。   |
+| `graft/node`    | Node.js 的子进程和 worker 协议。 |
+| `graft/testing` | 供测试使用的内存协议。           |
 
-之后是更大的应用，展示 Graft 的用途：
+## 旧包
 
-- [WebSocket 集成网关](samples/integration-gateway)，升级插件时保留会话
-- 由插件构成的聊天机器人，天气集成在子进程中运行
-- 由 `graft.yml` 驱动的 HTTP 网关
-- 工具即插件的 MCP 服务器：客户端连着时也能重载工具
-- 多租户服务
-- 能在不稳定的上游下继续运行的行情数据管道
+从 0.7.0 起，Graft 是一个动态 Layer 库。之前版本的 API 已移除，且不兼容。
 
-## 软件包
+下列软件包已不再开发，不再获得更新：
 
-| 软件包                                                       | 作用                                                                       |
-| ------------------------------------------------------------ | -------------------------------------------------------------------------- |
-| [`@graftland/graft`](packages/core)                          | 基于 Effect 的插件框架：插件、fork、服务、隔离、事件和日志。               |
-| [`@graftland/loader`](packages/loader)                       | 从条目列表或 YAML 配置文件加载插件。                                       |
-| [`@graftland/cli`](packages/cli)                             | `graft` 命令：`start`、`create`、`add` 和 `remove`。                       |
-| [`@graftland/create`](packages/create)                       | 生成新的 Graft 项目：`npm create @graftland` 和 `graft create`。           |
-| [`@graftland/package-manager`](packages/package-manager)     | 用 npm、pnpm 或 Yarn 安装依赖，失败时回滚。                                |
-| [`@graftland/plugin-remote`](packages/plugin-remote)         | 让插件在子进程、worker 或另一台机器上运行；提供 `graft start runner.yml`。 |
-| [`@graftland/plugin-otlp`](packages/plugin-otlp)             | 把一棵插件子树的 span 导出到 OpenTelemetry 收集端。                        |
-| [`@graftland/plugin-http`](packages/plugin-http)             | 共享 HTTP 服务器；路由和流随插件的生命周期加载和卸载。                     |
-| [`@graftland/plugin-http-api`](packages/plugin-http-api)     | 实时 Effect HttpApi 路由组、类型化客户端和 OpenAPI 文档。                  |
-| [`@graftland/plugin-mcp-server`](packages/plugin-mcp-server) | 把插件的工具提供给 MCP 客户端；工具重载时客户端无需重连。                  |
+| 软件包                         | 最后一个版本 | 改用                             |
+| ------------------------------ | ------------ | -------------------------------- |
+| `@graftland/loader`            | `0.6.0`      | 在自己的程序里用 `Graft.mount`。 |
+| `@graftland/hmr`               | `0.5.0`      | 无；Graft 不再重载模块。         |
+| `@graftland/cli`               | `0.6.0`      | 无；没有命令，也没有配置文件。   |
+| `@graftland/create`            | `0.6.0`      | 无。                             |
+| `@graftland/package-manager`   | `0.6.0`      | 无。                             |
+| `@graftland/plugin-remote`     | `0.6.0`      | `graft/rpc` 入口。               |
+| `@graftland/plugin-http`       | `0.5.0`      | 无。                             |
+| `@graftland/plugin-http-api`   | `0.5.0`      | 无。                             |
+| `@graftland/plugin-mcp-server` | `0.5.0`      | 无。                             |
+| `@graftland/plugin-otlp`       | `0.5.0`      | 无。                             |
+| `@graftland/plugin-release`    | 未发布       | 无。                             |
 
-所有软件包以相同版本一起发布。它们都需要 `effect` 4.1.x。
-
-## 方向
-
-在线升级目前支持运行在 Worker、子进程和 runner 中的插件（runner 只能重启，不能重叠）；状态交接与会话续连是下一步。设计是公开的：[价值定义](design/value.md)与[架构](design/architecture.md)。本 README 只描述已经实现的能力。
+`@graftland/plugin-release`
+从未发布，没有对象可标记。在 npm 上标记旧软件包为废弃是可选的独立决定。
 
 ## 参与贡献
 
@@ -128,7 +107,7 @@ devenv shell -- pnpm typecheck
 devenv shell -- pnpm test
 ```
 
-检查项、发布流程和文档站点见[发版](https://docs.graft.land/zh-cn/publishing/)。
+检查项、发布流程和文档站点见[发布](https://docs.graft.land/zh-cn/releases/)。
 
 ## 许可证
 

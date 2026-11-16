@@ -5,7 +5,7 @@
 	},
 	"version": "0.6.0",
 	"type": "module",
-	"description": "A plugin framework built on Effect: plugins, forks, services, isolation, events and logs",
+	"description": "Effect layers that mount and unmount at runtime, with remote services over effect/rpc",
 	"license": "Apache-2.0",
 	"repository": {
 		"type": "git",
@@ -24,45 +24,17 @@
 			"source": "./src/index.ts",
 			"default": "./dist/index.js"
 		},
-		"./Change": {
-			"source": "./src/Change.ts",
-			"default": "./dist/Change.js"
+		"./node": {
+			"source": "./src/node/index.ts",
+			"default": "./dist/node/index.js"
 		},
-		"./Event": {
-			"source": "./src/Event.ts",
-			"default": "./dist/Event.js"
+		"./rpc": {
+			"source": "./src/rpc/index.ts",
+			"default": "./dist/rpc/index.js"
 		},
-		"./Finalization": {
-			"source": "./src/Finalization.ts",
-			"default": "./dist/Finalization.js"
-		},
-		"./Fork": {
-			"source": "./src/Fork.ts",
-			"default": "./dist/Fork.js"
-		},
-		"./Graft": {
-			"source": "./src/Graft.ts",
-			"default": "./dist/Graft.js"
-		},
-		"./Kernel": {
-			"source": "./src/Kernel.ts",
-			"default": "./dist/Kernel.js"
-		},
-		"./Manifest": {
-			"source": "./src/Manifest.ts",
-			"default": "./dist/Manifest.js"
-		},
-		"./Plugin": {
-			"source": "./src/Plugin.ts",
-			"default": "./dist/Plugin.js"
-		},
-		"./Transition": {
-			"source": "./src/Transition.ts",
-			"default": "./dist/Transition.js"
-		},
-		"./Trust": {
-			"source": "./src/Trust.ts",
-			"default": "./dist/Trust.js"
+		"./testing": {
+			"source": "./src/testing/index.ts",
+			"default": "./dist/testing/index.js"
 		},
 		"./package.json": "./package.json"
 	},
@@ -71,9 +43,16 @@
 		"test": "vitest run"
 	},
 	"peerDependencies": {
-		"effect": "4.1.*"
+		"effect": "4.1.*",
+		"@effect/platform-node": "4.1.*"
+	},
+	"peerDependenciesMeta": {
+		"@effect/platform-node": {
+			"optional": true
+		}
 	},
 	"devDependencies": {
+		"@effect/platform-node": "4.1.2",
 		"@effect/vitest": "4.1.2",
 		"effect": "4.1.2",
 		"vitest": "5.1.0"
@@ -81,16 +60,9 @@
 	"publishConfig": {
 		"exports": {
 			".": "./dist/index.js",
-			"./Change": "./dist/Change.js",
-			"./Event": "./dist/Event.js",
-			"./Finalization": "./dist/Finalization.js",
-			"./Fork": "./dist/Fork.js",
-			"./Graft": "./dist/Graft.js",
-			"./Kernel": "./dist/Kernel.js",
-			"./Manifest": "./dist/Manifest.js",
-			"./Plugin": "./dist/Plugin.js",
-			"./Transition": "./dist/Transition.js",
-			"./Trust": "./dist/Trust.js",
+			"./node": "./dist/node/index.js",
+			"./rpc": "./dist/rpc/index.js",
+			"./testing": "./dist/testing/index.js",
 			"./package.json": "./package.json"
 		}
 	}

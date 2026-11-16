@@ -1,19 +1,17 @@
 ---
 title: Graft
-description: >-
-  园艺学 Effect 系统。面向长期运行的 TypeScript 应用、基于 Effect
-  的插件运行时，可在进程运行期间加载、替换和卸载插件。
+description: 在应用运行期间挂载和卸载 Effect 的 Layer。
 template: splash
 hero:
   title: "<span>园艺学</span> <span>Effect</span> <span>系统</span>"
   tagline:
-    Graft 在 Effect
-    上把应用养成一棵插件树。进程持续运行，任意一枝都可以加载、替换或卸载。放心修剪。
+    Graft 在依赖可用时挂载 Effect 的
+    Layer，发布它提供的服务，并在依赖消失时把它拆除。
   image:
     alt: Graft 标志：一个 G，横笔是插向圆心的箭头
     file: ../../../src/assets/graft-mark.svg
   actions:
-    - text: 种下第一个插件
+    - text: 挂载第一个 Layer
       link: quickstart/
       icon: right-arrow
     - text: 核心概念
@@ -25,134 +23,102 @@ import { Card, CardGrid } from "@astrojs/starlight/components"
 
 <div class="graft-manifesto">
 	<p>
-		<strong>软件不是造出来的，是长出来的。</strong>
+		<strong>Layer 不由启动时决定，而是长出来的。</strong>
 	</p>
 	<p>
-		插件到来、生根、结果。有的被剪掉，有的在树不倒的情况下被换掉。好园丁从不担心一根枝条从哪里来，也不担心剪掉它会怎样。
+		依赖到来时，Layer
+		随之出现；运行期间，它结出自己的服务；依赖消失时，它被剪掉。枝条在变，整棵树却始终立着。
 	</p>
 	<p>
-		Graft 给你这份确定。每个插件都嫁接在一个 scope 上，每个 fiber
-		都有归属，每个失败都能追溯到根。
+		Graft 只补充 Effect 所没有的部分：一张会变化的 Layer
+		图，以及让这些变化保持安全的保证。
 	</p>
 </div>
 
 ## 三项承诺
 
 <CardGrid>
-	<Card title="热替换">
-		不砍树，只换品种。监听模式把每次保存变成一个变更，只重新部署受影响的插件；变更失败时旧插件继续运行。见
-		<a href="cli/#监听模式">监听模式</a>。
+	<Card title="砧木">
+		服务就是 Effect 的 <code>Context</code> 键。挂载在 <code>requires</code>{" "}
+		中列出所需条目，由编译器检查。见<a href="mounting/">挂载</a>。
 	</Card>
-	<Card title="干净卸载">
-		每个插件都在自己的 <code>Scope</code>{" "}
-		中运行。插件消失时，依赖它的部分先停止，再执行它的 finalizer。失败保留完整的{" "}
+	<Card title="修剪">
+		每个挂载都有自己的 <code>Scope</code>
+		。依赖消失时，使用它的部分先停止，然后才关闭它的资源。失败保留完整的{" "}
 		<code>Cause</code>。见<a href="lifecycle/">生命周期</a>。
 	</Card>
-	<Card title="依赖受检查">
-		服务是 Effect 的 <code>Context</code> 键，由 layer 或其他插件提供。插件在{" "}
-		<code>inject</code> 中列出所需服务，由编译器检查。见
-		<a href="services/">服务</a>。
+	<Card title="可用性">
+		服务存在时读取它，或者只在它存在时运行工作。撤回会中断工作，而不是留下过期的值。见
+		<a href="availability/">服务可用性</a>。
 	</Card>
 </CardGrid>
 
-## 第一次嫁接
+## 第一次挂载
 
-```ts import.meta.vitest name="index: a first graft"
-import { Context, Effect, Option, Schema, Stream } from "effect"
+```ts import.meta.vitest name="index: a first mount"
+import { Context, Effect, Layer, Option, Stream } from "effect"
 
-import { Fork, Graft, Plugin } from "@graftland/graft"
+import { Graft, Mount } from "@graftland/graft"
 
 class Greeter extends Context.Service<
 	Greeter,
 	{ readonly greet: (name: string) => Effect.Effect<void> }
 >()("app/Greeter") {}
 
-// Publishes a Greeter while it is loaded.
-const greeter = Plugin.make({
-	name: "app/greeter",
-	config: Schema.Struct({ greeting: Schema.String }),
-	apply: ({ greeting }) =>
-		Graft.provide(Greeter, {
-			greet: (name) => Effect.log(`${greeting}, ${name}!`),
-		}),
-})
+const greeter = Layer.effect(
+	Greeter,
+	Effect.succeed({ greet: (name) => Effect.log(`Hello, ${name}!`) }),
+)
 
-// Starts once a Greeter exists, and stops before it goes away.
-const hello = Plugin.make({
-	name: "app/hello",
-	inject: [Greeter],
-	apply: () => Effect.flatMap(Greeter, (greeter) => greeter.greet("world")),
-})
-
-const states = await Effect.runPromise(
+const state = await Effect.runPromise(
 	Effect.gen(function* () {
-		const helloFork = yield* Graft.plugin(hello)
-		yield* helloFork.await
-		const waiting = yield* Stream.runHead(helloFork.state)
-
-		yield* Graft.plugin(greeter, { greeting: "Hello" })
-		const started = yield* helloFork.state.pipe(
-			Stream.filter(
-				(state) => state._tag !== "Pending" && state._tag !== "Loading",
-			),
-			Stream.runHead,
-		)
-		return [waiting, started]
+		const mount = yield* Graft.mount(greeter, { name: "greeter" })
+		yield* mount.await
+		return yield* Stream.runHead(mount.state)
 	}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
 )
-states // => [Option.some(Fork.ForkState.Pending({ missing: ["app/Greeter"] })), Option.some(Fork.ForkState.Active())]
+state // => Option.some(Mount.MountState.Active())
 ```
 
-## 查找方向
+## 找到你的路
 
 <CardGrid>
-	<Card title="快速上手" icon="rocket">
-		按照[快速开始](quickstart/)创建项目，并在运行中修改它。然后阅读[核心概念](concepts/)。
+	<Card title="开始使用" icon="rocket">
+		在[快速开始](quickstart/)中挂载一个 Layer，然后阅读[核心概念](concepts/)。
 	</Card>
-	<Card title="编写插件" icon="puzzle">
-		[插件](plugins/)、[服务](services/)和[事件](events/)：构成应用的基本部件。
+	<Card title="改变图" icon="puzzle">
+		在[挂载](mounting/)中挂载
+		Layer，在[发布](publications/)中放入值，在[服务可用性](availability/)中随服务出现和消失读取它们。
 	</Card>
-	<Card title="运行应用" icon="setting">
-		用[配置文件](config-file/)描述应用，用[命令行](cli/)启动，再通过[监听模式](cli/#监听模式)在运行中修改。
+	<Card title="保持安全" icon="shield">
+		[生命周期](lifecycle/)、[失败与重试](failures-retry/)和[隔离](isolation/)说明各项保证。
 	</Card>
-	<Card title="在别处运行插件" icon="laptop">
-		用 [Remote](remote/overview/) 把某个插件放到子进程、worker
-		或另一台机器上运行，使用它的插件不必改动。
-	</Card>
-	<Card title="从 cordis 迁移" icon="open-book">
-		了解 [cordis 的概念在 Graft 中如何对应](cordis/)。
+	<Card title="在别处运行" icon="laptop">
+		通过[远程服务](remote/)连接或 [Node](node/)
+		进程把服务提供出去，并在内存中测试它们。
 	</Card>
 </CardGrid>
 
 ## 文档地图
 
-| 分区         | 页面                                                                                       | 阅读目的                               |
-| ------------ | ------------------------------------------------------------------------------------------ | -------------------------------------- |
-| **入门**     | [快速开始](quickstart/)、[核心概念](concepts/)、[从 cordis 迁移](cordis/)                  | 了解模型并运行示例。                   |
-| **构建插件** | [插件](plugins/)、[服务](services/)、[事件](events/)                                       | 编写代码。                             |
-| **结构**     | [生命周期](lifecycle/)、[领域](isolation/)、[Intercept](intercepts/)、[变更](transitions/) | 控制插件之间的关系与变化。             |
-| **应用**     | [配置文件](config-file/)、[命令行](cli/)、[在程序中使用 Graft](embedding/)                 | 运行和维护应用。                       |
-| **Remote**   | [概览](remote/overview/)、[单元](units/)、[绑定](bindings/)、[控制](control/)              | 让插件在另一个进程或另一台机器上运行。 |
-| **参考**     | [Fork 句柄](fork-handle/)、[Loader API](loader-api/)、[错误](errors/)                      | 查阅确切行为。                         |
-| **项目**     | [发版](publishing/)                                                                        | 检查并发布 Graft。                     |
+| 部分     | 页面                                                                                   | 用来……                             |
+| -------- | -------------------------------------------------------------------------------------- | ---------------------------------- |
+| **开始** | [快速开始](quickstart/)、[核心概念](concepts/)                                         | 了解模型并运行起来。               |
+| **构建** | [挂载](mounting/)、[发布](publications/)、[服务可用性](availability/)                  | 把 Layer 和值放进图里。            |
+| **结构** | [生命周期](lifecycle/)、[失败与重试](failures-retry/)、[隔离](isolation/)              | 控制挂载之间的关系、失败和变化。   |
+| **运行** | [后台 fiber](background-fibers/)、[Intercept](intercepts/)、[可观测性](observability/) | 掌握工作归属、调整设置、观察过程。 |
+| **远程** | [远程服务](remote/)、[Node 进程](node/)、[测试](testing/)                              | 跨越进程边界。                     |
+| **项目** | [发布流程](releases/)                                                                  | 检查和发布 Graft。                 |
 
-## 包
+## 一个包
 
-| 包                             | 功能                                                                                                 |
-| ------------------------------ | ---------------------------------------------------------------------------------------------------- |
-| `@graftland/graft`             | 基于 Effect 的插件框架：插件、fork、服务、隔离、事件和日志。                                         |
-| `@graftland/loader`            | 从配置项列表或 YAML 配置文件加载插件。                                                               |
-| `@graftland/cli`               | 提供 `graft` 命令：`start`、`create`、`add` 和 `remove`。                                            |
-| `@graftland/create`            | 创建新的 Graft 项目：`npm create @graftland` 和 `graft create`。                                     |
-| `@graftland/package-manager`   | 使用 npm、pnpm 或 Yarn 安装依赖。安装失败时，通过[快照回滚](cli/#包管理器)撤销。                     |
-| `@graftland/plugin-remote`     | 让插件在子进程、worker 或另一台机器上运行。见 [Remote](remote/overview/)。                           |
-| `@graftland/plugin-otlp`       | 把一棵插件子树的 span 导出到 OpenTelemetry。见[导出 span](best-practices/observability/#导出-span)。 |
-| `@graftland/plugin-http`       | [共享 HTTP 服务器；路由和流随插件的生命周期加载和卸载。](http/)                                      |
-| `@graftland/plugin-http-api`   | [实时 HttpApi 路由组、类型化客户端和 OpenAPI 文档。](http-api/)                                      |
-| `@graftland/plugin-mcp-server` | 把插件的工具提供给 MCP 客户端。见 [MCP 服务器](mcp-server/overview/)。                               |
+Graft 只有一个包 `@graftland/graft`，`effect` 是它的 peer 依赖。
 
-所有包共用同一个版本号，一同发布，并需要 `effect` 4.1.x。
+| 入口            | 内容                                   |
+| --------------- | -------------------------------------- |
+| `graft`         | `Graft`、`Mount` 与 `Release`。        |
+| `graft/rpc`     | 通过任意 `effect/rpc` 协议的远程服务。 |
+| `graft/node`    | Node.js 的子进程和 worker 协议。       |
+| `graft/testing` | 供测试使用的内存协议。                 |
 
-园艺只出现在这一页。在其余文档和代码里，`Scope` 仍然叫
-`Scope`。Graft的插件模型借鉴自
-[cordis](https://github.com/cordiverse/cordis)。cordis 在时空中组合，Graft 只照料自己的园子。
+从更早的版本升级？见[发布流程](releases/)。

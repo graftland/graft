@@ -4,6 +4,7 @@ import {
 	Effect,
 	Exit,
 	Fiber,
+	Layer,
 	Option,
 	Ref,
 	Scope,
@@ -12,32 +13,31 @@ import {
 import { TestClock } from "effect/testing"
 import { assert, describe, it } from "@effect/vitest"
 
-import { Event, Graft, Plugin, type Fork } from "../src/index.ts"
+import { Graft, Mount } from "../src/index.ts"
 import { ownedScope } from "../src/internal/scope.ts"
 import { run } from "./utils.ts"
 
-describe("fork close completion", () => {
-	it.effect("makes every concurrent dispose wait for cleanup", () =>
+describe("mount close completion", () => {
+	it.effect("makes every concurrent unmount wait for cleanup", () =>
 		Effect.gen(function* () {
 			const entered = yield* Deferred.make<void>()
 			const release = yield* Deferred.make<void>()
 			const cleaned = yield* Ref.make(false)
-			const fork = yield* Graft.plugin(
-				Plugin.make({
-					name: "slow cleanup",
-					apply: () =>
-						Effect.addFinalizer(() =>
-							Deferred.succeed(entered, undefined).pipe(
-								Effect.andThen(Deferred.await(release)),
-								Effect.andThen(Ref.set(cleaned, true)),
-							),
+			const mount = yield* Graft.mount(
+				Layer.effectDiscard(
+					Effect.addFinalizer(() =>
+						Deferred.succeed(entered, undefined).pipe(
+							Effect.andThen(Deferred.await(release)),
+							Effect.andThen(Ref.set(cleaned, true)),
 						),
-				}),
+					),
+				),
+				{ name: "slow cleanup" },
 			)
-			yield* fork.await
-			const first = yield* Effect.forkScoped(fork.dispose)
+			yield* mount.await
+			const first = yield* Effect.forkScoped(mount.unmount)
 			yield* Deferred.await(entered)
-			const second = yield* Effect.forkScoped(fork.dispose)
+			const second = yield* Effect.forkScoped(mount.unmount)
 			yield* TestClock.adjust("1 millis")
 			const early = second.pollUnsafe() !== undefined
 			yield* Deferred.succeed(release, undefined)
@@ -50,48 +50,46 @@ describe("fork close completion", () => {
 	)
 
 	it.effect(
-		"keeps parent resources alive until an independently disposed child finishes",
+		"keeps parent resources alive until an independently unmounted child finishes",
 		() =>
 			Effect.gen(function* () {
 				const entered = yield* Deferred.make<void>()
 				const release = yield* Deferred.make<void>()
-				const handle = yield* Deferred.make<Fork.Fork>()
+				const handle = yield* Deferred.make<Mount.Mount>()
 				const alive = yield* Ref.make(false)
 				const observed = yield* Ref.make(false)
-				const parent = yield* Graft.plugin(
-					Plugin.make({
-						name: "parent",
-						apply: () =>
-							Effect.gen(function* () {
-								yield* Effect.acquireRelease(Ref.set(alive, true), () =>
-									Ref.set(alive, false),
-								)
-								const child = yield* Graft.plugin(
-									Plugin.make({
-										name: "child",
-										apply: () =>
-											Effect.addFinalizer(() =>
-												Deferred.succeed(entered, undefined).pipe(
-													Effect.andThen(Deferred.await(release)),
-													Effect.andThen(
-														Effect.flatMap(Ref.get(alive), (value) =>
-															Ref.set(observed, value),
-														),
-													),
+				const parent = yield* Graft.mount(
+					Layer.effectDiscard(
+						Effect.gen(function* () {
+							yield* Effect.acquireRelease(Ref.set(alive, true), () =>
+								Ref.set(alive, false),
+							)
+							const child = yield* Graft.mount(
+								Layer.effectDiscard(
+									Effect.addFinalizer(() =>
+										Deferred.succeed(entered, undefined).pipe(
+											Effect.andThen(Deferred.await(release)),
+											Effect.andThen(
+												Effect.flatMap(Ref.get(alive), (value) =>
+													Ref.set(observed, value),
 												),
 											),
-									}),
-								)
-								yield* child.await
-								yield* Deferred.succeed(handle, child)
-							}),
-					}),
+										),
+									),
+								),
+								{ name: "child" },
+							)
+							yield* child.await
+							yield* Deferred.succeed(handle, child)
+						}),
+					),
+					{ name: "parent" },
 				)
 				yield* parent.await
 				const child = yield* Deferred.await(handle)
-				const closingChild = yield* Effect.forkScoped(child.dispose)
+				const closingChild = yield* Effect.forkScoped(child.unmount)
 				yield* Deferred.await(entered)
-				const closingParent = yield* Effect.forkScoped(parent.dispose)
+				const closingParent = yield* Effect.forkScoped(parent.unmount)
 				yield* TestClock.adjust("1 millis")
 				const premature = closingParent.pollUnsafe() !== undefined
 				yield* Deferred.succeed(release, undefined)
@@ -103,58 +101,55 @@ describe("fork close completion", () => {
 			}).pipe(run),
 	)
 
-	it.effect("allows an event handler to dispose its own fork", () =>
+	it.effect("allows a background fiber to unmount its own mount", () =>
 		Effect.gen(function* () {
-			const event = Event.make<[], void, Fork.CleanupError>("self-dispose")
-			const handle = yield* Deferred.make<Fork.Fork>()
-			const fork = yield* Graft.plugin(
-				Plugin.make({
-					name: "self stopping",
-					apply: () =>
-						Event.on(event, () =>
-							Effect.yieldNow.pipe(
-								Effect.andThen(
-									Effect.flatMap(
-										Deferred.await(handle),
-										(fork) => fork.dispose,
-									),
+			const handle = yield* Deferred.make<Mount.Mount>()
+			const mount = yield* Graft.mount(
+				Layer.effectDiscard(
+					Graft.fork(
+						Effect.yieldNow.pipe(
+							Effect.andThen(
+								Effect.flatMap(
+									Deferred.await(handle),
+									(mount) => mount.unmount,
 								),
 							),
 						),
-				}),
+					).pipe(Effect.asVoid),
+				),
+				{ name: "self stopping" },
 			)
-			yield* Deferred.succeed(handle, fork)
-			yield* fork.await
-			yield* Event.emit(event)
-			yield* fork.dispose
-			const snapshot = yield* Stream.runHead(fork.state)
-			assert.strictEqual(Option.getOrThrow(snapshot)._tag, "Disposed")
+			yield* Deferred.succeed(handle, mount)
+			yield* mount.await
+			yield* Effect.yieldNow
+			yield* mount.unmount
+			const snapshot = yield* Stream.runHead(mount.state)
+			assert.strictEqual(Option.getOrThrow(snapshot)._tag, "Unmounted")
 		}).pipe(run),
 	)
 	it.effect(
-		"finishes cleanup after the first dispose caller is cancelled",
+		"finishes cleanup after the first unmount caller is cancelled",
 		() =>
 			Effect.gen(function* () {
 				const entered = yield* Deferred.make<void>()
 				const release = yield* Deferred.make<void>()
 				const cleaned = yield* Ref.make(false)
-				const fork = yield* Graft.plugin(
-					Plugin.make({
-						name: "cancelled dispose",
-						apply: () =>
-							Effect.addFinalizer(() =>
-								Deferred.succeed(entered, undefined).pipe(
-									Effect.andThen(Deferred.await(release)),
-									Effect.andThen(Ref.set(cleaned, true)),
-								),
+				const mount = yield* Graft.mount(
+					Layer.effectDiscard(
+						Effect.addFinalizer(() =>
+							Deferred.succeed(entered, undefined).pipe(
+								Effect.andThen(Deferred.await(release)),
+								Effect.andThen(Ref.set(cleaned, true)),
 							),
-					}),
+						),
+					),
+					{ name: "cancelled unmount" },
 				)
-				yield* fork.await
-				const first = yield* Effect.forkScoped(fork.dispose)
+				yield* mount.await
+				const first = yield* Effect.forkScoped(mount.unmount)
 				yield* Deferred.await(entered)
 				yield* Fiber.interrupt(first)
-				const second = yield* Effect.forkScoped(fork.dispose)
+				const second = yield* Effect.forkScoped(mount.unmount)
 				yield* TestClock.adjust("1 millis")
 				const early = second.pollUnsafe() !== undefined
 				yield* Deferred.succeed(release, undefined)

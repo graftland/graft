@@ -29,7 +29,7 @@ changes need no changeset.
 
 Maintainers review the generated **Version Packages** pull request, merge it,
 and tag the version it commits. The Changesets workflow does not publish. See
-the [publishing guide](packages/docs/content/docs/publishing.md) for the release
+the [releases guide](packages/docs/content/docs/releases.md) for the release
 procedure, publishing guarantees and repository setup
-([简体中文](packages/docs/content/docs/zh-cn/publishing.md),
-[繁體中文](packages/docs/content/docs/zh-tw/publishing.md)).
+([简体中文](packages/docs/content/docs/zh-cn/releases.md),
+[繁體中文](packages/docs/content/docs/zh-tw/releases.md)).

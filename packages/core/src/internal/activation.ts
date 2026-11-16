@@ -1,20 +1,20 @@
 /**
- * The supervision loop of a single fork.
+ * The supervision loop of a single mount.
  *
- * Each iteration acquires the fork's dependencies, runs `apply` in a fresh
+ * Each iteration acquires the mount's dependencies, builds it in a fresh
  * activation, waits until the specification or a dependency changes, and
  * tears the activation down. Teardown follows a fixed order instead of
  * relying on finalizer registration order:
  *
- * 1. stop `apply` if it is still running;
+ * 1. stop the build if it is still running;
  * 2. withdraw everything the activation published and close it to further
  *    publishing, so nobody new can lease it;
  * 3. wait until every consumer has released those provisions;
  * 4. stop supervised tasks and close their scopes, waiting for cleanup;
- * 5. close the activation scope (child forks, resources, handlers);
+ * 5. close the activation scope (child mounts and resources);
  * 6. release the leases the activation itself holds, whatever happened before.
  *
- * All phases contribute to one cleanup Exit. Failed state or fork disposal owns
+ * All phases contribute to one cleanup Exit. Failed state or unmounting owns
  * that result; logging it is never a substitute for handing it to the caller.
  */
 import {
@@ -39,21 +39,19 @@ import {
 	TxRef,
 } from "effect"
 
-import * as Finalization from "../Finalization"
-import { ForkState } from "../Fork"
 import { Graft, ServiceConflict } from "../Graft"
-import { isOptional, UnitTerm, type Update } from "../Plugin"
-import * as Transition from "../Transition"
+import { MountState } from "../Mount"
+import * as Release from "../Release"
+import { isOptional } from "./definition"
 import { publicationCycle, resolutionChanged } from "./dependencies"
-import { setState } from "./forkState"
-import * as Generations from "./generations"
+import { setState } from "./mountStatus"
 import {
 	realmKey,
 	realmOf,
 	Realms,
 	type Activation,
-	type ForkStatus,
 	type GraphNode,
+	type MountStatus,
 	type Provision,
 	type Runtime,
 	type ServiceKey,
@@ -126,12 +124,9 @@ interface Running {
 	readonly resolution: Resolution
 	readonly activation: Activation
 	readonly scope: Scope.Closeable
-	/** Everything plugin code may require: the activation is where plugin requirements are discharged. */
-	readonly context: Context.Context<unknown>
-	/** The fiber running `apply`; teardown stops it before withdrawing anything. */
-	readonly fiber: Fiber.Fiber<void | Update<unknown, unknown, unknown>, unknown>
+	/** The fiber building the mount; teardown stops it before withdrawing anything. */
+	readonly fiber: Fiber.Fiber<void, unknown>
 	readonly tasks: TaskGroup.Group
-	readonly updateCleanup: Ref.Ref<Cause.Cause<unknown>>
 }
 
 type Outcome = Data.TaggedEnum<{
@@ -144,7 +139,7 @@ type Outcome = Data.TaggedEnum<{
 
 const Outcome = Data.taggedEnum<Outcome>()
 
-/** What acquiring a fork's dependencies produced. */
+/** What acquiring a mount's dependencies produced. */
 type Acquired = Data.TaggedEnum<{
 	Missing: { readonly resolution: Resolution }
 	Running: { readonly running: Running }
@@ -154,7 +149,9 @@ const Acquired = Data.taggedEnum<Acquired>()
 
 interface Retry {
 	readonly resolution: Resolution
-	readonly step: (input: unknown) => Pull.Pull<unknown, never, unknown>
+	readonly step: (
+		input: unknown,
+	) => Pull.Pull<Schedule.Metadata, never, unknown>
 }
 
 /** A schedule belongs to one spec and the exact provisions that attempt used. */
@@ -170,7 +167,7 @@ const sameAttempt = (left: Resolution, right: Resolution): boolean =>
 const restart = Outcome.Restart()
 
 interface Prepared {
-	readonly plugin: Spec["plugin"]
+	readonly definition: Spec["definition"]
 	readonly slots: HashMap.HashMap<ServiceKey, Slot>
 	readonly lookups: ReadonlyArray<{
 		readonly optional: boolean
@@ -221,7 +218,7 @@ const resolve = Effect.fnUntraced(function* (
 	}
 })
 
-export { setState } from "./forkState"
+export { setState } from "./mountStatus"
 
 const waitDrained = Effect.fnUntraced(function* (
 	published: ReadonlyArray<Provision>,
@@ -247,11 +244,13 @@ export const withdraw = Effect.fnUntraced(function* (
 			yield* TxRef.set(activation.published, Option.none())
 			yield* TxRef.update(activation.node.state, (state) => ({
 				...state,
-				resolutions: HashMap.modify(
-					state.resolutions,
-					activation.generation,
-					(resolution) => ({ ...resolution, watch: HashMap.empty() }),
-				),
+				resolution:
+					state.resolution === undefined
+						? undefined
+						: {
+								...state.resolution,
+								watch: HashMap.empty(),
+							},
 			}))
 			for (const provision of published) {
 				const current = yield* TxRef.get(provision.slot.provision)
@@ -288,62 +287,55 @@ export const supervise = Effect.fnUntraced(function* (
 	runtime: Runtime,
 	id: number,
 	specRef: TxRef.TxRef<Spec>,
-	/** The selected resolution or update, never a newer request still waiting in specRef. */
+	/** The selected resolution, never a newer request still waiting in specRef. */
 	processing: TxRef.TxRef<Spec>,
 	node: GraphNode,
-	status: ForkStatus,
+	status: MountStatus,
 	completion?: Ref.Ref<Exit.Exit<void, unknown>>,
 ) {
 	const cleanup =
 		completion ?? (yield* Ref.make<Exit.Exit<void, unknown>>(Exit.void))
 	const realms = yield* Realms
-	const lifecycle = yield* Transition.Lifecycle
-	const permit = yield* Ref.make(Option.none<number>())
-	const environment = yield* Transition.Environment
-	/** What the fork inherits from where it was loaded: references and ambient services. */
+	/** What the mount inherits from where it was mounted: references and ambient services. */
 	const inherited = yield* Effect.context<never>()
-	/** Unit-built infrastructure (environment modules) refines inherited references for this activation. */
-	const references = Context.merge(
-		Context.merge(runtime.ambient, inherited),
-		environment,
-	)
+	const references = Context.merge(runtime.ambient, inherited)
 
 	// A supervisor retains its handles through Pending, running, teardown, and failed retry.
 	const held = yield* TxRef.make<Prepared | undefined>(undefined)
 	const prepare = Effect.gen(function* () {
 		const spec = yield* TxRef.get(specRef)
 		const previous = yield* TxRef.get(held)
-		if (previous?.plugin === spec.plugin) return previous
+		if (previous?.definition === spec.definition) return previous
 		let slots = HashMap.empty<ServiceKey, Slot>()
-		const lookups = yield* Effect.forEach(spec.plugin.inject, (dependency) =>
-			Effect.gen(function* () {
-				const key = isOptional(dependency) ? dependency.key : dependency
-				const qualified = realmKey(realmOf(realms, key.key), key.key)
-				const existing = HashMap.get(slots, qualified)
-				const slot = Option.isSome(existing)
-					? existing.value
-					: yield* Slots.retain(runtime, qualified)
-				slots = HashMap.set(slots, qualified, slot)
-				return {
-					optional: isOptional(dependency),
-					service: key.key,
-					qualified,
-					slot,
-					ambient: () =>
-						Context.getOption(
-							Context.isReference(key)
-								? references
-								: Context.merge(runtime.ambient, environment),
-							key,
-						),
-				}
-			}),
+		const lookups = yield* Effect.forEach(
+			spec.definition.requires,
+			(dependency) =>
+				Effect.gen(function* () {
+					const key = isOptional(dependency) ? dependency.key : dependency
+					const qualified = realmKey(realmOf(realms, key.key), key.key)
+					const existing = HashMap.get(slots, qualified)
+					const slot = Option.isSome(existing)
+						? existing.value
+						: yield* Slots.retain(runtime, qualified)
+					slots = HashMap.set(slots, qualified, slot)
+					return {
+						optional: isOptional(dependency),
+						service: key.key,
+						qualified,
+						slot,
+						ambient: () =>
+							Context.getOption(
+								Context.isReference(key) ? references : runtime.ambient,
+								key,
+							),
+					}
+				}),
 		)
 		if (previous !== undefined) {
 			for (const slot of HashMap.values(previous.slots))
 				yield* Slots.release(runtime, slot)
 		}
-		const prepared: Prepared = { plugin: spec.plugin, slots, lookups }
+		const prepared: Prepared = { definition: spec.definition, slots, lookups }
 		yield* TxRef.set(held, prepared)
 		return prepared
 	})
@@ -365,36 +357,36 @@ export const supervise = Effect.fnUntraced(function* (
 	}, Effect.tx)
 
 	const acquire = Effect.gen(function* () {
-		const acquired = yield* Effect.tx(
+		const resolution = yield* Effect.tx(
 			Effect.gen(function* () {
 				const prepared = yield* prepare
 				const resolution = yield* resolveCurrent(prepared)
 				yield* TxRef.set(processing, resolution.spec)
-				const generation =
-					resolution.missing.length === 0
-						? yield* Generations.acquire(runtime, node, {
-								watch: resolution.watch,
-								provisions: resolution.provisions,
-							})
-						: undefined
-				return { resolution, generation }
+				if (resolution.missing.length === 0) {
+					for (const provision of resolution.provisions)
+						yield* TxRef.update(provision.consumers, HashSet.add(id))
+					yield* TxRef.update(node.state, (state) => ({
+						...state,
+						resolution: {
+							watch: resolution.watch,
+							provisions: resolution.provisions,
+						},
+					}))
+				}
+				return resolution
 			}),
 		)
-		const { resolution, generation } = acquired
-		if (generation === undefined) return Acquired.Missing({ resolution })
-		const grantedTerm = yield* Ref.get(permit)
-		const inheritedTerm = yield* UnitTerm
-		const term = Option.orElse(grantedTerm, () => inheritedTerm)
+		if (resolution.missing.length > 0) return Acquired.Missing({ resolution })
 		const scope = yield* Scope.make()
 		const tasks = yield* TaskGroup.make
 		const published = yield* TxRef.make(
 			Option.some<ReadonlyArray<Provision>>([]),
 		)
 		const activation: Activation = {
-			fork: id,
-			generation,
+			mount: id,
 			node,
 			status,
+			scope,
 			tasks: Option.some(tasks),
 			published,
 			fallback: references,
@@ -405,7 +397,6 @@ export const supervise = Effect.fnUntraced(function* (
 		const context = Context.makeUnsafe<unknown>(
 			new Map<string, unknown>([
 				...inherited.mapUnsafe,
-				...environment.mapUnsafe,
 				...resolution.ambient,
 				...Array.map(
 					resolution.provisions,
@@ -413,35 +404,23 @@ export const supervise = Effect.fnUntraced(function* (
 				),
 				[Scope.Scope.key, scope],
 				[Graft.key, { runtime, activation }],
-				[UnitTerm.key, term],
 			]),
 		)
 		const spec = resolution.spec
-		if (Option.isSome(lifecycle)) yield* lifecycle.value.expose(context)
-		yield* setState(runtime, id, status, ForkState.Loading(), spec)
+		yield* setState(runtime, id, status, MountState.Loading(), spec)
 		const fiber = yield* Effect.suspend(() =>
-			// @effect-diagnostics-next-line anyUnknownInErrorContext:off -- the activation discharges plugin requirements and teardown observes its complete Exit
-			spec.plugin.decode(spec.input),
+			// @effect-diagnostics-next-line anyUnknownInErrorContext:off -- the activation discharges the mount's requirements and teardown observes its complete Exit
+			spec.definition.apply(spec.input),
 		).pipe(
-			// @effect-diagnostics-next-line anyUnknownInErrorContext:off -- plugin errors are preserved in the fiber's Exit
-			Effect.flatMap((config) => spec.plugin.apply(config)),
-			Effect.withSpan(`graft.plugin ${spec.plugin.name}`, {
-				attributes: {
-					"graft.fork": id,
-					"graft.plugin": spec.plugin.name,
-					"graft.revision": spec.revision,
-				},
-			}),
+			Effect.withSpan(`graft.mount ${spec.definition.name}`),
 			inActivation(context, spec),
 			Effect.forkIn(scope),
 		)
 		const running: Running = {
-			updateCleanup: yield* Ref.make<Cause.Cause<unknown>>(Cause.empty),
 			resolution,
 			tasks,
 			activation,
 			scope,
-			context,
 			fiber,
 		}
 		return Acquired.Running({ running })
@@ -452,7 +431,7 @@ export const supervise = Effect.fnUntraced(function* (
 			runtime,
 			id,
 			status,
-			ForkState.Pending({ missing: resolution.missing }),
+			MountState.Pending({ missing: resolution.missing }),
 			resolution.spec,
 		)
 		yield* Effect.tx(
@@ -468,25 +447,23 @@ export const supervise = Effect.fnUntraced(function* (
 		return restart
 	})
 
-	/** Runs plugin code with the activation's context, which discharges whatever it requires. */
+	/** Runs the build with the activation's context, which discharges whatever it requires. */
 	const inActivation =
 		(context: Context.Context<unknown>, spec: Spec) =>
 		<A, E>(effect: Effect.Effect<A, E, unknown>): Effect.Effect<A, E> =>
 			Effect.updateContext<A, E, unknown, never>(
-				// @effect-diagnostics-next-line anyUnknownInErrorContext:off -- this is where plugin requirements are discharged
+				// @effect-diagnostics-next-line anyUnknownInErrorContext:off -- this is where the mount's requirements are discharged
 				Effect.annotateLogs(effect, {
-					"graft.fork": id,
-					"graft.plugin": spec.plugin.name,
+					"graft.mount": id,
+					"graft.name": spec.definition.name,
 				}),
 				() => context,
 			)
 
 	const run = Effect.fnUntraced(function* (running: Running) {
 		const { resolution } = running
-		let spec = resolution.spec
-		const fiber = running.fiber
 		const first = yield* Effect.raceFirst(
-			Effect.asSome(Fiber.await(fiber)),
+			Effect.asSome(Fiber.await(running.fiber)),
 			Effect.as(waitChange(resolution), Option.none()),
 		)
 		if (Option.isNone(first)) return restart
@@ -496,59 +473,9 @@ export const supervise = Effect.fnUntraced(function* (
 				resolution,
 				cause: exit.cause,
 			})
-		yield* setState(runtime, id, status, ForkState.Active(), spec)
-		const update = exit.value
-		while (true) {
-			const next = yield* waitChange({ ...resolution, spec })
-			if (Option.isNone(next) || update === undefined) return restart
-			const candidate = next.value
-			if (
-				candidate.plugin !== spec.plugin ||
-				candidate.revision !== spec.revision
-			)
-				return restart
-			yield* TxRef.set(processing, candidate)
-			const operation = Effect.suspend(() =>
-				// @effect-diagnostics-next-line anyUnknownInErrorContext:off -- The activation supplies decoding requirements; the owned fiber retains its complete Exit.
-				spec.plugin.decode(candidate.input),
-			).pipe(Effect.flatMap(update), inActivation(running.context, spec))
-			const handled = yield* cancelOnChange(
-				operation,
-				waitChange({ ...resolution, spec: candidate }),
-				(result, settled, _restore, expectedCancellation) =>
-					Effect.gen(function* () {
-						if (Exit.isFailure(result)) {
-							// Teardown owns failures during cancellation; ordinary update failures are logged before restarting.
-							if (
-								!expectedCancellation(result.cause) &&
-								(Exit.isFailure(settled) || Cause.hasInterrupts(result.cause))
-							)
-								yield* Ref.update(running.updateCleanup, (cause) =>
-									Cause.combine(cause, result.cause),
-								)
-							if (
-								!expectedCancellation(result.cause) ||
-								(Exit.isSuccess(settled) && !settled.value)
-							)
-								yield* Effect.logWarning(
-									"Updating in place failed; restarting instead",
-									result.cause,
-								).pipe(
-									Effect.annotateLogs({
-										"graft.fork": id,
-										"graft.plugin": spec.plugin.name,
-									}),
-								)
-						}
-						if (Exit.isFailure(settled))
-							return yield* Effect.failCause(settled.cause)
-						return !settled.value && Exit.isSuccess(result) && result.value
-					}),
-			)
-			if (!handled) return restart
-			spec = candidate
-			yield* setState(runtime, id, status, ForkState.Active(), spec)
-		}
+		yield* setState(runtime, id, status, MountState.Active(), resolution.spec)
+		yield* waitChange(resolution)
+		return restart
 	})
 
 	/** Every phase finishes before the immutable result is handed to state or disposal. */
@@ -561,44 +488,53 @@ export const supervise = Effect.fnUntraced(function* (
 				withdraw(runtime, running.activation),
 			)
 			// Leased services may need these workers during consumer finalization.
-			// Unmarked interruptions have unresolved attribution; retain their full causes.
-			const tasksClosed = yield* Effect.exit(
-				Finalization.close(running.tasks.scope, exit),
+			// Release.close marks independent interruptions; a pure interruption is pending cancellation.
+			const tasksClosed = yield* Release.close(running.tasks.scope, exit).pipe(
+				Effect.catchCauseIf(Cause.hasInterruptsOnly, () => Effect.void),
+				Effect.exit,
 			)
-			const closed = yield* Effect.exit(Finalization.close(running.scope, exit))
+			const closed = yield* Release.close(running.scope, exit).pipe(
+				Effect.catchCauseIf(Cause.hasInterruptsOnly, () => Effect.void),
+				Effect.exit,
+			)
 			const released = yield* Effect.exit(
 				Effect.tx(
-					Generations.settle(runtime, node, running.activation.generation),
+					Effect.gen(function* () {
+						for (const provision of running.resolution.provisions)
+							yield* TxRef.update(provision.consumers, HashSet.remove(id))
+						yield* TxRef.update(node.state, (state) => ({
+							...state,
+							resolution: undefined,
+						}))
+					}),
 				),
 			)
-			const tasks = yield* Ref.get(running.tasks.cleanupFailures)
-			const updates = yield* Ref.get(running.updateCleanup)
-			// Only the closer's cancellation of apply is expected here.
+			const tasks = yield* Ref.get(running.tasks.failures)
+			// Only the closer's cancellation of the build is expected here.
 			const stoppedCause =
 				Exit.isFailure(stopped) && !interruptedBy(stopped.cause, closer)
 					? stopped.cause
 					: Cause.empty
 			const cause = Array.reduce(
 				[withdrawn, tasksClosed, closed, released],
-				Cause.combine(Cause.combine(tasks, updates), stoppedCause),
+				Cause.combine(tasks, stoppedCause),
 				(cause, result) =>
 					Exit.isFailure(result) ? Cause.combine(cause, result.cause) : cause,
 			)
-			if (Exit.isFailure(closed))
-				yield* Effect.logError(
-					"Releasing the plugin's resources failed",
-					closed.cause,
-				)
+			// A release that ends in a defect or a failure is reported. Pure cancellation
+			// stays silent: interrupting a cleanup is how teardown itself unwinds.
+			if (cause.reasons.length > 0 && !Cause.hasInterruptsOnly(cause))
+				yield* Effect.logError("Releasing the mount's resources failed", cause)
 			yield* reportFailure(
-				`Plugin "${running.resolution.spec.plugin.name}" failed`,
+				`Mount "${running.resolution.spec.definition.name}" failed`,
 				stopped,
 			)
 			return cause.reasons.length === 0 ? Exit.void : Exit.failCause(cause)
 		},
 		(effect, running) =>
 			Effect.annotateLogs(effect, {
-				"graft.fork": id,
-				"graft.plugin": running.resolution.spec.plugin.name,
+				"graft.mount": id,
+				"graft.name": running.resolution.spec.definition.name,
 			}),
 	)
 
@@ -613,7 +549,7 @@ export const supervise = Effect.fnUntraced(function* (
 				runtime,
 				id,
 				status,
-				ForkState.Failed({ cause: outcome.cause }),
+				MountState.Failed({ cause: outcome.cause }),
 				spec,
 			).pipe(Effect.andThen(Ref.set(cleanup, Exit.void))),
 		)
@@ -622,7 +558,7 @@ export const supervise = Effect.fnUntraced(function* (
 		const blocked = Array.flatMap(outcome.cause.reasons, (reason) =>
 			reason._tag === "Fail" &&
 			Schema.is(ServiceConflict)(reason.error) &&
-			reason.error.fork === id &&
+			reason.error.mount === id &&
 			(reason.error.reason === "SelfDependency" ||
 				reason.error.reason === "DependencyCycle")
 				? [realmKey(reason.error.realm ?? "", reason.error.service)]
@@ -663,18 +599,26 @@ export const supervise = Effect.fnUntraced(function* (
 			)
 			return Option.none<Retry>()
 		}
-		if (spec.plugin.retry === undefined) {
+		if (spec.definition.retry === undefined) {
 			yield* changed
 			return Option.none<Retry>()
 		}
-		const schedule = spec.plugin.retry
+		const schedule = spec.definition.retry
 		const operation = Effect.gen(function* () {
 			const step =
 				Option.isSome(previous) &&
 				sameAttempt(previous.value.resolution, outcome.resolution)
 					? previous.value.step
-					: yield* Schedule.toStepWithSleep(schedule)
+					: yield* Schedule.toStepWithMetadata(schedule)
 			return yield* step(outcome.cause).pipe(
+				// A zero-duration step would rebuild without pause. Floor it so an
+				// immediate schedule cannot spin the supervision loop; a step that
+				// already asks for a delay is not changed.
+				Effect.flatMap((meta) =>
+					Duration.toMillis(meta.duration) > 0
+						? Effect.void
+						: Effect.sleep(Duration.millis(1)),
+				),
 				Effect.as(Option.some({ resolution: outcome.resolution, step })),
 				Pull.catchDone(() => Effect.succeedNone),
 			)
@@ -698,7 +642,7 @@ export const supervise = Effect.fnUntraced(function* (
 							runtime,
 							id,
 							status,
-							ForkState.Failed({
+							MountState.Failed({
 								cause: Cause.combine(outcome.cause, result.cause),
 							}),
 							spec,
@@ -711,28 +655,22 @@ export const supervise = Effect.fnUntraced(function* (
 					return Option.none<Retry>()
 				}),
 			(result) =>
-				reportFailure("The plugin's retry schedule failed", result).pipe(
+				reportFailure("The mount's retry schedule failed", result).pipe(
 					Effect.annotateLogs({
-						"graft.fork": id,
-						"graft.plugin": spec.plugin.name,
+						"graft.mount": id,
+						"graft.name": spec.definition.name,
 					}),
 				),
 		)
 	})
 
-	// Mask acquisition, teardown, and result handoff together. Only plugin execution is interruptible.
+	// Mask acquisition, teardown, and result handoff together. Only the build is interruptible.
 	const cycle = Effect.uninterruptibleMask((restore) =>
 		Effect.gen(function* () {
-			const heldPermit = yield* Ref.get(permit)
-			if (Option.isSome(lifecycle) && Option.isNone(heldPermit)) {
-				const term = yield* restore(lifecycle.value.acquire)
-				yield* Ref.set(permit, Option.some(term))
-			}
 			const acquired = yield* acquire
 			if (acquired._tag === "Missing")
 				return yield* restore(pending(acquired.resolution))
 			const running = acquired.running
-			yield* Ref.set(permit, Option.none())
 			const used = yield* Effect.exit(
 				restore(
 					Effect.raceFirst(
@@ -753,19 +691,13 @@ export const supervise = Effect.fnUntraced(function* (
 					),
 				),
 			)
-			if (Option.isSome(lifecycle) && Exit.isSuccess(used))
-				yield* lifecycle.value.failed(
-					used.value._tag === "Failed"
-						? used.value.cause
-						: Cause.fail("A captured local dependency changed"),
-				)
 			const cleaned = yield* teardown(
 				running,
 				Exit.isSuccess(used) && used.value._tag === "Failed"
 					? Exit.failCause(used.value.cause)
 					: used,
 			)
-			// An apply that interrupted itself is a failed attempt, unlike interruption requested by teardown.
+			// A build that interrupted itself is a failed attempt, unlike interruption requested by teardown.
 			const closed =
 				Exit.isSuccess(used) &&
 				used.value._tag === "Failed" &&
@@ -774,40 +706,15 @@ export const supervise = Effect.fnUntraced(function* (
 					? Exit.failCause(Cause.combine(used.value.cause, cleaned.cause))
 					: cleaned
 			yield* Ref.set(cleanup, closed)
-			const tasks = yield* Ref.get(running.tasks.failures)
-			if (Option.isSome(lifecycle)) {
-				if (tasks.reasons.length > 0) yield* lifecycle.value.failed(tasks)
-				yield* lifecycle.value.stopped(closed)
-			}
-			if (Exit.isFailure(used)) {
-				if (tasks.reasons.length > 0)
-					yield* Ref.set(
-						cleanup,
-						Exit.failCause(
-							Cause.combine(
-								tasks,
-								Exit.isFailure(closed) ? closed.cause : Cause.empty,
-							),
-						),
-					)
-				return yield* Effect.failCause(used.cause)
-			}
+			if (Exit.isFailure(used)) return yield* Effect.failCause(used.cause)
 			if (Exit.isFailure(closed)) {
 				const spec = yield* TxRef.get(processing)
 				return Outcome.Failed({
 					resolution: { ...running.resolution, spec },
-					cause: Cause.combine(
-						Cause.combine(closed.cause, tasks),
-						used.value._tag === "Failed" ? used.value.cause : Cause.empty,
-					),
+					cause: closed.cause,
 				})
 			}
-			return used.value._tag === "Failed"
-				? Outcome.Failed({
-						...used.value,
-						cause: Cause.combine(used.value.cause, tasks),
-					})
-				: used.value
+			return used.value
 		}),
 	)
 

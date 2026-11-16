@@ -1,148 +1,86 @@
 ---
-title: 領域與隔離
-description: 讓外掛樹的某個分支擁有自己的服務和事件。
+title: 隔離
+description: 給一個掛載自己的服務，或在多個掛載之間共用一套服務。
 ---
 
-領域（realm）決定 fork 能看到哪些服務和事件。需要並排執行彼此獨立的實例時，可以使用領域，例如為每個租戶提供一組獨立的服務。如果只想修改某項設定，請參閱
-[Intercept](../intercepts/)。
+**領域（realm）**是服務解析時所在的命名空間。預設情況下，所有掛載共用一個領域。`isolate`
+給一個掛載換一個領域。
 
-`Graft.plugin` 的 `isolate` 選項對該 fork 及其所有後代生效。
+## 給掛載自己的領域
 
-領域是一個行程內的**可見性**邊界：它決定 fork 能看到什麼，而不決定程式碼在哪裡執行。要把外掛的程式碼移到子行程、worker 或另一台機器上，請使用
-[Remote](../remote/overview/)，它劃出的是**執行**邊界。兩者都不限制外掛程式碼能做什麼；如需權限邊界，請把 Remote 的 runner 放進容器或虛擬機器。
+```ts
+import { Context, Effect, Layer } from "effect"
 
-## 領域
+import { Graft } from "@graftland/graft"
 
-每個服務鍵和事件都歸屬於一個**領域（realm）**。預設情況下，整個應用程式只有一個領域：無論在哪裡發布服務，所有外掛都能看到；事件也會傳遞給所有處理函式。
+class Database extends Context.Service<Database, string>()("app/Database") {}
+class Tenant extends Context.Service<Tenant, string>()("app/Tenant") {}
 
-`isolate` 選項可以針對指定的鍵，為一個 fork 及其所有後代建立獨立的領域：
-
-```ts import.meta.vitest name="isolation: realms"
-import { Context, Effect, Schema, Stream } from "effect"
-
-import { Graft, Plugin } from "@graftland/graft"
-
-class Database extends Context.Service<Database, { readonly url: string }>()(
-	"app/Database",
-) {}
-
-const app = Plugin.make({
-	name: "app/app",
-	inject: [Database],
-	apply: () =>
-		Effect.flatMap(Database, (db) => Effect.log(`app uses ${db.url}`)),
-})
-
-const tenant = Plugin.make({
-	name: "app/tenant",
-	config: Schema.Struct({ name: Schema.String }),
-	apply: ({ name }) =>
-		Effect.gen(function* () {
-			yield* Graft.provide(Database, { url: `postgres://${name}` })
-			yield* Graft.plugin(app)
-		}),
-})
-
-const tenants = Plugin.make({
-	name: "app/tenants",
-	apply: () =>
-		Effect.gen(function* () {
-			yield* Graft.plugin(tenant, { name: "a" }, { isolate: [Database] })
-			yield* Graft.plugin(tenant, { name: "b" }, { isolate: [Database] })
-		}),
-})
-
-const messages = await Effect.runPromise(
+const tenant = Layer.effect(
+	Tenant,
 	Effect.gen(function* () {
-		yield* Graft.plugin(tenants)
-		return yield* Graft.logs.pipe(
-			Stream.take(2),
-			Stream.map((line) => line.message),
-			Stream.runCollect,
-		)
-	}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
+		const database = yield* Database
+		return `tenant on ${database}`
+	}),
 )
-messages // => [["app uses postgres://a"], ["app uses postgres://b"]]
+
+export const program = Effect.gen(function* () {
+	yield* Graft.mount(Layer.effect(Database, Effect.succeed("dedicated")), {
+		name: "database",
+		isolate: [Database],
+	})
+	yield* Graft.mount(tenant, { name: "tenant", requires: [Database] })
+})
 ```
 
-在這個例子中，每個 `tenant` fork 都可以發布自己的 `Database`。
+`isolate: [Database]` 給這個掛載一個專屬於 `Database`
+的私有領域。它的子掛載繼承這層對應：它們在同一個私有領域裡查找
+`Database`，所以看到的是這個專屬值。
 
-- 每個 fork 內的外掛只會看到該 fork 自己的 `Database`。
-- 在外部發布的 `Database` 對內部不可見，反之亦然。
-- 未隔離的鍵仍然照常共用。
+| 選項形式                      | 領域                                                 |
+| ----------------------------- | ---------------------------------------------------- |
+| 不傳                          | 共用的根領域。                                       |
+| `isolate: [Database]`         | 這個掛載的私有領域。                                 |
+| `isolate: [[Database, "eu"]]` | 標籤為 `eu` 的共用領域；所有使用該標籤的掛載共用它。 |
 
-`isolate` 接受任何帶有 `key` 的物件：可以是 `Database`
-這類服務鍵，也可以是[事件](../events/)。
+標籤讓多個掛載共用一套服務。私有領域和根領域都無法透過標籤存取。
 
-### 共用領域
+## 隔離涵蓋什麼
 
-使用標籤可以讓多個 fork 加入同一個共用領域，而不是各自使用私有領域：
+| 規則       | 說明                                                          |
+| ---------- | ------------------------------------------------------------- |
+| 按鍵隔離   | 每個鍵單獨隔離。一個掛載可以隔離 `Database`，其他一切都共用。 |
+| 繼承       | 子掛載從建立它的位置繼承領域。                                |
+| 提供者唯一 | 一個領域裡，一個鍵只由一個掛載或一次發布提供。                |
+| 查找       | 掛載先在自己的領域裡找服務，再找 `Graft.layer` 的環境。       |
+| 不繼承值   | 子掛載從不直接拿到父層的提供值；它在同一個領域裡自行解析。    |
+| 環境       | 來自環境的服務在每個領域裡都可見。                            |
 
-```ts import.meta.vitest name="isolation: shared realms"
-import { Context, Effect, Stream } from "effect"
+領域標籤和服務鍵是服務身分中相互獨立的部分，即使其中任一包含特殊字元也是如此。
 
-import { Graft, Plugin } from "@graftland/graft"
+## 發布環
 
-class Database extends Context.Service<Database, { readonly url: string }>()(
-	"app/Database",
-) {}
+發布一個值，可能直接或經由其他掛載重新啟動發布它的那個掛載。Graft 以
+`Graft.ServiceConflict` 原子地拒絕這樣的發布，領域保持不變。
 
-const database = Plugin.service(
-	Database,
-	Effect.succeed({ url: "postgres://staging" }),
-	{ name: "database" },
-)
+1. **找到觀察者**：目標領域裡把這個鍵當作可選相依、或透過環境後備值使用它的執行中掛載。
+2. **跟隨**它們的子掛載，以及它們使用的每個提供者的消費者。
+3. 如果發布者也在其中，**拒絕**這次發布。
 
-const api = Plugin.make({
-	name: "app/api",
-	inject: [Database],
-	apply: () =>
-		Effect.flatMap(Database, (db) => Effect.log(`api uses ${db.url}`)),
-})
+| `reason`          | 情況                           |
+| ----------------- | ------------------------------ |
+| `SelfDependency`  | 掛載在觀察它自己正在發布的鍵。 |
+| `DependencyCycle` | 環裡另一個掛載在觀察它。       |
+| `Invalidated`     | 相依變化已經使這個掛載失效。   |
 
-const worker = Plugin.make({
-	name: "app/worker",
-	inject: [Database],
-	apply: () =>
-		Effect.flatMap(Database, (db) => Effect.log(`worker uses ${db.url}`)),
-})
+被拒絕的掛載等待它的規格、相依項目或造成阻塞的圖發生變化。它不會反覆重試進同一個環。見[失敗與重試](../failures-retry/#serviceconflict)。
 
-const staging = Effect.gen(function* () {
-	yield* Graft.plugin(database, undefined, { isolate: [[Database, "staging"]] })
-	yield* Graft.plugin(api, undefined, { isolate: [[Database, "staging"]] })
-	yield* Graft.plugin(worker, undefined, { isolate: [[Database, "staging"]] })
-})
+## 隔離與 Intercept
 
-const messages = await Effect.runPromise(
-	Effect.gen(function* () {
-		yield* Graft.provide(Database, { url: "postgres://production" })
-		yield* staging
-		return yield* Graft.logs.pipe(
-			Stream.take(2),
-			Stream.map((line) => line.message),
-			Stream.runCollect,
-		)
-	}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
-)
-messages // => [["api uses postgres://staging"], ["worker uses postgres://staging"]]
-```
+| 工具        | 改變什麼                                       |
+| ----------- | ---------------------------------------------- |
+| `isolate`   | 服務在哪個領域解析，也就是掛載看到哪個提供者。 |
+| `intercept` | 掛載及其子掛載看到的 `Context.Reference` 值。  |
 
-無論 `api` 和 `worker` 位於樹的哪個位置，它們都共用 `staging` 領域的
-`Database`，看不到其他領域發布的 `Database`。
-
-標籤的規則：
-
-- 標籤與服務鍵或事件鍵是身分的兩個獨立部分。Graft 把它們各自當作完整的字串處理，包括內嵌的 NUL 字元。
-- 以 `#` 或 `@` 開頭的標籤不會指向私有領域。
-- 空標籤代表一個共用領域，這個領域與預設的根領域不同。
-
-### 環境後備與繼承
-
-領域隔離的是已發布的服務，不隔離建構 `Graft.layer` 時環境中的服務。
-
-| 問題                                                           | 答案                                                                                                        |
-| -------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| 領域中沒有某個注入鍵的 provision 時會怎樣？                    | 消費者可以使用環境中的值。                                                                                  |
-| 在領域 A 發布服務，會讓領域 B 中使用環境值的消費者重新啟動嗎？ | 不會。撤回服務同樣不會。                                                                                    |
-| 父外掛的 provision 會透過 Effect context 傳給子外掛嗎？        | 不會。每個子外掛必須透過自己的 `inject` 相依項目，在自己的領域中取得 provision。                            |
-| 來自環境的值仍然可用嗎？                                       | 可用。如果父外掛的 provision 遮蔽了根環境中的值，子外掛可以重新使用該環境後備，這個規則也適用於多代子外掛。 |
+用 `isolate` 把租戶隔開；用 [Intercept](../intercepts/)
+調整逾時、功能旗標這類設定。

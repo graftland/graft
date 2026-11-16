@@ -6,117 +6,96 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md) | 繁體中文
 
-[![npm](https://img.shields.io/npm/v/@graftland/graft)](https://www.npmjs.com/package/@graftland/graft)
-[![CI](https://github.com/graftland/graft/actions/workflows/ci.yml/badge.svg)](https://github.com/graftland/graft/actions/workflows/ci.yml)
-[![License](https://img.shields.io/github/license/graftland/graft)](LICENSE)
+Layer 不由啟動時決定。它們是長出來的。
 
-Graft 是面向長期執行的 TypeScript 應用程式、以 [Effect](https://effect.website)
-打造的外掛執行環境。每項能力都是一個依賴明確、生命週期獨立的外掛，因此你能以可控的影響範圍更換其中一項。修改一個外掛，`graft start --watch`
-只在執行中的行程裡取代受影響的外掛。
-
-軟體不是造出來的，是長出來的。應用程式是一棵外掛樹：每個外掛嫁接在一個 scope 上，從周圍汲取服務，也發布自己的服務。你可以在行程持續執行的同時載入、重新設定、取代和卸載任意一枝。剪掉哪裡，樹的其餘部分都照常生長。
+Graft 讓 Effect 的 `Layer`
+變成動態的。掛載一個 Layer，Graft 會在它需要的一切都可用時建置它，發布它提供的服務，並在某個相依項目消失時先把相依它的部分停掉，再拆除它。設定就是一個普通的發布值，修改它會讓相依它的一切重建。
 
 ```ts
-import { Context, Effect, Schema } from "effect"
+import { Context, Effect, Layer } from "effect"
 
-import { Graft, Plugin } from "@graftland/graft"
+import { Graft } from "@graftland/graft"
 
-class Greeter extends Context.Service<
-	Greeter,
-	{ readonly greet: (name: string) => Effect.Effect<void> }
->()("app/Greeter") {}
+class Region extends Context.Service<Region, string>()("app/Region") {}
+class Report extends Context.Service<Report, string>()("app/Report") {}
 
-// Publishes a Greeter while it is loaded.
-const greeter = Plugin.make({
-	name: "app/greeter",
-	config: Schema.Struct({ greeting: Schema.String }),
-	apply: ({ greeting }) =>
-		Graft.provide(Greeter, {
-			greet: (name) => Effect.log(`${greeting}, ${name}!`),
-		}),
-})
+const report = Layer.effect(
+	Report,
+	Effect.map(Region, (region) => `Report for ${region}`),
+)
 
-// Starts once a Greeter exists, and stops before it goes away.
-const hello = Plugin.make({
-	name: "app/hello",
-	inject: [Greeter],
-	apply: () => Effect.flatMap(Greeter, (greeter) => greeter.greet("world")),
+export const program = Effect.gen(function* () {
+	// A value from outside any layer. `set` rebuilds its consumers.
+	const region = yield* Graft.publish(Region, "eu")
+
+	// Built while Region is available, torn down and rebuilt when it changes.
+	const mount = yield* Graft.mount(report, {
+		name: "report",
+		requires: [Region],
+	})
+	yield* mount.await
+
+	yield* region.set("us")
 })
 ```
 
 ## 為什麼選擇 Graft
 
-- **熱替換。** 不砍樹，只換品種。`graft start --watch`
-  把每次儲存變成一個變更，只重新部署受影響的項目。變更失敗時，核心復原先前的版本；無法復原就回報
-  `RecoveryFailed`。
-- **乾淨卸載。** 每個外掛都在自己的 `Scope`
-  中執行，它啟動的每個 fiber 都有歸屬。外掛消失時，相依於它的外掛先停止，然後執行它的 finalizer。失敗（包括清理時的失敗）也保留完整的
+- **可用性驅動圖。**
+  掛載等待它需要的服務，全部到齊時建置，其中一個消失時停止。可選相依出現或消失時，掛載重建。
+- **拆除跟隨歸屬。** 每個掛載擁有一個
+  `Scope`，它啟動的每個 fiber 都有歸屬。消費者先於提供者停止，然後關閉資源，失敗保留完整的
   `Cause`。
-- **線上升級。**
-  取代執行在 Worker 或子行程中的外掛，使用它的外掛繼續執行。候選從不可變製品啟動，必須通過變更指定的探針；使用
-  `Overlap` 時，新呼叫進入候選，舊呼叫排空後終止舊單元。升級以
-  `Accepted`、`Aborted`、`Recovered`、`RecoveryFailed` 或 `Stuck`
-  結束；需要發布記錄器記錄的升級會等待確認，確認之前顯示為記錄受阻，見[變更](https://docs.graft.land/zh-tw/transitions/)。
-- **相依受檢查。** 服務是 Effect 的 `Context` 鍵，由 `Layer`
-  或其他外掛提供。外掛在 `inject` 中宣告相依，由編譯器檢查。
+- **服務來來去去時也能讀取。** `watch`、`await`、`use` 和 `whileAvailable`
+  從普通 Effect 程式碼裡讀取圖，撤回會中斷工作，而不是留下過期的值。
+- **遠端服務仍是服務。** 透過任意 `effect/rpc`
+  協定提供一個服務，並在另一個行程或另一台機器上發布它。使用它的掛載無需改動。
 
-某根枝條需要單獨栽種時，[Remote](https://docs.graft.land/zh-tw/remote/overview/)
-可以讓這個外掛在子行程、Node
-worker 或另一台機器上執行，使用它服務的外掛不必修改。
+Graft 只相依 `effect`；`@effect/platform-node` 是可選的，只有 `node`
+入口需要它。在 Node.js 上執行 Graft 需要 22.19 或更高版本。開發本工作區需要 Node.js
+22.22 或更高版本，它同時用於建置文件。
 
-在 Node.js 上執行 Graft 需要 22.19 或更新版本。開發本工作區需要 Node.js
-22.22 或更新版本，其中包括用 Astro 建置文件。
-
-## 快速開始
+## 開始使用
 
 ```sh
-npm create @graftland@latest my-app
-cd my-app
-npm run dev
+npm install effect @graftland/graft
 ```
 
-閱讀[文件](https://docs.graft.land/zh-tw/)。和程式設計代理一起開發？[`graft` skill](skills/graft)
-教它用外掛化、Effect 化的方式拆解應用程式，再撰寫、測試和執行：`npx skills add graftland/graft`。
+閱讀[文件](https://docs.graft.land/zh-tw/)。[快速開始](https://docs.graft.land/zh-tw/quickstart/)掛載第一個 Layer；[核心概念](https://docs.graft.land/zh-tw/concepts/)說明圖、掛載和發布。
 
-Graft 的外掛模型借鑑自
-[cordis](https://github.com/cordiverse/cordis)。cordis 在時空中組合，Graft 只照料自己的園子。請看
-[cordis 的概念如何對應到 Graft](https://docs.graft.land/zh-tw/cordis/)。想讓程式設計代理完成遷移，可以安裝[遷移 skills](skills)。
+## 一個套件
 
-## 範例
+Graft 只發布 `@graftland/graft`。
 
-[`samples/`](samples)
-以六個簡短的編號範例開頭。每個範例講一個概念，從第一個外掛到透過 `graft.yml`
-執行，再到把外掛移到另一個行程。
+| 入口            | 內容                             |
+| --------------- | -------------------------------- |
+| `graft`         | `Graft`、`Mount` 與 `Release`。  |
+| `graft/rpc`     | 透過 `effect/rpc` 的遠端服務。   |
+| `graft/node`    | Node.js 的子行程和 worker 協定。 |
+| `graft/testing` | 供測試使用的記憶體協定。         |
 
-之後是更大的應用程式，展示 Graft 的用途：
+## 舊套件
 
-- [WebSocket 整合閘道](samples/integration-gateway)，升級外掛時保留工作階段
-- 由外掛組成的聊天機器人，天氣整合在子行程中執行
-- 由 `graft.yml` 驅動的 HTTP 閘道
-- 工具即外掛的 MCP 伺服器：用戶端連著時也能重載工具
-- 多租戶服務
-- 能在不穩定的上游下繼續運作的行情資料管線
+從 0.7.0 起，Graft 是一個動態 Layer 程式庫。之前版本的 API 已移除，且不相容。
 
-## 套件
+下列套件已不再開發，不再獲得更新：
 
-| 套件                                                         | 作用                                                                       |
-| ------------------------------------------------------------ | -------------------------------------------------------------------------- |
-| [`@graftland/graft`](packages/core)                          | 以 Effect 打造的外掛框架：外掛、fork、服務、隔離、事件和日誌。             |
-| [`@graftland/loader`](packages/loader)                       | 從條目清單或 YAML 設定檔載入外掛。                                         |
-| [`@graftland/cli`](packages/cli)                             | `graft` 命令：`start`、`create`、`add` 和 `remove`。                       |
-| [`@graftland/create`](packages/create)                       | 產生新的 Graft 專案：`npm create @graftland` 與 `graft create`。           |
-| [`@graftland/package-manager`](packages/package-manager)     | 用 npm、pnpm 或 Yarn 安裝相依套件，失敗時還原。                            |
-| [`@graftland/plugin-remote`](packages/plugin-remote)         | 讓外掛在子行程、worker 或另一台機器上執行；提供 `graft start runner.yml`。 |
-| [`@graftland/plugin-otlp`](packages/plugin-otlp)             | 把一棵外掛子樹的 span 匯出到 OpenTelemetry 收集器。                        |
-| [`@graftland/plugin-http`](packages/plugin-http)             | 共用 HTTP 伺服器；路由與串流隨外掛的生命週期載入與卸載。                   |
-| [`@graftland/plugin-http-api`](packages/plugin-http-api)     | 即時 Effect HttpApi 路由群組、型別化用戶端與 OpenAPI 文件。                |
-| [`@graftland/plugin-mcp-server`](packages/plugin-mcp-server) | 把外掛的工具提供給 MCP 用戶端；工具重載時用戶端不必重新連線。              |
+| 套件                           | 最後一個版本 | 改用                             |
+| ------------------------------ | ------------ | -------------------------------- |
+| `@graftland/loader`            | `0.6.0`      | 在自己的程式裡用 `Graft.mount`。 |
+| `@graftland/hmr`               | `0.5.0`      | 無；Graft 不再重載模組。         |
+| `@graftland/cli`               | `0.6.0`      | 無；沒有命令，也沒有設定檔。     |
+| `@graftland/create`            | `0.6.0`      | 無。                             |
+| `@graftland/package-manager`   | `0.6.0`      | 無。                             |
+| `@graftland/plugin-remote`     | `0.6.0`      | `graft/rpc` 入口。               |
+| `@graftland/plugin-http`       | `0.5.0`      | 無。                             |
+| `@graftland/plugin-http-api`   | `0.5.0`      | 無。                             |
+| `@graftland/plugin-mcp-server` | `0.5.0`      | 無。                             |
+| `@graftland/plugin-otlp`       | `0.5.0`      | 無。                             |
+| `@graftland/plugin-release`    | 未發佈       | 無。                             |
 
-所有套件以相同版本一起發布。它們都需要 `effect` 4.1.x。
-
-## 方向
-
-線上升級目前支援執行在 Worker、子行程與 runner 中的外掛（runner 只能重新啟動，不能重疊）；狀態交接與工作階段續連是下一步。設計是公開的：[價值定義](design/value.md)與[架構](design/architecture.md)。本 README 只描述已經實作的能力。
+`@graftland/plugin-release`
+從未發佈，沒有對象可標記。在 npm 上標記舊套件為棄用是選用的獨立決定。
 
 ## 參與貢獻
 
@@ -128,7 +107,7 @@ devenv shell -- pnpm typecheck
 devenv shell -- pnpm test
 ```
 
-檢查項目、發布流程和文件網站請見[發版](https://docs.graft.land/zh-tw/publishing/)。
+檢查項目、發布流程和文件站見[發佈](https://docs.graft.land/zh-tw/releases/)。
 
 ## 授權
 

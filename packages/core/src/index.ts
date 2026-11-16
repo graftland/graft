@@ -1,16 +1,7 @@
 /**
- * Graft is a plugin framework built on Effect.
+ * Graft makes Effect layers dynamic: mount a layer and it is built while its
+ * requirements are available, publishing the services it provides.
  */
-export * as Change from "./Change"
 export * as Graft from "./Graft"
-export * as Event from "./Event"
-export * as Fork from "./Fork"
-export * as Plugin from "./Plugin"
-export * as Finalization from "./Finalization"
-export * as Transition from "./Transition"
-
-export * as Manifest from "./Manifest"
-
-export * as Trust from "./Trust"
-
-export * as Kernel from "./Kernel"
+export * as Mount from "./Mount"
+export * as Release from "./Release"

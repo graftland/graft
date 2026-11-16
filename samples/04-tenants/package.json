@@ -1,0 +1,13 @@
+{
+	"name": "@graftland-samples/04-tenants",
+	"private": true,
+	"type": "module",
+	"description": "Serve several tenants with isolated services and per-tenant settings",
+	"scripts": {
+		"start": "node src/main.ts"
+	},
+	"dependencies": {
+		"@graftland/graft": "workspace:*",
+		"effect": "4.1.2"
+	}
+}

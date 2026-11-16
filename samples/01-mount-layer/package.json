@@ -1,0 +1,13 @@
+{
+	"name": "@graftland-samples/01-mount-layer",
+	"private": true,
+	"type": "module",
+	"description": "Mount a layer, use the service it publishes, and let the scope release it",
+	"scripts": {
+		"start": "node src/main.ts"
+	},
+	"dependencies": {
+		"@graftland/graft": "workspace:*",
+		"effect": "4.1.2"
+	}
+}

@@ -9,16 +9,16 @@ import {
 	Layer,
 	Option,
 	Ref,
-	Schema,
 	Scope,
 	Stream,
 } from "effect"
 import { assert, describe, it } from "@effect/vitest"
 
-import { Graft, Plugin } from "../src/index.ts"
+import * as Graft from "../src/Graft.ts"
 import { realmKey } from "../src/internal/runtime.ts"
 import { RuntimeContext } from "../src/internal/runtimeContext"
-import { makeJournal, reach, registrySnapshot, run } from "./utils.ts"
+import type { Mount as MountHandle } from "../src/Mount.ts"
+import { makeJournal, reach, registrySnapshot, run } from "./b1c-utils.ts"
 
 class Service extends Context.Service<Service, string>()(
 	"@graftland/graft/test/teardown-interleavings.test/Service",
@@ -37,15 +37,15 @@ describe("teardown interleavings", () => {
 				)
 				const { runtime } = Context.get(context, RuntimeContext)
 				const released = yield* Ref.make(false)
-				yield* Graft.provide(Service, "root").pipe(
+				yield* Graft.publish(Service, "root").pipe(
 					Effect.provideContext(context),
+					Effect.provideService(Scope.Scope, rootScope),
 				)
-				const consumer = yield* Graft.plugin(
-					Plugin.make({
-						name: "root consumer",
-						inject: [Service],
-						apply: () => Effect.addFinalizer(() => Ref.set(released, true)),
-					}),
+				const consumer = yield* Graft.mount(
+					Layer.effectDiscard(
+						Effect.addFinalizer(() => Ref.set(released, true)),
+					),
+					{ name: "root consumer", requires: [Service] },
 				).pipe(Effect.provideContext(context))
 				yield* consumer.await
 				yield* Scope.close(rootScope, Exit.void)
@@ -54,7 +54,7 @@ describe("teardown interleavings", () => {
 				const registry = yield* registrySnapshot(runtime)
 				assert.isTrue(cleaned)
 				assert.strictEqual(HashMap.size(registry), 0)
-				yield* consumer.dispose
+				yield* consumer.unmount
 			}).pipe(Effect.scoped),
 	)
 
@@ -66,33 +66,34 @@ describe("teardown interleavings", () => {
 				const journal = yield* makeJournal
 				const closing = yield* Deferred.make<void>()
 				const release = yield* Deferred.make<void>()
-				const child = Plugin.make({
-					name: "child consumer",
-					inject: [Service],
-					apply: () =>
-						Effect.addFinalizer(() =>
-							Deferred.succeed(closing, undefined).pipe(
-								Effect.andThen(Deferred.await(release)),
-								Effect.andThen(journal.record("child released")),
-							),
+				const child = Layer.effectDiscard(
+					Effect.addFinalizer(() =>
+						Deferred.succeed(closing, undefined).pipe(
+							Effect.andThen(Deferred.await(release)),
+							Effect.andThen(journal.record("child released")),
 						),
-				})
-				const parent = yield* Graft.plugin(
-					Plugin.make({
-						name: "parent provider",
-						apply: () =>
-							Effect.gen(function* () {
-								yield* Effect.addFinalizer(() =>
-									journal.record("parent released"),
-								)
-								yield* Graft.provide(Service, "parent")
-								const fork = yield* Graft.plugin(child)
-								yield* fork.await
-							}),
-					}),
+					),
 				)
-				yield* parent.await
-				const disposing = yield* Effect.forkScoped(parent.dispose)
+				const childRef = yield* Deferred.make<MountHandle>()
+				const parent = Layer.merge(
+					Layer.succeed(Service, "parent"),
+					Layer.effectDiscard(
+						Effect.gen(function* () {
+							yield* Effect.addFinalizer(() =>
+								journal.record("parent released"),
+							)
+							const consumer = yield* Graft.mount(child, {
+								name: "child consumer",
+								requires: [Service],
+							})
+							yield* Deferred.succeed(childRef, consumer)
+						}),
+					),
+				)
+				const mounted = yield* Graft.mount(parent, { name: "parent provider" })
+				const consumer = yield* Deferred.await(childRef)
+				yield* reach(consumer, "Active")
+				const disposing = yield* Effect.forkScoped(mounted.unmount)
 				yield* Deferred.await(closing)
 				yield* journal.expect([])
 				const registry = yield* registrySnapshot(runtime)
@@ -100,61 +101,46 @@ describe("teardown interleavings", () => {
 				yield* Deferred.succeed(release, undefined)
 				yield* Fiber.join(disposing)
 				yield* journal.expect(["child released", "parent released"])
-				const tree = yield* Stream.runHead(Graft.forks)
+				const tree = yield* Stream.runHead(Graft.mounts)
 				assert.deepStrictEqual(Option.getOrThrow(tree), [])
 			}).pipe(run),
 	)
 
 	it.effect(
-		"settles update callers and terminates state streams after disposal interrupts an update",
+		"settles restart callers and terminates state streams when unmount interrupts a restart",
 		() =>
 			Effect.gen(function* () {
-				const entered = yield* Deferred.make<void>()
 				const closing = yield* Deferred.make<void>()
 				const release = yield* Deferred.make<void>()
-				const stopped = yield* Ref.make(false)
-				const fork = yield* Graft.plugin(
-					Plugin.make({
-						name: "disposed update",
-						config: Schema.String,
-						apply: () =>
-							Effect.gen(function* () {
-								yield* Effect.addFinalizer(() =>
-									Deferred.succeed(closing, undefined).pipe(
-										Effect.andThen(Deferred.await(release)),
-									),
-								)
-								return () =>
-									Deferred.succeed(entered, undefined).pipe(
-										Effect.andThen(Effect.never),
-										Effect.ensuring(Ref.set(stopped, true)),
-									)
-							}),
-					}),
-					"initial",
+				const mount = yield* Graft.mount(
+					Layer.effectDiscard(
+						Effect.addFinalizer(() =>
+							Deferred.succeed(closing, undefined).pipe(
+								Effect.andThen(Deferred.await(release)),
+							),
+						),
+					),
+					{ name: "disposed restart" },
 				)
-				yield* fork.await
-				const states = yield* Effect.forkScoped(Stream.runCollect(fork.state))
-				const updating = yield* Effect.forkScoped(fork.update("next"))
-				yield* Deferred.await(entered)
-				const disposing = yield* Effect.forkScoped(fork.dispose)
+				yield* mount.await
+				const states = yield* Effect.forkScoped(Stream.runCollect(mount.state))
+				const restarting = yield* Effect.forkScoped(mount.restart)
 				yield* Deferred.await(closing)
-				const interrupted = yield* Ref.get(stopped)
-				assert.isTrue(interrupted)
+				const disposing = yield* Effect.forkScoped(mount.unmount)
 				yield* Deferred.succeed(release, undefined)
 				yield* Fiber.join(disposing)
-				yield* Fiber.join(updating)
-				yield* fork.await
+				yield* Fiber.join(restarting)
+				yield* mount.await
 				const observed = yield* Fiber.join(states)
 				assert.strictEqual(
 					Array.last(observed).pipe(
 						Option.map((state) => state._tag),
 						Option.getOrThrow,
 					),
-					"Disposed",
+					"Unmounted",
 				)
 				assert.strictEqual(
-					Array.filter(observed, (state) => state._tag === "Disposed").length,
+					Array.filter(observed, (state) => state._tag === "Unmounted").length,
 					1,
 				)
 			}).pipe(run),

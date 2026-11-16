@@ -1,0 +1,13 @@
+{
+	"name": "@graftland-samples/05-remote",
+	"private": true,
+	"type": "module",
+	"description": "Serve a service over effect/rpc and use it from another graph",
+	"scripts": {
+		"start": "node src/main.ts"
+	},
+	"dependencies": {
+		"@graftland/graft": "workspace:*",
+		"effect": "4.1.2"
+	}
+}

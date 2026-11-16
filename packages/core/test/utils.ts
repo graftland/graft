@@ -7,12 +7,12 @@ import {
 	Ref,
 	Stream,
 	TxRef,
+	TxSubscriptionRef,
 	type Scope,
 } from "effect"
 import { assert } from "@effect/vitest"
 
-import { Graft, type Fork } from "../src/index.ts"
-import * as Snapshots from "../src/internal/snapshot.ts"
+import { Graft, Mount } from "../src/index.ts"
 
 /** Runs a test inside a fresh root graft. */
 export const run = <A, E>(
@@ -38,15 +38,17 @@ export const makeJournal: Effect.Effect<Journal> = Effect.gen(function* () {
 	}
 })
 
-/** Waits until the fork reaches a state with the given tag. */
-export const reach = (fork: Fork.Fork, tag: Fork.ForkState["_tag"]) =>
-	fork.state.pipe(
+/** Waits until the mount reaches a state with the given tag. */
+export const reach = (mount: Mount.Mount, tag: Mount.MountState["_tag"]) =>
+	mount.state.pipe(
 		Stream.filter((state) => state._tag === tag),
 		Stream.runHead,
 		Effect.flatMap(
 			Option.match({
 				onNone: () =>
-					Effect.die(new Error(`Fork ${fork.id} ended before reaching ${tag}`)),
+					Effect.die(
+						new Error(`Mount ${mount.id} ended before reaching ${tag}`),
+					),
 				onSome: () => Effect.void,
 			}),
 		),
@@ -73,15 +75,15 @@ export const registrySnapshot = Effect.fn("registrySnapshot")(function* (
 export const activeSnapshot = Effect.fn("activeSnapshot")(function* (
 	runtime: import("../src/internal/runtime.ts").Runtime,
 ) {
-	const forks = yield* Snapshots.get(runtime.forks)
+	const mounts = yield* TxSubscriptionRef.get(runtime.mounts)
 	let active = HashMap.empty<
 		number,
 		import("../src/internal/runtime.ts").ActiveResolution
 	>()
-	for (const [id, entry] of forks) {
+	for (const [id, entry] of mounts) {
 		const state = yield* TxRef.get(entry.node.state)
-		for (const resolution of HashMap.values(state.resolutions))
-			active = HashMap.set(active, id, resolution)
+		if (state.resolution !== undefined)
+			active = HashMap.set(active, id, state.resolution)
 	}
 	return active
 }, Effect.tx)

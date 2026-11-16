@@ -14,21 +14,33 @@ import {
 import { TestClock } from "effect/testing"
 import { assert, describe, it } from "@effect/vitest"
 
-import { Event, Graft, Plugin } from "../src/index.ts"
-import { reach, run } from "./utils.ts"
+import * as Graft from "../src/Graft.ts"
+import { reach, run } from "./b1b-utils.ts"
+
+/**
+ * Advances virtual time in 1ms steps, yielding between steps so the retry
+ * sleep is registered before the next adjustment wakes it.
+ */
+const advanceRetry = Effect.repeat(
+	Effect.andThen(Effect.yieldNow, TestClock.adjust("1 millis")),
+	Schedule.recurs(4),
+)
 
 // @effect-diagnostics-next-line deterministicKeys:off -- Deliberately contains the old identity separator.
 class Secret extends Context.Service<Secret, string>()("prefix\u0000value") {}
 // @effect-diagnostics-next-line deterministicKeys:off -- Deliberately matches the suffix of Secret's key.
 class Other extends Context.Service<Other, string>()("value") {}
+class Bridge extends Context.Service<Bridge, string>()(
+	"@graftland/graft/test/realm-identity.test/Bridge",
+) {}
 
-const secretProvider = Plugin.service(
-	Secret,
-	Effect.succeed("private secret"),
-	{ name: "secret provider" },
-)
-const otherProvider = Plugin.service(Other, Effect.succeed("other value"), {
+const secretProvider = Graft.mount(Layer.succeed(Secret, "private secret"), {
+	name: "secret provider",
+	isolate: [[Secret, "tenant"]],
+})
+const otherProvider = Graft.mount(Layer.succeed(Other, "other value"), {
 	name: "other provider",
+	isolate: [[Other, "tenant\u0000prefix"]],
 })
 const secretRealm = { isolate: [[Secret, "tenant"]] as const }
 const otherRealm = { isolate: [[Other, "tenant\u0000prefix"]] as const }
@@ -38,24 +50,19 @@ describe("realm identity", () => {
 		"does not satisfy a required dependency with another realm and service pair",
 		() =>
 			Effect.gen(function* () {
-				const provider = yield* Graft.plugin(
-					secretProvider,
-					undefined,
-					secretRealm,
+				const provider = yield* Graft.mount(
+					Layer.succeed(Secret, "private secret"),
+					{ name: "secret provider", ...secretRealm },
 				)
 				yield* provider.await
 				const seen = yield* Ref.make(Option.none<string>())
-				const consumer = yield* Graft.plugin(
-					Plugin.make({
-						name: "required consumer",
-						inject: [Other],
-						apply: () =>
-							Effect.flatMap(Effect.serviceOption(Secret), (value) =>
-								Ref.set(seen, value),
-							),
-					}),
-					undefined,
-					otherRealm,
+				const consumer = yield* Graft.mount(
+					Layer.effectDiscard(
+						Effect.flatMap(Effect.serviceOption(Secret), (value) =>
+							Ref.set(seen, value),
+						),
+					),
+					{ name: "required consumer", requires: [Other], ...otherRealm },
 				)
 				yield* TestClock.adjust("1 millis")
 				const snapshot = yield* Stream.runHead(consumer.state)
@@ -68,48 +75,40 @@ describe("realm identity", () => {
 
 	it.effect("publishes and withdraws distinct pairs independently", () =>
 		Effect.gen(function* () {
-			const secret = yield* Graft.plugin(secretProvider, undefined, secretRealm)
+			const secret = yield* secretProvider
 			yield* secret.await
-			const other = yield* Graft.plugin(otherProvider, undefined, otherRealm)
+			const other = yield* otherProvider
 			yield* other.await
-			const secretReader = yield* Graft.plugin(
-				Plugin.make({
-					name: "secret consumer",
-					inject: [Secret],
-					apply: () =>
-						Effect.gen(function* () {
-							const value = yield* Secret
-							const other = yield* Effect.serviceOption(Other)
-							assert.strictEqual(value, "private secret")
-							assert.deepStrictEqual(other, Option.none())
-						}),
-				}),
-				undefined,
-				secretRealm,
+			const secretReader = yield* Graft.mount(
+				Layer.effectDiscard(
+					Effect.gen(function* () {
+						const value = yield* Secret
+						const other = yield* Effect.serviceOption(Other)
+						assert.strictEqual(value, "private secret")
+						assert.deepStrictEqual(other, Option.none())
+					}),
+				),
+				{ name: "secret consumer", requires: [Secret], ...secretRealm },
 			)
 			yield* secretReader.await
 			const observed = yield* Ref.make<ReadonlyArray<string>>([])
-			const consumer = yield* Graft.plugin(
-				Plugin.make({
-					name: "other consumer",
-					inject: [Other],
-					apply: () =>
-						Effect.gen(function* () {
-							const value = yield* Other
-							const leaked = yield* Effect.serviceOption(Secret)
-							assert.deepStrictEqual(leaked, Option.none())
-							yield* Ref.update(observed, Array.append(value))
-						}),
-				}),
-				undefined,
-				otherRealm,
+			const consumer = yield* Graft.mount(
+				Layer.effectDiscard(
+					Effect.gen(function* () {
+						const value = yield* Other
+						const leaked = yield* Effect.serviceOption(Secret)
+						assert.deepStrictEqual(leaked, Option.none())
+						yield* Ref.update(observed, Array.append(value))
+					}),
+				),
+				{ name: "other consumer", requires: [Other], ...otherRealm },
 			)
 			yield* consumer.await
-			yield* secret.dispose
+			yield* secret.unmount
 			yield* TestClock.adjust("1 millis")
 			const values = yield* Ref.get(observed)
 			assert.deepStrictEqual(values, ["other value"])
-			yield* other.dispose
+			yield* other.unmount
 			yield* reach(consumer, "Pending")
 		}).pipe(run),
 	)
@@ -120,38 +119,34 @@ describe("realm identity", () => {
 			() =>
 				Effect.gen(function* () {
 					const starts = yield* Ref.make(0)
-					const consumer = yield* Graft.plugin(
-						Plugin.make({
+					const consumer = yield* Graft.mount(
+						Layer.effectDiscard(
+							Effect.gen(function* () {
+								const fallback = yield* Effect.serviceOption(Other)
+								const leaked = yield* Effect.serviceOption(Secret)
+								assert.deepStrictEqual(
+									fallback,
+									ambient ? Option.some("ambient") : Option.none(),
+								)
+								assert.deepStrictEqual(leaked, Option.none())
+								yield* Ref.update(starts, (n) => n + 1)
+							}),
+						),
+						{
 							name: "fallback consumer",
-							inject: ambient ? [Other] : [Plugin.optional(Other)],
-							apply: () =>
-								Effect.gen(function* () {
-									const fallback = yield* Effect.serviceOption(Other)
-									const leaked = yield* Effect.serviceOption(Secret)
-									assert.deepStrictEqual(
-										fallback,
-										ambient ? Option.some("ambient") : Option.none(),
-									)
-									assert.deepStrictEqual(leaked, Option.none())
-									yield* Ref.update(starts, (n) => n + 1)
-								}),
-						}),
-						undefined,
-						otherRealm,
+							requires: [ambient ? Other : Graft.optional(Other)],
+							...otherRealm,
+						},
 					)
 					yield* consumer.await
-					const provider = yield* Graft.plugin(
-						secretProvider,
-						undefined,
-						secretRealm,
-					)
+					const provider = yield* secretProvider
 					yield* provider.await
 					yield* TestClock.adjust("1 millis")
 					const afterPublication = yield* Ref.get(starts)
 					assert.strictEqual(afterPublication, 1)
 					const snapshot = yield* Stream.runHead(consumer.state)
 					assert.strictEqual(Option.getOrThrow(snapshot)._tag, "Active")
-					yield* provider.dispose
+					yield* provider.unmount
 					yield* TestClock.adjust("1 millis")
 					const afterWithdrawal = yield* Ref.get(starts)
 					assert.strictEqual(afterWithdrawal, 1)
@@ -174,24 +169,76 @@ describe("realm identity", () => {
 		"does not reject a child's unrelated publication as a dependency cycle",
 		() =>
 			Effect.gen(function* () {
-				const parent = yield* Graft.plugin(
-					Plugin.make({
+				const parent = yield* Graft.mount(
+					Layer.effectDiscard(
+						Effect.gen(function* () {
+							const child = yield* Graft.mount(
+								Layer.succeed(Secret, "private secret"),
+								{ name: "secret", ...secretRealm },
+							)
+							yield* child.await
+						}),
+					),
+					{
 						name: "watching parent",
-						inject: [Plugin.optional(Other)],
-						apply: () =>
-							Effect.gen(function* () {
-								const child = yield* Graft.plugin(
-									secretProvider,
-									undefined,
-									secretRealm,
-								)
-								yield* child.await
-							}),
-					}),
-					undefined,
-					otherRealm,
+						requires: [Graft.optional(Other)],
+						...otherRealm,
+					},
 				)
 				yield* parent.await
+			}).pipe(run),
+	)
+
+	it.effect(
+		"rechecks a rejected publication with the same structural identity",
+		() =>
+			Effect.gen(function* () {
+				const attempts = yield* Ref.make(0)
+				const owner = yield* Graft.mount(
+					Layer.effectDiscard(
+						Effect.gen(function* () {
+							const published = yield* Graft.mount(
+								Layer.succeed(Bridge, "bridge"),
+								{ name: "bridge" },
+							)
+							yield* published.await
+						}),
+					),
+					{ name: "watcher", requires: [Graft.optional(Other)], ...otherRealm },
+				)
+				yield* owner.await
+				const publisher = yield* Graft.mount(
+					Layer.effectDiscard(
+						Effect.gen(function* () {
+							yield* Ref.update(attempts, (n) => n + 1)
+							const published = yield* Graft.mount(
+								Layer.succeed(Other, "published"),
+								{ name: "publisher publication" },
+							)
+							yield* published.await
+						}),
+					),
+					{ name: "cyclic publisher", requires: [Bridge], ...otherRealm },
+				)
+				yield* reach(publisher, "Failed")
+				const unrelated = yield* secretProvider
+				yield* unrelated.await
+				yield* unrelated.unmount
+				yield* TestClock.adjust("1 millis")
+				const before = yield* Ref.get(attempts)
+				assert.strictEqual(before, 1)
+				// Dropping the watcher's dependency breaks the cycle for an independent provider.
+				yield* owner.unmount
+				yield* Effect.flatMap(
+					Graft.mount(Layer.succeed(Bridge, "bridge"), {
+						name: "independent provider",
+						...otherRealm,
+					}),
+					(mount) => mount.await,
+				)
+				yield* reach(publisher, "Active")
+				const after = yield* Ref.get(attempts)
+				assert.strictEqual(after, 2)
 			}).pipe(run),
 	)
 
@@ -214,27 +261,28 @@ describe("realm identity", () => {
 							),
 					),
 				)
-				const fork = yield* Graft.plugin(
-					Plugin.make({
+				const mount = yield* Graft.mount(
+					Layer.effectDiscard(
+						Effect.gen(function* () {
+							const attempt = yield* Ref.updateAndGet(attempts, (n) => n + 1)
+							// A third attempt would succeed, exposing a replenished budget without looping forever.
+							if (attempt <= 2) return yield* Effect.fail("still failing")
+						}),
+					),
+					{
 						name: "bounded retries with an optional dependency",
-						inject: [Plugin.optional(Other)],
+						requires: [Graft.optional(Other)],
 						retry,
-						apply: () =>
-							Effect.gen(function* () {
-								const attempt = yield* Ref.updateAndGet(attempts, (n) => n + 1)
-								// A third attempt would succeed, exposing a replenished budget without looping forever.
-								if (attempt <= 2) return yield* Effect.fail("still failing")
-							}),
-					}),
-					undefined,
-					otherRealm,
+						...otherRealm,
+					},
 				)
+				yield* advanceRetry
 				yield* Effect.raceFirst(
 					Deferred.await(exhausted),
-					reach(fork, "Active"),
+					reach(mount, "Active"),
 				)
 				const count = yield* Ref.get(attempts)
-				const snapshot = yield* Stream.runHead(fork.state)
+				const snapshot = yield* Stream.runHead(mount.state)
 				assert.strictEqual(count, 2)
 				assert.strictEqual(Option.getOrThrow(snapshot)._tag, "Failed")
 			}).pipe(run),
@@ -244,20 +292,14 @@ describe("realm identity", () => {
 		"keeps private and root realms separate from prefix-like and empty labels",
 		() =>
 			Effect.gen(function* () {
-				const Read = Event.make<[], string>("realm-read\u0000event")
-				const room = (value: string) =>
-					Plugin.make({
-						name: value,
-						apply: () =>
-							Graft.provide(Other, value).pipe(
-								Effect.andThen(Event.on(Read, () => Effect.succeed(value))),
-							),
-					})
-				const root = yield* Graft.plugin(room("root"))
-				yield* root.await
-				const privateRoom = yield* Graft.plugin(room("private"), undefined, {
-					isolate: [Other, Read],
+				const root = yield* Graft.mount(Layer.succeed(Other, "root"), {
+					name: "root",
 				})
+				yield* root.await
+				const privateRoom = yield* Graft.mount(
+					Layer.succeed(Other, "private"),
+					{ name: "private", isolate: [Other] },
+				)
 				yield* privateRoom.await
 				for (const label of [
 					"",
@@ -265,41 +307,27 @@ describe("realm identity", () => {
 					"@tenant",
 					"tenant\u0000prefix",
 				]) {
-					const provider = yield* Graft.plugin(
-						room(`label ${label}`),
-						undefined,
-						{
-							isolate: [
-								[Other, label],
-								[Read, label],
-							],
-						},
+					const provider = yield* Graft.mount(
+						Layer.succeed(Other, `label ${label}`),
+						{ name: `label ${label}`, isolate: [[Other, label]] },
 					)
 					yield* provider.await
-					const consumer = yield* Graft.plugin(
-						Plugin.make({
-							name: "shared reader",
-							inject: [Other],
-							apply: () =>
-								Effect.gen(function* () {
-									const value = yield* Other
-									const replies = yield* Event.parallel(Read)
-									assert.strictEqual(value, `label ${label}`)
-									assert.deepStrictEqual(replies, [`label ${label}`])
-								}),
-						}),
-						undefined,
+					const consumer = yield* Graft.mount(
+						Layer.effectDiscard(
+							Effect.flatMap(Other, (value) =>
+								Effect.sync(() => assert.strictEqual(value, `label ${label}`)),
+							),
+						),
 						{
-							isolate: [
-								[Other, label],
-								[Read, label],
-							],
+							name: "shared reader",
+							requires: [Other],
+							isolate: [[Other, label]],
 						},
 					)
 					yield* consumer.await
 				}
-				const replies = yield* Event.parallel(Read)
-				assert.deepStrictEqual(replies, ["root"])
+				const value = yield* Graft.await(Other)
+				assert.strictEqual(value, "root")
 			}).pipe(run),
 	)
 })

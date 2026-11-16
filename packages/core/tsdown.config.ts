@@ -6,15 +6,8 @@ export default defineConfig({
 	...config,
 	entry: [
 		"src/index.ts",
-		"src/Change.ts",
-		"src/Kernel.ts",
-		"src/Graft.ts",
-		"src/Plugin.ts",
-		"src/Event.ts",
-		"src/Fork.ts",
-		"src/Finalization.ts",
-		"src/Transition.ts",
-		"src/Trust.ts",
-		"src/Manifest.ts",
+		"src/rpc/index.ts",
+		"src/node/index.ts",
+		"src/testing/index.ts",
 	],
 })

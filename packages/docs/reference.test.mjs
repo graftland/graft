@@ -2,13 +2,14 @@ import { strict as assert } from "node:assert"
 import { test } from "node:test"
 import { fileURLToPath } from "node:url"
 
-import { Application, ReflectionKind } from "typedoc"
+import { Application, LogLevel, ReflectionKind } from "typedoc"
 
 import { publicEntries } from "../../scripts/public-api.mjs"
 
-// Exercise real Effect Schema classes and overloaded APIs, where flattening or
-// filtering reflections can silently lose fields or leave stale navigation.
-test("preserves core exports, re-exports, overloads, and local Schema fields", async (t) => {
+// Exercise real Effect Schema classes and re-exported namespaces, where
+// flattening or filtering reflections can silently lose fields or leave stale
+// navigation.
+test("preserves package entries, re-exports, dual exports, and local Schema fields", async () => {
 	const root = fileURLToPath(new URL("../../", import.meta.url))
 	const entries = publicEntries(root).filter(
 		(entry) => entry.packageName === "@graftland/graft",
@@ -26,21 +27,56 @@ test("preserves core exports, re-exports, overloads, and local Schema fields", a
 		),
 		plugin: [fileURLToPath(new URL("./typedoc-plugin.mjs", import.meta.url))],
 		alwaysCreateEntryPointModule: true,
+		// Every type a public signature mentions must be exported and documented.
+		validation: {
+			notExported: true,
+			invalidLink: true,
+			rewrittenLink: true,
+		},
 		excludeInternal: true,
 	})
 	const project = await app.convert()
+	// Run the same validation the docs build records, so a public signature
+	// that mentions a type no entry exports fails here too.
+	const warnings = []
+	const log = app.logger.log
+	app.logger.log = (message, level) => {
+		if (level >= LogLevel.Warn) warnings.push(String(message))
+		log.call(app.logger, message, level)
+	}
+	try {
+		app.validate(project)
+	} finally {
+		app.logger.log = log
+	}
+	assert.deepEqual(warnings, [])
+	// The package exports the root, rpc, node and testing entries, and nothing else.
+	assert.equal(entries.length, 4)
 	assert.equal(project.children.length, entries.length)
-	const finalization = project.children.find(
-		(entry) => entry.name === "Finalization",
-	)
-	assert.deepEqual(finalization.children.map((child) => child.name).sort(), [
-		"FinalizationInterrupted",
+	assert.deepEqual(project.children.map((entry) => entry.name).sort(), [
+		"index",
+		"node",
+		"rpc",
+		"testing",
+	])
+	const index = project.children.find((entry) => entry.name === "index")
+	const release = index.children.find((entry) => entry.name === "Release")
+	assert.deepEqual(release.children.map((child) => child.name).sort(), [
+		"ReleaseInterrupted",
 		"close",
 		"scoped",
 	])
-	const plugin = project.children.find((entry) => entry.name === "Plugin")
-	const make = plugin.children.find((child) => child.name === "make")
-	assert.equal(make.type.declaration.signatures.length, 2)
+	const graft = index.children.find((entry) => entry.name === "Graft")
+	// A public API without overloads still has one signature per function; two
+	// would mean a reflection was duplicated rather than merged.
+	assert.equal(
+		graft.children.find((child) => child.name === "mount").signatures.length,
+		1,
+	)
+	// `await` is the reserved-word alias of `await_`, so the API keeps both views.
+	const reserved = graft.children.find((child) => child.name === "await")
+	assert.ok(reserved.kindOf(ReflectionKind.Reference))
+	assert.ok(graft.children.some((child) => child.name === "await_"))
 	const conflict = Object.values(project.reflections).find(
 		(reflection) =>
 			reflection.name === "ServiceConflict" &&
@@ -52,13 +88,17 @@ test("preserves core exports, re-exports, overloads, and local Schema fields", a
 		"service",
 		"reason",
 		"realm",
-		"fork",
+		"mount",
 		"message",
 	])
 		assert.ok(
 			conflict.children.some((child) => child.name === name),
 			name,
 		)
+	assert.ok(
+		!conflict.children.some((child) => child.name === "fork"),
+		"a mount is named mount, not fork",
+	)
 	assert.ok(
 		conflict.children.find((child) => child.name === "reason").hasComment(),
 	)
@@ -67,82 +107,39 @@ test("preserves core exports, re-exports, overloads, and local Schema fields", a
 			group.children.some((child) => child.name === "pipe"),
 		),
 	)
-	const index = project.children.find((entry) => entry.name === "index")
 	assert.deepEqual(index.children.map((child) => child.name).sort(), [
-		"Change",
-		"Event",
-		"Finalization",
-		"Fork",
 		"Graft",
-		"Kernel",
-		"Manifest",
-		"Plugin",
-		"Transition",
-		"Trust",
+		"Mount",
+		"Release",
 	])
+	// TypeDoc expands `export * as Graft` into a namespace when the module is not
+	// a separate entry point; the export is still the same module, and the names
+	// are the contract this test protects.
 	assert.ok(
-		index.children.every((child) => child.kindOf(ReflectionKind.Reference)),
+		index.children.every((child) => child.kindOf(ReflectionKind.Namespace)),
 	)
-	await t.test(
-		"preserves Change requests, handles, current status, and rejection reference fields",
-		() => {
-			const change = project.children.find((entry) => entry.name === "Change")
-			assert.ok(change)
-			for (const name of [
-				"submit",
-				"run",
-				"get",
-				"changes",
-				"Outcome",
-				"Conclusion",
-				"Target",
-			])
-				assert.ok(
-					change.children.some((child) => child.name === name),
-					`Change.${name}`,
-				)
-			const fields = (name, expected) => {
-				const reference = change.children.find((child) => child.name === name)
-				const declaration = reference?.kindOf(ReflectionKind.Reference)
-					? reference.getTargetReflection()
-					: reference
-				assert.ok(declaration, `Change.${name}`)
-				for (const field of expected)
-					assert.ok(
-						declaration.children.some((child) => child.name === field),
-						`Change.${name}.${field}`,
-					)
-				return declaration
-			}
-			const request = fields("Request", [
-				"operations",
-				"realms",
-				"key",
-				"strategy",
-				"budget",
-				"requirements",
-			])
-			assert.ok(
-				request.children.find((child) => child.name === "key").flags.isOptional,
-			)
-			fields("Handle", ["id", "await", "cancel"])
-			fields("Status", [
-				"id",
-				"sequence",
-				"members",
-				"plan",
-				"remaining",
-				"leaseHolders",
-				"unconfirmedUnits",
-				"conclusion",
-			])
-			const rejected = fields("ChangeRejected", [
-				"constructor",
-				"_tag",
-				"reason",
-				"conflicts",
-			])
-			assert.ok(rejected.kindOf(ReflectionKind.Class))
-		},
-	)
+	const entry = (name) => project.children.find((child) => child.name === name)
+	const remote = entry("rpc").children.find((child) => child.name === "Remote")
+	for (const name of ["connect", "serve", "service", "RemoteUnavailable"])
+		assert.ok(
+			remote.children.some((child) => child.name === name),
+			`rpc.Remote.${name}`,
+		)
+	for (const name of [
+		"SubprocessOptions",
+		"WorkerOptions",
+		"layerProtocolStdio",
+		"layerProtocolWorker",
+		"subprocessProtocol",
+		"workerProtocol",
+	])
+		assert.ok(
+			entry("node").children.some((child) => child.name === name),
+			`node.${name}`,
+		)
+	for (const name of ["InMemoryProtocol", "make"])
+		assert.ok(
+			entry("testing").children.some((child) => child.name === name),
+			`testing.${name}`,
+		)
 })

@@ -6,8 +6,9 @@
 		"tsBuildInfoFile": ".cache/.tsbuildinfo",
 
 		"module": "esnext",
-		// Workspace packages see each other as installed packages, through their built declarations.
+		// Workspace packages use source during local typechecking; published exports use dist.
 		"moduleResolution": "bundler",
+		"customConditions": ["source"],
 		"target": "esnext",
 		"types": ["node"],
 

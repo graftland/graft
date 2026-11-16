@@ -1,6 +1,0 @@
-{
-	"name": "intercept-settings-2671",
-	"version": "1.0.0",
-	"type": "module",
-	"exports": "./index.mjs"
-}

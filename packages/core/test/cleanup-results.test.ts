@@ -5,13 +5,14 @@ import {
 	Effect,
 	Exit,
 	Fiber,
+	Layer,
 	Ref,
 	Schema,
 	Scope,
 } from "effect"
 import { assert, describe, it } from "@effect/vitest"
 
-import { Fork, Graft, Plugin } from "../src/index.ts"
+import { Graft, Mount } from "../src/index.ts"
 import { reach, run } from "./utils.ts"
 
 const defects = (exit: Exit.Exit<unknown, unknown>): ReadonlyArray<unknown> =>
@@ -23,7 +24,7 @@ const defects = (exit: Exit.Exit<unknown, unknown>): ReadonlyArray<unknown> =>
 						: reason._tag === "Fail"
 							? reason.error
 							: undefined
-				return Schema.is(Fork.CleanupError)(value)
+				return Schema.is(Mount.CleanupError)(value)
 					? defects(Exit.failCause(value.cause))
 					: reason._tag === "Die"
 						? [value]
@@ -38,26 +39,25 @@ describe("activation cleanup results", () => {
 			Effect.gen(function* () {
 				const entered = yield* Deferred.make<void>()
 				const release = yield* Deferred.make<void>()
-				const fork = yield* Graft.plugin(
-					Plugin.make({
-						name: "cleanup defect",
-						apply: () =>
-							Effect.addFinalizer(() =>
-								Deferred.succeed(entered, undefined).pipe(
-									Effect.andThen(Deferred.await(release)),
-									Effect.andThen(Effect.die("cleanup defect")),
-								),
+				const mount = yield* Graft.mount(
+					Layer.effectDiscard(
+						Effect.addFinalizer(() =>
+							Deferred.succeed(entered, undefined).pipe(
+								Effect.andThen(Deferred.await(release)),
+								Effect.andThen(Effect.die("cleanup defect")),
 							),
-					}),
+						),
+					),
+					{ name: "cleanup defect" },
 				)
-				yield* fork.await
-				const first = yield* Effect.forkScoped(Effect.exit(fork.dispose))
+				yield* mount.await
+				const first = yield* Effect.forkScoped(Effect.exit(mount.unmount))
 				yield* Deferred.await(entered)
-				const second = yield* Effect.forkScoped(Effect.exit(fork.dispose))
+				const second = yield* Effect.forkScoped(Effect.exit(mount.unmount))
 				yield* Deferred.succeed(release, undefined)
 				const a = yield* Fiber.join(first)
 				const b = yield* Fiber.join(second)
-				const c = yield* Effect.exit(fork.dispose)
+				const c = yield* Effect.exit(mount.unmount)
 				assert.deepStrictEqual(a, b)
 				assert.deepStrictEqual(a, c)
 				assert.include(defects(a), "cleanup defect")
@@ -67,26 +67,32 @@ describe("activation cleanup results", () => {
 	it.effect("combines startup and resource cleanup causes in Failed", () =>
 		Effect.gen(function* () {
 			const released = yield* Ref.make(false)
-			const fork = yield* Graft.plugin(
-				Plugin.make({
-					name: "startup and cleanup",
-					apply: () =>
-						Effect.gen(function* () {
-							yield* Effect.addFinalizer(() => Ref.set(released, true))
-							yield* Effect.addFinalizer(() => Effect.die("cleanup defect"))
-							return yield* Effect.fail("startup failure")
-						}),
-				}),
+			const mount = yield* Graft.mount(
+				Layer.effectDiscard(
+					Effect.gen(function* () {
+						yield* Effect.addFinalizer(() => Ref.set(released, true))
+						yield* Effect.addFinalizer(() => Effect.die("cleanup defect"))
+						return yield* Effect.fail("startup failure")
+					}),
+				),
+				{ name: "startup and cleanup" },
 			)
-			const exit = yield* Effect.exit(fork.await)
+			const exit = yield* Effect.exit(mount.await)
 			assert.isTrue(Exit.isFailure(exit))
 			if (Exit.isFailure(exit)) {
-				assert.isTrue(
-					Array.some(
-						exit.cause.reasons,
-						(r) => r._tag === "Fail" && r.error === "startup failure",
-					),
+				// Effect's rule for defects: defects take precedence, so a typed failure is
+				// reported as a defect when the same scope's cleanup also dies.
+				assert.deepStrictEqual(
+					Array.map(exit.cause.reasons, (reason) => [
+						reason._tag,
+						reason._tag === "Die" ? reason.defect : undefined,
+					]),
+					[
+						["Die", "startup failure"],
+						["Die", "cleanup defect"],
+					],
 				)
+				assert.isFalse(Cause.hasFails(exit.cause))
 				assert.include(defects(exit), "cleanup defect")
 			}
 			const didRelease = yield* Ref.get(released)
@@ -99,27 +105,23 @@ describe("activation cleanup results", () => {
 		() =>
 			Effect.gen(function* () {
 				const released = yield* Ref.make(false)
-				const parent = yield* Graft.plugin(
-					Plugin.make({
-						name: "parent",
-						apply: () =>
-							Effect.gen(function* () {
-								yield* Effect.addFinalizer(() => Ref.set(released, true))
-								const child = yield* Graft.plugin(
-									Plugin.make({
-										name: "child",
-										apply: () =>
-											Effect.addFinalizer(() =>
-												Effect.die("child cleanup defect"),
-											),
-									}),
-								)
-								yield* child.await
-							}),
-					}),
+				const parent = yield* Graft.mount(
+					Layer.effectDiscard(
+						Effect.gen(function* () {
+							yield* Effect.addFinalizer(() => Ref.set(released, true))
+							const child = yield* Graft.mount(
+								Layer.effectDiscard(
+									Effect.addFinalizer(() => Effect.die("child cleanup defect")),
+								),
+								{ name: "child" },
+							)
+							yield* child.await
+						}),
+					),
+					{ name: "parent" },
 				)
 				yield* parent.await
-				const exit = yield* Effect.exit(parent.dispose)
+				const exit = yield* Effect.exit(parent.unmount)
 				const didRelease = yield* Ref.get(released)
 				assert.isTrue(didRelease)
 				assert.include(defects(exit), "child cleanup defect")
@@ -131,28 +133,27 @@ describe("activation cleanup results", () => {
 			Effect.gen(function* () {
 				const applying = yield* Deferred.make<void>()
 				const taskStarted = yield* Deferred.make<void>()
-				const fork = yield* Graft.plugin(
-					Plugin.make({
-						name: "all cleanup phases",
-						apply: () =>
-							Effect.gen(function* () {
-								yield* Effect.addFinalizer(() => Effect.die("resource cleanup"))
-								yield* Plugin.fork(
-									Deferred.succeed(taskStarted, undefined).pipe(
-										Effect.andThen(Effect.never),
-										Effect.ensuring(Effect.die("task cleanup")),
-									),
-								)
-								yield* Deferred.await(taskStarted)
-								return yield* Deferred.succeed(applying, undefined).pipe(
+				const mount = yield* Graft.mount(
+					Layer.effectDiscard(
+						Effect.gen(function* () {
+							yield* Effect.addFinalizer(() => Effect.die("resource cleanup"))
+							yield* Graft.fork(
+								Deferred.succeed(taskStarted, undefined).pipe(
 									Effect.andThen(Effect.never),
-									Effect.ensuring(Effect.die("apply cleanup")),
-								)
-							}),
-					}),
+									Effect.ensuring(Effect.die("task cleanup")),
+								),
+							)
+							yield* Deferred.await(taskStarted)
+							return yield* Deferred.succeed(applying, undefined).pipe(
+								Effect.andThen(Effect.never),
+								Effect.ensuring(Effect.die("apply cleanup")),
+							)
+						}),
+					),
+					{ name: "all cleanup phases" },
 				)
 				yield* Deferred.await(applying)
-				const exit = yield* Effect.exit(fork.dispose)
+				const exit = yield* Effect.exit(mount.unmount)
 				assert.sameMembers(
 					[...defects(exit)],
 					["resource cleanup", "task cleanup", "apply cleanup"],
@@ -166,51 +167,24 @@ describe("activation cleanup results", () => {
 			Effect.gen(function* () {
 				const entered = yield* Deferred.make<void>()
 				const release = yield* Deferred.make<void>()
-				const fork = yield* Graft.plugin(
-					Plugin.make({
-						name: "cancelled waiter",
-						apply: () =>
-							Effect.addFinalizer(() =>
-								Deferred.succeed(entered, undefined).pipe(
-									Effect.andThen(Deferred.await(release)),
-									Effect.andThen(Effect.die("retained cleanup")),
-								),
+				const mount = yield* Graft.mount(
+					Layer.effectDiscard(
+						Effect.addFinalizer(() =>
+							Deferred.succeed(entered, undefined).pipe(
+								Effect.andThen(Deferred.await(release)),
+								Effect.andThen(Effect.die("retained cleanup")),
 							),
-					}),
+						),
+					),
+					{ name: "cancelled waiter" },
 				)
-				yield* fork.await
-				const first = yield* Effect.forkScoped(fork.dispose)
+				yield* mount.await
+				const first = yield* Effect.forkScoped(mount.unmount)
 				yield* Deferred.await(entered)
 				yield* Fiber.interrupt(first)
 				yield* Deferred.succeed(release, undefined)
-				const exit = yield* Effect.exit(fork.dispose)
+				const exit = yield* Effect.exit(mount.unmount)
 				assert.include(defects(exit), "retained cleanup")
-			}).pipe(run),
-	)
-
-	it.effect(
-		"does not replay an acknowledged cleanup failure after recovery",
-		() =>
-			Effect.gen(function* () {
-				const fork = yield* Graft.plugin(
-					Plugin.make({
-						name: "recovering cleanup",
-						config: Schema.Boolean,
-						apply: (failing) =>
-							failing
-								? Effect.addFinalizer(() => Effect.die("old cleanup")).pipe(
-										Effect.andThen(Effect.fail("old startup")),
-									)
-								: Effect.void,
-					}),
-					true,
-				)
-				const failed = yield* Effect.exit(fork.await)
-				assert.include(defects(failed), "old cleanup")
-				yield* fork.update(false)
-				yield* fork.await
-				const disposed = yield* Effect.exit(fork.dispose)
-				assert.isTrue(Exit.isSuccess(disposed))
 			}).pipe(run),
 	)
 
@@ -226,19 +200,16 @@ describe("activation cleanup results", () => {
 						),
 					),
 			}
-			const fork = yield* Graft.plugin(
-				Plugin.make({
-					name: "intercept cleanup",
-					apply: () =>
-						Effect.addFinalizer(() => Effect.die("intercept resource cleanup")),
-				}),
-				undefined,
-				{ intercept: [intercept] },
+			const mount = yield* Graft.mount(
+				Layer.effectDiscard(
+					Effect.addFinalizer(() => Effect.die("intercept resource cleanup")),
+				),
+				{ name: "intercept cleanup", intercept: [intercept] },
 			)
-			yield* fork.await
+			yield* mount.await
 			yield* Deferred.succeed(stop, undefined)
-			yield* reach(fork, "Failed")
-			const exit = yield* Effect.exit(fork.await)
+			yield* reach(mount, "Failed")
+			const exit = yield* Effect.exit(mount.await)
 			assert.sameMembers(
 				[...defects(exit)],
 				["intercept defect", "intercept resource cleanup"],
@@ -251,46 +222,20 @@ describe("activation cleanup results", () => {
 		() =>
 			Effect.gen(function* () {
 				const scope = yield* Scope.make()
-				const fork = yield* Graft.plugin(
-					Plugin.make({
-						name: "parent closure",
-						apply: () =>
-							Effect.addFinalizer(() => Effect.die("parent observed cleanup")),
-					}),
+				const mount = yield* Graft.mount(
+					Layer.effectDiscard(
+						Effect.addFinalizer(() => Effect.die("parent observed cleanup")),
+					),
+					{ name: "parent closure" },
 				).pipe(Scope.provide(scope))
-				yield* fork.await
+				yield* mount.await
 				const parentExit = yield* Effect.exit(Scope.close(scope, Exit.void))
-				const explicitExit = yield* Effect.exit(fork.dispose)
+				const explicitExit = yield* Effect.exit(mount.unmount)
 				assert.include(defects(parentExit), "parent observed cleanup")
 				assert.include(defects(explicitExit), "parent observed cleanup")
 			}).pipe(run),
 	)
 
-	it.effect("preserves interrupted update cleanup in the disposal result", () =>
-		Effect.gen(function* () {
-			const entered = yield* Deferred.make<void>()
-			const fork = yield* Graft.plugin(
-				Plugin.make({
-					name: "update cleanup",
-					config: Schema.String,
-					apply: () =>
-						Effect.succeed(() =>
-							Deferred.succeed(entered, undefined).pipe(
-								Effect.andThen(Effect.never),
-								Effect.ensuring(Effect.die("update cleanup defect")),
-							),
-						),
-				}),
-				"initial",
-			)
-			yield* fork.await
-			const updating = yield* Effect.forkScoped(fork.update("next"))
-			yield* Deferred.await(entered)
-			const exit = yield* Effect.exit(fork.dispose)
-			yield* Fiber.join(updating)
-			assert.include(defects(exit), "update cleanup defect")
-		}).pipe(run),
-	)
 	it.effect(
 		"retains activation and intercept cleanup in the same disposal result",
 		() =>
@@ -299,17 +244,14 @@ describe("activation cleanup results", () => {
 					apply: (effect) =>
 						effect.pipe(Effect.ensuring(Effect.die("intercept shutdown"))),
 				}
-				const fork = yield* Graft.plugin(
-					Plugin.make({
-						name: "intercept shutdown",
-						apply: () =>
-							Effect.addFinalizer(() => Effect.die("activation shutdown")),
-					}),
-					undefined,
-					{ intercept: [intercept] },
+				const mount = yield* Graft.mount(
+					Layer.effectDiscard(
+						Effect.addFinalizer(() => Effect.die("activation shutdown")),
+					),
+					{ name: "intercept shutdown", intercept: [intercept] },
 				)
-				yield* fork.await
-				const exit = yield* Effect.exit(fork.dispose)
+				yield* mount.await
+				const exit = yield* Effect.exit(mount.unmount)
 				assert.sameMembers(
 					[...defects(exit)],
 					["intercept shutdown", "activation shutdown"],
@@ -320,16 +262,15 @@ describe("activation cleanup results", () => {
 		"retains an apply interruption alongside resource cleanup failure",
 		() =>
 			Effect.gen(function* () {
-				const fork = yield* Graft.plugin(
-					Plugin.make({
-						name: "interrupted startup",
-						apply: () =>
-							Effect.addFinalizer(() =>
-								Effect.die("interrupted startup cleanup"),
-							).pipe(Effect.andThen(Effect.interrupt)),
-					}),
+				const mount = yield* Graft.mount(
+					Layer.effectDiscard(
+						Effect.addFinalizer(() =>
+							Effect.die("interrupted startup cleanup"),
+						).pipe(Effect.andThen(Effect.interrupt)),
+					),
+					{ name: "interrupted startup" },
 				)
-				const exit = yield* Effect.exit(fork.await)
+				const exit = yield* Effect.exit(mount.await)
 				assert.isTrue(Exit.isFailure(exit))
 				if (Exit.isFailure(exit)) assert.isTrue(Cause.hasInterrupts(exit.cause))
 				assert.include(defects(exit), "interrupted startup cleanup")
@@ -337,29 +278,23 @@ describe("activation cleanup results", () => {
 	)
 })
 
-it.effect("retains interruption from an intercept finalizer on dispose", () =>
+it.effect("retains interruption from an intercept finalizer on unmount", () =>
 	Effect.gen(function* () {
-		const fork = yield* Graft.plugin(
-			Plugin.make({
-				name: "interrupted intercept cleanup",
-				apply: () => Effect.void,
-			}),
-			undefined,
-			{
-				intercept: [
-					{ apply: (effect) => effect.pipe(Effect.ensuring(Effect.interrupt)) },
-				],
-			},
-		)
-		yield* fork.await
-		const exit = yield* Effect.exit(fork.dispose)
+		const mount = yield* Graft.mount(Layer.effectDiscard(Effect.void), {
+			name: "interrupted intercept cleanup",
+			intercept: [
+				{ apply: (effect) => effect.pipe(Effect.ensuring(Effect.interrupt)) },
+			],
+		})
+		yield* mount.await
+		const exit = yield* Effect.exit(mount.unmount)
 		assert(Exit.isFailure(exit))
 		assert.isTrue(
 			Array.some(
 				exit.cause.reasons,
 				(reason) =>
 					reason._tag === "Fail" &&
-					Schema.is(Fork.CleanupError)(reason.error) &&
+					Schema.is(Mount.CleanupError)(reason.error) &&
 					Cause.hasInterruptsOnly(reason.error.cause),
 			),
 		)

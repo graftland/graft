@@ -1,0 +1,13 @@
+{
+	"name": "@graftland-samples/03-failure-retry",
+	"private": true,
+	"type": "module",
+	"description": "A mount that fails at first, retries on a schedule, and then becomes active",
+	"scripts": {
+		"start": "node src/main.ts"
+	},
+	"dependencies": {
+		"@graftland/graft": "workspace:*",
+		"effect": "4.1.2"
+	}
+}

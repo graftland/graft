@@ -11,7 +11,6 @@ import {
 import { assert, it } from "@effect/vitest"
 
 import { publicationCycle } from "../src/internal/dependencies.ts"
-import { Token } from "../src/internal/generations.ts"
 import {
 	realmKey,
 	type ActiveResolution,
@@ -79,7 +78,7 @@ it.effect(
 						parent,
 						state: TxRef.makeUnsafe<GraphNode["state"]["value"]>({
 							live: true,
-							resolutions: HashMap.empty(),
+							resolution: undefined,
 						}),
 					})
 				}
@@ -93,15 +92,13 @@ it.effect(
 					provisions: Array.map(
 						Array.filter(nodes, () => random(4) === 0),
 						(node): Provision => ({
-							realm: "",
 							key: slots[0]!.key,
 							service: "dependency",
 							value: undefined,
 							owner: node.id,
-							generation: new Token({ fork: node.id, generation: 0 }),
 							node,
 							slot: slots[0]!,
-							consumers: TxRef.makeUnsafe(HashSet.empty<Token>()),
+							consumers: TxRef.makeUnsafe(HashSet.empty<number>()),
 						}),
 					),
 				})
@@ -110,13 +107,7 @@ it.effect(
 					if (random(4) !== 0) {
 						const current = resolution()
 						active = HashMap.set(active, node.id, current)
-						yield* TxRef.set(node.state, {
-							live: true,
-							resolutions: HashMap.make([
-								new Token({ fork: node.id, generation: 0 }),
-								current,
-							]),
-						})
+						yield* TxRef.set(node.state, { live: true, resolution: current })
 					}
 				}
 				for (const publisher of nodes) {
@@ -137,17 +128,7 @@ it.effect(
 							retried,
 							forward(
 								nodes,
-								HashMap.set(
-									active,
-									publisher.id,
-									Option.match(HashMap.get(active, publisher.id), {
-										onNone: () => candidate,
-										onSome: (old) => ({
-											watch: HashMap.union(old.watch, candidate.watch),
-											provisions: [...old.provisions, ...candidate.provisions],
-										}),
-									}),
-								),
+								HashMap.set(active, publisher.id, candidate),
 								slot.key,
 								publisher.id,
 							),
@@ -169,7 +150,7 @@ it.effect(
 					parent,
 					state: TxRef.makeUnsafe<GraphNode["state"]["value"]>({
 						live: true,
-						resolutions: HashMap.empty(),
+						resolution: undefined,
 					}),
 				})
 				const watcher = makeNode(1)
@@ -182,29 +163,21 @@ it.effect(
 					holders: TxRef.makeUnsafe(1),
 				}
 				const lease: Provision = {
-					realm: "",
 					key: slot.key,
 					service: "lease",
 					value: undefined,
 					owner: watcher.id,
-					generation: new Token({ fork: watcher.id, generation: 0 }),
 					node: watcher,
 					slot,
-					consumers: TxRef.makeUnsafe(HashSet.empty<Token>()),
+					consumers: TxRef.makeUnsafe(HashSet.empty<number>()),
 				}
 				yield* TxRef.set(watcher.state, {
 					live: true,
-					resolutions: HashMap.make([
-						new Token({ fork: watcher.id, generation: 0 }),
-						{ watch: HashMap.make([slot.key, slot]), provisions: [] },
-					]),
+					resolution: { watch: HashMap.make([slot.key, slot]), provisions: [] },
 				})
 				yield* TxRef.set(bridge.state, {
 					live: true,
-					resolutions: HashMap.make([
-						new Token({ fork: bridge.id, generation: 0 }),
-						{ watch: HashMap.empty(), provisions: [lease] },
-					]),
+					resolution: { watch: HashMap.empty(), provisions: [lease] },
 				})
 				const waiting = yield* Effect.forkScoped(
 					Effect.tx(
@@ -221,26 +194,20 @@ it.effect(
 				const subscribers = [...watcher.state.pending.keys()]
 				yield* TxRef.set(unrelated.state, {
 					live: false,
-					resolutions: HashMap.empty(),
+					resolution: undefined,
 				})
 				assert.deepStrictEqual([...watcher.state.pending.keys()], subscribers)
 				// Withdrawal clears watch only. The lease keeps the bridge connected to the watcher.
 				yield* TxRef.update(bridge.state, (state) => ({
 					...state,
-					resolutions: HashMap.make([
-						new Token({ fork: bridge.id, generation: 0 }),
-						{ watch: HashMap.empty(), provisions: [lease] },
-					]),
+					resolution: { watch: HashMap.empty(), provisions: [lease] },
 				}))
 				const withdrawn = yield* Effect.tx(
 					publicationCycle(publisher, slot.key),
 				)
 				assert.isTrue(withdrawn)
 				// Lease release removes the reverse path and wakes the failed publisher.
-				yield* TxRef.set(bridge.state, {
-					live: true,
-					resolutions: HashMap.empty(),
-				})
+				yield* TxRef.set(bridge.state, { live: true, resolution: undefined })
 				yield* Fiber.join(waiting)
 			}),
 		),

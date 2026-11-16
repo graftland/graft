@@ -1,6 +1,0 @@
-{
-	"name": "tuning-worker-763",
-	"version": "1.0.0",
-	"type": "module",
-	"exports": "./index.mjs"
-}

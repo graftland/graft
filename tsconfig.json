@@ -8,103 +8,22 @@
 			"path": "./packages/core/tsconfig.test.json"
 		},
 		{
-			"path": "./packages/loader"
+			"path": "./samples/01-mount-layer"
 		},
 		{
-			"path": "./packages/loader/tsconfig.test.json"
+			"path": "./samples/02-publish-rebuild"
 		},
 		{
-			"path": "./packages/package-manager"
+			"path": "./samples/03-failure-retry"
 		},
 		{
-			"path": "./packages/package-manager/tsconfig.test.json"
+			"path": "./samples/04-tenants"
 		},
 		{
-			"path": "./packages/create"
+			"path": "./samples/05-remote"
 		},
 		{
-			"path": "./packages/create/tsconfig.test.json"
-		},
-		{
-			"path": "./packages/create/tsconfig.templates.json"
-		},
-		{
-			"path": "./packages/cli"
-		},
-		{
-			"path": "./packages/cli/tsconfig.test.json"
-		},
-		{
-			"path": "./samples/01-hello"
-		},
-		{
-			"path": "./samples/02-services"
-		},
-		{
-			"path": "./samples/03-events"
-		},
-		{
-			"path": "./samples/04-failures"
-		},
-		{
-			"path": "./samples/05-config-file"
-		},
-		{
-			"path": "./samples/chat-bot"
-		},
-		{
-			"path": "./samples/http-gateway"
-		},
-		{
-			"path": "./samples/saas-tenants"
-		},
-		{
-			"path": "./samples/market-feed"
-		},
-		{
-			"path": "./samples/mcp-tools"
-		},
-		{
-			"path": "./packages/plugin-remote"
-		},
-		{
-			"path": "./packages/plugin-remote/tsconfig.test.json"
-		},
-		{
-			"path": "./packages/plugin-otlp"
-		},
-		{
-			"path": "./packages/plugin-otlp/tsconfig.test.json"
-		},
-		{
-			"path": "./packages/plugin-mcp-server"
-		},
-		{
-			"path": "./packages/plugin-mcp-server/tsconfig.test.json"
-		},
-		{
-			"path": "./packages/plugin-http"
-		},
-		{
-			"path": "./packages/plugin-http/tsconfig.test.json"
-		},
-		{
-			"path": "packages/plugin-http-api"
-		},
-		{
-			"path": "packages/plugin-http-api/tsconfig.test.json"
-		},
-		{
-			"path": "./packages/plugin-release"
-		},
-		{
-			"path": "./packages/plugin-release/tsconfig.test.json"
-		},
-		{
-			"path": "./packages/benchmarks"
-		},
-		{
-			"path": "./packages/benchmarks/tsconfig.test.json"
+			"path": "./samples/06-reconnect"
 		}
 	]
 }

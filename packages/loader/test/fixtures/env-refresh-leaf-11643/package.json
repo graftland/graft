@@ -1,6 +1,0 @@
-{
-	"name": "env-refresh-leaf-11643",
-	"version": "1.0.0",
-	"type": "module",
-	"exports": "./index.mjs"
-}

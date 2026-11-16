@@ -10,7 +10,7 @@ import {
 } from "effect"
 import { assert, it } from "@effect/vitest"
 
-import * as Finalization from "../src/Finalization"
+import * as Release from "../src/Release"
 
 for (const mode of ["masked", "interruptible", "self", "joined", "mixed"]) {
 	for (const timing of ["body", "release"]) {
@@ -50,9 +50,7 @@ for (const mode of ["masked", "interruptible", "self", "joined", "mixed"]) {
 						yield* Deferred.succeed(entered, undefined)
 						if (timing === "body") return yield* Effect.never
 					})
-					const worker = yield* Finalization.scoped(work).pipe(
-						Effect.forkScoped,
-					)
+					const worker = yield* Release.scoped(work).pipe(Effect.forkScoped)
 					yield* timing === "body"
 						? Deferred.await(entered)
 						: Deferred.await(closing)
@@ -75,7 +73,7 @@ for (const mode of ["masked", "interruptible", "self", "joined", "mixed"]) {
 						assert.isTrue(Cause.hasInterruptsOnly(exit.cause))
 					} else {
 						const release = Cause.squash(exit.cause)
-						assert(Schema.is(Finalization.FinalizationInterrupted)(release))
+						assert(Schema.is(Release.ReleaseInterrupted)(release))
 						assert.isTrue(Cause.hasInterruptsOnly(release.cause))
 						assert.isTrue(
 							Array.every(

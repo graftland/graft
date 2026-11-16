@@ -1,158 +1,109 @@
 ---
 title: Lifecycle
-description: Load plugins, follow their state, and change them while they run.
+description:
+  The states of a mount, who owns it, and the order in which it is torn down.
 ---
 
-## Load a plugin
+A mount is not a one-time build. It is built, torn down and built again as the
+graph changes, always in a fixed order.
 
-`Graft.plugin` loads a plugin and returns its fork (see the
-[fork handle](../fork-handle/)):
+## Mount states
 
-```ts title="app.ts"
-import { Effect, Schema } from "effect"
+| State       | Meaning                                                              |
+| ----------- | -------------------------------------------------------------------- |
+| `Loading`   | Building the layer, or publishing a value.                           |
+| `Pending`   | Waiting for required services. `missing` lists their keys.           |
+| `Active`    | Built and serving; its services are published.                       |
+| `Failed`    | The build, a background fiber or cleanup failed. `cause` has it all. |
+| `Unmounted` | Removed. This is the last state.                                     |
 
-import { Graft, Plugin } from "@graftland/graft"
+A mount moves between states on its own:
 
-const greeter = Plugin.make({
-	name: "app/greeter",
-	config: Schema.Struct({ greeting: Schema.String }),
-	apply: ({ greeting }) => Effect.log(`${greeting}, world`),
-})
+| From      | To          | When                                                   |
+| --------- | ----------- | ------------------------------------------------------ |
+| `Pending` | `Loading`   | Its required services appear.                          |
+| `Active`  | `Loading`   | A requirement or a publication it uses changes.        |
+| `Failed`  | `Loading`   | Its spec or dependencies change, or its `retry` fires. |
+| Any       | `Unmounted` | Its scope closes or `unmount` runs.                    |
 
-export const app = Plugin.make({
-	name: "app/app",
-	apply: () =>
-		Effect.gen(function* () {
-			const fork = yield* Graft.plugin(greeter, { greeting: "Hello" })
-			yield* fork.await
-		}),
-})
-```
+## Ownership
 
-| Argument | What it is                                                                       |
-| -------- | -------------------------------------------------------------------------------- |
-| 1st      | The plugin.                                                                      |
-| 2nd      | The plugin's input, decoded by its config schema. Omit it if there is no config. |
-| 3rd      | Options: [`isolate` and `intercept`](../isolation/).                             |
+A mount belongs to the scope where it was created.
 
-### Ownership and stop order
+- Closing that scope unmounts it.
+- A mount created inside a layer is a child of that mount, and stops when the
+  parent stops or restarts.
+- A background fiber from `Graft.fork` belongs to the mount; a fiber from
+  `Effect.forkScoped` belongs to the scope that owns it.
 
-The fork belongs to the current `Scope`. When that scope closes, the fork is
-unloaded. Inside `apply`, the current scope is the plugin's own, so plugins
-loaded there are its children.
+`Graft.layer` itself closes with the runtime. Closing it unmounts everything in
+the graph.
 
-- Children stop when the parent stops or restarts.
-- Like everything else in the parent's scope, they are released in reverse
-  order. A child loaded after the parent opened a resource stops before that
-  resource closes.
-- A child that uses a service of its parent through `inject` always stops first,
-  in any order. See [How withdrawal works](../services/#how-withdrawal-works).
+## Teardown order
 
-## Fork states
+When a mount is torn down, by a change, a failure, `restart` or `unmount`:
 
-A fork is always in one of these states:
+1. **Stop the build** if it is still running.
+2. **Withdraw its services** in one transaction, and close the mount to further
+   publishing, so no new consumer can lease them.
+3. **Drain consumers.** Wait until every consumer releases its lease, then let
+   each one restart according to its dependencies.
+4. **Stop the background fibers** and close their scopes, waiting for cleanup.
+5. **Close the mount's scope**, which stops child mounts and runs finalizers.
+6. **Release the mount's own leases** on the services it required.
 
-| State      | Meaning                                                    |
-| ---------- | ---------------------------------------------------------- |
-| `Loading`  | Decoding its config or running `apply`.                    |
-| `Pending`  | Waiting for required services. `missing` lists their keys. |
-| `Active`   | `apply` finished. The plugin is running.                   |
-| `Failed`   | Startup or execution failed. `cause` has the full `Cause`. |
-| `Disposed` | Unloaded. This is the last state.                          |
+| Consumer's situation             | After the restart                |
+| -------------------------------- | -------------------------------- |
+| An environment fallback exists   | It uses the fallback.            |
+| Required dependency, no fallback | It becomes `Pending`.            |
+| Optional dependency, no fallback | It rebuilds without the service. |
 
-A fork moves between states on its own:
+Healthy background fibers and their resources stay available to consumer
+finalizers during step 3. If draining takes more than 10 seconds, Graft logs a
+warning: two mounts may be waiting for each other.
 
-| From      | To         | When                                                              |
-| --------- | ---------- | ----------------------------------------------------------------- |
-| `Pending` | `Loading`  | Its required services appear.                                     |
-| `Active`  | `Pending`  | A service it needs goes away.                                     |
-| `Failed`  | `Loading`  | Its config or dependencies change, or its `retry` schedule fires. |
-| Any       | `Disposed` | The fork is disposed, or its parent scope closes.                 |
+A failure during teardown joins the mount's `Failed` cause. `unmount` reports it
+as `Mount.CleanupError`; its `cause` keeps the original reasons.
 
-### Failures and retries
+## Restart and unmount
 
-| Source of failure                            | Result                                                                                            |
-| -------------------------------------------- | ------------------------------------------------------------------------------------------------- |
-| `apply`                                      | `Failed`, then the normal `retry` path.                                                           |
-| A `Plugin.fork` task (not pure interruption) | The same as `apply`. The full `Cause` is kept after sibling tasks are cancelled and cleaned up.   |
-| Building or running an intercept             | `Failed` with the full `Cause`, and `await` finishes. The `retry` schedule does **not** retry it. |
-| A bare `Effect.forkScoped`                   | Not reported to the supervisor.                                                                   |
+| Call      | Effect                                                                                                              |
+| --------- | ------------------------------------------------------------------------------------------------------------------- |
+| `await`   | Waits until stable (not `Loading`); `Pending` counts as stable; `Failed` fails with its cause, even with a `retry`. |
+| `restart` | Tears down and builds again, even when nothing changed. Waits until the rebuild starts.                             |
+| `unmount` | Tears the mount down and removes it, along with everything below it.                                                |
+| `stable`  | Waits until the mount and its descendants have no `Loading` state.                                                  |
 
-For an intercept failure, the fork waits for a config update or an explicit
-`restart`. The failure belongs to the spec that the supervisor was processing at
-that time, including an in-place update. An update that was already processed
-does not trigger another try, and new requests that arrive during cleanup stay
-pending.
+Concurrent and repeated `unmount` calls share the same cleanup result.
 
-How retry interacts with changes:
+### Unmount while the mount is loading
 
-- Retry driver initialization and each step run under the same change
-  supervision.
-- A config or dependency change cancels the obsolete operation and waits for its
-  cleanup before starting another attempt.
-- An unchanged spec and dependency resolution retain their `Schedule` state and
-  retry budget.
-- Schedule failures, including cleanup failures caused by a change, join the
-  activation's `Failed` `Cause`. New failures while disposal cancels a retry
-  belong to `CleanupError.cause` instead; previously published startup failures
-  are not replayed.
+Unmounting a mount that is still `Loading` cancels the build and succeeds.
+`unmount` fails with `Mount.CleanupError` only when a finalizer of a resource
+already acquired by the build interrupts itself or fails. That failure is never
+reported as `Release.ReleaseInterrupted`.
 
-### Teardown order
+| Finalizer during the build | `unmount` cause                                    | Log                                                  |
+| -------------------------- | -------------------------------------------------- | ---------------------------------------------------- |
+| Interrupts itself only     | Interruption reasons only                          | None.                                                |
+| Dies or fails              | The defect or failure, plus an interruption reason | One error, `Releasing the mount's resources failed`. |
 
-1. Stop `apply`.
-2. Close publication and withdraw services.
-3. Drain all consumers. Healthy tasks stay available to consumer finalizers,
-   even when a failure in another task started the teardown.
-4. Stop the remaining tasks and close their scopes.
-5. Close the activation scope.
-6. Release the plugin's own dependency leases.
+A mount that has finished loading keeps the behavior described above.
 
-Failures during draining keep their complete `Cause`, and Graft logs them. If a
-failure started the teardown, they are added to the final `Failed` state.
+## A rebuild is a new activation
 
-## Observe the application
+Each build is independent:
 
-### Fork tree
+- Its finalizers run in its own scope.
+- Its background fibers are new; none survives a rebuild.
+- Its services are new values, even if the layer is the same.
 
-`Graft.forks` is a stream of the whole fork tree. It emits again on every
-change. Each node has the fork's `id`, `name`, `input`, `state` and `children`:
+Anything that must survive a rebuild belongs in the environment where
+`Graft.layer` is built, or in a parent mount that is not rebuilt.
 
-```ts import.meta.vitest name="lifecycle: read the fork tree"
-import { Effect, Option, Stream } from "effect"
+## Services from the environment
 
-import { Fork, Graft } from "@graftland/graft"
-
-import { app } from "./app.ts"
-
-const trees = await Effect.runPromise(
-	Effect.gen(function* () {
-		const fork = yield* Graft.plugin(app)
-		yield* fork.stable
-		return yield* Stream.runHead(Graft.forks)
-	}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
-)
-
-trees // => Option.some([{ id: 1, name: "app/app", input: undefined, state: Fork.ForkState.Active(), children: [{ id: 2, name: "app/greeter", input: { greeting: "Hello" }, state: Fork.ForkState.Active(), children: [] }] }])
-```
-
-### Logs
-
-`Graft.logs` collects logs from the environment that uses `Graft.layer`,
-including logs from the host application.
-
-- A new subscriber first receives the last 1000 entries.
-- Logs emitted while a plugin runs carry the `graft.fork` and `graft.plugin`
-  annotations.
-- Host logs keep their own annotations. Graft does not invent a plugin identity
-  for them, so readers of logs must allow these annotations to be missing.
-- For log levels, your own annotations and spans, see
-  [Logs and tracing](../best-practices/observability/).
-
-## Related
-
-| Page                                                  | Covers                                             |
-| ----------------------------------------------------- | -------------------------------------------------- |
-| [Fork handle](../fork-handle/)                        | `await`, `stable`, `update`, `restart`, `dispose`. |
-| [Changes](../transitions/)                            | Deploying new versions of plugins in the kernel.   |
-| [Errors](../errors/)                                  | Every named error and what to do about it.         |
-| [Troubleshooting](../best-practices/troubleshooting/) | Finding why a fork does not start or does nothing. |
+Services in the environment where `Graft.layer` is built satisfy `requires`
+without a publication. They live as long as that environment, not as long as a
+mount. Use the environment for connections, file systems and settings that last
+for the whole program.

@@ -2,9 +2,7 @@
 
 ## 项目
 
-- Graft 是基于 Effect 4 的插件框架，设计上参考
-  [cordis](https://github.com/cordiverse/cordis)。借鉴其插件、上下文与服务的组合方式，但直接用 Effect 的
-  `Context`、`Layer`、`Scope` 与 `Fiber` 等表达，不另造一套概念包装。
+- Graft：Effect 的动态 Layer 库，只依赖 effect。
 
 ## 开发环境
 

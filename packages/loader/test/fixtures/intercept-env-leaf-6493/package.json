@@ -1,6 +1,0 @@
-{
-	"name": "intercept-env-leaf-6493",
-	"version": "1.0.0",
-	"type": "module",
-	"exports": "./index.mjs"
-}

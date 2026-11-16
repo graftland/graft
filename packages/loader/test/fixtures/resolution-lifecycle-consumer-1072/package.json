@@ -1,6 +1,0 @@
-{
-	"name": "resolution-lifecycle-consumer-1072",
-	"version": "1.0.0",
-	"type": "module",
-	"exports": "./index.mjs"
-}

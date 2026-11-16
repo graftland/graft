@@ -1,20 +1,17 @@
 ---
 title: Graft
-description: >-
-  Horticultural Effect Systems. An Effect-native plugin runtime for long-running
-  TypeScript applications: load, replace and unload plugins in a running
-  process.
+description: Effect layers that mount and unmount while the application runs.
 template: splash
 hero:
   title: "<span>Horticultural</span> <span>Effect</span> <span>Systems</span>"
   tagline:
-    Graft grows your application as a tree of plugins on Effect. Load, replace
-    and unload any branch while the process keeps running. Prune fearlessly.
+    Graft mounts Effect layers while what they need is available, publishes the
+    services they provide, and tears them down when a requirement goes away.
   image:
     alt: The Graft mark, a G whose crossbar is an arrow driven into its center
     file: ../../src/assets/graft-mark.svg
   actions:
-    - text: Plant your first plugin
+    - text: Mount your first layer
       link: quickstart/
       icon: right-arrow
     - text: Core concepts
@@ -26,142 +23,109 @@ import { Card, CardGrid } from "@astrojs/starlight/components"
 
 <div class="graft-manifesto">
 	<p>
-		<strong>Software is not built. It is grown.</strong>
+		<strong>Layers are not fixed at startup. They are grown.</strong>
 	</p>
 	<p>
-		Plugins arrive, take root and bear fruit. Some are pruned; some are replaced
-		while the tree keeps standing. A good gardener never wonders where a branch
-		came from, or what happens when it is cut.
+		A layer arrives when its dependencies do, bears its services while it runs,
+		and is pruned when a dependency disappears. The application keeps standing
+		while its branches change.
 	</p>
 	<p>
-		Graft gives you that certainty. Every plugin is grafted onto a scope. Every
-		fiber has an owner. Every failure is traced back to its root.
+		Graft adds only what Effect does not have: a graph of layers that come and
+		go, and the guarantees that make those changes safe.
 	</p>
 </div>
 
 ## Three promises
 
 <CardGrid>
-	<Card title="Hot swap">
-		Change the variety without felling the tree. In watch mode each save becomes
-		one Change that redeploys only the plugins it affects, and a failed Change
-		keeps the old ones running. See <a href="cli/#watch-mode">watch mode</a>.
+	<Card title="Rootstock">
+		Services are Effect <code>Context</code> keys. A mount lists what it needs
+		in <code>requires</code>, and the compiler checks the list. See{" "}
+		<a href="mounting/">mounting</a>.
 	</Card>
-	<Card title="Clean teardown">
-		Each plugin runs in its own <code>Scope</code>. When it goes away, its
-		dependents stop first, then its finalizers run. A failure keeps its full{" "}
-		<code>Cause</code>. See <a href="lifecycle/">lifecycle</a>.
+	<Card title="Pruning">
+		Each mount runs in its own <code>Scope</code>. When a requirement goes away,
+		its dependents stop first, then its resources close. A failure keeps its
+		full <code>Cause</code>. See <a href="lifecycle/">lifecycle</a>.
 	</Card>
-	<Card title="Checked dependencies">
-		Services are Effect <code>Context</code> keys, provided by layers or by
-		other plugins. A plugin lists what it needs in <code>inject</code>, and the
-		compiler checks the list. See <a href="services/">services</a>.
+	<Card title="Availability">
+		Read a service while it exists, or run work only while it is published.
+		Withdrawal interrupts the work instead of leaving a stale value behind. See{" "}
+		<a href="availability/">availability</a>.
 	</Card>
 </CardGrid>
 
-## A first graft
+## A first mount
 
-```ts import.meta.vitest name="index: a first graft"
-import { Context, Effect, Option, Schema, Stream } from "effect"
+```ts import.meta.vitest name="index: a first mount"
+import { Context, Effect, Layer, Option, Stream } from "effect"
 
-import { Fork, Graft, Plugin } from "@graftland/graft"
+import { Graft, Mount } from "@graftland/graft"
 
 class Greeter extends Context.Service<
 	Greeter,
 	{ readonly greet: (name: string) => Effect.Effect<void> }
 >()("app/Greeter") {}
 
-// Publishes a Greeter while it is loaded.
-const greeter = Plugin.make({
-	name: "app/greeter",
-	config: Schema.Struct({ greeting: Schema.String }),
-	apply: ({ greeting }) =>
-		Graft.provide(Greeter, {
-			greet: (name) => Effect.log(`${greeting}, ${name}!`),
-		}),
-})
+const greeter = Layer.effect(
+	Greeter,
+	Effect.succeed({ greet: (name) => Effect.log(`Hello, ${name}!`) }),
+)
 
-// Starts once a Greeter exists, and stops before it goes away.
-const hello = Plugin.make({
-	name: "app/hello",
-	inject: [Greeter],
-	apply: () => Effect.flatMap(Greeter, (greeter) => greeter.greet("world")),
-})
-
-const states = await Effect.runPromise(
+const state = await Effect.runPromise(
 	Effect.gen(function* () {
-		const helloFork = yield* Graft.plugin(hello)
-		yield* helloFork.await
-		const waiting = yield* Stream.runHead(helloFork.state)
-
-		yield* Graft.plugin(greeter, { greeting: "Hello" })
-		const started = yield* helloFork.state.pipe(
-			Stream.filter(
-				(state) => state._tag !== "Pending" && state._tag !== "Loading",
-			),
-			Stream.runHead,
-		)
-		return [waiting, started]
+		const mount = yield* Graft.mount(greeter, { name: "greeter" })
+		yield* mount.await
+		return yield* Stream.runHead(mount.state)
 	}).pipe(Effect.scoped, Effect.provide(Graft.layer)),
 )
-states // => [Option.some(Fork.ForkState.Pending({ missing: ["app/Greeter"] })), Option.some(Fork.ForkState.Active())]
+state // => Option.some(Mount.MountState.Active())
 ```
 
 ## Find your way
 
 <CardGrid>
 	<Card title="Get started" icon="rocket">
-		Create a project and change it while it runs in the
-		[quickstart](quickstart/). Then read the [core concepts](concepts/).
+		Mount a layer in the [quickstart](quickstart/), then read the
+		[concepts](concepts/).
 	</Card>
-	<Card title="Write plugins" icon="puzzle">
-		[Plugins](plugins/), [services](services/) and [events](events/): the
-		building blocks of an application.
+	<Card title="Change the graph" icon="puzzle">
+		Mount layers in [mounting](mounting/), publish values in
+		[publications](publications/), and read services as they come and go in
+		[availability](availability/).
 	</Card>
-	<Card title="Run an application" icon="setting">
-		Describe it in a [config file](config-file/), start it with the [command
-		line](cli/), and edit it live in [watch mode](cli/#watch-mode).
+	<Card title="Stay safe" icon="shield">
+		[Lifecycle](lifecycle/), [failures and retries](failures-retry/) and
+		[isolation](isolation/) describe the guarantees.
 	</Card>
-	<Card title="Run plugins elsewhere" icon="laptop">
-		Move one plugin into a child process, a worker or another machine with
-		[Remote](remote/overview/). The plugins that use it do not change.
-	</Card>
-	<Card title="Coming from cordis?" icon="open-book">
-		See [how cordis concepts map to Graft](cordis/).
+	<Card title="Run work elsewhere" icon="laptop">
+		Expose services over [remote](remote/) connections or a [Node](node/)
+		process, and test them in memory.
 	</Card>
 </CardGrid>
 
 ## Documentation map
 
-| Section           | Pages                                                                                             | Read it to…                                            |
-| ----------------- | ------------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
-| **Start here**    | [Quickstart](quickstart/), [Core concepts](concepts/), [Coming from cordis](cordis/)              | Learn the model and run something.                     |
-| **Build plugins** | [Plugins](plugins/), [Services](services/), [Events](events/)                                     | Write the code.                                        |
-| **Structure**     | [Lifecycle](lifecycle/), [Realms](isolation/), [Intercepts](intercepts/), [Changes](transitions/) | Control how plugins relate and change.                 |
-| **Applications**  | [Config file](config-file/), [Command line](cli/), [Use Graft in your program](embedding/)        | Run and operate an app.                                |
-| **Remote**        | [Overview](remote/overview/), [Units](units/), [Bindings](bindings/), [Control](control/)         | Run a plugin in another process or on another machine. |
-| **Reference**     | [Fork handle](fork-handle/), [Loader API](loader-api/), [Errors](errors/)                         | Look up exact behavior.                                |
-| **Project**       | [Publishing](publishing/)                                                                         | Check and publish Graft.                               |
+| Section        | Pages                                                                                               | Read it to…                                    |
+| -------------- | --------------------------------------------------------------------------------------------------- | ---------------------------------------------- |
+| **Start here** | [Quickstart](quickstart/), [Concepts](concepts/)                                                    | Learn the model and run something.             |
+| **Build**      | [Mounting](mounting/), [Publications](publications/), [Availability](availability/)                 | Put layers and values in the graph.            |
+| **Structure**  | [Lifecycle](lifecycle/), [Failures and retries](failures-retry/), [Isolation](isolation/)           | Control how mounts relate, fail and change.    |
+| **Run**        | [Background fibers](background-fibers/), [Intercepts](intercepts/), [Observability](observability/) | Own work, adjust references, see what happens. |
+| **Remote**     | [Remote services](remote/), [Node processes](node/), [Testing](testing/)                            | Cross process boundaries.                      |
+| **Project**    | [Releases](releases/)                                                                               | Check and publish Graft.                       |
 
-## Packages
+## One package
 
-| Package                        | What it does                                                                                                                |
-| ------------------------------ | --------------------------------------------------------------------------------------------------------------------------- |
-| `@graftland/graft`             | A plugin framework built on Effect: plugins, forks, services, isolation, events and logs.                                   |
-| `@graftland/loader`            | Loads plugins from a list of entries or a YAML config file.                                                                 |
-| `@graftland/cli`               | The `graft` command: `start`, `create`, `add` and `remove`.                                                                 |
-| `@graftland/create`            | Makes a new Graft project: `npm create @graftland` and `graft create`.                                                      |
-| `@graftland/package-manager`   | Installs dependencies with npm, pnpm or Yarn. A failed install is undone by [snapshot rollback](cli/#package-managers).     |
-| `@graftland/plugin-remote`     | Runs a plugin in a child process, a worker or on another machine. See [Remote](remote/overview/).                           |
-| `@graftland/plugin-otlp`       | Exports the spans of a subtree of plugins to OpenTelemetry. See [Export spans](best-practices/observability/#export-spans). |
-| `@graftland/plugin-http`       | [Shared HTTP server; routes and streams follow plugin lifetimes.](http/)                                                    |
-| `@graftland/plugin-http-api`   | [Live HttpApi groups, typed clients and OpenAPI documentation.](http-api/)                                                  |
-| `@graftland/plugin-mcp-server` | Serves the tools of plugins to MCP clients. See [MCP server](mcp-server/overview/).                                         |
+Graft is a single package, `@graftland/graft`, with `effect` as a peer
+dependency.
 
-All packages share one version number and are released together. They need
-`effect` 4.1.x.
+| Entry           | What it holds                                   |
+| --------------- | ----------------------------------------------- |
+| `graft`         | `Graft`, `Mount` and `Release`.                 |
+| `graft/rpc`     | Remote services over any `effect/rpc` protocol. |
+| `graft/node`    | Child process and worker protocols for Node.js. |
+| `graft/testing` | An in-memory protocol for tests.                |
 
-The garden is only on this page. In the rest of the documentation and in the
-code, a `Scope` is still a `Scope`. Graft draws its plugin model from
-[cordis](https://github.com/cordiverse/cordis). Where cordis composes across
-space and time, Graft keeps to the garden.
+Upgrading from an earlier version? See [Releases](releases/).

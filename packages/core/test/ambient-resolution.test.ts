@@ -1,7 +1,7 @@
-import { Context, Deferred, Effect, Layer, Option, Ref } from "effect"
+import { Array, Context, Deferred, Effect, Layer, Option, Ref } from "effect"
 import { assert, describe, it } from "@effect/vitest"
 
-import { Event, Graft, Plugin } from "../src/index.ts"
+import { Graft } from "../src/index.ts"
 
 class Service extends Context.Service<Service, string>()(
 	"@graftland/graft/test/ambient-resolution.test/Service",
@@ -16,27 +16,31 @@ describe("ambient resolution", () => {
 		"gives old and new consumers the same service after publication",
 		() =>
 			Effect.gen(function* () {
-				const Read = Event.make<[], string>("ambient-read")
+				const values = yield* Ref.make<ReadonlyArray<string>>([])
 				const switched = yield* Deferred.make<void>()
-				const consumer = Plugin.make({
+				const consumer = Layer.effectDiscard(
+					Effect.gen(function* () {
+						const value = yield* Service
+						yield* Ref.update(values, Array.append(value))
+						if (value === "dynamic")
+							yield* Deferred.succeed(switched, undefined)
+					}),
+				)
+				const old = yield* Graft.mount(consumer, {
 					name: "consumer",
-					inject: [Service],
-					apply: () =>
-						Effect.gen(function* () {
-							const value = yield* Service
-							yield* Event.on(Read, () => Effect.succeed(value))
-							if (value === "dynamic")
-								yield* Deferred.succeed(switched, undefined)
-						}),
+					requires: [Service],
 				})
-				const old = yield* Graft.plugin(consumer)
 				yield* old.await
-				yield* Graft.provide(Service, "dynamic")
+				const publication = yield* Graft.publish(Service, "dynamic")
+				yield* publication.await
 				yield* Deferred.await(switched)
-				const recent = yield* Graft.plugin(consumer)
+				const recent = yield* Graft.mount(consumer, {
+					name: "consumer",
+					requires: [Service],
+				})
 				yield* recent.await
-				const values = yield* Event.parallel(Read)
-				assert.deepStrictEqual(values, ["dynamic", "dynamic"])
+				const seen = yield* Ref.get(values)
+				assert.deepStrictEqual(seen.slice(-2), ["dynamic", "dynamic"])
 			}).pipe(Effect.scoped, Effect.provide(Layer.fresh(ambientLayer))),
 	)
 
@@ -45,27 +49,26 @@ describe("ambient resolution", () => {
 		() =>
 			Effect.gen(function* () {
 				const seen = yield* Ref.make(Option.none<string>())
-				const consumer = Plugin.make({
+				const consumer = Layer.effectDiscard(
+					Effect.flatMap(Effect.serviceOption(Service), (value) =>
+						Ref.set(seen, value),
+					),
+				)
+				const before = yield* Graft.mount(consumer, {
 					name: "environment reader",
-					apply: () =>
-						Effect.flatMap(Effect.serviceOption(Service), (value) =>
-							Ref.set(seen, value),
-						),
 				})
-				const before = yield* Graft.plugin(consumer)
 				yield* before.await
 				const initial = yield* Ref.get(seen)
 				assert.deepStrictEqual(initial, Option.some("ambient"))
-				const isolated = yield* Graft.plugin(
-					Plugin.service(Service, Effect.succeed("private"), {
-						name: "isolated provider",
-					}),
-					undefined,
-					{ isolate: [Service] },
+				const isolated = yield* Graft.mount(
+					Layer.effect(Service, Effect.succeed("private")),
+					{ name: "isolated provider", isolate: [Service] },
 				)
 				yield* isolated.await
-				yield* isolated.dispose
-				const after = yield* Graft.plugin(consumer)
+				yield* isolated.unmount
+				const after = yield* Graft.mount(consumer, {
+					name: "environment reader",
+				})
 				yield* after.await
 				const subsequent = yield* Ref.get(seen)
 				assert.deepStrictEqual(subsequent, Option.some("ambient"))

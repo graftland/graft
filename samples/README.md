@@ -1,52 +1,28 @@
 # Samples
 
-English | [简体中文](README.zh-CN.md) | [繁體中文](README.zh-TW.md)
+English
 
-Each sample is a program you can run. Each one is in its own package.
+Each sample is a small program in its own package. Read them in order; each one
+teaches one idea and prints what happens.
 
-## Start here
-
-New to Graft? Read these in order. Each one is a short file that teaches one
-idea, prints what happens, and suggests something to try.
-
-| Sample                             | You will learn                                                                         |
-| ---------------------------------- | -------------------------------------------------------------------------------------- |
-| [01 · Hello](01-hello)             | Define a plugin, load it, change its config, unload it.                                |
-| [02 · Services](02-services)       | Publish a service from one plugin and use it in another plugin, which waits for it.    |
-| [03 · Events](03-events)           | Event handlers that go away when their plugin unloads.                                 |
-| [04 · Failures](04-failures)       | Failed plugins, retry schedules, and background work that belongs to a plugin.         |
-| [05 · Config file](05-config-file) | Run plugins from `graft.yml` with `graft start --watch`, and edit them while they run. |
-
-For deployment and authentication, see the
-[Remote guide](../packages/docs/content/docs/remote/overview.md).
-
-## Real-world applications
-
-These samples join the basics into larger programs. Each README starts with a
-problem that you would otherwise solve by hand. Then it shows what Graft does
-about it.
-
-| Sample                                     | Scenario                                                                                    | What it shows                                                                                                     |
-| ------------------------------------------ | ------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| [integration-gateway](integration-gateway) | A persistent WebSocket bot gateway while an independently packaged integration transitions. | Worker and child-process transitions; installed public packages.                                                  |
-| [chat-bot](chat-bot)                       | A chat bot whose commands and filters are plugins.                                          | Event handlers owned by plugins, dependency gating, update in place, a weather integration in a child process.    |
-| [http-gateway](http-gateway)               | An HTTP gateway with a shared todo store.                                                   | HttpApi contracts, typed clients, live OpenAPI and Scalar UI; watch edits, Pending routes and the live fork tree. |
-| [mcp-tools](mcp-tools)                     | An MCP server whose tools are plugins.                                                      | `plugin-mcp-server`, tools that reload while a client is connected, rollback of a broken tool.                    |
-| [saas-tenants](saas-tenants)               | One set of plugins serving several tenants.                                                 | `isolate` and `intercept` per tenant, a shared service with per-tenant settings, onboarding and offboarding.      |
-| [market-feed](market-feed)                 | A market data pipeline behind an unreliable exchange.                                       | Supervised background tasks, retry schedules, `Pending` and `Failed` states, optional dependencies.               |
+| Sample                                         | You will learn                                                              |
+| ---------------------------------------------- | --------------------------------------------------------------------------- |
+| [01 · Mount a layer](01-mount-layer)           | Mount a normal `Layer`, use its service, and release it.                    |
+| [02 · Publish and rebuild](02-publish-rebuild) | Publish a value and rebuild the mounts that require it when it changes.     |
+| [03 · Failure and retry](03-failure-retry)     | Failed mounts, retry schedules, and background fibers owned by a mount.     |
+| [04 · Tenants](04-tenants)                     | `isolate` and `intercept` for several tenants with one set of layers.       |
+| [05 · Remote](05-remote)                       | Serve services over `effect/rpc` and connect to them from another graph.    |
+| [06 · Reconnect](06-reconnect)                 | A dropped connection withdraws remote services; reconnecting restores them. |
 
 ## Run a sample
 
-The samples import the workspace packages. Node loads these packages from their
-build output. From the repository root:
+From the repository root:
 
 ```sh
 devenv shell -- pnpm build
-devenv shell -- pnpm --filter @graftland/sample-hello start
+devenv shell -- pnpm --filter @graftland-samples/01-mount-layer start
 ```
 
-`http-gateway` keep running until you press <kbd>Ctrl</kbd>+<kbd>C</kbd>. The
-other samples print their story and exit.
-
-`devenv shell -- pnpm test` runs the samples' tests together with the rest of
-the workspace.
+Each README gives its exact command. Samples 01–04 print their story and exit.
+Samples 05 and 06 use the in-memory protocol from `@graftland/graft/testing`, so
+they also finish on their own.

@@ -1,6 +1,7 @@
 /**
- * The graft runtime: loading plugins, publishing services, replacing
- * plugins at runtime, and observing the fork tree and its logs.
+ * Dynamic layers for Effect. Mount a layer, and Graft builds it while
+ * everything it requires is available, publishes the services it provides,
+ * and tears it down, dependents first, when a requirement goes away.
  */
 import {
 	Array,
@@ -19,31 +20,34 @@ import {
 	Record,
 	Ref,
 	References,
-	Schema,
 	Scope,
 	Stream,
 	TxRef,
+	TxSubscriptionRef,
+	type Schedule,
 } from "effect"
 
-import { CleanupError, ForkState, type Fork, type ForkTree } from "./Fork"
 import { setState, supervise, withdraw } from "./internal/activation"
+import { ServiceConflict, ServiceWithdrawn } from "./internal/conflicts"
 import { inheritContext } from "./internal/context"
-import { publicationCycle, resolutionChanged } from "./internal/dependencies"
-import * as ForkStatus from "./internal/forkState"
-import * as Generations from "./internal/generations"
-import * as Probes from "./internal/probes"
+import {
+	Optional,
+	type Definition,
+	type Dependency,
+} from "./internal/definition"
+import * as MountRegistry from "./internal/mountStatus"
+import { ensureOpen, publishValue } from "./internal/publication"
 import {
 	GraftKey,
 	realmKey,
 	realmOf,
 	Realms,
 	type Activation,
-	type ForkEntry,
-	type ForkStatus as ForkStatusHandle,
 	type GraphNode,
-	type Handler,
 	type LocalSnapshot,
 	type LogEntry,
+	type MountEntry,
+	type MountStatus,
 	type Provision,
 	type Runtime,
 	type ServiceKey,
@@ -53,108 +57,45 @@ import {
 import { RuntimeContext } from "./internal/runtimeContext"
 import { ownedScope } from "./internal/scope"
 import * as Slots from "./internal/slots"
-import * as Snapshots from "./internal/snapshot"
-import * as TrustState from "./internal/trust"
-import type { ErrorOf, InputOf, Plugin } from "./Plugin"
-import * as Transition from "./Transition"
+import * as TaskGroup from "./internal/tasks"
+import type { Tasks } from "./internal/tasks"
+import {
+	CleanupError,
+	MountState,
+	type Mount,
+	type MountTree,
+	type Publication,
+} from "./Mount"
 
-/** Identifies the current runtime. Use the module's operations to access it; its state is private. */
+export type { Dependency, Optional } from "./internal/definition"
+export type { LogEntry } from "./internal/runtime"
+export type { Tasks } from "./internal/tasks"
+
+/** Identifies the current graph. Use the module's operations to access it; its state is private. */
 export class Graft extends Context.Service<Graft, unknown>()(GraftKey) {}
 
-export class ServiceConflict extends Schema.TaggedError<
-	ServiceConflict,
-	{ readonly brand: unique symbol }
->()("ServiceConflict", {
-	service: Schema.String,
-	/** Absent for an existing provision; otherwise explains why this activation cannot publish. */
-	reason: Schema.optionalKey(
-		Schema.Literals(["SelfDependency", "DependencyCycle", "Invalidated"]),
-	),
-	realm: Schema.optionalKey(Schema.String),
-	fork: Schema.optionalKey(Schema.Finite),
-}) {
-	override get message(): string {
-		return this.reason === undefined
-			? `Service "${this.service}" is already provided in this realm`
-			: this.reason === "Invalidated"
-				? `Cannot provide "${this.service}": the provider's dependencies have changed`
-				: `Cannot provide "${this.service}": publication would restart its own provider`
-	}
-}
+export { ServiceConflict, ServiceWithdrawn } from "./internal/conflicts"
 
 /**
- * Publishes a service into the current realm. It stays available until the
- * activation that published it is torn down, which first waits for every
- * consumer to let go of it.
+ * Marks a requirement as optional: the mount builds without it and rebuilds
+ * whenever it appears or disappears. Read it with `Effect.serviceOption`.
  */
-export const provide = Effect.fnUntraced(function* <I, S>(
-	key: Context.Key<I, S>,
-	value: S,
-): Effect.fn.Return<void, ServiceConflict, Graft> {
-	const { runtime, activation } = yield* RuntimeContext
-	const realms = yield* Realms
-	const qualified = realmKey(realmOf(realms, key.key), key.key)
-	yield* Effect.tx(
-		Effect.gen(function* () {
-			const published = yield* TxRef.get(activation.published)
-			if (Option.isNone(published)) {
-				return yield* Effect.die(
-					new Error(
-						`Cannot provide "${key.key}": the plugin providing it is being torn down`,
-					),
-				)
-			}
-			const state = yield* TxRef.get(activation.node.state)
-			const resolution = Option.getOrUndefined(
-				HashMap.get(state.resolutions, activation.generation),
-			)
-			if (resolution !== undefined && (yield* resolutionChanged(resolution))) {
-				return yield* ServiceConflict.make({
-					service: key.key,
-					reason: "Invalidated",
-				})
-			}
-			// Retaining and publishing share the caller's transaction, including an outer Effect.tx.
-			const directory = yield* TxRef.get(runtime.slots)
-			const existing = HashMap.get(directory, qualified)
-			if (
-				Option.isSome(existing) &&
-				(yield* TxRef.get(existing.value.provision))._tag === "Some"
-			) {
-				return yield* ServiceConflict.make({ service: key.key })
-			}
-			if (yield* publicationCycle(activation.node, qualified)) {
-				const direct =
-					resolution !== undefined && HashMap.has(resolution.watch, qualified)
-				return yield* ServiceConflict.make({
-					service: key.key,
-					realm: realmOf(realms, key.key),
-					fork: activation.fork,
-					reason: direct ? "SelfDependency" : "DependencyCycle",
-				})
-			}
-			const slot = yield* Slots.retain(runtime, qualified)
-			const provision: Provision = {
-				realm: realmOf(realms, key.key),
-				key: qualified,
-				service: key.key,
-				value,
-				owner: activation.fork,
-				generation: activation.generation,
-				node: activation.node,
-				slot,
-				consumers: TxRef.makeUnsafe(HashSet.empty<Generations.Token>()),
-			}
-			yield* TxRef.set(slot.provision, Option.some(provision))
-			yield* TxRef.set(
-				activation.published,
-				Option.some(Array.append(published.value, provision)),
-			)
-		}),
-	)
-})
+export const optional = <Key extends Context.Key<any, any>>(
+	key: Key,
+): Optional<Key> => new Optional({ key })
 
-export type { LogEntry } from "./internal/runtime"
+/**
+ * Identifiers of the required entries in a `requires` list. Optional entries do
+ * not count: the layer is built while they may be absent, so it must read them
+ * through `Effect.serviceOption`.
+ */
+export type Required<Requires extends ReadonlyArray<Dependency>> = Extract<
+	Requires[number],
+	Context.Key<any, any>
+>["Identifier"]
+
+/** The errors of background fibers started with `Graft.fork`. */
+export type BackgroundError<R> = R extends Tasks<infer E> ? E : never
 
 /** How many log entries new subscribers of `logs` receive from the past. */
 const logReplay = 1000
@@ -163,19 +104,13 @@ const runtimeLayer = Layer.effect(
 	Graft,
 	Effect.gen(function* () {
 		const ambient = yield* Effect.context<never>()
-		const unitMember = yield* Transition.UnitMember
-		const forks = yield* Snapshots.make(HashMap.empty<number, ForkEntry>())
 		const runtime: Runtime = {
-			trust: yield* TxRef.make(TrustState.empty),
-			unitOwned: Option.isSome(unitMember),
 			ambient,
 			slots: yield* TxRef.make(HashMap.empty<ServiceKey, Slot>()),
-			forks,
-			events: yield* TxRef.make(
-				HashMap.empty<string, ReadonlyArray<Handler>>(),
+			mounts: yield* TxSubscriptionRef.make(
+				HashMap.empty<number, MountEntry>(),
 			),
 			ids: yield* TxRef.make(1),
-			generationIds: yield* TxRef.make(1),
 			logs: yield* PubSub.sliding<LogEntry>({
 				capacity: logReplay,
 				replay: logReplay,
@@ -184,18 +119,19 @@ const runtimeLayer = Layer.effect(
 		const published = yield* TxRef.make(
 			Option.some<ReadonlyArray<Provision>>([]),
 		)
+		const scope = yield* Effect.scope
 		const activation: Activation = {
-			fork: 0,
-			generation: new Generations.Token({ fork: 0, generation: 0 }),
+			mount: 0,
 			node: {
 				id: 0,
 				parent: undefined,
 				state: TxRef.makeUnsafe<GraphNode["state"]["value"]>({
 					live: true,
-					resolutions: HashMap.empty(),
+					resolution: undefined,
 				}),
 			},
 			status: undefined,
+			scope,
 			tasks: Option.none(),
 			published,
 			provisionKeys: HashSet.empty(),
@@ -206,7 +142,7 @@ const runtimeLayer = Layer.effect(
 	}),
 )
 
-/** Copies every log entry into the runtime, so `logs` can replay recent history. */
+/** Copies every log entry into the graph, so `logs` can replay recent history. */
 const loggerLayer = Logger.layer(
 	[
 		Effect.map(RuntimeContext, ({ runtime }) =>
@@ -224,13 +160,16 @@ const loggerLayer = Logger.layer(
 	{ mergeWithExisting: true },
 )
 
-/** The root graft. Services provided at the root are withdrawn when the layer closes. */
+/**
+ * The graph. Services in the environment it is built in satisfy `requires`
+ * too. Closing the layer unmounts everything.
+ */
 export const layer: Layer.Layer<Graft> = Layer.provideMerge(
 	loggerLayer,
 	runtimeLayer,
 )
 
-/** An entry for `intercept`: adjusts a reference for one fork and everything below it. */
+/** An entry for `intercept`: adjusts a reference for one mount and everything below it. */
 export interface Intercept {
 	readonly apply: <A, E, R>(
 		effect: Effect.Effect<A, E, R>,
@@ -245,21 +184,34 @@ export const intercept = <A>(
 	apply: (effect) => Effect.updateService(effect, reference, f),
 })
 
-/** Anything resolved through realms: a service key or an event. */
+/** Anything resolved through realms, such as a service key. */
 export interface Isolatable {
 	readonly key: string
 }
 
-export interface PluginOptions {
-	/** Matches a statically described child when this fork belongs to an execution unit. */
-	readonly declaration?: string
+/** Where a mount's services are visible, and what it inherits. */
+export interface PlacementOptions {
 	/**
-	 * Gives these services or events their own realm below this fork. A label
-	 * puts every fork using it into one shared realm instead.
+	 * Gives these services their own realm below this mount. A label puts
+	 * every mount using it into one shared realm instead.
 	 */
 	readonly isolate?:
 		ReadonlyArray<Isolatable | readonly [Isolatable, label: string]> | undefined
 	readonly intercept?: ReadonlyArray<Intercept> | undefined
+}
+
+export interface MountOptions<
+	Requires extends ReadonlyArray<Dependency>,
+> extends PlacementOptions {
+	/** Shown in the mount tree and in log annotations. */
+	readonly name?: string | undefined
+	/**
+	 * What the layer needs from the graph. The layer is built only while every
+	 * required entry is available, and rebuilt when any of them changes.
+	 */
+	readonly requires?: Requires | undefined
+	/** Rebuilds a failed mount on this schedule; without it, a failed mount waits for a change. */
+	readonly retry?: Schedule.Schedule<unknown, unknown> | undefined
 }
 
 const isolation =
@@ -269,23 +221,21 @@ const isolation =
 			: ([entry[0].key, `@${entry[1]}`] as const)
 
 /**
- * Changes a fork's spec and waits until its supervisor has begun restarting
- * with it. A later change also counts.
+ * Changes a mount's spec and waits until its supervisor has acted on it:
+ * rebuilding has begun. A later change also counts.
  */
 const accept = Effect.fnUntraced(function* (
-	status: ForkStatusHandle,
+	status: MountStatus,
 	spec: TxRef.TxRef<Spec>,
 	f: (current: Spec) => Spec,
 ) {
-	const next = yield* Effect.tx(
-		TxRef.modify(spec, (current) => {
-			const next = f(current)
-			return [next, next]
-		}),
-	)
+	const next = yield* TxRef.modify(spec, (current) => {
+		const next = f(current)
+		return [next, next]
+	})
 	yield* Effect.tx(
 		Effect.gen(function* () {
-			const snapshot = yield* Snapshots.get(status.snapshot)
+			const snapshot = yield* TxSubscriptionRef.get(status.snapshot)
 			if (snapshot.disposed || snapshot.accepted === next) return
 			const current = yield* TxRef.get(spec)
 			if (current !== next) return
@@ -294,308 +244,521 @@ const accept = Effect.fnUntraced(function* (
 	)
 })
 
-const makeFork = <I, E>(
-	status: ForkStatusHandle,
-	id: number,
-	spec: TxRef.TxRef<Spec>,
-	dispose: Effect.Effect<void, CleanupError>,
-): Fork<I, E> => {
-	const snapshot = status.snapshot as Snapshots.Snapshot<
-		LocalSnapshot<E | Schema.SchemaError>
-	>
-	const settled = (value: LocalSnapshot<E | Schema.SchemaError>) =>
-		value.state._tag === "Failed"
-			? Effect.failCause(value.state.cause)
-			: Effect.void
-	const state = Snapshots.changesStream(snapshot).pipe(
-		// The definition's error bound is retained under compatible replacements.
-		Stream.map(
-			(snapshot) => (snapshot as LocalSnapshot<E | Schema.SchemaError>).state,
-		),
+interface Started {
+	readonly id: number
+	readonly status: MountStatus
+	readonly spec: TxRef.TxRef<Spec>
+	readonly unmount: Effect.Effect<void, CleanupError>
+}
+
+const makeMount = <E>({ id, status, spec, unmount }: Started): Mount<E> => {
+	const state = TxSubscriptionRef.changesStream(status.snapshot).pipe(
+		// The definition's error type is carried by the public signature.
+		Stream.map((snapshot) => (snapshot as LocalSnapshot<E>).state),
 		Stream.changes,
-		Stream.takeUntil(ForkState.$is("Disposed")),
+		Stream.takeUntil(MountState.$is("Unmounted")),
 	)
 	return {
 		id,
-		probes: Probes.names(status.probes),
-		probe: (name) => Probes.run(status.probes, name),
 		state,
-		await: Effect.flatMap(Snapshots.get(snapshot), (current) =>
-			current.state._tag === "Loading"
-				? Effect.flatMap(
-						Snapshots.waitFor(
-							snapshot,
-							(value) => value.state._tag !== "Loading",
-						),
-						settled,
-					)
-				: settled(current),
+		await: state.pipe(
+			Stream.filter((state) => !MountState.$is("Loading")(state)),
+			Stream.runHead,
+			Effect.flatMap((state) =>
+				Option.isSome(state) && state.value._tag === "Failed"
+					? Effect.failCause(state.value.cause)
+					: Effect.void,
+			),
 		),
-		stable: ForkStatus.stable(status),
-		update: (input) =>
-			accept(status, spec, (current) => ({ ...current, input })),
+		stable: MountRegistry.stable(status),
 		restart: accept(status, spec, (current) => ({
 			...current,
 			revision: current.revision + 1,
 		})),
-		dispose,
+		unmount,
 	}
 }
 
-/** Loads a plugin under the current scope. Closing that scope unloads it. */
-export const plugin: <P extends Plugin>(
-	plugin: P,
-	...args: [InputOf<P>] extends [void]
-		? [input?: NoInfer<InputOf<P>>, options?: PluginOptions]
-		: [input: NoInfer<InputOf<P>>, options?: PluginOptions]
-) => Effect.Effect<Fork<InputOf<P>, ErrorOf<P>>, never, Graft | Scope.Scope> =
-	Effect.fnUntraced(function* <P extends Plugin>(
-		plugin: P,
-		input?: InputOf<P>,
-		options?: PluginOptions,
-	) {
-		// Publish the fork, install its cleanup, and start its supervisor atomically.
-		// forkIn starts the supervisor interruptibly even while registration is masked.
-		return yield* Effect.uninterruptible(
-			Effect.gen(function* () {
-				const { runtime, activation } = yield* RuntimeContext
-				const registry = yield* Transition.Registry
-				const parent = yield* Transition.Lifecycle
-				const lifecycle = yield* Option.isSome(registry)
-					? registry.value
-							.open(
-								plugin,
-								input,
-								Option.fromUndefinedOr(options?.declaration),
-								Option.map(parent, (lifecycle) => lifecycle.instance),
-							)
-							.pipe(Effect.asSome)
-					: Effect.succeed(Option.none<Transition.MemberLifecycle>())
-				if (Option.isSome(lifecycle) && options?.isolate !== undefined)
-					return yield* Effect.die(
-						"Managed members use their statically declared realm",
-					)
-				const scope = yield* Effect.scope
-				const termination = yield* Ref.make<Exit.Exit<void, unknown>>(Exit.void)
-				const owned = yield* ownedScope(
-					scope,
-					Effect.flatMap(Ref.get(termination), (exit) =>
-						Exit.isFailure(exit)
-							? Effect.fail(CleanupError.make({ cause: exit.cause }))
-							: Effect.void,
-					),
+/** Registers a mount, ties it to the current scope, and starts its supervisor. */
+const start = (
+	definition: Definition,
+	input: unknown,
+	options: PlacementOptions | undefined,
+	/**
+	 * A publication belongs to the mount it is published from: it may not be
+	 * registered once that mount is tearing down, and it is torn down with it.
+	 */
+	publishes = false,
+): Effect.Effect<Started, never, Graft | Scope.Scope> =>
+	// Register the mount, install its cleanup, and start its supervisor atomically.
+	// forkIn starts the supervisor interruptibly even while registration is masked.
+	Effect.uninterruptible(
+		Effect.gen(function* () {
+			const { runtime, activation } = yield* RuntimeContext
+			const scope = yield* Effect.scope
+			const termination = yield* Ref.make<Exit.Exit<void, unknown>>(Exit.void)
+			const owned = yield* ownedScope(
+				scope,
+				Effect.flatMap(Ref.get(termination), (exit) =>
+					Exit.isFailure(exit)
+						? Effect.fail(CleanupError.make({ cause: exit.cause }))
+						: Effect.void,
+				),
+			)
+			const mountScope = owned.scope
+			// Whoever unmounts this mount closes the activation that owns it, even
+			// when the caller passed an independent scope.
+			if (publishes)
+				yield* Scope.addFinalizerExit(activation.scope, (exit) =>
+					owned.close(exit).pipe(Effect.orDie),
 				)
-				const forkScope = owned.scope
-				const { id, spec, node, status } = yield* Effect.acquireRelease(
+			const { id, spec, node, status } = yield* Effect.acquireRelease(
+				Effect.tx(
+					Effect.gen(function* () {
+						// The check shares this transaction with the registration below:
+						// teardown closing the owner either happens before this reads it,
+						// or after this mount is registered. There is no window between,
+						// because this body never suspends.
+						if (publishes) yield* ensureOpen(activation, definition.name)
+						const id = yield* TxRef.get(runtime.ids)
+						yield* TxRef.set(runtime.ids, id + 1)
+						const spec = TxRef.makeUnsafe<Spec>({
+							definition,
+							input,
+							revision: 0,
+						})
+						const node: GraphNode = {
+							id,
+							parent: activation.node.id === 0 ? undefined : activation.node,
+							state: TxRef.makeUnsafe<GraphNode["state"]["value"]>({
+								live: true,
+								resolution: undefined,
+							}),
+						}
+						const initialSpec = yield* TxRef.get(spec)
+						const status = yield* MountRegistry.make(
+							activation.status,
+							initialSpec,
+						)
+						const entry: MountEntry = {
+							id,
+							node,
+							status,
+							parent: activation.mount === 0 ? undefined : activation.mount,
+							spec,
+							accepted: undefined,
+							name: definition.name,
+							input,
+							state: MountState.Loading(),
+						}
+						yield* TxSubscriptionRef.update(
+							runtime.mounts,
+							HashMap.set(id, entry),
+						)
+						return { id, spec, node, status }
+					}),
+				),
+				({ id, node, status }) =>
 					Effect.tx(
 						Effect.gen(function* () {
-							const id = yield* TxRef.get(runtime.ids)
-							yield* TxRef.set(runtime.ids, id + 1)
-							const spec = TxRef.makeUnsafe<Spec>({
-								plugin,
-								requested: plugin,
-								input,
-								revision: 0,
+							yield* TxRef.set(node.state, {
+								live: false,
+								resolution: undefined,
 							})
-							const node: GraphNode = {
+							yield* MountRegistry.dispose(runtime, id, status)
+						}),
+					),
+			).pipe(Scope.provide(mountScope))
+			const realms = HashMap.fromIterable(
+				Array.map(options?.isolate ?? [], isolation(id)),
+			)
+			const inherited = yield* Effect.context<never>()
+			const context = inheritContext(activation, inherited)
+			const supervisor = Effect.forever(
+				Effect.gen(function* () {
+					const initial = yield* TxRef.get(spec)
+					const processing = yield* TxRef.make(initial)
+					yield* Effect.suspend(() =>
+						Array.reduce(
+							options?.intercept ?? [],
+							supervise(
+								runtime,
 								id,
-								parent: activation.node.id === 0 ? undefined : activation.node,
-								state: TxRef.makeUnsafe<GraphNode["state"]["value"]>({
-									live: true,
-									resolutions: HashMap.empty(),
-								}),
-							}
-							const initialSpec = yield* TxRef.get(spec)
-							const status = yield* ForkStatus.make(
-								runtime.unitOwned,
-								activation.status,
-								initialSpec,
-							)
-							const entry: ForkEntry = {
-								initialRevision: initialSpec.revision,
-								scope: forkScope,
-								id,
+								spec,
+								processing,
 								node,
 								status,
-								parent: activation.fork === 0 ? undefined : activation.fork,
-								spec,
-								accepted: undefined,
-								name: plugin.name,
-								input,
-								state: ForkState.Loading(),
-							}
-							yield* Snapshots.update(runtime.forks, HashMap.set(id, entry))
-							return { id, spec, node, status }
-						}),
-					),
-					({ id, node, status }) =>
-						Effect.tx(
+								termination,
+							).pipe(
+								Effect.updateService(Realms, (outer) =>
+									HashMap.union(outer, realms),
+								),
+							),
+							(effect, entry) => entry.apply(effect),
+						),
+					).pipe(
+						Effect.andThen(
+							Effect.die(
+								new Error("The mount supervisor stopped unexpectedly"),
+							),
+						),
+						Effect.catchCause((cause) =>
 							Effect.gen(function* () {
-								yield* TxRef.update(node.state, (state) => ({
-									...state,
-									live: false,
-								}))
-								yield* ForkStatus.dispose(runtime, id, status)
+								if (mountScope.state._tag === "Closed")
+									return yield* Effect.failCause(cause)
+								const cleanup = yield* Ref.get(termination)
+								const completeCause = Exit.isFailure(cleanup)
+									? Cause.combine(cause, cleanup.cause)
+									: cause
+								const attempted = yield* TxRef.get(processing)
+								yield* Effect.logError(
+									"The mount supervisor failed",
+									cause,
+								).pipe(
+									Effect.annotateLogs({
+										"graft.mount": id,
+										"graft.name": attempted.definition.name,
+									}),
+								)
+								yield* Effect.uninterruptible(
+									setState(
+										runtime,
+										id,
+										status,
+										MountState.Failed({ cause: completeCause }),
+										attempted,
+									).pipe(Effect.andThen(Ref.set(termination, Exit.void))),
+								)
+								yield* Effect.tx(
+									Effect.gen(function* () {
+										const current = yield* TxRef.get(spec)
+										if (current === attempted) return yield* Effect.txRetry
+									}),
+								)
 							}),
 						),
-				).pipe(Scope.provide(forkScope))
-				const realms = HashMap.fromIterable(
-					Array.map(
-						Option.isSome(lifecycle)
-							? (lifecycle.value.isolate ?? [])
-							: (options?.isolate ?? []),
-						isolation(id),
-					),
-				)
-				const inherited = yield* Effect.context<never>()
-				const context = inheritContext(activation, inherited)
-				const supervisor = Effect.forever(
+					)
+				}),
+			).pipe(Effect.updateContext<never, never>(() => context))
+			yield* Effect.acquireRelease(
+				Effect.forkIn(supervisor, mountScope),
+				(fiber) =>
 					Effect.gen(function* () {
-						const initial = yield* TxRef.get(spec)
-						const processing = yield* TxRef.make(initial)
-						yield* Effect.suspend(() =>
-							Array.reduce(
-								options?.intercept ?? [],
-								supervise(
-									runtime,
-									id,
-									spec,
-									processing,
-									node,
-									status,
-									termination,
-								).pipe(
-									Effect.updateService(Realms, (outer) =>
-										HashMap.union(outer, realms),
-									),
-								),
-								(effect, entry) => entry.apply(effect),
-							),
-						).pipe(
-							Effect.andThen(
-								Effect.die(
-									new Error("The plugin supervisor stopped unexpectedly"),
-								),
-							),
-							Effect.catchCause((cause) =>
-								Effect.gen(function* () {
-									if (forkScope.state._tag === "Closed")
-										return yield* Effect.failCause(cause)
-									const cleanup = yield* Ref.get(termination)
-									const completeCause = Exit.isFailure(cleanup)
-										? Cause.combine(cause, cleanup.cause)
-										: cause
-									const attempted = yield* TxRef.get(processing)
-									yield* Effect.logError(
-										"The plugin supervisor failed",
-										cause,
-									).pipe(
-										Effect.annotateLogs({
-											"graft.fork": id,
-											"graft.plugin": attempted.plugin.name,
-										}),
-									)
-									yield* Effect.uninterruptible(
-										setState(
-											runtime,
-											id,
-											status,
-											ForkState.Failed({ cause: completeCause }),
-											attempted,
-										).pipe(Effect.andThen(Ref.set(termination, Exit.void))),
-									)
-									yield* Effect.tx(
-										Effect.gen(function* () {
-											const current = yield* TxRef.get(spec)
-											if (current === attempted) return yield* Effect.txRetry
-										}),
-									)
-								}),
-							),
+						const closer = yield* Effect.withFiber((self) =>
+							Effect.succeed(self.id),
 						)
+						yield* Fiber.interrupt(fiber)
+						const exit = yield* Fiber.await(fiber)
+						// Only our cancellation is expected; an interceptor finalizer can interrupt itself.
+						return yield* Exit.isFailure(exit) &&
+						!Array.every(
+							exit.cause.reasons,
+							(reason) =>
+								reason._tag === "Interrupt" && reason.fiberId === closer,
+						)
+							? Ref.update(termination, (cleanup) =>
+									Exit.failCause(
+										Exit.isFailure(cleanup)
+											? Cause.combine(cleanup.cause, exit.cause)
+											: exit.cause,
+									),
+								).pipe(
+									Effect.andThen(
+										Effect.logError(
+											"Stopping the mount supervisor failed",
+											exit.cause,
+										).pipe(Effect.annotateLogs({ "graft.mount": id })),
+									),
+								)
+							: Effect.void
 					}),
-				).pipe(
-					Effect.updateContext<never, never>(() =>
-						Context.add(
-							Option.isSome(lifecycle)
-								? Context.add(
-										context,
-										Transition.Environment,
-										lifecycle.value.environment,
-									)
-								: context,
-							Transition.Lifecycle,
-							lifecycle,
-						),
-					),
-				)
-				yield* Effect.acquireRelease(
-					Effect.forkIn(supervisor, forkScope),
-					(fiber) =>
-						Effect.gen(function* () {
-							const closer = yield* Effect.withFiber((self) =>
-								Effect.succeed(self.id),
-							)
-							yield* Fiber.interrupt(fiber)
-							const exit = yield* Fiber.await(fiber)
-							// Only our cancellation is expected; an interceptor finalizer can interrupt itself.
-							return yield* Exit.isFailure(exit) &&
-							!Array.every(
-								exit.cause.reasons,
-								(reason) =>
-									reason._tag === "Interrupt" && reason.fiberId === closer,
-							)
-								? Ref.update(termination, (cleanup) =>
-										Exit.failCause(
-											Exit.isFailure(cleanup)
-												? Cause.combine(cleanup.cause, exit.cause)
-												: exit.cause,
-										),
-									).pipe(
-										Effect.andThen(
-											Effect.logError(
-												"Stopping the plugin supervisor failed",
-												exit.cause,
-											).pipe(Effect.annotateLogs({ "graft.fork": id })),
-										),
-									)
-								: Effect.void
-						}),
-				).pipe(Scope.provide(forkScope))
-				const fork = makeFork<InputOf<P>, ErrorOf<P>>(
-					status,
-					id,
-					spec,
-					owned.close(Exit.void),
-				)
-				if (Option.isSome(lifecycle)) yield* lifecycle.value.attached(fork)
-				return fork
-			}),
+			).pipe(Scope.provide(mountScope))
+			return { id, status, spec, unmount: owned.close(Exit.void) }
+		}),
+	)
+
+/**
+ * Mounts a layer under the current scope; closing that scope unmounts it.
+ *
+ * The layer is built while every required entry of `requires` is available,
+ * and each service it outputs is published to the graph. When a requirement
+ * changes, mounts that use this layer's services are torn down first, then
+ * the layer is released and built again. Effect's internal
+ * `Layer.CurrentMemoMap` is never published, even if the layer outputs it.
+ *
+ * When the layer fails to build and a finalizer of that build also dies,
+ * Effect reports both as defects, so the typed build failure appears as a
+ * `Die`.
+ */
+export const mount = <
+	ROut,
+	E,
+	RIn extends Required<Requires> | Graft | Tasks<any>,
+	const Requires extends ReadonlyArray<Dependency> = readonly [],
+>(
+	self: Layer.Layer<ROut, E, RIn>,
+	options?: MountOptions<Requires>,
+): Effect.Effect<
+	Mount<E | BackgroundError<RIn> | ServiceConflict>,
+	never,
+	Graft | Scope.Scope
+> =>
+	Effect.map(
+		start(
+			{
+				name: options?.name ?? "layer",
+				requires: options?.requires ?? [],
+				retry: options?.retry,
+				apply: () =>
+					Effect.gen(function* () {
+						const scope = yield* Effect.scope
+						const memoMap = yield* Layer.makeMemoMap
+						const context = yield* Layer.buildWithMemoMap(self, memoMap, scope)
+						// `buildWithMemoMap` adds its own memo map to the result; it is
+						// infrastructure, not a service this layer provides.
+						for (const [service, value] of Context.omit(Layer.CurrentMemoMap)(
+							context,
+						).mapUnsafe)
+							yield* publishValue(service, value)
+					}),
+			},
+			undefined,
+			options,
+		),
+		(started) => makeMount<E | BackgroundError<RIn> | ServiceConflict>(started),
+	)
+
+/**
+ * Publishes a value under the current scope; closing that scope withdraws
+ * it. `set` replaces the value, which rebuilds everything that requires it.
+ * A publication from inside a mount also ends with that mount, and is
+ * refused once that mount has begun tearing down.
+ */
+export const publish = <I, S>(
+	key: Context.Key<I, S>,
+	value: S,
+	options?: PlacementOptions,
+): Effect.Effect<Publication<S, ServiceConflict>, never, Graft | Scope.Scope> =>
+	Effect.gen(function* () {
+		const { activation } = yield* RuntimeContext
+		const started = yield* start(
+			{
+				name: key.key,
+				requires: [],
+				retry: undefined,
+				apply: (input) => publishValue(key.key, input, activation),
+			},
+			value,
+			options,
+			true,
+		)
+		return {
+			...makeMount<ServiceConflict>(started),
+			set: (value: S) =>
+				accept(started.status, started.spec, (current) => ({
+					...current,
+					input: value,
+				})),
+		}
+	})
+
+/**
+ * Starts a fiber owned by the current mount. It is interrupted when the mount
+ * is torn down, and its failure fails the mount.
+ */
+export const fork: <A, E, R>(
+	effect: Effect.Effect<A, E, R>,
+) => Effect.Effect<
+	Fiber.Fiber<A, E>,
+	never,
+	Exclude<R, Scope.Scope> | Graft | Tasks<E>
+> = Effect.fnUntraced(function* <A, E, R>(effect: Effect.Effect<A, E, R>) {
+	const { activation } = yield* RuntimeContext
+	if (Option.isNone(activation.tasks))
+		return yield* Effect.die(new Error("Graft.fork requires a mounted layer"))
+	return yield* TaskGroup.run(activation.tasks.value, effect)
+})
+
+/** Holds a slot so its identity survives while nothing is published in it. */
+const retained = (key: string) =>
+	Effect.gen(function* () {
+		const { runtime } = yield* RuntimeContext
+		const realms = yield* Realms
+		const qualified = realmKey(realmOf(realms, key), key)
+		return yield* Effect.acquireRelease(
+			Effect.tx(Slots.retain(runtime, qualified)),
+			(slot) => Effect.tx(Slots.release(runtime, slot)),
 		)
 	})
 
-const byId = Order.mapInput(Order.Number, (entry: ForkEntry) => entry.id)
+const sameProvision = (
+	left: Option.Option<Provision>,
+	right: Option.Option<Provision>,
+) =>
+	Option.isNone(left)
+		? Option.isNone(right)
+		: Option.isSome(right) && left.value === right.value
+
+/** Waits until a provision is available, and holds it until released. */
+const lease = (slot: Slot, consumer: number) =>
+	Effect.acquireRelease(
+		Effect.tx(
+			Effect.gen(function* () {
+				const current = yield* TxRef.get(slot.provision)
+				if (Option.isNone(current)) return yield* Effect.txRetry
+				yield* TxRef.update(current.value.consumers, HashSet.add(consumer))
+				return current.value
+			}),
+		),
+		(provision) =>
+			Effect.tx(TxRef.update(provision.consumers, HashSet.remove(consumer))),
+	)
+
+/** Completes once this exact provision is no longer the one published. */
+const withdrawn = (slot: Slot, provision: Provision) =>
+	Effect.tx(
+		Effect.gen(function* () {
+			const current = yield* TxRef.get(slot.provision)
+			if (Option.exists(current, (current) => current === provision))
+				return yield* Effect.txRetry
+		}),
+	)
+
+const consumerId = Effect.gen(function* () {
+	const { runtime } = yield* RuntimeContext
+	return yield* TxRef.modify(runtime.ids, (id) => [id, id + 1])
+})
+
+/**
+ * The service's availability: `Some` while it is published, `None` while it
+ * is not, followed by every change. Only services in the graph count, not the
+ * environment `layer` was built in.
+ */
+export const watch = <I, S>(
+	key: Context.Key<I, S>,
+): Stream.Stream<Option.Option<S>, never, Graft> =>
+	Stream.unwrap(
+		Effect.map(retained(key.key), (slot) =>
+			Stream.unfold(Option.none<Option.Option<Provision>>(), (previous) =>
+				Effect.tx(
+					Effect.gen(function* () {
+						const current = yield* TxRef.get(slot.provision)
+						if (
+							Option.isSome(previous) &&
+							sameProvision(previous.value, current)
+						)
+							return yield* Effect.txRetry
+						return [
+							Option.map(current, (provision) => provision.value as S),
+							Option.some(current),
+						] as const
+					}),
+				),
+			),
+		),
+	)
+
+/**
+ * Waits until the service is published and returns it. The value may be
+ * withdrawn right after; use `use` or `whileAvailable` to hold it.
+ */
+export const await_ = <I, S>(
+	key: Context.Key<I, S>,
+): Effect.Effect<S, never, Graft> =>
+	Effect.scoped(
+		Effect.flatMap(retained(key.key), (slot) =>
+			Effect.tx(
+				Effect.gen(function* () {
+					const current = yield* TxRef.get(slot.provision)
+					if (Option.isNone(current)) return yield* Effect.txRetry
+					return current.value.value as S
+				}),
+			),
+		),
+	)
+export { await_ as await }
+
+/** Leases the service for one run of `f`, racing it against withdrawal. */
+const leased = <I, S, A, E, R, A2, E2>(
+	key: Context.Key<I, S>,
+	f: (service: S) => Effect.Effect<A, E, R>,
+	onWithdrawn: Effect.Effect<A2, E2>,
+	repeat: boolean,
+): Effect.Effect<A | A2, E | E2, R | Graft> =>
+	Effect.gen(function* () {
+		const scope = yield* Scope.make()
+		return yield* Effect.gen(function* () {
+			const slot = yield* Scope.provide(retained(key.key), scope)
+			const once = Effect.gen(function* () {
+				const leaseScope = yield* Scope.make()
+				return yield* Effect.gen(function* () {
+					const consumer = yield* consumerId
+					const provision = yield* Scope.provide(
+						lease(slot, consumer),
+						leaseScope,
+					)
+					return yield* Effect.raceFirst(
+						f(provision.value as S),
+						Effect.andThen(withdrawn(slot, provision), onWithdrawn),
+					)
+				}).pipe(Effect.onExit((exit) => Scope.close(leaseScope, exit)))
+			})
+			if (!repeat) return yield* once
+			return yield* Effect.forever(once)
+		}).pipe(Effect.onExit((exit) => Scope.close(scope, exit)))
+	})
+
+/**
+ * Waits until the service is published, then runs `f` with it. While `f`
+ * runs, the provider waits before tearing the service down. If the service
+ * is withdrawn first, `f` is interrupted and this fails with `ServiceWithdrawn`.
+ */
+export const use = <I, S, A, E, R>(
+	key: Context.Key<I, S>,
+	f: (service: S) => Effect.Effect<A, E, R>,
+): Effect.Effect<A, E | ServiceWithdrawn, R | Graft> =>
+	leased(key, f, ServiceWithdrawn.make({ service: key.key }), false)
+
+/**
+ * Runs `f` whenever the service is published. When the service is withdrawn,
+ * `f` is interrupted, and runs again with the next value. If `f` completes,
+ * it waits for the next value; if it fails, this fails.
+ */
+export const whileAvailable = <I, S, E, R>(
+	key: Context.Key<I, S>,
+	f: (service: S) => Effect.Effect<void, E, R>,
+): Effect.Effect<never, E, R | Graft> =>
+	Effect.andThen(
+		leased(
+			key,
+			(service) => Effect.andThen(f(service), Effect.never),
+			Effect.void,
+			true,
+		),
+		Effect.never,
+	)
+
+const byId = Order.mapInput(Order.Number, (entry: MountEntry) => entry.id)
 
 const buildTree = (
-	forks: HashMap.HashMap<number, ForkEntry>,
-): ReadonlyArray<ForkTree> => {
+	mounts: HashMap.HashMap<number, MountEntry>,
+): ReadonlyArray<MountTree> => {
 	// Group once: filtering every entry for each node would be quadratic, and
-	// the tree is rebuilt on every fork change.
+	// the tree is rebuilt on every change.
 	const key = (parent: number | undefined) =>
 		parent === undefined ? "" : `${parent}`
 	const byParent = Array.groupBy(
-		Array.sort(HashMap.toValues(forks), byId),
+		Array.sort(HashMap.toValues(mounts), byId),
 		(entry) => key(entry.parent),
 	)
-	const children = (parent: number | undefined): ReadonlyArray<ForkTree> =>
+	const children = (parent: number | undefined): ReadonlyArray<MountTree> =>
 		Array.map(
 			Record.get(byParent, key(parent)).pipe(
-				Option.getOrElse((): ReadonlyArray<ForkEntry> => []),
+				Option.getOrElse((): ReadonlyArray<MountEntry> => []),
 			),
 			(entry) => ({
 				id: entry.id,
 				name: entry.name,
-				input: entry.input,
 				state: entry.state,
 				children: children(entry.id),
 			}),
@@ -603,18 +766,18 @@ const buildTree = (
 	return children(undefined)
 }
 
-/** The fork tree, emitted again on every change. */
-export const forks: Stream.Stream<
-	ReadonlyArray<ForkTree>,
+/** The mount tree, emitted again on every change. */
+export const mounts: Stream.Stream<
+	ReadonlyArray<MountTree>,
 	never,
 	Graft
 > = Stream.unwrap(
 	Effect.map(RuntimeContext, ({ runtime }) =>
-		Snapshots.changesStream(runtime.forks).pipe(Stream.map(buildTree)),
+		TxSubscriptionRef.changesStream(runtime.mounts).pipe(Stream.map(buildTree)),
 	),
 )
 
-/** Recent and live environment logs, including host logs; plugin execution adds identity annotations. */
+/** Recent and live logs; logs written while building a mount carry `graft.mount` and `graft.name`. */
 export const logs: Stream.Stream<LogEntry, never, Graft> = Stream.unwrap(
 	Effect.map(RuntimeContext, ({ runtime }) => Stream.fromPubSub(runtime.logs)),
 )
