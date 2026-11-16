@@ -3,7 +3,7 @@
 	"engines": {
 		"node": ">=22.19.0"
 	},
-	"version": "0.6.0",
+	"version": "0.7.0",
 	"type": "module",
 	"description": "Effect layers that mount and unmount at runtime, with remote services over effect/rpc",
 	"license": "Apache-2.0",
